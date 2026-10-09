@@ -40,11 +40,15 @@ function readColors() {
   const accent = root.getPropertyValue('--primary').trim() || body.color;
   // Nodes in the muted label grey: in 3D many overlap, and the text color added up too bright
   const muted = root.getPropertyValue('--nav-label-color').trim() || body.color;
+  const text = new Color(body.color);
   return {
     node: new Color(muted),
+    nodeAlpha: 0.5,
     accent: new Color(accent),
-    link: new Color(body.color),
-    text: new Color(body.color),
+    link: text,
+    linkAlpha: 0.035,
+    dimmedLinkAlpha: 0.02,
+    text,
     font: body.fontFamily,
   };
 }
@@ -184,7 +188,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         nodeGraphics[node.index]
           .clear()
           .circle(0, 0, node.radius)
-          .fill(isLit(node.index) ? { color: colors.accent, alpha: 0.5 } : { color: colors.node, alpha: 0.75 });
+          .fill(isLit(node.index) ? { color: colors.accent, alpha: 0.5 } : { color: colors.node, alpha: colors.nodeAlpha });
       };
 
       for (const node of nodes) {
@@ -279,7 +283,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
           for (const [s, t] of linkPairs) {
             linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
           }
-          linkLayer.stroke({ width, color: colors.link, alpha: 0.04 });
+          linkLayer.stroke({ width, color: colors.link, alpha: colors.dimmedLinkAlpha });
           for (const [s, t] of linkPairs) {
             if (s !== hovered.index && t !== hovered.index) continue;
             linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
@@ -289,7 +293,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
           for (const [s, t] of linkPairs) {
             linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
           }
-          linkLayer.stroke({ width, color: colors.link, alpha: 0.12 });
+          linkLayer.stroke({ width, color: colors.link, alpha: colors.linkAlpha });
         }
       };
 
