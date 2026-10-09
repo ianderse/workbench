@@ -1,4 +1,4 @@
-import { Brain, Globe, Monitor, Search, Terminal } from 'lucide-react';
+import { Globe, Monitor, Search, Terminal } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import type { CustomMcpServer } from '../../../shared/types';
 
@@ -34,9 +34,8 @@ export function ConnectorRow({ icon, name, description, children, disabled = fal
 }
 
 /** Built-in connectors that can be switched on or off: icon and translation keys (settings ns) */
-export const BUILTIN_CONNECTOR_META: { id: 'context7' | 'memory' | 'electron' | 'puppeteer'; icon: React.ElementType; qaOnly?: boolean }[] = [
+export const BUILTIN_CONNECTOR_META: { id: 'context7' | 'electron' | 'puppeteer'; icon: React.ElementType; qaOnly?: boolean }[] = [
   { id: 'context7', icon: Search },
-  { id: 'memory', icon: Brain },
   { id: 'electron', icon: Monitor, qaOnly: true },
   { id: 'puppeteer', icon: Globe, qaOnly: true },
 ];

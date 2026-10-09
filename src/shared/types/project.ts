@@ -150,7 +150,6 @@ export interface MemorySystemStatus {
 
 // Memory Infrastructure Types
 export interface MemoryDatabaseStatus {
-  kuzuInstalled: boolean;
   databasePath: string;
   databaseExists: boolean;
   databases: string[];
@@ -217,7 +216,7 @@ export interface MemoryProviderConfig {
   ollamaEmbeddingModel?: string;
   ollamaEmbeddingDim?: number;
 
-  // LadybugDB settings (embedded database - no Docker required)
+  // Memory database settings (embedded libSQL - no Docker required)
   database?: string;  // Database name (default: auto_claude_memory)
   dbPath?: string;    // Database storage path (default: ~/.auto-claude/memories)
 }
@@ -309,7 +308,7 @@ export interface ProjectEnvConfig {
   defaultBranch?: string; // Base branch for worktree creation (e.g., 'main', 'develop')
 
   // Memory Integration (V2 - Multi-provider support)
-  // Uses LadybugDB embedded database (no Docker required)
+  // Uses the embedded libSQL memory database (no Docker required)
   memoryEnabled: boolean;
   memoryProviderConfig?: MemoryProviderConfig;  // Provider configuration
   // Legacy fields (still supported for backward compatibility)
@@ -326,8 +325,6 @@ export interface ProjectEnvConfig {
   mcpServers?: {
     /** Context7 documentation lookup - default: true */
     context7Enabled?: boolean;
-    /** Memory knowledge graph - default: true (if memoryProviderConfig set) */
-    memoryEnabled?: boolean;
     /** Electron desktop automation (QA only) - default: false */
     electronEnabled?: boolean;
     /** Puppeteer browser automation (QA only) - default: false */

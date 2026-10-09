@@ -32,7 +32,6 @@ function connectionSignature({ id, type, command, args, url }: CustomMcpServer):
 
 const BUILTIN_SETTING_KEY = {
   context7: 'context7Enabled',
-  memory: 'memoryEnabled',
   electron: 'electronEnabled',
   puppeteer: 'puppeteerEnabled',
 } as const;
@@ -64,7 +63,6 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
       if (!env.mcpServers && !env.customMcpServers?.length) return;
       updateConnectors(() => ({
         context7Enabled: env.mcpServers?.context7Enabled,
-        memoryEnabled: env.mcpServers?.memoryEnabled,
         electronEnabled: env.mcpServers?.electronEnabled,
         puppeteerEnabled: env.mcpServers?.puppeteerEnabled,
         customServers: env.customMcpServers,

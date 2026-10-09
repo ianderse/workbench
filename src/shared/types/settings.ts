@@ -16,8 +16,6 @@ export type ColorTheme = 'default';
 export interface McpConnectorSettings {
   /** Context7 documentation lookup (default on) */
   context7Enabled?: boolean;
-  /** Memory knowledge graph (default on; also needs the memory server configured) */
-  memoryEnabled?: boolean;
   /** Electron automation, QA agents only (default off) */
   electronEnabled?: boolean;
   /** Puppeteer browser automation, QA agents only (default off) */

@@ -381,7 +381,7 @@ export interface ElectronAPI {
   getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
   updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
 
-  // Memory Infrastructure operations (LadybugDB - no Docker required)
+  // Memory Infrastructure operations (libSQL - no Docker required)
   getMemoryInfrastructureStatus: (dbPath?: string) => Promise<IPCResult<InfrastructureStatus>>;
   listMemoryDatabases: (dbPath?: string) => Promise<IPCResult<string[]>>;
   testMemoryConnection: (dbPath?: string, database?: string) => Promise<IPCResult<MemoryValidationResult>>;

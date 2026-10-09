@@ -885,7 +885,6 @@ export class AgentManager extends EventEmitter {
     const enabled = ids ?? getDefaultMcpConnectorIds(defaults);
     return {
       context7Enabled: enabled.includes('context7'),
-      memoryEnabled: enabled.includes('memory') && !!process.env.GRAPHITI_MCP_URL,
       electronMcpEnabled: enabled.includes('electron'),
       puppeteerMcpEnabled: enabled.includes('puppeteer'),
       customServers: getUsableCustomServers(defaults).filter((server) => enabled.includes(server.id)),

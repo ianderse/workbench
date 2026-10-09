@@ -54,7 +54,6 @@ export default defineConfig({
         'semver',
         'zod',
         '@anthropic-ai/sdk',
-        'kuzu',
         'electron-updater',
         '@electron-toolkit/utils',
         // debug -> ms (used by bundled dependencies)

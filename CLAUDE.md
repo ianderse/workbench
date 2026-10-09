@@ -19,7 +19,7 @@ resolves issues → User reviews and merges.
 - **Insights** — AI chat interface for exploring and understanding a codebase
 - **Pull Requests** — Create a GitHub pull request from a task's worktree (via the `gh` CLI)
 - **Memory** — Local knowledge store that retains insights across sessions
-- **Connectors** — MCP servers for agents (Context7, Memory, Electron/Puppeteer for QA, user-added servers) with
+- **Connectors** — MCP servers for agents (Context7, Electron/Puppeteer for QA, user-added servers) with
   app-wide defaults in Settings and per-task choices in the task dialog
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
 - **Flexible Authentication** — Claude Code subscription (OAuth) or API profiles with any Anthropic-compatible endpoint
@@ -216,8 +216,8 @@ Each spec in `.auto-claude/specs/XXX-name/` contains `spec.md`, `requirements.js
 
 ### MCP Connectors
 
-Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Memory, Electron
-and Puppeteer (QA agents only), plus custom servers, which must pass a connection test before they can be switched on.
+Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and
+Puppeteer (QA agents only), plus custom servers, which must pass a connection test before they can be switched on.
 New tasks copy the enabled ids into `TaskMetadata.mcpConnectors` and can change them in the task dialog. When a task
 starts, `AgentManager.resolveTaskMcpOptions()` passes that task's connectors to its worker (so concurrent tasks don't
 affect each other); `getRequiredMcpServers()` gives every MCP-using agent all enabled connectors and

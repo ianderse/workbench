@@ -16,8 +16,6 @@ import {
   AGENT_CONFIGS,
   CONTEXT7_TOOLS,
   ELECTRON_TOOLS,
-  MEMORY_MCP_TOOLS,
-  GRAPHITI_MCP_TOOLS,
   PUPPETEER_TOOLS,
   getAgentConfig,
   getDefaultThinkingLevel,
@@ -32,8 +30,6 @@ export {
   AGENT_CONFIGS,
   CONTEXT7_TOOLS,
   ELECTRON_TOOLS,
-  MEMORY_MCP_TOOLS,
-  GRAPHITI_MCP_TOOLS,
   PUPPETEER_TOOLS,
   getAgentConfig,
   getDefaultThinkingLevel,
@@ -131,22 +127,17 @@ export class ToolRegistry {
  *
  * Handles dynamic server selection:
  * - "browser" → electron (if is_electron) or puppeteer (if is_web_frontend)
- * - "memory" → only if memoryEnabled is true
  * - Applies per-agent ADD/REMOVE overrides from mcpConfig
  */
 export function getRequiredMcpServers(
   agentType: AgentType,
   options: {
     projectCapabilities?: ProjectCapabilities;
-    memoryEnabled?: boolean;
-    /** @deprecated Use memoryEnabled instead */
-    graphitiEnabled?: boolean;
     mcpConfig?: McpConfig;
   } = {},
 ): string[] {
   const {
     projectCapabilities,
-    memoryEnabled = options.graphitiEnabled ?? false,
     mcpConfig = {},
   } = options;
 
@@ -177,11 +168,6 @@ export function getRequiredMcpServers(
         }
       }
     }
-  }
-
-  // Filter memory if not enabled
-  if (servers.includes('memory') && !memoryEnabled) {
-    servers = servers.filter((s) => s !== 'memory');
   }
 
   // Per-agent MCP overrides: AGENT_MCP_<agent>_ADD / AGENT_MCP_<agent>_REMOVE

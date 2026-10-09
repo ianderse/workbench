@@ -78,7 +78,7 @@ export function setupIpcHandlers(
   // Insights handlers
   registerInsightsHandlers(getMainWindow);
 
-  // Memory & infrastructure handlers (for LadybugDB)
+  // Memory & infrastructure handlers (local libSQL memory store)
   registerMemoryHandlers();
 
   // App auto-update handlers

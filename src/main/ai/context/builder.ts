@@ -12,7 +12,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { categorizeMatches } from './categorizer.js';
-import { fetchGraphHints, isMemoryEnabled } from './graphiti-integration.js';
 import { extractKeywords } from './keyword-extractor.js';
 import { discoverPatterns } from './pattern-discovery.js';
 import { searchService } from './search.js';
@@ -129,8 +128,6 @@ export interface BuildContextConfig {
   services?: string[];
   /** Override auto-extracted keywords. */
   keywords?: string[];
-  /** Whether to include memory graph hints (default true). */
-  includeGraphHints?: boolean;
 }
 
 /**
@@ -142,7 +139,6 @@ export interface BuildContextConfig {
  * 3. Search each service directory for matching files.
  * 4. Categorize files (modify vs reference).
  * 5. Discover code patterns in reference files.
- * 6. Optionally fetch Graphiti graph hints.
  *
  * @returns SubtaskContext suitable for injecting into agent prompts.
  */
@@ -152,7 +148,6 @@ export async function buildContext(config: BuildContextConfig): Promise<SubtaskC
     projectDir,
     services: providedServices,
     keywords: providedKeywords,
-    includeGraphHints = true,
   } = config;
 
   const projectIndex = loadProjectIndex(projectDir);
@@ -190,11 +185,6 @@ export async function buildContext(config: BuildContextConfig): Promise<SubtaskC
   const rawPatterns = discoverPatterns(projectDir, toReference, keywords);
   const patterns = toCodePatterns(rawPatterns);
 
-  // Step 6: Graph hints (optional)
-  const graphHints = includeGraphHints && isMemoryEnabled()
-    ? await fetchGraphHints(taskDescription, projectDir)
-    : [];
-
   // Compose final context
   const files: ContextFile[] = [
     ...toModify.map(m => toContextFile(m, 'modify')),
@@ -222,7 +212,6 @@ export async function buildTaskContext(config: BuildContextConfig): Promise<Task
     projectDir,
     services: providedServices,
     keywords: providedKeywords,
-    includeGraphHints = true,
   } = config;
 
   const projectIndex = loadProjectIndex(projectDir);
@@ -249,10 +238,6 @@ export async function buildTaskContext(config: BuildContextConfig): Promise<Task
   const { toModify, toReference } = categorizeMatches(allMatches, taskDescription);
   const patternsDiscovered = discoverPatterns(projectDir, toReference, keywords);
 
-  const graphHints = includeGraphHints && isMemoryEnabled()
-    ? await fetchGraphHints(taskDescription, projectDir)
-    : [];
-
   return {
     taskDescription,
     scopedServices: services,
@@ -260,6 +245,5 @@ export async function buildTaskContext(config: BuildContextConfig): Promise<Task
     filesToReference: toReference,
     patternsDiscovered,
     serviceContexts,
-    graphHints,
   };
 }
