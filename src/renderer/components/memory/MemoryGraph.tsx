@@ -27,35 +27,15 @@ const CAMERA_DISTANCE = 3;
 /** How fast a released spin slows down (ms for it to drop to about a third) */
 const SPIN_DECAY_MS = 300;
 
-/**
- * Soft colors for the most connected nodes after the master node (which uses the primary color).
- * The top 1 + GROUP_COLORS.length nodes are group heads: adding a color colors one more group.
- */
-const GROUP_COLORS = [
-  '#6A9BCC', // blue
-  '#7FB77E', // sage
-  '#C9A0DC', // lavender
-  '#E0B65A', // mustard
-  '#5FB3B3', // teal
-  '#D98BA6', // rose
-  '#9D8FD1', // periwinkle
-  '#B5C46B', // olive
-  '#D4A373', // tan
-  '#7AA6A0', // sea green
-  '#C77D9E', // mauve
-  '#8FB5D9', // sky
-  '#B39C7D', // taupe
-  '#A3C9A8', // mint
-  '#E2A0A0', // salmon
-  '#A7B4C2', // slate
-];
-
 /** Theme colors from the page's CSS, re-read when the appearance changes */
 function readColors() {
   const body = getComputedStyle(document.body);
-  const accent = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || body.color;
+  const root = getComputedStyle(document.documentElement);
+  const accent = root.getPropertyValue('--primary').trim() || body.color;
+  // Nodes in the muted label grey: in 3D many overlap, and the text color added up too bright
+  const muted = root.getPropertyValue('--nav-label-color').trim() || body.color;
   return {
-    node: new Color(body.color),
+    node: new Color(muted),
     accent: new Color(accent),
     link: new Color(body.color),
     text: new Color(body.color),
@@ -149,33 +129,6 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
     let rotation = [1, 0, 0, 0, 1, 0, 0, 0, 1];
     const byConnections = [...nodes].sort((a, b) => b.connections - a.connections);
 
-    // Groups: the most connected nodes are group heads (rank 0 is the master node); a node takes
-    // the group of the head it links to (the least connected one when it links to several), and a
-    // link takes the group of its head end (the parent's when both ends are heads)
-    const headRank = new Map<number, number>();
-    byConnections.slice(0, 1 + GROUP_COLORS.length).forEach((node, rank) => {
-      if (node.connections > 0) headRank.set(node.index, rank);
-    });
-    const groupOf = new Int16Array(nodes.length).fill(-1);
-    for (const node of nodes) {
-      const own = headRank.get(node.index);
-      if (own !== undefined) {
-        groupOf[node.index] = own;
-        continue;
-      }
-      for (const neighbour of neighbours[node.index]) {
-        const rank = headRank.get(neighbour);
-        if (rank !== undefined && rank > groupOf[node.index]) groupOf[node.index] = rank;
-      }
-    }
-    // Links bucketed by group (index 0 holds the ungrouped ones, group g is at g + 1)
-    const linksByGroup: Array<Array<[number, number]>> = Array.from({ length: headRank.size + 2 }, () => []);
-    for (const pair of linkPairs) {
-      const a = headRank.get(pair[0]);
-      const b = headRank.get(pair[1]);
-      const group = a !== undefined && b !== undefined ? Math.min(a, b) : a ?? b ?? -1;
-      linksByGroup[group + 1].push(pair);
-    }
     let dirty = false;
 
     const setup = async () => {
@@ -216,22 +169,15 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       const nodeGraphics: Graphics[] = [];
       const labels = new Map<number, Text>();
 
-      const groupPalette = GROUP_COLORS.map((color) => new Color(color));
-      const groupColor = (group: number) => (group === 0 ? colors.accent : groupPalette[group - 1]);
-      // A hovered node and its links light up in its group's color (the primary color without one)
-      const highlightColor = (node: ViewNode) => groupColor(Math.max(groupOf[node.index], 0));
+      // Every node is drawn in the muted grey; a hovered node, its neighbours and its links light up
+      // in the primary color at half opacity
+      const isLit = (index: number) =>
+        !!hovered && (hovered.index === index || neighbours[hovered.index].has(index));
       const drawNode = (node: ViewNode) => {
-        const g = nodeGraphics[node.index].clear();
-        const group = groupOf[node.index];
-        if (hovered?.index === node.index) {
-          g.circle(0, 0, node.radius).fill({ color: highlightColor(node), alpha: 1 });
-          return;
-        }
-        if (group < 0) {
-          g.circle(0, 0, node.radius).fill({ color: colors.node, alpha: 0.75 });
-        } else {
-          g.circle(0, 0, node.radius).fill({ color: groupColor(group), alpha: headRank.has(node.index) ? 1 : 0.85 });
-        }
+        nodeGraphics[node.index]
+          .clear()
+          .circle(0, 0, node.radius)
+          .fill(isLit(node.index) ? { color: colors.accent, alpha: 0.5 } : { color: colors.node, alpha: 0.75 });
       };
 
       for (const node of nodes) {
@@ -331,17 +277,12 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
             if (s !== hovered.index && t !== hovered.index) continue;
             linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
           }
-          linkLayer.stroke({ width: width * 1.5, color: highlightColor(hovered), alpha: 0.9 });
+          linkLayer.stroke({ width: width * 1.5, color: colors.accent, alpha: 0.5 });
         } else {
-          linksByGroup.forEach((pairs, bucket) => {
-            if (pairs.length === 0) return;
-            for (const [s, t] of pairs) {
-              linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
-            }
-            linkLayer.stroke(bucket === 0
-              ? { width, color: colors.link, alpha: 0.12 }
-              : { width, color: groupColor(bucket - 1), alpha: 0.35 });
-          });
+          for (const [s, t] of linkPairs) {
+            linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
+          }
+          linkLayer.stroke({ width, color: colors.link, alpha: 0.12 });
         }
       };
 
@@ -380,10 +321,15 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       };
 
       function setHovered(node: ViewNode | null) {
+        const redraw = (around: ViewNode | null) => {
+          if (!around) return;
+          drawNode(around);
+          for (const index of neighbours[around.index]) drawNode(nodes[index]);
+        };
         const previous = hovered;
         hovered = node;
-        if (previous) drawNode(previous);
-        if (node) drawNode(node);
+        redraw(previous);
+        redraw(node);
         dirty = true;
       }
 
