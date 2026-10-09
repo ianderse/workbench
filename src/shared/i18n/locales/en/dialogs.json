@@ -105,17 +105,6 @@
     "readOnlyVolumeDescription": "Please move Auto Claude to your Applications folder before updating.",
     "skipThisVersion": "Skip this version"
   },
-  "versionWarning": {
-    "title": "Action required",
-    "subtitle": "Version 2.7.5 update",
-    "description": "Due to authentication changes in this version, you need to re-authenticate your Claude profile.",
-    "instructions": "To re-authenticate:",
-    "step1": "Go to Settings",
-    "step2": "Navigate to Settings > Accounts",
-    "step3": "Click \"Re-authenticate\" on your profile",
-    "gotIt": "Got it",
-    "goToSettings": "Go to settings"
-  },
   "addWorkspace": {
     "title": "Create workspace",
     "description": "Group related projects together for cross-repo specs and validation.",

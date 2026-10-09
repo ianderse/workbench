@@ -26,6 +26,7 @@ process.stdin.on('end', () => {
     systemPrompt: fs.readFileSync(promptFile, 'utf8'),
     configDir: process.env.CLAUDE_CONFIG_DIR,
     apiKey: process.env.ANTHROPIC_API_KEY ?? null,
+    graphifyOut: process.env.GRAPHIFY_OUT ?? null,
   }));
   for (const event of JSON.parse(process.env.FAKE_EVENTS || '[]')) process.stdout.write(JSON.stringify(event) + '\\n');
   if (process.env.FAKE_STDERR) process.stderr.write(process.env.FAKE_STDERR);
@@ -76,6 +77,7 @@ import {
   resolveInsightsBackend,
   runInsightsViaClaudeCode,
   CLAUDE_CODE_READ_ONLY_TOOLS,
+  CLAUDE_CODE_GRAPHIFY_COMMANDS,
 } from '../insights-claude-code';
 import type { InsightsStreamEvent } from '../insights';
 import { INSIGHTS_ERROR_CODES, parseInsightsError } from '../../../../shared/constants/insights';
@@ -160,6 +162,50 @@ describe('runInsightsViaClaudeCode', () => {
     expect(systemPrompt).toContain('helping developers understand');
     expect(configDir).toBe('/profiles/main');
     expect(apiKey).toBeNull();
+  });
+
+  it('lets the CLI search the project memory graph with graphify commands only', async () => {
+    setRun(conversation);
+    await (await run({
+      graphify: {
+        prompt: 'CodebaseGraph tool section',
+        commandPrompt: 'graphify commands section',
+        cli: '/home/me/.local/bin/graphify',
+        graph: '/project/.auto-claude/memory/graphify-out/graph.json',
+      },
+    })).promise;
+    const { args, systemPrompt, graphifyOut } = record();
+
+    expect(args[args.indexOf('--tools') + 1]).toBe([...CLAUDE_CODE_READ_ONLY_TOOLS, 'Bash'].join(','));
+    const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--allowedTools') + 1 + CLAUDE_CODE_GRAPHIFY_COMMANDS.length);
+    expect(allowed).toEqual([...CLAUDE_CODE_GRAPHIFY_COMMANDS]);
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
+    expect(systemPrompt).toContain('graphify commands section');
+    expect(systemPrompt).not.toContain('CodebaseGraph tool section');
+    expect(graphifyOut).toBe('/project/.auto-claude/memory/graphify-out');
+  });
+
+  it('shows the command of a Bash graph search', async () => {
+    setRun([
+      blockStart(0, { type: 'tool_use', id: 'toolu_2', name: 'Bash', input: {} }),
+      delta(0, { type: 'input_json_delta', partial_json: '{"command": "graphify explain AgentManager", ' }),
+      delta(0, { type: 'input_json_delta', partial_json: '"description": "Explain AgentManager"}' }),
+      blockStop(0),
+      ...conversation,
+    ]);
+    const { promise, events } = await run();
+    const result = await promise;
+    expect(result.toolCalls[0]).toEqual({ name: 'Bash', input: 'graphify explain AgentManager' });
+    expect(events[0]).toEqual({ type: 'tool-start', name: 'Bash', input: 'graphify explain AgentManager' });
+  });
+
+  it('keeps Bash out without a memory graph', async () => {
+    setRun(conversation);
+    await (await run()).promise;
+    const { args, graphifyOut } = record();
+    expect(args).not.toContain('--allowedTools');
+    expect(args[args.indexOf('--tools') + 1]).not.toContain('Bash');
+    expect(graphifyOut).toBeNull();
   });
 
   it('sends history, the question and attachments as one stream-json user message', async () => {

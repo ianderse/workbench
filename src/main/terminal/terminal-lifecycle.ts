@@ -19,16 +19,15 @@ import { isWindows } from '../platform';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeCodeEnv } from '../claude-code-settings';
+import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
 
 /**
  * Options for terminal restoration
  */
 export interface RestoreOptions {
   resumeClaudeSession: boolean;
-  captureSessionId: (terminalId: string, projectPath: string, startTime: number) => void;
-  /** Callback triggered when a Claude session needs to be resumed.
-   * Note: sessionId is deprecated and ignored - resumeClaude uses --continue */
-  onResumeNeeded?: (terminalId: string, sessionId: string | undefined) => void;
+  /** Callback triggered when Claude should be resumed (cd to the project, then `claude --continue`) */
+  onResumeNeeded?: (terminalId: string) => void;
 }
 
 /**
@@ -75,7 +74,12 @@ export async function createTerminal(
     // 1. Claude Code settings env (from settings.json hierarchy)
     // 2. Profile env (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN)
     // 3. Custom env from TerminalCreateOptions
-    const mergedEnv = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
+    const mergedEnv: Record<string, string> = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
+
+    // Point Claude Code's /graphify command at the project's memory graph (.auto-claude/memory)
+    // instead of graphify-out in the working directory
+    const graphifyOut = projectPath && (await hasGraphifyGraph(projectPath)) ? getGraphifyOutDir(projectPath) : undefined;
+    if (graphifyOut) mergedEnv.GRAPHIFY_OUT = graphifyOut;
 
     if (mergedEnv.CLAUDE_CODE_OAUTH_TOKEN) {
       debugLog('[TerminalLifecycle] Injecting OAuth token from active profile');
@@ -113,7 +117,8 @@ export async function createTerminal(
       cwd: terminalCwd,
       outputBuffer: '',
       title: `Terminal ${terminals.size + 1}`,
-      shellType
+      shellType,
+      graphifyOut,
     };
 
     terminals.set(id, terminal);
@@ -159,14 +164,12 @@ export async function restoreTerminal(
   const storedSessions = SessionHandler.getSavedSessions(session.projectPath);
   const storedSession = storedSessions.find(s => s.id === session.id);
   const storedIsClaudeMode = storedSession?.isCLIMode ?? session.isCLIMode;
-  const storedClaudeSessionId = storedSession?.claudeSessionId ?? session.claudeSessionId;
   // Get worktreeConfig from stored session (authoritative) since renderer-passed value may be stale
   const storedWorktreeConfig = storedSession?.worktreeConfig ?? session.worktreeConfig;
 
   debugLog('[TerminalLifecycle] Restoring terminal session:', session.id,
     'Passed Claude mode:', session.isCLIMode,
-    'Stored Claude mode:', storedIsClaudeMode,
-    'Stored session ID:', storedClaudeSessionId);
+    'Stored Claude mode:', storedIsClaudeMode);
 
   // Debug: Log outputBuffer info from both passed and stored session
   const passedBufferLen = session.outputBuffer?.length ?? 0;
@@ -239,7 +242,6 @@ export async function restoreTerminal(
   if (options.resumeClaudeSession && storedIsClaudeMode) {
     // Set Claude mode so it persists correctly across app restarts
     // Without this, storedIsClaudeMode would be false on next restore
-    terminal.claudeSessionId = storedClaudeSessionId;
     terminal.isCLIMode = true;
     // Mark terminal as having a pending Claude resume
     // The actual resume will be triggered when the terminal becomes active
@@ -249,7 +251,7 @@ export async function restoreTerminal(
     // Notify renderer that this terminal has a pending Claude resume
     // The renderer will trigger the resume when the terminal tab becomes active
     // Use safeSendToRenderer with isDestroyed() check to prevent crashes
-    safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_PENDING_RESUME, terminal.id, storedClaudeSessionId);
+    safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_PENDING_RESUME, terminal.id);
 
     // Persist the Claude mode and pending resume state
     if (terminal.projectPath) {
@@ -286,8 +288,6 @@ export async function destroyTerminal(
 
   try {
     SessionHandler.removePersistedSession(terminal);
-    // Release any claimed session ID for this terminal
-    SessionHandler.releaseSessionId(id);
     onCleanup(id);
 
     // Delete from map BEFORE killing to prevent race with onExit handler

@@ -10,7 +10,6 @@ import {
   BASE_WRITE_TOOLS,
   WEB_TOOLS,
   CONTEXT7_TOOLS,
-  MEMORY_MCP_TOOLS, GRAPHITI_MCP_TOOLS,
   PUPPETEER_TOOLS,
   ELECTRON_TOOLS,
   type AgentType,
@@ -62,7 +61,6 @@ describe('tool constants', () => {
 
   it('should export MCP tool arrays matching agent-configs', () => {
     expect(CONTEXT7_TOOLS).toHaveLength(2);
-    expect(MEMORY_MCP_TOOLS).toHaveLength(5);
     expect(PUPPETEER_TOOLS).toHaveLength(8);
     expect(ELECTRON_TOOLS).toHaveLength(4);
   });
@@ -205,19 +203,8 @@ describe('getDefaultThinkingLevel (registry)', () => {
 // =============================================================================
 
 describe('getRequiredMcpServers (registry)', () => {
-  it('should filter memory when not enabled', () => {
-    const servers = getRequiredMcpServers('coder', { memoryEnabled: false });
-    expect(servers).not.toContain('memory');
-  });
-
-  it('should include memory when enabled', () => {
-    const servers = getRequiredMcpServers('coder', { memoryEnabled: true });
-    expect(servers).toContain('memory');
-  });
-
   it('should handle browser→electron resolution via mcpConfig', () => {
     const servers = getRequiredMcpServers('qa_reviewer', {
-      memoryEnabled: true,
       projectCapabilities: { is_electron: true },
       mcpConfig: { ELECTRON_MCP_ENABLED: 'true' },
     });
@@ -227,7 +214,6 @@ describe('getRequiredMcpServers (registry)', () => {
 
   it('should handle browser→puppeteer resolution via mcpConfig', () => {
     const servers = getRequiredMcpServers('qa_reviewer', {
-      memoryEnabled: true,
       projectCapabilities: { is_web_frontend: true, is_electron: false },
       mcpConfig: { PUPPETEER_MCP_ENABLED: 'true' },
     });
@@ -251,10 +237,9 @@ describe('getRequiredMcpServers (registry)', () => {
 
   it('should support per-agent MCP REMOVE overrides but protect auto-claude', () => {
     const servers = getRequiredMcpServers('coder', {
-      memoryEnabled: true,
-      mcpConfig: { AGENT_MCP_coder_REMOVE: 'auto-claude,memory' },
+      mcpConfig: { AGENT_MCP_coder_REMOVE: 'auto-claude,context7' },
     });
     expect(servers).toContain('auto-claude');
-    expect(servers).not.toContain('memory');
+    expect(servers).not.toContain('context7');
   });
 });

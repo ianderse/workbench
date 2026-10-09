@@ -266,8 +266,8 @@ export function createStreamHandler(onEvent: SessionEventCallback) {
   }
 
   function handleError(part: ErrorPart): void {
-    const errorMessage = part.error instanceof Error ? part.error.message : String(part.error ?? 'Stream error');
-    const { sessionError } = classifyError(errorMessage);
+    // Classify the error itself (not just its message) so HTTP status codes inside it are seen
+    const { sessionError } = classifyError(part.error ?? 'Stream error');
     emit({ type: 'error', error: sessionError });
   }
 

@@ -14,6 +14,8 @@ import {
   DialogTitle
 } from './components/ui/dialog';
 import { Sidebar, type SidebarView } from './components/Sidebar';
+import { MemoryGraph } from './components/memory/MemoryGraph';
+import { useMemoryGraphStore } from './stores/memory-graph-store';
 import { KanbanBoard } from './components/KanbanBoard';
 import { TaskDetailModal } from './components/task-detail/TaskDetailModal';
 import { TaskCreationWizard } from './components/TaskCreationWizard';
@@ -23,10 +25,7 @@ import { TerminalGrid } from './components/TerminalGrid';
 import { Insights } from './components/Insights';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsPage } from './components/ProjectsPage';
-import { RateLimitModal } from './components/RateLimitModal';
-import { SDKRateLimitModal } from './components/SDKRateLimitModal';
 import { AuthFailureModal } from './components/AuthFailureModal';
-import { VersionWarningModal } from './components/VersionWarningModal';
 import { OnboardingWizard } from './components/onboarding';
 import { AppUpdateNotification } from './components/AppUpdateNotification';
 import { ProactiveSwapListener } from './components/ProactiveSwapListener';
@@ -42,14 +41,13 @@ import { useTitleBarColors } from './hooks/useTitleBarColors';
 import { useGlobalTerminalListeners } from './hooks/useGlobalTerminalListeners';
 import { useTerminalProfileChange } from './hooks/useTerminalProfileChange';
 import { sanitizeColorTheme } from '../shared/constants';
-import { TITLE_BAR_STRIP_HEIGHT } from './lib/title-bar';
+import { IS_DEV_BUILD, TITLE_BAR_STRIP_HEIGHT } from './lib/title-bar';
+import { DevBuildBar } from './components/DevBuildBar';
 import type { Task, Project } from '../shared/types';
 import { AddProjectModal, pickAndAddExistingProject, type AddProjectModalStep } from './components/AddProjectModal';
 import { ViewStateProvider } from './contexts/ViewStateContext';
 import { INTERFACE_FONT_STACKS } from './lib/font-options';
 
-// Version constant for version-specific warnings (e.g., reauthentication notices)
-const VERSION_WARNING_275 = '2.7.5';
 
 export function App() {
   // Load IPC listeners for real-time updates
@@ -105,8 +103,18 @@ export function App() {
       setActiveView('kanban');
     }
   }, [projects.length, activeView]);
+
+  // The Memory view needs the project's memory graph: leave it when the project has none
+  const memoryProjectId = useProjectStore((state) => state.activeProjectId ?? state.selectedProjectId);
+  const memoryGraphAvailable = useMemoryGraphStore((state) =>
+    memoryProjectId ? state.available[memoryProjectId] : undefined
+  );
+  useEffect(() => {
+    if (activeView === 'memory' && memoryGraphAvailable === false) {
+      setActiveView('kanban');
+    }
+  }, [activeView, memoryGraphAvailable]);
   const [isOnboardingWizardOpen, setIsOnboardingWizardOpen] = useState(false);
-  const [isVersionWarningModalOpen, setIsVersionWarningModalOpen] = useState(false);
   const [isRefreshingTasks, setIsRefreshingTasks] = useState(false);
 
   // Initialize dialog state
@@ -220,39 +228,6 @@ export function App() {
       setIsOnboardingWizardOpen(true);
     }
   }, [settingsHaveLoaded, settings.onboardingCompleted, profiles, claudeProfiles]);
-
-  // Version 2.7.5 warning - show once to notify users about reauthentication requirement
-  useEffect(() => {
-    const checkVersionWarning = async () => {
-      if (!settingsHaveLoaded) return;
-
-      try {
-        const version = await window.electronAPI.getAppVersion();
-        const seenWarnings = settings.seenVersionWarnings || [];
-
-        // Show warning for 2.7.5 if not already seen
-        if (version === VERSION_WARNING_275 && !seenWarnings.includes(VERSION_WARNING_275)) {
-          setIsVersionWarningModalOpen(true);
-        }
-      } catch (error) {
-        console.error('Failed to check version warning:', error);
-      }
-    };
-
-    checkVersionWarning();
-  }, [settingsHaveLoaded, settings.seenVersionWarnings]);
-
-  // Handle version warning dismissal
-  const handleVersionWarningClose = () => {
-    setIsVersionWarningModalOpen(false);
-    // Persist that user has seen this warning (to disk, not just in-memory)
-    const seenWarnings = settings.seenVersionWarnings || [];
-    if (!seenWarnings.includes(VERSION_WARNING_275)) {
-      saveSettings({
-        seenVersionWarnings: [...seenWarnings, VERSION_WARNING_275]
-      });
-    }
-  };
 
   const { t, i18n } = useTranslation('dialogs');
 
@@ -691,10 +666,14 @@ export function App() {
         {/* Main content */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Window drag strip; on Windows/Linux it also reserves the row the window controls sit in.
-              Insights draws its own so its chat history column can run the full height */}
-          {!(activeView === 'insights' && selectedProject) && (
+              Insights draws its own so its chat history column can run the full height, except in
+              development builds, where the DEVELOPMENT BUILD strip below has to stay under it */}
+          {(IS_DEV_BUILD || !(activeView === 'insights' && selectedProject)) && (
             <div className="electron-drag shrink-0" style={{ height: TITLE_BAR_STRIP_HEIGHT }} />
           )}
+
+          {/* Scrolling DEVELOPMENT BUILD strip (npm run dev only) */}
+          <DevBuildBar />
 
           {/* Main content area */}
           <main className="flex-1 overflow-hidden">
@@ -726,6 +705,9 @@ export function App() {
                 </div>
                 {activeView === 'insights' && (activeProjectId || selectedProjectId) && (
                   <Insights projectId={activeProjectId || selectedProjectId!} />
+                )}
+                {activeView === 'memory' && (activeProjectId || selectedProjectId) && (
+                  <MemoryGraph projectId={activeProjectId || selectedProjectId!} />
                 )}
               </>
             ) : (
@@ -876,28 +858,11 @@ export function App() {
           </DialogContent>
         </Dialog>
 
-        {/* Rate Limit Modal - shows when Claude Code hits usage limits (terminal) */}
-        <RateLimitModal />
-
-        {/* SDK Rate Limit Modal - shows when SDK/CLI operations hit limits (tasks, etc.) */}
-        <SDKRateLimitModal />
-
         {/* Auth Failure Modal - shows when Claude CLI encounters 401/auth errors */}
         <AuthFailureModal onOpenSettings={() => {
           setSettingsInitialSection('accounts');
           setIsSettingsDialogOpen(true);
         }} />
-
-        {/* Version Warning Modal - one-time notice for 2.7.5 re-authentication */}
-        <VersionWarningModal
-          isOpen={isVersionWarningModalOpen}
-          onClose={handleVersionWarningClose}
-          onOpenSettings={() => {
-            handleVersionWarningClose();
-            setSettingsInitialSection('accounts');
-            setIsSettingsDialogOpen(true);
-          }}
-        />
 
         {/* Onboarding Wizard - shows on first launch when onboardingCompleted is false */}
         <OnboardingWizard

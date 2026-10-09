@@ -7,3 +7,6 @@ const IS_MAC = typeof navigator !== 'undefined' && navigator.platform.toUpperCas
 
 /** Height (px) of the draggable strip at the top of content areas, under the window controls */
 export const TITLE_BAR_STRIP_HEIGHT = IS_MAC ? 0 : TITLE_BAR_OVERLAY_HEIGHT;
+
+/** `npm run dev` build: the content area shows a scrolling DEVELOPMENT BUILD strip */
+export const IS_DEV_BUILD = import.meta.env.DEV;

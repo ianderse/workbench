@@ -14,6 +14,7 @@ import {
 import { resetStuckSubtasks } from '../ipc-handlers/task/plan-file-utils';
 import { AUTO_BUILD_PATHS, getSpecsDir } from '../../shared/constants';
 import { projectStore } from '../project-store';
+import { getGraphifyPromptContext, type GraphifyAgentContext } from '../graphify';
 import { resolveAuth, resolveAuthFromQueue } from '../ai/auth/resolver';
 import { resolveModelId } from '../ai/config/phase-config';
 import { detectProviderFromModel } from '../ai/providers/factory';
@@ -393,6 +394,7 @@ export class AgentManager extends EventEmitter {
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
       mcpOptions: this.resolveTaskMcpOptions(resolvedSpecDir, metadata?.mcpConnectors),
+      graphify: await this.resolveGraphifyContext(projectPath),
       toolContext: {
         cwd: projectPath,
         projectDir: projectPath,
@@ -513,6 +515,7 @@ export class AgentManager extends EventEmitter {
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
       mcpOptions: this.resolveTaskMcpOptions(specDir),
+      graphify: await this.resolveGraphifyContext(projectPath),
       toolContext: {
         cwd: effectiveCwd,
         projectDir: effectiveProjectDir,
@@ -612,6 +615,7 @@ export class AgentManager extends EventEmitter {
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
       mcpOptions: this.resolveTaskMcpOptions(specDir),
+      graphify: await this.resolveGraphifyContext(projectPath),
       toolContext: {
         cwd: effectiveCwd,
         projectDir: effectiveProjectDir,
@@ -863,6 +867,13 @@ export class AgentManager extends EventEmitter {
     };
   }
 
+  /** The project's memory graph for its agents (CodebaseGraph tool), when "Use Graphify" is on */
+  private async resolveGraphifyContext(projectPath: string): Promise<GraphifyAgentContext | undefined> {
+    const project = projectStore.getProjects().find((p) => p.path === projectPath);
+    if (!project?.settings?.useGraphify) return undefined;
+    return (await getGraphifyPromptContext(projectPath)) ?? undefined;
+  }
+
   /**
    * MCP options for a task's session: the connectors chosen for the task (passed in, or from
    * task_metadata.json), otherwise the Connectors defaults. Each task's worker gets its own
@@ -885,7 +896,6 @@ export class AgentManager extends EventEmitter {
     const enabled = ids ?? getDefaultMcpConnectorIds(defaults);
     return {
       context7Enabled: enabled.includes('context7'),
-      memoryEnabled: enabled.includes('memory') && !!process.env.GRAPHITI_MCP_URL,
       electronMcpEnabled: enabled.includes('electron'),
       puppeteerMcpEnabled: enabled.includes('puppeteer'),
       customServers: getUsableCustomServers(defaults).filter((server) => enabled.includes(server.id)),

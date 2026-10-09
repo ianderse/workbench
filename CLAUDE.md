@@ -19,8 +19,10 @@ resolves issues → User reviews and merges.
 - **Insights** — AI chat interface for exploring and understanding a codebase
 - **Pull Requests** — Create a GitHub pull request from a task's worktree (via the `gh` CLI)
 - **Memory** — Local knowledge store that retains insights across sessions
-- **Connectors** — MCP servers for agents (Context7, Memory, Electron/Puppeteer for QA, user-added servers) with
+- **Connectors** — MCP servers for agents (Context7, Electron/Puppeteer for QA, user-added servers) with
   app-wide defaults in Settings and per-task choices in the task dialog
+- **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
+  project's code, built into `.auto-claude/memory` and offered to agents
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
 - **Flexible Authentication** — Claude Code subscription (OAuth) or API profiles with any Anthropic-compatible endpoint
 - **Multi-Account Swapping** — When one Claude account hits a rate limit, switch to an available one automatically
@@ -103,7 +105,6 @@ npm run dev:mcp        # Development mode with remote debugging on port 9222 (El
 npm start              # Production build + run
 npm run typecheck      # TypeScript type check (strict)
 npm test               # Unit + integration tests (Vitest)
-npm run test:e2e       # End-to-end tests (Playwright)
 ```
 
 ### Packaging
@@ -156,7 +157,6 @@ auto-claude/
 │   └── shared/              # Shared types, i18n, constants, utils
 ├── prompts/                 # Agent system prompts (.md)
 ├── resources/               # App and tray icons, macOS entitlements
-├── e2e/                     # Playwright end-to-end tests
 └── .github/                 # Workflows and scripts (postinstall, prebuilds, deb check, bump-version)
 ```
 
@@ -216,13 +216,27 @@ Each spec in `.auto-claude/specs/XXX-name/` contains `spec.md`, `requirements.js
 
 ### MCP Connectors
 
-Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Memory, Electron
-and Puppeteer (QA agents only), plus custom servers, which must pass a connection test before they can be switched on.
+Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and
+Puppeteer (QA agents only), plus custom servers, which must pass a connection test before they can be switched on.
 New tasks copy the enabled ids into `TaskMetadata.mcpConnectors` and can change them in the task dialog. When a task
 starts, `AgentManager.resolveTaskMcpOptions()` passes that task's connectors to its worker (so concurrent tasks don't
 affect each other); `getRequiredMcpServers()` gives every MCP-using agent all enabled connectors and
 `src/main/ai/mcp/registry.ts` builds configs for built-in and custom servers. Helpers live in
 `src/shared/utils/mcp-connectors.ts`.
+
+### Graphify Memory Graph
+
+`src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
+Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
+.auto-claude/memory` (Settings > Project > Memory index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
+`index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Memory page) is on,
+`AgentManager.resolveGraphifyContext()` passes the graph to the worker: agents that search code (they have Grep) get
+the `CodebaseGraph` tool (`tools/builtin/codebase-graph.ts`: query, explain, path, affected, hubs) and a prompt
+section about it; the Claude page (Insights) gets the same tool, or, when it runs through Claude Code, Bash limited to
+graphify's search commands. Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
+`~/.claude` and each Claude profile's config dir; "Claude Code command" row on Settings > Updates), and agent windows
+get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/memory`. Project memory
+settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
 
 ### Electron MCP (agent QA of the app)
 
@@ -233,7 +247,7 @@ drive the running app over the Chrome DevTools Protocol with `get_electron_windo
 ## Frontend
 
 **Stack:** Electron 40, React 19, TypeScript (strict), Vercel AI SDK v6, Zustand 5, Tailwind CSS v4, Radix UI,
-xterm.js 6, electron-vite 5 (Vite 7), Vitest 4 + React Testing Library + jsdom, Playwright, Motion.
+xterm.js 6, electron-vite 5 (Vite 7), Vitest 4 + React Testing Library + jsdom, Motion.
 
 **Path aliases:** `@/*` → `src/renderer/*`, `@shared/*` → `src/shared/*`, `@preload/*` → `src/preload/*`.
 

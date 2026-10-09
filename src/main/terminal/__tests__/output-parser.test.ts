@@ -5,7 +5,6 @@ import {
   isClaudeBusyOutput,
   isClaudeIdleOutput,
   detectClaudeBusyState,
-  extractClaudeSessionId,
   extractRateLimitReset,
   extractOAuthToken,
   extractEmail,
@@ -175,21 +174,6 @@ describe('output-parser', () => {
     it('prioritizes busy over idle', () => {
       // If both patterns present, busy should win
       expect(detectClaudeBusyState('● Working\n> ')).toBe('busy');
-    });
-  });
-
-  describe('extractClaudeSessionId', () => {
-    it('extracts session ID from "Session ID: xxx" format', () => {
-      expect(extractClaudeSessionId('Session ID: abc123')).toBe('abc123');
-      expect(extractClaudeSessionId('Session: xyz789')).toBe('xyz789');
-    });
-
-    it('extracts session ID from "Resuming session: xxx"', () => {
-      expect(extractClaudeSessionId('Resuming session: sess_456')).toBe('sess_456');
-    });
-
-    it('returns null when no session ID found', () => {
-      expect(extractClaudeSessionId('Hello world')).toBe(null);
     });
   });
 

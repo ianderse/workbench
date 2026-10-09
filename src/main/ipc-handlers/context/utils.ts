@@ -98,17 +98,24 @@ export function loadGlobalSettings(): GlobalSettings {
 }
 
 /**
+ * A memory setting from a project's .env (MEMORY_<name>). Projects saved by older versions used
+ * GRAPHITI_<name>, which is still read until the project's memory settings are saved again
+ */
+export function readMemoryEnvVar(vars: EnvironmentVars, name: string): string | undefined {
+  return vars[`MEMORY_${name}`] || vars[`GRAPHITI_${name}`] || undefined;
+}
+
+/** A memory setting from the project's .env, falling back to the process environment */
+function memoryEnvValue(projectEnvVars: EnvironmentVars, name: string): string | undefined {
+  return readMemoryEnvVar(projectEnvVars, name) ?? readMemoryEnvVar(process.env as EnvironmentVars, name);
+}
+
+/**
  * Check if memory is enabled in project or global environment
  */
 export function isMemoryEnabled(projectEnvVars: EnvironmentVars): boolean {
-  return (
-    projectEnvVars['GRAPHITI_ENABLED']?.toLowerCase() === 'true' ||
-    process.env.GRAPHITI_ENABLED?.toLowerCase() === 'true'
-  );
+  return memoryEnvValue(projectEnvVars, 'ENABLED')?.toLowerCase() === 'true';
 }
-
-/** @deprecated Use isMemoryEnabled instead */
-export const isGraphitiEnabled = isMemoryEnabled;
 
 /**
  * Check if OpenAI API key is available
@@ -143,8 +150,7 @@ export function validateEmbeddingConfiguration(
 ): EmbeddingValidationResult {
   // Get the configured embedding provider (default to openai for backwards compatibility)
   const provider = (
-    projectEnvVars['GRAPHITI_EMBEDDER_PROVIDER'] ||
-    process.env.GRAPHITI_EMBEDDER_PROVIDER ||
+    memoryEnvValue(projectEnvVars, 'EMBEDDER_PROVIDER') ||
     'openai'
   ).toLowerCase();
 
@@ -208,7 +214,7 @@ export function validateEmbeddingConfiguration(
 }
 
 /**
- * Get memory database details (LadybugDB - embedded database)
+ * Get memory database details (local libSQL database)
  */
 export interface MemoryDatabaseDetails {
   dbPath: string;
@@ -216,12 +222,10 @@ export interface MemoryDatabaseDetails {
 }
 
 export function getMemoryDatabaseDetails(projectEnvVars: EnvironmentVars): MemoryDatabaseDetails {
-  const dbPath = projectEnvVars['GRAPHITI_DB_PATH'] ||
-                 process.env.GRAPHITI_DB_PATH ||
+  const dbPath = memoryEnvValue(projectEnvVars, 'DB_PATH') ||
                  require('path').join(require('os').homedir(), '.auto-claude', 'memories');
 
-  const database = projectEnvVars['GRAPHITI_DATABASE'] ||
-                   process.env.GRAPHITI_DATABASE ||
+  const database = memoryEnvValue(projectEnvVars, 'DATABASE') ||
                    'auto_claude_memory';
 
   return { dbPath, database };

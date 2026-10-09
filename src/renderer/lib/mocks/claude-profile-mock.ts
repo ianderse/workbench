@@ -64,7 +64,6 @@ export const claudeProfileMock = {
     data: null
   }),
 
-  onSDKRateLimit: () => () => {},
 
   onAuthFailure: () => () => {},
 

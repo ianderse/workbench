@@ -14,7 +14,6 @@ export interface TerminalProcess {
   isCLIMode: boolean;
   projectPath?: string;
   cwd: string;
-  claudeSessionId?: string;
   claudeProfileId?: string;
   outputBuffer: string;
   title: string;
@@ -24,6 +23,8 @@ export interface TerminalProcess {
   pendingCLIResume?: boolean;
   /** Whether Claude was invoked with --dangerously-skip-permissions (YOLO mode) */
   dangerouslySkipPermissions?: boolean;
+  /** The project's Graphify output directory (its GRAPHIFY_OUT), when the project has a memory graph */
+  graphifyOut?: string;
   /** Shell type for Windows (affects command chaining syntax) */
   shellType?: WindowsShellType;
   /** Whether PTY has emitted exit; used to avoid writes/resizes on dead PTYs */
@@ -85,7 +86,6 @@ export interface TerminalProfileChangeInfo {
   id: string;
   cwd: string;
   projectPath?: string;
-  claudeSessionId?: string;
   claudeProfileId?: string;
   isCLIMode: boolean;
   dangerouslySkipPermissions?: boolean;

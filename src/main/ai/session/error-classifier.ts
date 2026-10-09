@@ -176,7 +176,7 @@ export function classifyError(error: unknown): ClassifiedError {
     };
   }
 
-  const message = sanitizeErrorMessage(errorToString(error));
+  const message = sanitizeErrorMessage(errorText(error));
 
   if (isAbortError(error)) {
     return {
@@ -261,7 +261,7 @@ export function classifyToolError(
 ): SessionError {
   return {
     code: ErrorCode.TOOL_ERROR,
-    message: `Tool '${toolName}' (${toolCallId}) failed: ${sanitizeErrorMessage(errorToString(error))}`,
+    message: `Tool '${toolName}' (${toolCallId}) failed: ${sanitizeErrorMessage(errorText(error))}`,
     retryable: true,
     cause: error,
   };
@@ -271,13 +271,52 @@ export function classifyToolError(
 // Helpers
 // =============================================================================
 
+/** HTTP details of a provider API error (the AI SDK's APICallError), if the error carries them */
+interface ApiCallDetails {
+  statusCode?: number;
+  responseBody?: string;
+}
+
+/**
+ * The provider API error behind an error: the error itself, or the last attempt of the AI SDK's
+ * RetryError ("Failed after N attempts. Last error: ..."), which hides the status code
+ */
+function apiCallDetails(error: unknown): ApiCallDetails | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const candidate = error as ApiCallDetails & { errors?: unknown[]; lastError?: unknown };
+  if (typeof candidate.statusCode === 'number') return candidate;
+  const last = candidate.lastError ?? candidate.errors?.[candidate.errors.length - 1];
+  return last && last !== error ? apiCallDetails(last) : undefined;
+}
+
+/** "HTTP 429 rate_limit_error" from an API error's status and JSON body */
+function describeApiCall({ statusCode, responseBody }: ApiCallDetails): string {
+  let errorType: string | undefined;
+  try {
+    const body = JSON.parse(responseBody ?? '') as { error?: { type?: unknown } };
+    if (typeof body.error?.type === 'string') errorType = body.error.type;
+  } catch {
+    // Not a JSON error body
+  }
+  return [statusCode !== undefined ? `HTTP ${statusCode}` : null, errorType].filter(Boolean).join(' ');
+}
+
+/**
+ * The error's message in its original casing, followed by the HTTP status and API error type when
+ * the error came from a provider API call
+ */
+function errorText(error: unknown): string {
+  const message = error instanceof Error ? error.message : typeof error === 'string' ? error : String(error);
+  const details = apiCallDetails(error);
+  const description = details ? describeApiCall(details) : '';
+  return description && !message.includes(description) ? `${message} (${description})` : message;
+}
+
 /**
  * Convert any error to a lowercase string for pattern matching.
  */
 function errorToString(error: unknown): string {
-  if (error instanceof Error) return error.message.toLowerCase();
-  if (typeof error === 'string') return error.toLowerCase();
-  return String(error).toLowerCase();
+  return errorText(error).toLowerCase();
 }
 
 /**

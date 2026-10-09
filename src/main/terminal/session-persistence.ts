@@ -135,7 +135,7 @@ class SessionPersistence {
    */
   updateSessionMetadata(
     id: string,
-    updates: Partial<Pick<TerminalSessionState, 'title' | 'isCLIMode' | 'claudeSessionId' | 'daemonPtyId'>>
+    updates: Partial<Pick<TerminalSessionState, 'title' | 'isCLIMode' | 'daemonPtyId'>>
   ): void {
     const session = this.sessions.get(id);
     if (!session) return;

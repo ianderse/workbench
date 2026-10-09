@@ -297,7 +297,7 @@ async function listOllamaModelsNative(baseUrl?: string): Promise<OllamaModel[]> 
  * - Ollama model discovery and downloads with real-time progress tracking
  *
  * These handlers allow the renderer process to:
- * 1. Check memory system status (Kuzu database, LadybugDB)
+ * 1. Check memory system status (local libSQL database)
  * 2. Discover, list, and download Ollama models
  * 3. Subscribe to real-time download progress events
  *

@@ -19,9 +19,9 @@ export function useTerminalProfileChange(): void {
 
   const recreateTerminal = useCallback(async (
     terminalId: string,
-    sessionId?: string,
     sessionMigrated?: boolean,
-    isCLIMode?: boolean
+    isCLIMode?: boolean,
+    dangerouslySkipPermissions?: boolean
   ) => {
     // Prevent duplicate recreation
     if (recreatingTerminals.current.has(terminalId)) {
@@ -42,7 +42,6 @@ export function useTerminalProfileChange(): void {
 
       debugLog('[useTerminalProfileChange] Recreating terminal:', {
         terminalId,
-        sessionId,
         sessionMigrated,
         cwd: terminal.cwd,
         projectPath: terminal.projectPath
@@ -106,25 +105,16 @@ export function useTerminalProfileChange(): void {
       });
 
       // If there was an active Claude session that was migrated, auto-resume it
-      if (sessionId && sessionMigrated) {
-        debugLog('[useTerminalProfileChange] Session migrated, auto-resuming:', sessionId);
-        // Store the session ID for tracking
-        store.setClaudeSessionId(newTerminal.id, sessionId);
-
-        // Auto-resume the Claude session with --continue
-        // YOLO mode (dangerouslySkipPermissions) is preserved server-side by the
-        // main process during migration (storeMigratedSessionFlag), so resumeClaudeAsync
-        // will restore it automatically when migratedSession is true
+      if (sessionMigrated) {
+        // The project's latest session was copied to the new profile: continue it there
+        // (cd to the project, then `claude --continue`) in the YOLO mode it had.
         // Note: resumeClaudeInTerminal uses fire-and-forget IPC (ipcRenderer.send).
         // If resume fails in the main process, the error is logged but no failure event
         // is emitted back to the renderer. The terminal will show an empty shell prompt.
-        window.electronAPI.resumeClaudeInTerminal(
-          newTerminal.id,
-          sessionId,
-          { migratedSession: true }
-        );
+        store.setCLIMode(newTerminal.id, true);
+        window.electronAPI.resumeClaudeInTerminal(newTerminal.id, { dangerouslySkipPermissions });
         debugLog('[useTerminalProfileChange] Resume initiated for terminal:', newTerminal.id);
-      } else if (isCLIMode && sessionId && !sessionMigrated) {
+      } else if (isCLIMode && !sessionMigrated) {
         // Session had an active Claude session but migration failed
         // Notify user that their Claude session was lost
         debugError('[useTerminalProfileChange] Session migration failed for terminal:', terminalId);
@@ -151,9 +141,9 @@ export function useTerminalProfileChange(): void {
       for (const terminalInfo of event.terminals) {
         await recreateTerminal(
           terminalInfo.id,
-          terminalInfo.sessionId,
           terminalInfo.sessionMigrated,
-          terminalInfo.isCLIMode
+          terminalInfo.isCLIMode,
+          terminalInfo.dangerouslySkipPermissions
         );
       }
 

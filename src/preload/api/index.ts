@@ -8,6 +8,7 @@ import type { InsightsAPI } from './modules/insights-api';
 import { AppUpdateAPI, createAppUpdateAPI } from './app-update-api';
 import { DebugAPI, createDebugAPI } from './modules/debug-api';
 import { ClaudeCodeAPI, createClaudeCodeAPI } from './modules/claude-code-api';
+import { GraphifyAPI, createGraphifyAPI } from './modules/graphify-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
 import { ProfileAPI, createProfileAPI } from './profile-api';
 import { QueueAPI, createQueueAPI } from './queue-api';
@@ -23,6 +24,7 @@ export interface ElectronAPI extends
   AppUpdateAPI,
   DebugAPI,
   ClaudeCodeAPI,
+  GraphifyAPI,
   McpAPI,
   ProfileAPI {
   /** Queue routing API for rate limit recovery */
@@ -39,6 +41,7 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createAppUpdateAPI(),
   ...createDebugAPI(),
   ...createClaudeCodeAPI(),
+  ...createGraphifyAPI(),
   ...createMcpAPI(),
   ...createProfileAPI(),
   queue: createQueueAPI()  // Queue routing for rate limit recovery
@@ -57,6 +60,7 @@ export {
   createProfileAPI,
   createDebugAPI,
   createClaudeCodeAPI,
+  createGraphifyAPI,
   createMcpAPI,
   createQueueAPI
 };
@@ -73,6 +77,7 @@ export type {
   ProfileAPI,
   DebugAPI,
   ClaudeCodeAPI,
+  GraphifyAPI,
   McpAPI,
   QueueAPI
 };

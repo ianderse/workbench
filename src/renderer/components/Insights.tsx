@@ -8,6 +8,8 @@ import {
   Search,
   FileText,
   FolderSearch,
+  Network,
+  SquareTerminal,
   PanelLeft,
   SquarePen,
   ArrowUp,
@@ -880,6 +882,10 @@ const getToolIcon = (toolName: string) => {
       return FolderSearch;
     case 'Grep':
       return Search;
+    case 'CodebaseGraph':
+      return Network;
+    case 'Bash':
+      return SquareTerminal;
     default:
       return FileText;
   }
@@ -972,6 +978,10 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
         return { icon: FolderSearch, label: t('insights.tools.searchingFiles') };
       case 'Grep':
         return { icon: Search, label: t('insights.tools.searchingCode') };
+      case 'CodebaseGraph':
+        return { icon: Network, label: t('insights.tools.searchingGraph') };
+      case 'Bash':
+        return { icon: SquareTerminal, label: t('insights.tools.runningCommand') };
       default:
         return { icon: Loader2, label: toolName };
     }

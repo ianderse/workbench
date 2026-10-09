@@ -100,7 +100,6 @@ export const IPC_CHANNELS = {
   TERMINAL_EXIT: 'terminal:exit',
   TERMINAL_TITLE_CHANGE: 'terminal:titleChange',
   TERMINAL_WORKTREE_CONFIG_CHANGE: 'terminal:worktreeConfigChange',  // Worktree config restored/changed (for sync on recovery)
-  TERMINAL_CLAUDE_SESSION: 'terminal:claudeSession',  // Claude session ID captured
   TERMINAL_PENDING_RESUME: 'terminal:pendingResume',  // Terminal has pending Claude resume (for deferred activation)
   TERMINAL_RATE_LIMIT: 'terminal:rateLimit',  // Claude Code rate limit detected
   TERMINAL_OAUTH_TOKEN: 'terminal:oauthToken',  // OAuth token captured from setup-token output
@@ -281,6 +280,16 @@ export const IPC_CHANNELS = {
   CLAUDE_CODE_INSTALL_VERSION: 'claudeCode:installVersion',
   CLAUDE_CODE_GET_INSTALLATIONS: 'claudeCode:getInstallations',
   CLAUDE_CODE_SET_ACTIVE_PATH: 'claudeCode:setActivePath',
+
+  // Graphify CLI (memory graph)
+  GRAPHIFY_CHECK_VERSION: 'graphify:checkVersion',
+  GRAPHIFY_INSTALL: 'graphify:install',
+  GRAPHIFY_INSTALL_CLAUDE_COMMAND: 'graphify:installClaudeCommand',
+  GRAPHIFY_GET_INDEX: 'graphify:getIndex',
+  GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
+  GRAPHIFY_HAS_GRAPH: 'graphify:hasGraph',
+  GRAPHIFY_GET_GRAPH: 'graphify:getGraph',
+  GRAPHIFY_INDEX_UPDATED: 'graphify:indexUpdated', // main -> renderer: a project's graph was rebuilt
 
   // MCP Server health checks
   MCP_CHECK_HEALTH: 'mcp:checkHealth',           // Quick connectivity check

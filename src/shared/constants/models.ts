@@ -368,7 +368,7 @@ export const PHASE_KEYS: readonly (keyof PhaseModelConfig)[] = ['spec', 'plannin
 
 export const MEMORY_BACKENDS = [
   { value: 'file', label: 'File-based (default)' },
-  { value: 'memory', label: 'Memory (LadybugDB)' }
+  { value: 'memory', label: 'Memory (local database)' }
 ] as const;
 
 // ============================================

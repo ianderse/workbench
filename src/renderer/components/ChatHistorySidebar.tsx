@@ -215,7 +215,9 @@ export function ChatHistorySidebar({
       )}
 
       {/* Session list */}
-      <ScrollArea className="flex-1">
+      {/* Radix wraps the content in a display:table div that grows with it; make it a block so long
+          titles truncate instead of pushing the item past the sidebar */}
+      <ScrollArea className="flex-1" viewportClassName="[&>div]:!block">
         {isLoading ? (
           <div className="flex h-14 items-center justify-center pt-6">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />

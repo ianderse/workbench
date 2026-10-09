@@ -7,7 +7,7 @@ import type { McpConnectorSettings } from '../types/settings';
 import type { CustomMcpServer } from '../types/project';
 
 /** Built-in connectors that can be switched on or off (Auto Claude's own server is always on) */
-export const BUILTIN_MCP_CONNECTORS = ['context7', 'memory', 'electron', 'puppeteer'] as const;
+export const BUILTIN_MCP_CONNECTORS = ['context7', 'electron', 'puppeteer'] as const;
 
 /** Browser automation connectors, offered to the QA agents only */
 export const BROWSER_MCP_CONNECTORS: readonly string[] = ['electron', 'puppeteer'];
@@ -21,7 +21,6 @@ export function getUsableCustomServers(settings: McpConnectorSettings | undefine
 export function getDefaultMcpConnectorIds(settings: McpConnectorSettings | undefined): string[] {
   return [
     ...(settings?.context7Enabled !== false ? ['context7'] : []),
-    ...(settings?.memoryEnabled !== false ? ['memory'] : []),
     ...(settings?.electronEnabled === true ? ['electron'] : []),
     ...(settings?.puppeteerEnabled === true ? ['puppeteer'] : []),
     ...getUsableCustomServers(settings)

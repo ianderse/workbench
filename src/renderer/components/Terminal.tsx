@@ -569,6 +569,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Clear the pending flag and trigger the actual resume
           useTerminalStore.getState().setPendingClaudeResume(id, false);
           window.electronAPI.activateDeferredClaudeResume(id);
+          // The terminal now runs `claude --continue` in the project: show it in Claude mode
+          useTerminalStore.getState().setCLIMode(id, true);
         }
       }, 100); // Small delay to let React finish batched updates
 
@@ -718,11 +720,11 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
         pendingCLIResume={terminal?.pendingCLIResume}
       />
 
-      <div
-        ref={terminalRef}
-        className="flex-1 px-2 py-1.5"
-        style={{ minHeight: 0 }}
-      />
+      {/* Padding lives on the wrapper: xterm's fit addon sizes rows from its container's height,
+          which would include the container's own padding and cut off the last line */}
+      <div className="flex-1 px-2 py-1.5" style={{ minHeight: 0 }}>
+        <div ref={terminalRef} className="h-full w-full" />
+      </div>
 
       {/* Worktree creation dialog */}
       {projectPath && (

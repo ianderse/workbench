@@ -10,7 +10,8 @@
     "kanban": "Kanban",
     "terminals": "Agents",
     "insights": "Claude",
-    "projects": "Projects"
+    "projects": "Projects",
+    "memory": "Graph"
   },
   "actions": {
     "settings": "Settings",
@@ -23,16 +24,6 @@
   },
   "messages": {
     "initializeToCreateTasks": "Initialize Auto Claude to create tasks"
-  },
-  "updateBanner": {
-    "title": "Update Available",
-    "version": "Version {{version}} is ready",
-    "updateAndRestart": "Update and Restart",
-    "installAndRestart": "Install and Restart",
-    "downloading": "Downloading...",
-    "dismiss": "Dismiss",
-    "downloadError": "Failed to download update",
-    "readOnlyVolumeWarning": "Move to Applications folder to update"
   },
   "claudeCode": {
     "title": "Claude Code CLI",
@@ -78,5 +69,37 @@
       "next": "Next",
       "stable": "Stable"
     }
+  },
+  "graphify": {
+    "title": "Graphify",
+    "description": "The Graphify CLI that builds each project's memory graph and its /graphify command in Claude Code",
+    "status": "Status",
+    "version": "Version",
+    "changelog": "Changelog",
+    "install": "Install",
+    "update": "Update",
+    "refresh": "Refresh",
+    "checking": "Checking Graphify...",
+    "upToDate": "Graphify is up to date",
+    "updateAvailable": "Graphify update available",
+    "notInstalled": "Graphify not installed",
+    "error": "Error checking Graphify",
+    "latest": "Latest",
+    "lastChecked": "Last checked",
+    "installFailed": "Failed to open a terminal for the installation",
+    "claudeCommand": "Claude Code command",
+    "claudeCommandReady": "/graphify is available in Claude Code",
+    "claudeCommandMissing_one": "/graphify isn't set up in 1 Claude Code configuration",
+    "claudeCommandMissing_other": "/graphify isn't set up in {{count}} Claude Code configurations",
+    "claudeCommandFailed": "Couldn't add /graphify to Claude Code",
+    "setUp": "Set up",
+    "viewChangelog": "View changelog",
+    "viewChangelogAriaLabel": "View Graphify changelog (opens in new window)"
+  },
+  "memoryGraph": {
+    "loading": "Loading the memory graph",
+    "layingOut": "{{nodes}} nodes and {{links}} links are loading",
+    "empty": "The memory graph is empty",
+    "loadFailed": "Couldn't load the memory graph"
   }
 }

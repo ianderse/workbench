@@ -11,8 +11,8 @@ import { loadProjectContext } from '../../stores/context-store';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 
 /**
- * The project index row (Analyze/Refresh, plus loading and error), placed in the General
- * page's Auto-Build section.
+ * The project index row (Analyze/Refresh, plus loading and error), placed in the Project
+ * page's Project section.
  */
 export function ProjectIndexRows({ projectId }: { projectId: string }) {
   const { t } = useTranslation('settings');

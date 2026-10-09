@@ -20,7 +20,7 @@
       },
       "memory": {
         "title": "Memory and context",
-        "description": "Persistent memory across sessions with Graphiti"
+        "description": "Persistent memory across sessions"
       },
       "parallel": {
         "title": "Parallel execution",

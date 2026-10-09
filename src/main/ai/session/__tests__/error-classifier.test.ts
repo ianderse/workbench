@@ -232,3 +232,35 @@ describe('classifyToolError', () => {
     expect(result.message).toContain('sk-***');
   });
 });
+
+// =============================================================================
+// Provider API errors (AI SDK APICallError / RetryError)
+// =============================================================================
+
+describe('classifyError with provider API errors', () => {
+  const rateLimitBody = '{"type":"error","error":{"type":"rate_limit_error","message":"Error"}}';
+  const apiCallError = (statusCode: number, responseBody: string) =>
+    Object.assign(new Error('Error'), { statusCode, responseBody });
+
+  it('sees the status code inside a RetryError and treats a 429 as a rate limit', () => {
+    const retryError = Object.assign(new Error('Failed after 3 attempts. Last error: Error'), {
+      errors: [apiCallError(429, rateLimitBody), apiCallError(429, rateLimitBody), apiCallError(429, rateLimitBody)],
+    });
+    const result = classifyError(retryError);
+    expect(isRateLimitError(retryError)).toBe(true);
+    expect(result.outcome).toBe('rate_limited');
+    expect(result.sessionError.message).toContain('Failed after 3 attempts. Last error: Error (HTTP 429 rate_limit_error)');
+  });
+
+  it('treats a 401 API error as an authentication failure', () => {
+    const error = apiCallError(401, '{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}');
+    expect(classifyError(error).outcome).toBe('auth_failure');
+  });
+
+  it('keeps the original casing of generic error messages', () => {
+    const error = apiCallError(500, '{"type":"error","error":{"type":"api_error","message":"Internal server error"}}');
+    const result = classifyError(error);
+    expect(result.outcome).toBe('error');
+    expect(result.sessionError.message).toBe('Error (HTTP 500 api_error)');
+  });
+});

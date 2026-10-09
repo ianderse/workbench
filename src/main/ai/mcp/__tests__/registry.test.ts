@@ -30,27 +30,6 @@ describe('getMcpServerConfig', () => {
     });
   });
 
-  describe('memory', () => {
-    it('returns null when no memory URL provided', () => {
-      const config = getMcpServerConfig('memory', {});
-      expect(config).toBeNull();
-    });
-
-    it('returns config with streamable-http transport when URL is provided', () => {
-      const config = getMcpServerConfig('memory', { memoryMcpUrl: 'http://localhost:8080/mcp' });
-      expect(config).not.toBeNull();
-      expect(config?.transport.type).toBe('streamable-http');
-      if (config?.transport.type === 'streamable-http') {
-        expect(config.transport.url).toBe('http://localhost:8080/mcp');
-      }
-    });
-
-    it('reads URL from env.GRAPHITI_MCP_URL option', () => {
-      const config = getMcpServerConfig('memory', { env: { GRAPHITI_MCP_URL: 'http://graphiti.local' } });
-      expect(config?.transport.type).toBe('streamable-http');
-    });
-  });
-
   describe('electron', () => {
     it('returns the electron server config', () => {
       const config = getMcpServerConfig('electron');
@@ -134,7 +113,7 @@ describe('resolveMcpServers', () => {
     expect(configs.map((c) => c.id)).toEqual(['context7', 'electron', 'puppeteer']);
   });
 
-  it('filters out servers that cannot be configured (e.g. memory without a URL)', () => {
+  it('filters out servers that cannot be configured (e.g. a removed or unknown server)', () => {
     const configs = resolveMcpServers(['context7', 'memory'], {});
     expect(configs).toHaveLength(1);
     expect(configs[0].id).toBe('context7');
@@ -149,12 +128,6 @@ describe('resolveMcpServers', () => {
     const configs = resolveMcpServers(['context7', 'bogus-server-id']);
     expect(configs).toHaveLength(1);
     expect(configs[0].id).toBe('context7');
-  });
-
-  it('includes memory server when memoryMcpUrl is provided', () => {
-    const configs = resolveMcpServers(['memory'], { memoryMcpUrl: 'http://memory.local' });
-    expect(configs).toHaveLength(1);
-    expect(configs[0].id).toBe('memory');
   });
 
   it('passes specDir through to auto-claude config', () => {

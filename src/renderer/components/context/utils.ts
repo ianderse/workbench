@@ -1,7 +1,5 @@
+import { formatDateTime } from '../../../shared/utils/format-date-time';
+
 export function formatDate(timestamp: string): string {
-  try {
-    return new Date(timestamp).toLocaleString();
-  } catch {
-    return timestamp;
-  }
+  return formatDateTime(timestamp) || timestamp;
 }

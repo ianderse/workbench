@@ -26,8 +26,6 @@ export class TerminalManager {
   private saveTimer: NodeJS.Timeout | null = null;
   private lastNotifiedRateLimitReset: Map<string, string> = new Map();
   private eventCallbacks: TerminalEventHandler.EventHandlerCallbacks;
-  /** Server-side storage for YOLO mode flags during profile migration (sessionId → flag) */
-  private migratedSessionFlags: Map<string, boolean> = new Map();
 
   constructor(getWindow: WindowGetter) {
     this.getWindow = getWindow;
@@ -78,18 +76,9 @@ export class TerminalManager {
       (terminal, data) => this.handleTerminalData(terminal, data),
       {
         resumeClaudeSession: true,
-        captureSessionId: (terminalId, projectPath, startTime) => {
-          SessionHandler.captureClaudeSessionId(
-            terminalId,
-            projectPath,
-            startTime,
-            this.terminals,
-            this.getWindow
-          );
-        },
-        onResumeNeeded: (terminalId, sessionId) => {
+        onResumeNeeded: (terminalId) => {
           // Use async version to avoid blocking main process
-          this.resumeClaudeAsync(terminalId, sessionId).catch((error) => {
+          this.resumeClaudeAsync(terminalId).catch((error) => {
             debugError('[terminal-manager] Failed to resume Claude session:', error);
           });
         }
@@ -116,7 +105,6 @@ export class TerminalManager {
    * Kill all terminal processes
    */
   async killAll(): Promise<void> {
-    this.migratedSessionFlags.clear();
     this.saveTimer = await TerminalLifecycle.destroyAllTerminals(
       this.terminals,
       this.saveTimer
@@ -164,15 +152,6 @@ export class TerminalManager {
       cwd,
       profileId,
       this.getWindow,
-      (terminalId, projectPath, startTime) => {
-        SessionHandler.captureClaudeSessionId(
-          terminalId,
-          projectPath,
-          startTime,
-          this.terminals,
-          this.getWindow
-        );
-      },
       dangerouslySkipPermissions
     );
   }
@@ -192,15 +171,6 @@ export class TerminalManager {
       cwd,
       profileId,
       this.getWindow,
-      (terminalId, projectPath, startTime) => {
-        SessionHandler.captureClaudeSessionId(
-          terminalId,
-          projectPath,
-          startTime,
-          this.terminals,
-          this.getWindow
-        );
-      },
       dangerouslySkipPermissions
     );
   }
@@ -226,36 +196,19 @@ export class TerminalManager {
   /**
    * Resume Claude in a terminal asynchronously (non-blocking)
    */
-  async resumeClaudeAsync(id: string, sessionId?: string, options?: { migratedSession?: boolean }): Promise<void> {
+  async resumeClaudeAsync(id: string, options?: { dangerouslySkipPermissions?: boolean }): Promise<void> {
     const terminal = this.terminals.get(id);
     if (!terminal) {
-      // Clean up stale migratedSessionFlags if terminal no longer exists
-      if (options?.migratedSession && sessionId) {
-        this.migratedSessionFlags.delete(sessionId);
-      }
       return;
     }
 
-    // For migrated sessions, restore YOLO mode from server-side storage
-    // (set during profile change in storeMigratedSessionFlag)
-    if (options?.migratedSession && sessionId) {
-      const storedFlag = this.migratedSessionFlags.get(sessionId);
-      if (storedFlag !== undefined) {
-        terminal.dangerouslySkipPermissions = storedFlag;
-        this.migratedSessionFlags.delete(sessionId);
-      }
+    // A terminal recreated after a profile swap is new, so the renderer passes the YOLO mode the
+    // session had
+    if (options?.dangerouslySkipPermissions !== undefined) {
+      terminal.dangerouslySkipPermissions = options.dangerouslySkipPermissions;
     }
 
-    await ClaudeIntegration.resumeClaudeAsync(terminal, sessionId, this.getWindow, options);
-  }
-
-  /**
-   * Store YOLO mode flag for a session being migrated during profile swap.
-   * Called from the profile change handler before the renderer recreates terminals.
-   * The flag is consumed by resumeClaudeAsync when the new terminal resumes.
-   */
-  storeMigratedSessionFlag(sessionId: string, dangerouslySkipPermissions: boolean): void {
-    this.migratedSessionFlags.set(sessionId, dangerouslySkipPermissions);
+    await ClaudeIntegration.resumeClaudeAsync(terminal, this.getWindow);
   }
 
   /**
@@ -277,20 +230,20 @@ export class TerminalManager {
     terminal.pendingCLIResume = false;
 
     // Now actually resume Claude
-    await ClaudeIntegration.resumeClaudeAsync(terminal, undefined, this.getWindow);
+    await ClaudeIntegration.resumeClaudeAsync(terminal, this.getWindow);
   }
 
   /**
-   * Resume Claude in a terminal with a specific session ID
+   * Resume Claude in a terminal (its project's latest session)
    * @deprecated Use resumeClaudeAsync for non-blocking behavior
    */
-  resumeClaude(id: string, sessionId?: string): void {
+  resumeClaude(id: string): void {
     const terminal = this.terminals.get(id);
     if (!terminal) {
       return;
     }
 
-    ClaudeIntegration.resumeClaude(terminal, sessionId, this.getWindow);
+    ClaudeIntegration.resumeClaude(terminal, this.getWindow);
   }
 
   /**
@@ -348,18 +301,9 @@ export class TerminalManager {
       (terminal, data) => this.handleTerminalData(terminal, data),
       {
         resumeClaudeSession: true,
-        captureSessionId: (terminalId, projectPath, startTime) => {
-          SessionHandler.captureClaudeSessionId(
-            terminalId,
-            projectPath,
-            startTime,
-            this.terminals,
-            this.getWindow
-          );
-        },
-        onResumeNeeded: (terminalId, sessionId) => {
+        onResumeNeeded: (terminalId) => {
           // Use async version to avoid blocking main process
-          this.resumeClaudeAsync(terminalId, sessionId).catch((error) => {
+          this.resumeClaudeAsync(terminalId).catch((error) => {
             debugError('[terminal-manager] Failed to resume Claude session:', error);
           });
         }
@@ -392,14 +336,6 @@ export class TerminalManager {
   }
 
   /**
-   * Get Claude session ID for a terminal
-   */
-  getClaudeSessionId(id: string): string | undefined {
-    const terminal = this.terminals.get(id);
-    return terminal?.claudeSessionId;
-  }
-
-  /**
    * Get info about all terminals for profile change operations.
    * Returns info needed to migrate sessions and notify frontend.
    */
@@ -411,7 +347,6 @@ export class TerminalManager {
         id,
         cwd: terminal.cwd,
         projectPath: terminal.projectPath,
-        claudeSessionId: terminal.claudeSessionId,
         claudeProfileId: terminal.claudeProfileId,
         isCLIMode: terminal.isCLIMode,
         dangerouslySkipPermissions: terminal.dangerouslySkipPermissions

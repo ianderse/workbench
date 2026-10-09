@@ -94,8 +94,6 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
     }
   };
   const activeProject = useProjectStore(s => s.getActiveProject());
-  const completedSubtasks = task.subtasks.filter(s => s.status === 'completed').length;
-  const totalSubtasks = task.subtasks.length;
 
   // Event Handlers
   const handleStartStop = async () => {
@@ -295,33 +293,12 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                             {t('tasks:detailHeader.incomplete')}
                           </Badge>
                       ) : (
-                        <>
-                           <Badge
-                             variant={getStatusBadgeVariant(task.status, state.isStuck)}
-                             className={cn('text-xs', (task.status === 'in_progress' && !state.isStuck) && 'status-running')}
-                           >
-                             {t(TASK_STATUS_LABELS[task.status])}
-                           </Badge>
-                          {task.status === 'human_review' && task.reviewReason && (
-                            <Badge
-                              variant={task.reviewReason === 'completed' ? 'success' : task.reviewReason === 'errors' ? 'destructive' : 'warning'}
-                              className="text-xs"
-                            >
-                              {t(`tasks:detailHeader.reviewReason.${
-                                task.reviewReason === 'completed' || task.reviewReason === 'errors' ||
-                                task.reviewReason === 'plan_review' || task.reviewReason === 'stopped'
-                                  ? task.reviewReason
-                                  : 'qa'
-                              }`)}
-                            </Badge>
-                          )}
-                        </>
-                      )}
-                      {/* Compact progress indicator */}
-                      {totalSubtasks > 0 && (
-                        <span className="text-xs text-muted-foreground ml-1">
-                          {t('tasks:detailHeader.subtaskProgress', { completed: completedSubtasks, total: totalSubtasks })}
-                        </span>
+                        <Badge
+                          variant={getStatusBadgeVariant(task.status, state.isStuck)}
+                          className={cn('text-xs', (task.status === 'in_progress' && !state.isStuck) && 'status-running')}
+                        >
+                          {t(TASK_STATUS_LABELS[task.status])}
+                        </Badge>
                       )}
                     </div>
                   </DialogPrimitive.Description>

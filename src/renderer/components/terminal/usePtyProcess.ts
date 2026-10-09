@@ -172,7 +172,7 @@ export function usePtyProcess({
 
     if (isRestored && terminalState) {
       // Restored session
-      debugLog(`[usePtyProcess] Restoring session for terminal: ${terminalId}, cwd: ${terminalState.cwd}, isCLIMode: ${terminalState.isCLIMode}, claudeSessionId: ${terminalState.claudeSessionId || 'none'}`);
+      debugLog(`[usePtyProcess] Restoring session for terminal: ${terminalId}, cwd: ${terminalState.cwd}, isCLIMode: ${terminalState.isCLIMode}`);
       window.electronAPI.restoreTerminalSession(
         {
           id: terminalState.id,
@@ -180,7 +180,6 @@ export function usePtyProcess({
           cwd: terminalState.cwd,
           projectPath: projectPath || '',
           isCLIMode: terminalState.isCLIMode,
-          claudeSessionId: terminalState.claudeSessionId,
           outputBuffer: '',
           createdAt: terminalState.createdAt.toISOString(),
           lastActiveAt: new Date().toISOString(),

@@ -26,6 +26,7 @@ import { TaskSuggestionSchema } from '../schema/insight-extractor';
 import type { ImageAttachment } from '../../../shared/types';
 import { buildAttachmentParts } from './insights-attachments';
 import { INSIGHTS_ERROR_CODES, formatInsightsError } from '../../../shared/constants/insights';
+import type { GraphifyAgentContext } from '../../graphify';
 
 // =============================================================================
 // Types
@@ -53,6 +54,8 @@ export interface InsightsConfig {
   abortSignal?: AbortSignal;
   /** Files attached to the current message (images, PDFs, text/code files) */
   attachments?: ImageAttachment[];
+  /** The project's memory graph, when its "Use Graphify" setting is on (CodebaseGraph tool) */
+  graphify?: GraphifyAgentContext;
 }
 
 /** Error raised when the model finishes without producing any answer text */
@@ -233,9 +236,10 @@ export async function runInsightsQuery(
     thinkingLevel = 'medium',
     abortSignal,
     attachments,
+    graphify,
   } = config;
 
-  const systemPrompt = buildSystemPrompt(projectDir);
+  const systemPrompt = graphify ? `${buildSystemPrompt(projectDir)}\n\n${graphify.prompt}` : buildSystemPrompt(projectDir);
 
   const fullPrompt = buildConversationPrompt(message, history);
 
@@ -246,9 +250,10 @@ export async function runInsightsQuery(
     specDir: join(projectDir, '.auto-claude', 'specs'),
     securityProfile: null as unknown as SecurityProfile,
     abortSignal,
+    graphify: graphify ? { cli: graphify.cli, graph: graphify.graph } : undefined,
   };
 
-  // Bind tools via registry (insights agent gets Read, Glob, Grep)
+  // Bind tools via registry (insights agent gets Read, Glob, Grep, and CodebaseGraph with a graph)
   const registry = buildToolRegistry();
   const tools = registry.getToolsForAgent('insights', toolContext);
 
@@ -393,6 +398,16 @@ function redactSecrets(message: string): string {
  * Extract a brief description from tool call args for UI display.
  */
 export function extractToolInput(args: Record<string, unknown>): string {
+  // Bash (graphify searches when the chat runs through Claude Code): the command itself
+  if (args.command) {
+    const command = String(args.command);
+    return command.length > 80 ? `${command.slice(0, 77)}...` : command;
+  }
+  // CodebaseGraph: the search and what it is about
+  if (args.action) {
+    const subject = args.question ?? args.symbol ?? (args.from && args.to ? `${args.from} → ${args.to}` : '');
+    return subject ? `${args.action}: ${subject}` : String(args.action);
+  }
   if (args.pattern) return `pattern: ${args.pattern}`;
   if (args.file_path) {
     const fp = String(args.file_path);

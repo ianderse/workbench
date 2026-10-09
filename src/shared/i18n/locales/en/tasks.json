@@ -27,21 +27,21 @@
   },
   "labels": {
     "running": "Running",
-    "aiReview": "AI Review",
-    "needsReview": "Needs Review",
+    "aiReview": "AI review",
+    "needsReview": "Needs review",
     "pending": "Pending",
     "stuck": "Stuck",
     "incomplete": "Incomplete",
     "recovering": "Recovering...",
-    "needsRecovery": "Needs Recovery",
-    "needsResume": "Needs Resume",
+    "needsRecovery": "Needs recovery",
+    "needsResume": "Needs resume",
     "onHoldUntil": "On hold · resumes {{time}}"
   },
   "reviewReason": {
     "completed": "Completed",
-    "hasErrors": "Has Errors",
-    "qaIssues": "QA Issues",
-    "approvePlan": "Approve Plan",
+    "hasErrors": "Has errors",
+    "qaIssues": "QA issues",
+    "approvePlan": "Approve plan",
     "stopped": "Stopped"
   },
   "tooltips": {
@@ -292,7 +292,7 @@
     }
   },
   "subtasks": {
-    "untitled": "Subtask #{{number}}",
+    "untitled": "Subtask {{number}}",
     "expandAll": "Expand all",
     "collapseAll": "Collapse all",
     "empty": "No subtasks defined",

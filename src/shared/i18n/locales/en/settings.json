@@ -361,7 +361,10 @@
       "title": "General",
       "description": "Auto-Build and agent config",
       "useClaudeMd": "Use CLAUDE.md",
-      "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context"
+      "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context",
+      "useGraphify": "Use Graphify",
+      "useGraphifyDescription": "Give agents the project's memory graph, built under Memory index on the Project page",
+      "useGraphifyNotInstalled": "Install Graphify on the Updates page to use the project's memory graph"
     },
     "queue": {
       "title": "Queue",
@@ -375,7 +378,7 @@
     },
     "memory": {
       "title": "Memory",
-      "description": "Graphiti memory backend",
+      "description": "Persistent memory for agents",
       "integrationTitle": "Memory",
       "integrationDescription": "Configure persistent cross-session memory for agents",
       "syncDescription": "Configure persistent memory"
@@ -555,7 +558,7 @@
     "apiKeys": "API Keys",
     "apiKeysInfo": "Keys set here are used as defaults. Individual projects can override these in their settings.",
     "openaiKey": "OpenAI API Key",
-    "openaiKeyDescription": "Required for Graphiti memory backend (embeddings)",
+    "openaiKeyDescription": "Required for OpenAI memory embeddings",
     "toast": {
       "authSuccess": "Profile Authenticated",
       "authSuccessWithEmail": "Connected as {{email}}",
@@ -878,11 +881,6 @@
         "name": "Context7",
         "description": "Documentation lookup for libraries"
       },
-      "graphiti": {
-        "name": "Graphiti Memory",
-        "description": "Knowledge graph for cross-session context",
-        "notConfigured": "Requires memory configuration (see Memory settings)"
-      },
       "electron": {
         "name": "Electron",
         "description": "Desktop app automation via Chrome DevTools"
@@ -894,11 +892,6 @@
       "autoClaude": {
         "name": "Auto Claude tools",
         "description": "Build progress tracking"
-      },
-      "memory": {
-        "name": "Memory",
-        "description": "Knowledge from previous sessions",
-        "notConfigured": "Not configured (enable memory in the project's Memory settings)"
       }
     },
     "customServers": "Custom servers",
@@ -1065,7 +1058,7 @@
   "projectPages": {
     "initializeFirst": "Initialize Auto-Build in the project's General settings to configure this page.",
     "general": {
-      "autoBuildTitle": "Auto-Build",
+      "autoBuildTitle": "Project",
       "notInitialized": "Not initialized",
       "notInitializedDescription": "Initialize Auto-Build to enable task creation and agent workflows",
       "initialize": "Initialize",
@@ -1086,8 +1079,8 @@
     },
     "memory": {
       "enable": "Enable memory",
-      "enableDescription": "Persistent cross-session memory using LadybugDB (embedded database)",
-      "fileBasedDescription": "Session insights are stored locally in JSON files. Enable for persistent cross-session context with semantic search",
+      "enableDescription": "Persistent cross-session memory in a local database",
+      "fileBasedDescription": "Enable persistent cross-session context with semantic search (stored locally in JSON files)",
       "embeddingsTitle": "Embeddings",
       "provider": "Embedding provider",
       "providerDescription": "Used for semantic search; keyword search works without it",
@@ -1125,7 +1118,16 @@
       "loadFailed": "Failed to load project index",
       "score": "Score {{score}}",
       "filter": "Filter",
-      "loadingMemories": "Loading memories..."
+      "loadingMemories": "Loading memories...",
+      "memoryIndex": "Memory index",
+      "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
+      "noMemoryIndex": "Map the project's code into a Graphify graph in .auto-claude/memory",
+      "memoryIndexNotInstalled": "Install Graphify on the Updates page to build a memory graph",
+      "memoryIndexNotEnabled": "Turn on Use Graphify on the Memory page to build a memory graph",
+      "buildMemoryIndex": "Build",
+      "rebuildMemoryIndex": "Rebuild",
+      "buildingMemoryIndex": "Building the memory graph...",
+      "memoryIndexFailed": "Couldn't build the memory graph"
     },
     "mcp": {
       "serversTitle": "MCP servers",

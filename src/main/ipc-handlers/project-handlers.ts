@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron';
 import { existsSync } from 'fs';
-import { execFile, execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type {
@@ -30,27 +30,15 @@ const execFileAsync = promisify(execFile);
 // ============================================
 
 /**
- * Get list of git branches for a directory (both local and remote)
+ * Get list of git branches for a directory (both local and remote), from the refs already known
+ * locally (remote refs are only fetched by the branch pickers' refresh button)
  */
-function getGitBranches(projectPath: string): string[] {
+async function getGitBranches(projectPath: string): Promise<string[]> {
   try {
-    // First fetch to ensure we have latest remote refs
-    try {
-      execFileSync(getToolPath('git'), ['fetch', '--prune'], {
-        cwd: projectPath,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        timeout: 10000 // 10 second timeout for fetch
-      });
-    } catch {
-      // Fetch may fail if offline or no remote, continue with local refs
-    }
-
     // Get all branches (local + remote) using --all flag
-    const result = execFileSync(getToolPath('git'), ['branch', '--all', '--format=%(refname:short)'], {
+    const { stdout: result } = await execFileAsync(getToolPath('git'), ['branch', '--all', '--format=%(refname:short)'], {
       cwd: projectPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      encoding: 'utf-8'
     });
 
     const branches = result.trim().split('\n')
@@ -147,12 +135,11 @@ async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false):
 /**
  * Get the current git branch for a directory
  */
-function getCurrentGitBranch(projectPath: string): string | null {
+async function getCurrentGitBranch(projectPath: string): Promise<string | null> {
   try {
-    const result = execFileSync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    const { stdout: result } = await execFileAsync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: projectPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      encoding: 'utf-8'
     });
     return result.trim() || null;
   } catch {
@@ -164,8 +151,8 @@ function getCurrentGitBranch(projectPath: string): string | null {
  * Detect the main branch for a git repository
  * Checks for common main branch names in order of preference
  */
-function detectMainBranch(projectPath: string): string | null {
-  const branches = getGitBranches(projectPath);
+async function detectMainBranch(projectPath: string): Promise<string | null> {
+  const branches = await getGitBranches(projectPath);
   if (branches.length === 0) return null;
 
   // Check for common main branch names in order of preference
@@ -178,10 +165,9 @@ function detectMainBranch(projectPath: string): string | null {
 
   // If none of the common names found, check for origin/HEAD reference
   try {
-    const result = execFileSync(getToolPath('git'), ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+    const { stdout: result } = await execFileAsync(getToolPath('git'), ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
       cwd: projectPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      encoding: 'utf-8'
     });
     const ref = result.trim();
     // Extract branch name from refs/remotes/origin/main
@@ -417,7 +403,7 @@ export function registerProjectHandlers(
         if (!existsSync(projectPath)) {
           return { success: false, error: 'Directory does not exist' };
         }
-        const branches = getGitBranches(projectPath);
+        const branches = await getGitBranches(projectPath);
         return { success: true, data: branches };
       } catch (error) {
         return {
@@ -455,7 +441,7 @@ export function registerProjectHandlers(
         if (!existsSync(projectPath)) {
           return { success: false, error: 'Directory does not exist' };
         }
-        const branch = getCurrentGitBranch(projectPath);
+        const branch = await getCurrentGitBranch(projectPath);
         return { success: true, data: branch };
       } catch (error) {
         return {
@@ -474,7 +460,7 @@ export function registerProjectHandlers(
         if (!existsSync(projectPath)) {
           return { success: false, error: 'Directory does not exist' };
         }
-        const mainBranch = detectMainBranch(projectPath);
+        const mainBranch = await detectMainBranch(projectPath);
         return { success: true, data: mainBranch };
       } catch (error) {
         return {

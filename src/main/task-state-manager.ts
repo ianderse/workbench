@@ -37,9 +37,18 @@ export class TaskStateManager {
   private taskContextById = new Map<string, TaskContextEntry>();
   private terminalEventSeen = new Set<string>();
   private getMainWindow: (() => BrowserWindow | null) | null = null;
+  private onTaskCompleted: ((taskId: string, project: Project) => void) | null = null;
 
   configure(getMainWindow: () => BrowserWindow | null): void {
     this.getMainWindow = getMainWindow;
+  }
+
+  /**
+   * Called when a task completes: its build finished and passed QA (human review, "completed"),
+   * or it was marked done (merged)
+   */
+  setTaskCompletedListener(listener: (taskId: string, project: Project) => void): void {
+    this.onTaskCompleted = listener;
   }
 
   handleTaskEvent(taskId: string, event: TaskEventPayload, task: Task, project: Project): boolean {
@@ -295,6 +304,10 @@ export class TaskStateManager {
 
       this.persistStatus(task, project, status, reviewReason, stateValue, executionPhase);
       this.emitStatus(taskId, status, reviewReason, project.id);
+
+      // Only transitions seen while the app runs (not tasks restored in that state)
+      const completed = (stateValue === 'human_review' && reviewReason === 'completed') || stateValue === 'done';
+      if (completed && lastState !== undefined) this.onTaskCompleted?.(taskId, project);
     });
 
     actor.start();

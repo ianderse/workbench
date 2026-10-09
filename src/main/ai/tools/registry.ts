@@ -16,8 +16,6 @@ import {
   AGENT_CONFIGS,
   CONTEXT7_TOOLS,
   ELECTRON_TOOLS,
-  MEMORY_MCP_TOOLS,
-  GRAPHITI_MCP_TOOLS,
   PUPPETEER_TOOLS,
   getAgentConfig,
   getDefaultThinkingLevel,
@@ -32,8 +30,6 @@ export {
   AGENT_CONFIGS,
   CONTEXT7_TOOLS,
   ELECTRON_TOOLS,
-  MEMORY_MCP_TOOLS,
-  GRAPHITI_MCP_TOOLS,
   PUPPETEER_TOOLS,
   getAgentConfig,
   getDefaultThinkingLevel,
@@ -49,6 +45,17 @@ export const TOOL_RECORD_DISCOVERY = 'mcp__auto-claude__record_discovery';
 export const TOOL_RECORD_GOTCHA = 'mcp__auto-claude__record_gotcha';
 export const TOOL_GET_SESSION_CONTEXT = 'mcp__auto-claude__get_session_context';
 export const TOOL_UPDATE_QA_STATUS = 'mcp__auto-claude__update_qa_status';
+export const TOOL_CODEBASE_GRAPH = 'CodebaseGraph';
+
+/**
+ * The tool names an agent gets in a session: its configured tools, plus CodebaseGraph for agents
+ * that search code (they have Grep) when the project has a memory graph
+ */
+export function getSessionToolNames(configTools: readonly string[], context: ToolContext): string[] {
+  const names = [...configTools];
+  if (context.graphify && names.includes('Grep')) names.push(TOOL_CODEBASE_GRAPH);
+  return names;
+}
 
 // =============================================================================
 // MCP Config for dynamic server resolution
@@ -113,7 +120,7 @@ export class ToolRegistry {
     context: ToolContext,
   ): Record<string, AITool> {
     const config = getAgentConfig(agentType);
-    const allowedNames = new Set(config.tools);
+    const allowedNames = new Set(getSessionToolNames(config.tools, context));
     const result: Record<string, AITool> = {};
 
     for (const [name, definedTool] of Array.from(this.tools.entries())) {
@@ -131,22 +138,17 @@ export class ToolRegistry {
  *
  * Handles dynamic server selection:
  * - "browser" → electron (if is_electron) or puppeteer (if is_web_frontend)
- * - "memory" → only if memoryEnabled is true
  * - Applies per-agent ADD/REMOVE overrides from mcpConfig
  */
 export function getRequiredMcpServers(
   agentType: AgentType,
   options: {
     projectCapabilities?: ProjectCapabilities;
-    memoryEnabled?: boolean;
-    /** @deprecated Use memoryEnabled instead */
-    graphitiEnabled?: boolean;
     mcpConfig?: McpConfig;
   } = {},
 ): string[] {
   const {
     projectCapabilities,
-    memoryEnabled = options.graphitiEnabled ?? false,
     mcpConfig = {},
   } = options;
 
@@ -177,11 +179,6 @@ export function getRequiredMcpServers(
         }
       }
     }
-  }
-
-  // Filter memory if not enabled
-  if (servers.includes('memory') && !memoryEnabled) {
-    servers = servers.filter((s) => s !== 'memory');
   }
 
   // Per-agent MCP overrides: AGENT_MCP_<agent>_ADD / AGENT_MCP_<agent>_REMOVE

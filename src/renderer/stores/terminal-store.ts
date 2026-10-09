@@ -126,7 +126,6 @@ export interface Terminal {
   cwd: string;
   createdAt: Date;
   isCLIMode: boolean;
-  claudeSessionId?: string;  // Claude Code session ID for resume
   // outputBuffer removed - now managed by terminalBufferManager singleton
   isRestored?: boolean;  // Whether this terminal was restored from a saved session
   associatedTaskId?: string;  // ID of task associated with this terminal (for context loading)
@@ -165,7 +164,6 @@ interface TerminalState {
   setActiveTerminal: (id: string | null) => void;
   setTerminalStatus: (id: string, status: TerminalStatus) => void;
   setCLIMode: (id: string, isCLIMode: boolean) => void;
-  setClaudeSessionId: (id: string, sessionId: string) => void;
   setAssociatedTask: (id: string, taskId: string | undefined) => void;
   setWorktreeConfig: (id: string, config: TerminalWorktreeConfig | undefined) => void;
   setClaudeBusy: (id: string, isBusy: boolean) => void;
@@ -282,9 +280,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       cwd: session.cwd,
       createdAt: new Date(session.createdAt),
       // Reset Claude mode to false - Claude Code is killed on app restart
-      // Keep claudeSessionId so users can resume by clicking the invoke button
       isCLIMode: false,
-      claudeSessionId: session.claudeSessionId,
       // outputBuffer now stored in terminalBufferManager (done above before existence check)
       isRestored: true,
       projectPath: session.projectPath,
@@ -304,7 +300,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       activeTerminalId: state.activeTerminalId || restoredTerminal.id,
     }));
 
-    debugLog(`[TerminalStore] Successfully added restored terminal ${session.id} to store, isRestored: true, claudeSessionId: ${session.claudeSessionId || 'none'}, pendingCLIResume: ${session.isCLIMode === true}`);
+    debugLog(`[TerminalStore] Successfully added restored terminal ${session.id} to store, isRestored: true, pendingCLIResume: ${session.isCLIMode === true}`);
     return restoredTerminal;
   },
 
@@ -407,9 +403,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       if (String(actor.getSnapshot().value) === 'idle') {
         sendTerminalMachineEvent(id, { type: 'SHELL_READY' });
       }
-      // Include current claudeSessionId to prevent XState action from overwriting it
-      const terminal = get().terminals.find(t => t.id === id);
-      sendTerminalMachineEvent(id, { type: 'CLAUDE_ACTIVE', claudeSessionId: terminal?.claudeSessionId });
+      sendTerminalMachineEvent(id, { type: 'CLAUDE_ACTIVE' });
     } else {
       // Only send CLAUDE_EXITED if machine is in a state that accepts it
       const actor = getOrCreateTerminalActor(id);
@@ -431,22 +425,6 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
               cliNamedOnce: isCLIMode ? t.cliNamedOnce : undefined
             }
           : t
-      ),
-    }));
-  },
-
-  setClaudeSessionId: (id: string, sessionId: string) => {
-    // Ensure machine has transitioned past idle before sending CLAUDE_ACTIVE
-    const actor = getOrCreateTerminalActor(id);
-    if (String(actor.getSnapshot().value) === 'idle') {
-      sendTerminalMachineEvent(id, { type: 'SHELL_READY' });
-    }
-    // Send CLAUDE_ACTIVE with session ID to XState machine
-    sendTerminalMachineEvent(id, { type: 'CLAUDE_ACTIVE', claudeSessionId: sessionId });
-
-    set((state) => ({
-      terminals: state.terminals.map((t) =>
-        t.id === id ? { ...t, claudeSessionId: sessionId } : t
       ),
     }));
   },
@@ -480,36 +458,27 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
 
   setPendingClaudeResume: (id: string, pending: boolean) => {
     // Send RESUME_REQUESTED or RESUME_COMPLETE to XState machine
-    let shouldUpdateZustand = true;
-
     if (pending) {
-      const terminal = get().terminals.find(t => t.id === id);
-      if (terminal?.claudeSessionId) {
-        sendTerminalMachineEvent(id, { type: 'RESUME_REQUESTED', claudeSessionId: terminal.claudeSessionId });
-      } else {
-        // No claudeSessionId - can't send RESUME_REQUESTED, so don't set pendingCLIResume
-        // to avoid XState/Zustand divergence (UI would show pending but machine wouldn't know)
-        debugLog('[terminal-store] setPendingClaudeResume: dropping request for terminal', id, '- no claudeSessionId');
-        shouldUpdateZustand = false;
+      // Resuming runs `claude --continue` in the project (its latest session); make sure the
+      // machine has left idle so it accepts the request
+      const actor = getOrCreateTerminalActor(id);
+      if (String(actor.getSnapshot().value) === 'idle') {
+        sendTerminalMachineEvent(id, { type: 'SHELL_READY' });
       }
+      sendTerminalMachineEvent(id, { type: 'RESUME_REQUESTED' });
     } else {
       // Resume cleared - either completed or cancelled
       const actor = terminalActors.get(id);
       if (actor && String(actor.getSnapshot().value) === 'pending_resume') {
-        // Include claudeSessionId to prevent XState action from overwriting it to undefined
-        const terminal = get().terminals.find(t => t.id === id);
-        sendTerminalMachineEvent(id, { type: 'RESUME_COMPLETE', claudeSessionId: terminal?.claudeSessionId });
+        sendTerminalMachineEvent(id, { type: 'RESUME_COMPLETE' });
       }
     }
 
-    // Only update Zustand state if XState was notified (prevents state divergence)
-    if (shouldUpdateZustand) {
-      set((state) => ({
-        terminals: state.terminals.map((t) =>
-          t.id === id ? { ...t, pendingCLIResume: pending } : t
-        ),
-      }));
-    }
+    set((state) => ({
+      terminals: state.terminals.map((t) =>
+        t.id === id ? { ...t, pendingCLIResume: pending } : t
+      ),
+    }));
   },
 
   setClaudeNamedOnce: (id: string, named: boolean) => {

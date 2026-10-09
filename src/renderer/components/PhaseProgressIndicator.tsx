@@ -11,18 +11,8 @@ interface PhaseProgressIndicatorProps {
   className?: string;
 }
 
-// Phase display configuration (colors only - labels are translated)
-const PHASE_COLORS: Record<ExecutionPhase, { color: string; bgColor: string }> = {
-  idle: { color: 'bg-muted-foreground', bgColor: 'bg-muted' },
-  planning: { color: 'bg-amber-500', bgColor: 'bg-amber-500/20' },
-  coding: { color: 'bg-info', bgColor: 'bg-info/20' },
-  rate_limit_paused: { color: 'bg-orange-500', bgColor: 'bg-orange-500/20' },
-  auth_failure_paused: { color: 'bg-red-500', bgColor: 'bg-red-500/20' },
-  qa_review: { color: 'bg-purple-500', bgColor: 'bg-purple-500/20' },
-  qa_fixing: { color: 'bg-orange-500', bgColor: 'bg-orange-500/20' },
-  complete: { color: 'bg-success', bgColor: 'bg-success/20' },
-  failed: { color: 'bg-destructive', bgColor: 'bg-destructive/20' },
-};
+// Bar fill: neutral like the settings dialog's progress bars (the status line names the phase)
+const FILL_CLASS = 'bg-foreground/70';
 
 /**
  * Progress bar that adapts based on execution phase:
@@ -80,15 +70,13 @@ export const PhaseProgressIndicator = memo(function PhaseProgressIndicator({
   // Show subtask progress whenever subtasks exist (stops pulsing animation when spec completes)
   const showSubtaskProgress = totalSubtasks > 0;
 
-  const colors = PHASE_COLORS[phase] || PHASE_COLORS.idle;
-
   return (
     <div ref={containerRef} className={className}>
       {/* Progress bar */}
       <div
         className={cn(
-          'relative h-1.5 w-full overflow-hidden rounded-full',
-          isStuck ? 'bg-warning/20' : 'bg-border'
+          'relative h-1 w-full overflow-hidden rounded-full',
+          isStuck ? 'bg-(--error)/20' : 'bg-segment-track'
         )}
       >
         <AnimatePresence mode="wait">
@@ -96,7 +84,7 @@ export const PhaseProgressIndicator = memo(function PhaseProgressIndicator({
             // Stuck/Interrupted state - pulsing warning bar (only animate when visible)
             <motion.div
               key="stuck"
-              className="absolute inset-0 bg-warning/40"
+              className="absolute inset-0 bg-(--error)/50"
               initial={{ opacity: 0 }}
               animate={isVisible ? { opacity: [0.3, 0.6, 0.3] } : { opacity: 0.45 }}
               transition={isVisible ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : undefined}
@@ -105,7 +93,7 @@ export const PhaseProgressIndicator = memo(function PhaseProgressIndicator({
             // Determinate progress for coding phase
             <motion.div
               key="determinate"
-              className={cn('h-full rounded-full', colors.color)}
+              className={cn('h-full rounded-full', FILL_CLASS)}
               initial={{ width: 0 }}
               animate={{ width: `${subtaskProgress}%` }}
               transition={{ duration: 0.5, ease: 'easeOut' }}
@@ -114,7 +102,7 @@ export const PhaseProgressIndicator = memo(function PhaseProgressIndicator({
             // Indeterminate animated progress for planning/validation (only when visible)
             <motion.div
               key="indeterminate"
-              className={cn('absolute h-full w-1/3 rounded-full', colors.color)}
+              className={cn('absolute h-full w-1/3 rounded-full', FILL_CLASS)}
               animate={{
                 x: ['-100%', '400%'],
               }}
@@ -128,7 +116,7 @@ export const PhaseProgressIndicator = memo(function PhaseProgressIndicator({
             // Static placeholder when not visible but running
             <motion.div
               key="indeterminate-static"
-              className={cn('absolute h-full w-1/3 rounded-full left-1/3', colors.color)}
+              className={cn('absolute h-full w-1/3 rounded-full left-1/3', FILL_CLASS)}
             />
           ) : null}
         </AnimatePresence>

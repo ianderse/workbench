@@ -251,9 +251,7 @@ export interface TerminalProfileChangedEvent {
   newProfileId: string;
   terminals: Array<{
     id: string;
-    /** Session ID if terminal had an active Claude session */
-    sessionId?: string;
-    /** Whether the session was successfully migrated to new profile */
+    /** Whether the project's latest Claude session was copied to the new profile */
     sessionMigrated?: boolean;
     /** Whether the terminal was in Claude mode (had an active Claude session) */
     isCLIMode?: boolean;

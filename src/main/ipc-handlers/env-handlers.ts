@@ -7,6 +7,10 @@ import { app } from 'electron';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { projectStore } from '../project-store';
 import { parseEnvFile } from './utils';
+import { readMemoryEnvVar } from './context/utils';
+
+/** Memory settings in a project's .env, stored as MEMORY_<name> */
+const MEMORY_ENV_NAMES = ['ENABLED', 'EMBEDDER_PROVIDER', 'DATABASE', 'DB_PATH'] as const;
 
 /**
  * Register all env-related IPC handlers
@@ -30,6 +34,11 @@ export function registerEnvHandlers(
   ): string => {
     // Parse existing content to preserve comments and structure
     const existingVars = existingContent ? parseEnvFile(existingContent) : {};
+    // Carry memory settings saved under the old GRAPHITI_* names over to MEMORY_*
+    for (const name of MEMORY_ENV_NAMES) {
+      const value = readMemoryEnvVar(existingVars, name);
+      if (value !== undefined) existingVars[`MEMORY_${name}`] = value;
+    }
 
     // Update with new values
     if (config.autoBuildModel !== undefined) {
@@ -40,13 +49,13 @@ export function registerEnvHandlers(
       existingVars['DEFAULT_BRANCH'] = config.defaultBranch;
     }
     if (config.memoryEnabled !== undefined) {
-      existingVars['GRAPHITI_ENABLED'] = config.memoryEnabled ? 'true' : 'false';
+      existingVars['MEMORY_ENABLED'] = config.memoryEnabled ? 'true' : 'false';
     }
     // Memory Provider Configuration (embeddings only - LLM uses Claude SDK)
     if (config.memoryProviderConfig) {
       const pc = config.memoryProviderConfig;
       // Embedding provider only (LLM provider removed - Claude SDK handles RAG)
-      if (pc.embeddingProvider) existingVars['GRAPHITI_EMBEDDER_PROVIDER'] = pc.embeddingProvider;
+      if (pc.embeddingProvider) existingVars['MEMORY_EMBEDDER_PROVIDER'] = pc.embeddingProvider;
       // OpenAI Embeddings
       if (pc.openaiApiKey) existingVars['OPENAI_API_KEY'] = pc.openaiApiKey;
       if (pc.openaiEmbeddingModel) existingVars['OPENAI_EMBEDDING_MODEL'] = pc.openaiEmbeddingModel;
@@ -64,19 +73,19 @@ export function registerEnvHandlers(
       if (pc.ollamaBaseUrl) existingVars['OLLAMA_BASE_URL'] = pc.ollamaBaseUrl;
       if (pc.ollamaEmbeddingModel) existingVars['OLLAMA_EMBEDDING_MODEL'] = pc.ollamaEmbeddingModel;
       if (pc.ollamaEmbeddingDim) existingVars['OLLAMA_EMBEDDING_DIM'] = String(pc.ollamaEmbeddingDim);
-      // LadybugDB (embedded database)
-      if (pc.dbPath) existingVars['GRAPHITI_DB_PATH'] = pc.dbPath;
-      if (pc.database) existingVars['GRAPHITI_DATABASE'] = pc.database;
+      // Memory database
+      if (pc.dbPath) existingVars['MEMORY_DB_PATH'] = pc.dbPath;
+      if (pc.database) existingVars['MEMORY_DATABASE'] = pc.database;
     }
     // Legacy fields (still supported)
     if (config.openaiApiKey !== undefined) {
       existingVars['OPENAI_API_KEY'] = config.openaiApiKey;
     }
     if (config.memoryDatabase !== undefined) {
-      existingVars['GRAPHITI_DATABASE'] = config.memoryDatabase;
+      existingVars['MEMORY_DATABASE'] = config.memoryDatabase;
     }
     if (config.memoryDbPath !== undefined) {
-      existingVars['GRAPHITI_DB_PATH'] = config.memoryDbPath;
+      existingVars['MEMORY_DB_PATH'] = config.memoryDbPath;
     }
     if (config.enableFancyUi !== undefined) {
       existingVars['ENABLE_FANCY_UI'] = config.enableFancyUi ? 'true' : 'false';
@@ -93,7 +102,6 @@ export function registerEnvHandlers(
       if (config.mcpServers.puppeteerEnabled !== undefined) {
         existingVars['PUPPETEER_MCP_ENABLED'] = config.mcpServers.puppeteerEnabled ? 'true' : 'false';
       }
-      // Note: memoryEnabled is already handled via GRAPHITI_ENABLED above
     }
 
     // Per-agent MCP overrides (add/remove MCPs from specific agents)
@@ -176,10 +184,10 @@ ${existingVars['CUSTOM_MCP_SERVERS'] ? `CUSTOM_MCP_SERVERS=${existingVars['CUSTO
 # MEMORY INTEGRATION
 # Embedding providers: OpenAI, Google AI, Azure OpenAI, Ollama, Voyage
 # =============================================================================
-${existingVars['GRAPHITI_ENABLED'] ? `GRAPHITI_ENABLED=${existingVars['GRAPHITI_ENABLED']}` : '# GRAPHITI_ENABLED=true'}
+${existingVars['MEMORY_ENABLED'] ? `MEMORY_ENABLED=${existingVars['MEMORY_ENABLED']}` : '# MEMORY_ENABLED=true'}
 
 # Embedding Provider (for semantic search - optional, keyword search works without)
-${existingVars['GRAPHITI_EMBEDDER_PROVIDER'] ? `GRAPHITI_EMBEDDER_PROVIDER=${existingVars['GRAPHITI_EMBEDDER_PROVIDER']}` : '# GRAPHITI_EMBEDDER_PROVIDER=ollama'}
+${existingVars['MEMORY_EMBEDDER_PROVIDER'] ? `MEMORY_EMBEDDER_PROVIDER=${existingVars['MEMORY_EMBEDDER_PROVIDER']}` : '# MEMORY_EMBEDDER_PROVIDER=ollama'}
 
 # OpenAI Embeddings
 ${existingVars['OPENAI_API_KEY'] ? `OPENAI_API_KEY=${existingVars['OPENAI_API_KEY']}` : '# OPENAI_API_KEY='}
@@ -203,9 +211,9 @@ ${existingVars['OLLAMA_BASE_URL'] ? `OLLAMA_BASE_URL=${existingVars['OLLAMA_BASE
 ${existingVars['OLLAMA_EMBEDDING_MODEL'] ? `OLLAMA_EMBEDDING_MODEL=${existingVars['OLLAMA_EMBEDDING_MODEL']}` : '# OLLAMA_EMBEDDING_MODEL=embeddinggemma'}
 ${existingVars['OLLAMA_EMBEDDING_DIM'] ? `OLLAMA_EMBEDDING_DIM=${existingVars['OLLAMA_EMBEDDING_DIM']}` : '# OLLAMA_EMBEDDING_DIM=768'}
 
-# LadybugDB Database (embedded - no Docker required)
-${existingVars['GRAPHITI_DATABASE'] ? `GRAPHITI_DATABASE=${existingVars['GRAPHITI_DATABASE']}` : '# GRAPHITI_DATABASE=auto_claude_memory'}
-${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_DB_PATH']}` : '# GRAPHITI_DB_PATH=~/.auto-claude/memories'}
+# Memory database
+${existingVars['MEMORY_DATABASE'] ? `MEMORY_DATABASE=${existingVars['MEMORY_DATABASE']}` : '# MEMORY_DATABASE=auto_claude_memory'}
+${existingVars['MEMORY_DB_PATH'] ? `MEMORY_DB_PATH=${existingVars['MEMORY_DB_PATH']}` : '# MEMORY_DB_PATH=~/.auto-claude/memories'}
 `;
 
     return content;
@@ -263,7 +271,7 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
         config.defaultBranch = vars['DEFAULT_BRANCH'];
       }
 
-      if (vars['GRAPHITI_ENABLED']?.toLowerCase() === 'true') {
+      if (readMemoryEnvVar(vars, 'ENABLED')?.toLowerCase() === 'true') {
         config.memoryEnabled = true;
       }
 
@@ -276,19 +284,15 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
         config.openaiKeyIsGlobal = true;
       }
 
-      if (vars['GRAPHITI_DATABASE']) {
-        config.memoryDatabase = vars['GRAPHITI_DATABASE'];
-      }
-      if (vars['GRAPHITI_DB_PATH']) {
-        config.memoryDbPath = vars['GRAPHITI_DB_PATH'];
-      }
+      config.memoryDatabase = readMemoryEnvVar(vars, 'DATABASE') ?? config.memoryDatabase;
+      config.memoryDbPath = readMemoryEnvVar(vars, 'DB_PATH') ?? config.memoryDbPath;
 
       if (vars['ENABLE_FANCY_UI']?.toLowerCase() === 'false') {
         config.enableFancyUi = false;
       }
 
       // Populate memoryProviderConfig from .env file (embeddings only - no LLM provider)
-      const embeddingProvider = vars['GRAPHITI_EMBEDDER_PROVIDER'];
+      const embeddingProvider = readMemoryEnvVar(vars, 'EMBEDDER_PROVIDER');
       if (embeddingProvider || vars['AZURE_OPENAI_API_KEY'] ||
           vars['VOYAGE_API_KEY'] || vars['GOOGLE_API_KEY'] || vars['OLLAMA_BASE_URL']) {
         config.memoryProviderConfig = {
@@ -310,9 +314,9 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
           ollamaBaseUrl: vars['OLLAMA_BASE_URL'],
           ollamaEmbeddingModel: vars['OLLAMA_EMBEDDING_MODEL'],
           ollamaEmbeddingDim: vars['OLLAMA_EMBEDDING_DIM'] ? parseInt(vars['OLLAMA_EMBEDDING_DIM'], 10) : undefined,
-          // LadybugDB
-          database: vars['GRAPHITI_DATABASE'],   // env key kept for backward compat
-          dbPath: vars['GRAPHITI_DB_PATH'],        // env key kept for backward compat
+          // Memory database
+          database: readMemoryEnvVar(vars, 'DATABASE'),
+          dbPath: readMemoryEnvVar(vars, 'DB_PATH'),
         };
       }
 
@@ -320,7 +324,6 @@ ${existingVars['GRAPHITI_DB_PATH'] ? `GRAPHITI_DB_PATH=${existingVars['GRAPHITI_
       // Default: context7=true, electron/puppeteer=false
       config.mcpServers = {
         context7Enabled: vars['CONTEXT7_ENABLED']?.toLowerCase() !== 'false', // default true
-        memoryEnabled: config.memoryEnabled, // follows GRAPHITI_ENABLED
         electronEnabled: vars['ELECTRON_MCP_ENABLED']?.toLowerCase() === 'true', // default false
         puppeteerEnabled: vars['PUPPETEER_MCP_ENABLED']?.toLowerCase() === 'true', // default false
       };

@@ -22,7 +22,6 @@ export interface TerminalSessionState {
 
   // Claude Code specific
   isCLIMode: boolean;
-  claudeSessionId?: string;  // For potential /resume
 
   // Timing
   createdAt: number;

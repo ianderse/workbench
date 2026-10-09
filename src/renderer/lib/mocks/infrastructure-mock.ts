@@ -1,15 +1,14 @@
 /**
  * Mock implementation for infrastructure and system operations
- * Updated for LadybugDB (embedded database, no Docker required)
+ * Local libSQL memory database (embedded, no Docker required)
  */
 
 export const infrastructureMock = {
-  // Memory Infrastructure Operations (LadybugDB)
+  // Memory Infrastructure Operations (libSQL)
   getMemoryInfrastructureStatus: async () => ({
     success: true,
     data: {
       memory: {
-        kuzuInstalled: true,
         databasePath: '~/.auto-claude/graphs',
         databaseExists: true,
         databases: ['auto_claude_memory']
@@ -27,7 +26,7 @@ export const infrastructureMock = {
     success: true,
     data: {
       success: true,
-      message: 'Connected to LadybugDB database (mock)',
+      message: 'Connected to memory database (mock)',
       details: { latencyMs: 5 }
     }
   }),

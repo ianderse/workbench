@@ -19,7 +19,7 @@ import type { ZodSchema } from 'zod';
 
 import type { SubagentExecutor, SubagentSpawnParams, SubagentResult } from '../tools/builtin/spawn-subagent';
 import type { ToolContext } from '../tools/types';
-import type { ToolRegistry } from '../tools/registry';
+import { getSessionToolNames, type ToolRegistry } from '../tools/registry';
 import type { AgentType } from '../config/agent-configs';
 import { getAgentConfig } from '../config/agent-configs';
 import { ComplexityAssessmentOutputSchema } from '../schema/output/complexity-assessment.output';
@@ -133,7 +133,7 @@ export class SubagentExecutorImpl implements SubagentExecutor {
 
       const tools: Record<string, AITool> = {};
       const agentConfig = getAgentConfig(agentType);
-      for (const toolName of agentConfig.tools) {
+      for (const toolName of getSessionToolNames(agentConfig.tools, subagentToolContext)) {
         if (toolName === 'SpawnSubagent') continue; // No recursion
         const definedTool = this.config.registry.getTool(toolName);
         if (definedTool) {

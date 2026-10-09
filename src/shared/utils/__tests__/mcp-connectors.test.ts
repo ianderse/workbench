@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { getDefaultMcpConnectorIds, getUsableCustomServers } from '../mcp-connectors';
 
 describe('mcp connectors', () => {
-  it('defaults to Context7 and Memory on, browser automation off', () => {
-    expect(getDefaultMcpConnectorIds(undefined)).toEqual(['context7', 'memory']);
+  it('defaults to Context7 on, browser automation off', () => {
+    expect(getDefaultMcpConnectorIds(undefined)).toEqual(['context7']);
   });
 
   it('includes only tested custom servers that are switched on', () => {
@@ -16,7 +16,7 @@ describe('mcp connectors', () => {
         { id: 'untested', name: 'Untested', type: 'command' as const, command: 'npx' },
       ],
     };
-    expect(getDefaultMcpConnectorIds(settings)).toEqual(['memory', 'electron', 'on']);
+    expect(getDefaultMcpConnectorIds(settings)).toEqual(['electron', 'on']);
     expect(getUsableCustomServers(settings).map((s) => s.id)).toEqual(['on', 'off']);
   });
 });

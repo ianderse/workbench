@@ -42,7 +42,6 @@ export interface TaskContext {
   filesToReference: FileMatch[];
   patternsDiscovered: Record<string, string>;
   serviceContexts: Record<string, Record<string, unknown>>;
-  graphHints: Record<string, unknown>[];
 }
 
 /** Index entry for a single service inside project_index.json. */
