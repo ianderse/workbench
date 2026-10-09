@@ -680,10 +680,7 @@ export function App() {
     <ViewStateProvider>
       <TooltipProvider>
         <ProactiveSwapListener />
-      <div className="flex h-screen flex-col bg-background">
-        {/* Red "DEVELOPMENT BUILD" bar (npm run dev only) */}
-        <DevBuildBar />
-      <div className="flex min-h-0 flex-1">
+      <div className="flex h-screen bg-background">
         {/* Sidebar */}
         <Sidebar
           onSettingsClick={() => setIsSettingsDialogOpen(true)}
@@ -699,6 +696,9 @@ export function App() {
           {!(activeView === 'insights' && selectedProject) && (
             <div className="electron-drag shrink-0" style={{ height: TITLE_BAR_STRIP_HEIGHT }} />
           )}
+
+          {/* Scrolling DEVELOPMENT BUILD strip (npm run dev only) */}
+          <DevBuildBar />
 
           {/* Main content area */}
           <main className="flex-1 overflow-hidden">
@@ -744,7 +744,6 @@ export function App() {
             )}
           </main>
         </div>
-      </div>
 
         {/* Task detail modal */}
         <TaskDetailModal

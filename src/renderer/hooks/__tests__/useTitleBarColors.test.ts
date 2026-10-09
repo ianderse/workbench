@@ -5,14 +5,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook } from '@testing-library/react';
 import { cssColorToHex, useTitleBarColors } from '../useTitleBarColors';
 
-// Vitest runs with import.meta.env.DEV set; each test picks the build type it checks
-const build = vi.hoisted(() => ({ isDev: false }));
-vi.mock('../../lib/title-bar', () => ({
-  get IS_DEV_BUILD() {
-    return build.isDev;
-  },
-}));
-
 describe('cssColorToHex', () => {
   it('converts rgb/rgba to hex and ignores alpha', () => {
     expect(cssColorToHex('rgb(21, 21, 21)')).toBe('#151515');
@@ -33,7 +25,6 @@ describe('useTitleBarColors', () => {
     document.body.style.backgroundColor = 'rgb(252, 252, 251)';
     document.body.style.color = 'rgb(11, 11, 11)';
     document.documentElement.className = '';
-    build.isDev = false;
   });
 
   it('sends the page colors on mount and again when the appearance mode changes', async () => {
@@ -46,12 +37,6 @@ describe('useTitleBarColors', () => {
     await new Promise((resolve) => setTimeout(resolve, 0)); // let the MutationObserver fire
 
     expect(setTitleBarColors).toHaveBeenLastCalledWith({ color: '#151515', symbolColor: '#f0efec' });
-  });
-
-  it('swaps the colors in development builds, matching the DEVELOPMENT BUILD bar', () => {
-    build.isDev = true;
-    renderHook(() => useTitleBarColors());
-    expect(setTitleBarColors).toHaveBeenLastCalledWith({ color: '#0b0b0b', symbolColor: '#fcfcfb' });
   });
 
   it('does not resend unchanged colors', async () => {

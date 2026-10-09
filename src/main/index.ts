@@ -303,10 +303,7 @@ function createWindow(): void {
       ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 15, y: 10 } }
       : {
           titleBarStyle: 'hidden' as const,
-          // Development builds invert the controls' row, under the renderer's DEVELOPMENT BUILD bar
-          titleBarOverlay: is.dev
-            ? { color: '#F0EFEC', symbolColor: '#151515', height: TITLE_BAR_OVERLAY_HEIGHT }
-            : { color: '#151515', symbolColor: '#F0EFEC', height: TITLE_BAR_OVERLAY_HEIGHT }
+          titleBarOverlay: { color: '#151515', symbolColor: '#F0EFEC', height: TITLE_BAR_OVERLAY_HEIGHT }
         }),
     icon: getIconPath(),
     webPreferences: {
