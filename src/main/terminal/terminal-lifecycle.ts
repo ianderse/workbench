@@ -19,6 +19,7 @@ import { isWindows } from '../platform';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeCodeEnv } from '../claude-code-settings';
+import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
 
 /**
  * Options for terminal restoration
@@ -73,7 +74,12 @@ export async function createTerminal(
     // 1. Claude Code settings env (from settings.json hierarchy)
     // 2. Profile env (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN)
     // 3. Custom env from TerminalCreateOptions
-    const mergedEnv = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
+    const mergedEnv: Record<string, string> = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
+
+    // Point Claude Code's /graphify command at the project's memory graph (.auto-claude/memory)
+    // instead of graphify-out in the working directory
+    const graphifyOut = projectPath && (await hasGraphifyGraph(projectPath)) ? getGraphifyOutDir(projectPath) : undefined;
+    if (graphifyOut) mergedEnv.GRAPHIFY_OUT = graphifyOut;
 
     if (mergedEnv.CLAUDE_CODE_OAUTH_TOKEN) {
       debugLog('[TerminalLifecycle] Injecting OAuth token from active profile');
@@ -111,7 +117,8 @@ export async function createTerminal(
       cwd: terminalCwd,
       outputBuffer: '',
       title: `Terminal ${terminals.size + 1}`,
-      shellType
+      shellType,
+      graphifyOut,
     };
 
     terminals.set(id, terminal);

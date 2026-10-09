@@ -241,6 +241,23 @@ function escapeShellCommand(cmd: string): string {
  */
 const YOLO_MODE_FLAG = ' --dangerously-skip-permissions';
 
+/**
+ * Claude Code flag that tells it where the project's memory graph is, when the terminal's project
+ * has one: Graphify's /graphify skill looks for graphify-out in the working directory, while the
+ * graph lives in .auto-claude/memory (the terminal's GRAPHIFY_OUT points there). Left out when the
+ * path has characters that would need escaping inside the shell command.
+ */
+function graphifyHintFlag(terminal: TerminalProcess): string {
+  const out = terminal.graphifyOut;
+  if (!out || /["'$`%!]/.test(out) || (!isWindows() && out.includes('\\'))) return '';
+  const graph = path.join(out, 'graph.json');
+  const text =
+    `The Graphify knowledge graph of this project is in ${out} (GRAPHIFY_OUT points there), not in graphify-out ` +
+    `under the working directory. For /graphify questions about the code, run graphify query, explain, path or ` +
+    `affected with --graph ${graph}, and do not rebuild the graph.`;
+  return ` --append-system-prompt ${isWindows() ? `"${text}"` : `'${text}'`}`;
+}
+
 // ============================================================================
 // SHARED HELPERS - Used by both sync and async invokeClaude
 // ============================================================================
@@ -985,7 +1002,7 @@ export function invokeClaude(
   debugLog('[ClaudeIntegration:invokeClaude] Dangerously skip permissions:', dangerouslySkipPermissions);
 
   // Compute extra flags for YOLO mode
-  const extraFlags = dangerouslySkipPermissions ? YOLO_MODE_FLAG : undefined;
+  const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` || undefined;
 
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
@@ -1102,7 +1119,7 @@ export function resumeClaude(
       : buildPathPrefix(claudeEnv.PATH || '');
 
     // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : '';
+    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
 
     // Go to the project directory, then pick up its latest Claude session
     const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);
@@ -1162,7 +1179,7 @@ export async function invokeCLIAsync(
     debugLog('[ClaudeIntegration:invokeCLIAsync] Dangerously skip permissions:', dangerouslySkipPermissions);
 
     // Compute extra flags for YOLO mode
-    const extraFlags = dangerouslySkipPermissions ? YOLO_MODE_FLAG : undefined;
+    const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` || undefined;
 
     terminal.isCLIMode = true;
     // Store YOLO mode setting so it persists across profile switches
@@ -1318,7 +1335,7 @@ export async function resumeClaudeAsync(
       : buildPathPrefix(claudeEnv.PATH || '');
 
     // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : '';
+    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
 
     // Go to the project directory, then pick up its latest Claude session
     const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);

@@ -1,20 +1,25 @@
 /**
  * Graphify (https://github.com/Graphify-Labs/graphify) builds a knowledge graph of a project's code.
  *
- * Auto Claude detects the `graphify` CLI (Settings > Updates), builds each project's memory graph
- * into .auto-claude/memory (Settings > Project > Memory index), and points agents at it when the
- * project's "Use Graphify" setting is on. Everything runs asynchronously so the main process never
- * blocks on the CLI.
+ * Auto Claude detects the `graphify` CLI (Settings > Updates), sets up its /graphify command in
+ * Claude Code, builds each project's memory graph into .auto-claude/memory (Settings > Project >
+ * Memory index), and gives agents a CodebaseGraph tool to search it when the project's "Use
+ * Graphify" setting is on. Everything runs asynchronously so the main process never blocks on the
+ * CLI.
  */
 
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
 import semver from 'semver';
 import { findExecutableAsync, getAugmentedEnvAsync } from './env-utils';
 import { isWindows, requiresShell } from './platform';
 import { appLog } from './app-logger';
+import { getClaudeProfileManager } from './claude-profile-manager';
+import { expandHomePath } from './claude-profile/profile-utils';
+import { getGraphifyGraphPath, getGraphifyMemoryDir, hasGraphifyGraph } from './graphify-paths';
 import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../shared/types/cli';
 
 const execFileAsync = promisify(execFile);
@@ -25,6 +30,9 @@ const PYPI_URL = `https://pypi.org/pypi/${GRAPHIFY_PACKAGE}/json`;
 const VERSION_TIMEOUT_MS = 15_000;
 const BUILD_TIMEOUT_MS = 30 * 60_000;
 const INDEX_INFO_FILE = 'index.json';
+/** How long to wait for an install started from Settings > Updates before setting up /graphify */
+const INSTALL_WATCH_INTERVAL_MS = 5000;
+const INSTALL_WATCH_MAX_TRIES = 120;
 
 interface GraphifyInstallation {
   path: string;
@@ -35,20 +43,22 @@ let detection: Promise<GraphifyInstallation | null> | null = null;
 let latestVersion: Promise<string | null> | null = null;
 const buildsInProgress = new Map<string, Promise<GraphifyIndexInfo>>();
 
-/** Where a project's memory graph is stored */
-export function getGraphifyMemoryDir(projectPath: string): string {
-  return path.join(projectPath, '.auto-claude', 'memory');
-}
+export { getGraphifyMemoryDir, getGraphifyGraphPath, hasGraphifyGraph };
 
-/** The graph file Graphify writes for a project */
-export function getGraphifyGraphPath(projectPath: string): string {
-  return path.join(getGraphifyMemoryDir(projectPath), 'graphify-out', 'graph.json');
-}
-
-async function runGraphify(executable: string, args: string[], cwd?: string, timeout = VERSION_TIMEOUT_MS) {
+async function runGraphify(
+  executable: string,
+  args: string[],
+  cwd?: string,
+  timeout = VERSION_TIMEOUT_MS,
+  extraEnv: Record<string, string | undefined> = {}
+) {
+  const env: Record<string, string | undefined> = { ...(await getAugmentedEnvAsync()), ...extraEnv };
+  for (const key of Object.keys(env)) {
+    if (env[key] === undefined) delete env[key];
+  }
   return execFileAsync(executable, args, {
     cwd,
-    env: await getAugmentedEnvAsync(),
+    env: env as NodeJS.ProcessEnv,
     timeout,
     maxBuffer: 20 * 1024 * 1024,
     windowsHide: true,
@@ -92,7 +102,99 @@ export async function checkGraphifyVersion(forceRefresh = false): Promise<Graphi
   const [installation, latest] = await Promise.all([detectGraphify(forceRefresh), latestVersion]);
   const installed = installation ? installation.version ?? 'unknown' : null;
   const isOutdated = !!(installed && latest && semver.valid(installed) && semver.valid(latest) && semver.lt(installed, latest));
-  return { installed, latest, isOutdated };
+  const claudeCommand = installation ? await getGraphifyClaudeCommandStatus() : null;
+  return { installed, latest, isOutdated, claudeCommand };
+}
+
+/**
+ * Claude Code config directories that should offer /graphify: the default one (~/.claude) and each
+ * Claude profile's own (Claude Code runs with CLAUDE_CONFIG_DIR set to it)
+ */
+function getClaudeConfigDirs(): string[] {
+  const dirs = [path.join(os.homedir(), '.claude')];
+  try {
+    for (const profile of getClaudeProfileManager().getSettings().profiles) {
+      if (profile.configDir) dirs.push(path.resolve(expandHomePath(profile.configDir)));
+    }
+  } catch (error) {
+    appLog.warn('[Graphify] Could not read the Claude profiles:', error);
+  }
+  return [...new Set(dirs)];
+}
+
+/** Where `graphify install` puts the /graphify skill in a Claude Code config directory */
+function getClaudeSkillPath(configDir: string): string {
+  return path.join(configDir, 'skills', 'graphify', 'SKILL.md');
+}
+
+/** Claude Code config directories that don't have the /graphify command yet */
+async function getConfigDirsMissingCommand(): Promise<{ dirs: string[]; missing: string[] }> {
+  const dirs = getClaudeConfigDirs();
+  const present = await Promise.all(
+    dirs.map((dir) => fs.access(getClaudeSkillPath(dir)).then(() => true, () => false))
+  );
+  return { dirs, missing: dirs.filter((_, i) => !present[i]) };
+}
+
+/** Whether Claude Code offers /graphify, counted over its config directories */
+export async function getGraphifyClaudeCommandStatus(): Promise<{ configDirs: number; missing: number }> {
+  const { dirs, missing } = await getConfigDirsMissingCommand();
+  return { configDirs: dirs.length, missing: missing.length };
+}
+
+/**
+ * Make /graphify available in Claude Code: `graphify install` copies Graphify's skill into each
+ * config directory that lacks it (and registers it in that directory's CLAUDE.md)
+ */
+export async function installGraphifyClaudeCommand(): Promise<{ configDirs: number; missing: number }> {
+  const installation = await detectGraphify();
+  if (!installation) throw new Error('Graphify is not installed');
+  const defaultDir = path.join(os.homedir(), '.claude');
+  const { dirs, missing } = await getConfigDirsMissingCommand();
+  const failed: string[] = [];
+  for (const dir of missing) {
+    try {
+      await runGraphify(installation.path, ['install', '--platform', 'claude'], os.homedir(), VERSION_TIMEOUT_MS * 4, {
+        // The default directory is used when CLAUDE_CONFIG_DIR isn't set
+        CLAUDE_CONFIG_DIR: dir === defaultDir ? undefined : dir,
+        PYTHONIOENCODING: 'utf-8',
+      });
+    } catch (error) {
+      failed.push(dir);
+      appLog.warn(`[Graphify] Could not add /graphify to Claude Code in ${dir}:`, error);
+    }
+  }
+  if (failed.length === missing.length && failed.length > 0) {
+    throw new Error('Could not add the /graphify command to Claude Code');
+  }
+  return { configDirs: dirs.length, missing: failed.length };
+}
+
+let installWatch: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * After an install or update opens in a terminal, wait (in the background) for the new graphify
+ * command and then make /graphify available in Claude Code
+ */
+export function setUpClaudeCommandAfterInstall(previousVersion: string | null): void {
+  if (installWatch) clearTimeout(installWatch);
+  let tries = 0;
+  const check = async () => {
+    installWatch = null;
+    tries++;
+    const installation = await detectGraphify(true);
+    if (installation && (previousVersion === null || installation.version !== previousVersion)) {
+      try {
+        await installGraphifyClaudeCommand();
+        appLog.info('[Graphify] Added the /graphify command to Claude Code');
+      } catch (error) {
+        appLog.warn('[Graphify] Setting up /graphify after the install failed:', error);
+      }
+      return;
+    }
+    if (tries < INSTALL_WATCH_MAX_TRIES) installWatch = setTimeout(() => void check(), INSTALL_WATCH_INTERVAL_MS);
+  };
+  installWatch = setTimeout(() => void check(), INSTALL_WATCH_INTERVAL_MS);
 }
 
 /** Shell command that installs (or updates) Graphify with uv, pipx or pip, whichever is available */
@@ -105,16 +207,6 @@ export async function getGraphifyInstallCommand(isUpdate: boolean): Promise<stri
   }
   const python = isWindows() ? 'py' : 'python3';
   return `${python} -m pip install --user --upgrade ${GRAPHIFY_PACKAGE}`;
-}
-
-/** Whether the project has a memory graph (.auto-claude/memory/graphify-out/graph.json) */
-export async function hasGraphifyGraph(projectPath: string): Promise<boolean> {
-  try {
-    await fs.access(getGraphifyGraphPath(projectPath));
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** The project's memory graph, trimmed to what the graph view draws, or null when it has none */

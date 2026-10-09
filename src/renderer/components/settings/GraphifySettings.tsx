@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertTriangle, Download, Loader2, RefreshCw } from 'lucide-react';
+import { AlertTriangle, Download, Loader2, RefreshCw, Wrench } from 'lucide-react';
 import { ExternalLink } from '../ui/external-link';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
@@ -12,13 +12,15 @@ import { useGraphifyVersion } from '../../hooks/useGraphifyVersion';
 const VERSION_RECHECK_DELAY_MS = 5000;
 
 /**
- * Graphify CLI (builds the projects' memory graphs): status, install/update and version
+ * Graphify CLI (builds the projects' memory graphs): status, install/update, version and its
+ * /graphify command in Claude Code (set up after an install, or with the Set up button)
  */
 export function GraphifySettings() {
   const { t } = useTranslation(['navigation']);
   const { info, lastChecked, isChecking, error, refresh } = useGraphifyVersion();
   const [isInstalling, setIsInstalling] = useState(false);
   const [installError, setInstallError] = useState<string | null>(null);
+  const [isSettingUpCommand, setIsSettingUpCommand] = useState(false);
 
   const status = isChecking && !info
     ? 'loading'
@@ -55,6 +57,22 @@ export function GraphifySettings() {
     }
   };
 
+  const handleSetUpCommand = async () => {
+    setIsSettingUpCommand(true);
+    setInstallError(null);
+    try {
+      const result = await window.electronAPI.installGraphifyClaudeCommand();
+      if (!result.success) setInstallError(result.error || t('navigation:graphify.claudeCommandFailed'));
+    } catch (err) {
+      setInstallError(err instanceof Error ? err.message : t('navigation:graphify.claudeCommandFailed'));
+    } finally {
+      setIsSettingUpCommand(false);
+      void refresh();
+    }
+  };
+
+  const claudeCommand = info?.claudeCommand ?? null;
+
   return (
     <SettingsSection title={t('navigation:graphify.title')} description={t('navigation:graphify.description')}>
       <SettingsRows>
@@ -84,6 +102,25 @@ export function GraphifySettings() {
               .join(' · ')}
           >
             <span className="font-mono text-sm">{info.installed}</span>
+          </SettingsRow>
+        )}
+
+        {/* The /graphify command in Claude Code (one skill per Claude Code config directory) */}
+        {info?.installed && claudeCommand && (
+          <SettingsRow
+            label={t('navigation:graphify.claudeCommand')}
+            description={
+              claudeCommand.missing === 0
+                ? t('navigation:graphify.claudeCommandReady')
+                : t('navigation:graphify.claudeCommandMissing', { count: claudeCommand.missing })
+            }
+          >
+            {claudeCommand.missing > 0 && (
+              <Button size="sm" className="gap-1.5" onClick={handleSetUpCommand} disabled={isSettingUpCommand}>
+                {isSettingUpCommand ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Wrench className="h-3.5 w-3.5" />}
+                {t('navigation:graphify.setUp')}
+              </Button>
+            )}
           </SettingsRow>
         )}
 

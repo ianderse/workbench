@@ -1,6 +1,6 @@
 /**
- * Graphify IPC handlers: CLI version check and install (Settings > Updates) and each project's
- * memory graph (Settings > Project > Memory index)
+ * Graphify IPC handlers: CLI version check and install, and its /graphify command in Claude Code
+ * (Settings > Updates), and each project's memory graph (Settings > Project > Memory index)
  */
 
 import { ipcMain } from 'electron';
@@ -15,8 +15,10 @@ import {
   detectGraphify,
   getGraphifyInstallCommand,
   hasGraphifyGraph,
+  installGraphifyClaudeCommand,
   readGraphifyGraph,
   readGraphifyIndex,
+  setUpClaudeCommandAfterInstall,
 } from '../graphify';
 import { openTerminalWithCommand } from './claude-code-handlers';
 
@@ -35,17 +37,32 @@ export function registerGraphifyHandlers(): void {
     }
   );
 
-  // Open a terminal with the install (or update) command
+  // Open a terminal with the install (or update) command; once the new graphify command shows up,
+  // /graphify is added to Claude Code
   ipcMain.handle(IPC_CHANNELS.GRAPHIFY_INSTALL, async (): Promise<IPCResult<{ command: string }>> => {
     try {
-      const command = await getGraphifyInstallCommand(!!(await detectGraphify()));
+      const installation = await detectGraphify();
+      const command = await getGraphifyInstallCommand(!!installation);
       await openTerminalWithCommand(command);
+      setUpClaudeCommandAfterInstall(installation ? installation.version : null);
       return { success: true, data: { command } };
     } catch (error) {
       appLog.error('[Graphify] Install failed:', error);
       return { success: false, error: errorMessage(error) };
     }
   });
+
+  ipcMain.handle(
+    IPC_CHANNELS.GRAPHIFY_INSTALL_CLAUDE_COMMAND,
+    async (): Promise<IPCResult<{ configDirs: number; missing: number }>> => {
+      try {
+        return { success: true, data: await installGraphifyClaudeCommand() };
+      } catch (error) {
+        appLog.error('[Graphify] Adding /graphify to Claude Code failed:', error);
+        return { success: false, error: errorMessage(error) };
+      }
+    }
+  );
 
   ipcMain.handle(
     IPC_CHANNELS.GRAPHIFY_GET_INDEX,

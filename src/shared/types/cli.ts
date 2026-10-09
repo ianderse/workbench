@@ -87,6 +87,11 @@ export interface GraphifyVersionInfo {
   latest: string | null;
   /** Whether a newer version than the installed one is available */
   isOutdated: boolean;
+  /**
+   * Whether Claude Code offers the /graphify command: how many of its config directories (the
+   * default one and each Claude profile's) don't have it yet. Null when Graphify isn't installed.
+   */
+  claudeCommand: { configDirs: number; missing: number } | null;
 }
 
 /**
