@@ -41,7 +41,7 @@ import { useTitleBarColors } from './hooks/useTitleBarColors';
 import { useGlobalTerminalListeners } from './hooks/useGlobalTerminalListeners';
 import { useTerminalProfileChange } from './hooks/useTerminalProfileChange';
 import { sanitizeColorTheme } from '../shared/constants';
-import { TITLE_BAR_STRIP_HEIGHT } from './lib/title-bar';
+import { IS_DEV_BUILD, TITLE_BAR_STRIP_HEIGHT } from './lib/title-bar';
 import { DevBuildBar } from './components/DevBuildBar';
 import type { Task, Project } from '../shared/types';
 import { AddProjectModal, pickAndAddExistingProject, type AddProjectModalStep } from './components/AddProjectModal';
@@ -666,8 +666,9 @@ export function App() {
         {/* Main content */}
         <div className="flex flex-1 flex-col overflow-hidden">
           {/* Window drag strip; on Windows/Linux it also reserves the row the window controls sit in.
-              Insights draws its own so its chat history column can run the full height */}
-          {!(activeView === 'insights' && selectedProject) && (
+              Insights draws its own so its chat history column can run the full height, except in
+              development builds, where the DEVELOPMENT BUILD strip below has to stay under it */}
+          {(IS_DEV_BUILD || !(activeView === 'insights' && selectedProject)) && (
             <div className="electron-drag shrink-0" style={{ height: TITLE_BAR_STRIP_HEIGHT }} />
           )}
 
