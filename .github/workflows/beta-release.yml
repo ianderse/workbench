@@ -443,71 +443,28 @@ jobs:
           output-path: release-assets
           copy-other-manifests: 'true'
 
-      - name: Rename and validate beta manifests
+      - name: Validate update manifests
         run: |
           cd release-assets
 
-          echo "=== Current manifest files ==="
-          ls -la *.yml 2>/dev/null || echo "No yml files found yet"
-
-          # electron-builder generates latest*.yml files by default
-          # For beta channel, electron-updater expects beta*.yml files
-          # Rename: latest.yml -> beta.yml, latest-mac.yml -> beta-mac.yml, latest-linux.yml -> beta-linux.yml
-
-          # Windows: latest.yml -> beta.yml
-          if [ -f "latest.yml" ]; then
-            echo "Renaming latest.yml -> beta.yml (Windows)"
-            mv latest.yml beta.yml
-          fi
-
-          # macOS: latest-mac.yml -> beta-mac.yml
-          if [ -f "latest-mac.yml" ]; then
-            echo "Renaming latest-mac.yml -> beta-mac.yml (macOS)"
-            mv latest-mac.yml beta-mac.yml
-          fi
-
-          # Linux: latest-linux.yml -> beta-linux.yml
-          if [ -f "latest-linux.yml" ]; then
-            echo "Renaming latest-linux.yml -> beta-linux.yml (Linux)"
-            mv latest-linux.yml beta-linux.yml
-          fi
-
-          # Linux ARM64: latest-linux-arm64.yml -> beta-linux-arm64.yml (if exists)
-          if [ -f "latest-linux-arm64.yml" ]; then
-            echo "Renaming latest-linux-arm64.yml -> beta-linux-arm64.yml (Linux ARM64)"
-            mv latest-linux-arm64.yml beta-linux-arm64.yml
-          fi
-
-          echo ""
-          echo "=== Beta manifest files after rename ==="
-          ls -la *.yml 2>/dev/null || echo "No yml files found"
-
-          # Validate required beta manifests exist
+          # Keep electron-builder's latest*.yml names: the app reads releases from a private repo through
+          # electron-updater's private GitHub provider, which only looks for latest*.yml. Beta builds are
+          # told apart by the release's pre-release flag (allowPrerelease)
           missing_manifests=""
-
-          if [ ! -f "beta-mac.yml" ]; then
-            missing_manifests="$missing_manifests beta-mac.yml"
-          fi
-
-          if [ ! -f "beta.yml" ]; then
-            missing_manifests="$missing_manifests beta.yml"
-          fi
-
-          if [ ! -f "beta-linux.yml" ]; then
-            missing_manifests="$missing_manifests beta-linux.yml"
-          fi
+          for manifest in latest.yml latest-mac.yml latest-linux.yml; do
+            if [ ! -f "$manifest" ]; then
+              missing_manifests="$missing_manifests $manifest"
+            fi
+          done
 
           if [ -n "$missing_manifests" ]; then
-            echo "::error::Missing required beta manifests:$missing_manifests"
+            echo "::error::Missing required update manifests:$missing_manifests"
             echo "::error::Auto-update will fail on affected platforms without these files!"
             exit 1
           fi
 
-          echo ""
-          echo "All required beta manifests present:"
-          echo "  - beta-mac.yml (macOS)"
-          echo "  - beta.yml (Windows)"
-          echo "  - beta-linux.yml (Linux)"
+          echo "All required update manifests present:"
+          ls -la *.yml
 
       - name: Generate checksums
         run: |
