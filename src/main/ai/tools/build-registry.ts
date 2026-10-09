@@ -18,6 +18,7 @@ import { grepTool } from './builtin/grep';
 import { webFetchTool } from './builtin/web-fetch';
 import { webSearchTool } from './builtin/web-search';
 import { spawnSubagentTool } from './builtin/spawn-subagent';
+import { codebaseGraphTool } from './builtin/codebase-graph';
 
 const asDefined = (t: unknown): DefinedTool => t as DefinedTool;
 
@@ -35,5 +36,6 @@ export function buildToolRegistry(): ToolRegistry {
   registry.registerTool('WebFetch', asDefined(webFetchTool));
   registry.registerTool('WebSearch', asDefined(webSearchTool));
   registry.registerTool('SpawnSubagent', asDefined(spawnSubagentTool));
+  registry.registerTool('CodebaseGraph', asDefined(codebaseGraphTool));
   return registry;
 }

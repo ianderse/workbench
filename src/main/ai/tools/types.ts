@@ -31,6 +31,8 @@ export interface ToolContext {
   abortSignal?: AbortSignal;
   /** If set, Write/Edit tools can only write within these directories */
   allowedWritePaths?: string[];
+  /** The project's memory graph (Graphify), when set the CodebaseGraph tool searches it */
+  graphify?: { cli: string; graph: string };
 }
 
 // ---------------------------------------------------------------------------

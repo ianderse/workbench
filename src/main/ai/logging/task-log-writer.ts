@@ -311,6 +311,12 @@ export class TaskLogWriter {
         return typeof args.url === 'string' ? truncate(args.url) : undefined;
       case 'WebSearch':
         return typeof args.query === 'string' ? truncate(args.query) : undefined;
+      case 'CodebaseGraph': {
+        const subject = args.question ?? args.symbol ?? (args.from && args.to ? `${args.from} → ${args.to}` : undefined);
+        return typeof args.action === 'string'
+          ? truncate(typeof subject === 'string' ? `${args.action}: ${subject}` : args.action)
+          : undefined;
+      }
       default: {
         // Generic: try common field names
         const value = args.file_path ?? args.path ?? args.command ?? args.query ?? args.pattern;

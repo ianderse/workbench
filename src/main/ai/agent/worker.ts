@@ -155,6 +155,7 @@ function buildToolContext(session: SerializableSessionConfig, securityProfile: S
     specDir: session.toolContext.specDir,
     securityProfile,
     abortSignal: abortController.signal,
+    graphify: session.graphify ? { cli: session.graphify.cli, graph: session.graphify.graph } : undefined,
   };
 }
 
@@ -228,7 +229,7 @@ async function assemblePrompt(
     projectDir: session.projectDir,
     projectInstructions: cachedProjectInstructions,
   });
-  return session.graphifyContext ? `${prompt}\n\n${session.graphifyContext}` : prompt;
+  return session.graphify ? `${prompt}\n\n${session.graphify.prompt}` : prompt;
 }
 
 // =============================================================================

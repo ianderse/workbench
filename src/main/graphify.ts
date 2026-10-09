@@ -291,28 +291,61 @@ export function buildGraphifyIndex(projectPath: string): Promise<GraphifyIndexIn
   return promise;
 }
 
+/** What an agent session needs to search the project's memory graph */
+export interface GraphifyAgentContext {
+  /** System prompt section introducing the CodebaseGraph tool */
+  prompt: string;
+  /**
+   * The same section for Claude Code runs, which search the graph with graphify commands through
+   * Bash instead (GRAPHIFY_OUT set to the graph's directory, so no --graph is needed)
+   */
+  commandPrompt: string;
+  /** The graphify command */
+  cli: string;
+  /** The project's graph.json */
+  graph: string;
+}
+
 /**
- * Prompt section that points an agent at the project's memory graph, or null when the project
- * doesn't use Graphify or has no graph yet
+ * The project's memory graph for agents (the CodebaseGraph tool and a prompt section about it), or
+ * null when Graphify isn't installed or the project has no graph yet
  */
-export async function getGraphifyPromptContext(projectPath: string): Promise<string | null> {
+export async function getGraphifyPromptContext(projectPath: string): Promise<GraphifyAgentContext | null> {
   const [installation, index] = await Promise.all([detectGraphify(), readGraphifyIndex(projectPath)]);
   if (!installation || !index) return null;
   const graph = getGraphifyGraphPath(projectPath);
   const report = path.join(path.dirname(graph), 'GRAPH_REPORT.md');
-  const cli = installation.path.includes(' ') ? `"${installation.path}"` : installation.path;
-  return [
-    '## PROJECT MEMORY GRAPH (GRAPHIFY)',
+  const intro = `A knowledge graph of this project's code (${index.nodes} nodes, ${index.edges} edges) is available`;
+  const outro = [
     '',
-    `A knowledge graph of this project's code (${index.nodes} nodes, ${index.edges} edges) is available.`,
-    `Read the summary in \`${report}\` for the main modules and most connected symbols, and query the graph`,
-    'to see how code connects before searching through files:',
+    `For an overview of the main modules, read \`${report}\`. The graph was built ${index.builtAt}; code changed`,
+    'since then is not in it, so confirm details in the files it points to.',
+  ];
+  const prompt = [
+    '## PROJECT CODE GRAPH (GRAPHIFY)',
     '',
-    `- \`${cli} query "<question>" --graph "${graph}"\``,
-    `- \`${cli} explain "<SymbolName>" --graph "${graph}"\``,
-    `- \`${cli} path "<SymbolA>" "<SymbolB>" --graph "${graph}"\``,
-    `- \`${cli} affected "<SymbolName>" --graph "${graph}"\` (what a change to it can impact)`,
+    `${intro} through the \`CodebaseGraph\` tool. Search it before grepping or reading files to find where things`,
+    'are and how they connect:',
     '',
-    `The graph was built ${index.builtAt}; code changed since then is not in it, so confirm details in the files.`,
+    '- `query` with a question ("how are task logs written?"): the relevant symbols, their files and connections',
+    '- `explain` a symbol: what it is and what it links to',
+    '- `path` between two symbols: how they connect',
+    '- `affected` by a symbol: what a change to it can impact',
+    '- `hubs`: the most connected symbols, the core of the architecture',
+    ...outro,
   ].join('\n');
+  const commandPrompt = [
+    '## PROJECT CODE GRAPH (GRAPHIFY)',
+    '',
+    `${intro}. Search it with these Bash commands before grepping or reading files to find where things are and`,
+    'how they connect (only these graphify commands are allowed):',
+    '',
+    '- `graphify query "how are task logs written?"`: the relevant symbols, their files and connections',
+    '- `graphify explain "SymbolName"`: what a symbol is and what it links to',
+    '- `graphify path "SymbolA" "SymbolB"`: how two symbols connect',
+    '- `graphify affected "SymbolName"`: what a change to a symbol can impact',
+    '- `graphify god-nodes`: the most connected symbols, the core of the architecture',
+    ...outro,
+  ].join('\n');
+  return { prompt, commandPrompt, cli: installation.path, graph };
 }

@@ -62,8 +62,11 @@ export interface SerializableSessionConfig {
   configDir?: string;
   /** Pre-resolved path to OAuth token file for file-based OAuth providers (e.g., Codex). Worker-safe. */
   oauthTokenFilePath?: string;
-  /** Project memory graph instructions (Graphify), appended to the system prompt when set */
-  graphifyContext?: string;
+  /**
+   * The project's memory graph (Graphify): a prompt section appended to the system prompt, and the
+   * command and graph the CodebaseGraph tool searches
+   */
+  graphify?: { prompt: string; commandPrompt: string; cli: string; graph: string };
   /** MCP options resolved from project settings (serialized for worker) */
   mcpOptions?: {
     context7Enabled?: boolean;
