@@ -282,6 +282,12 @@ export const IPC_CHANNELS = {
   CLAUDE_CODE_GET_INSTALLATIONS: 'claudeCode:getInstallations',
   CLAUDE_CODE_SET_ACTIVE_PATH: 'claudeCode:setActivePath',
 
+  // Graphify CLI (memory graph)
+  GRAPHIFY_CHECK_VERSION: 'graphify:checkVersion',
+  GRAPHIFY_INSTALL: 'graphify:install',
+  GRAPHIFY_GET_INDEX: 'graphify:getIndex',
+  GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
+
   // MCP Server health checks
   MCP_CHECK_HEALTH: 'mcp:checkHealth',           // Quick connectivity check
   MCP_TEST_CONNECTION: 'mcp:testConnection',     // Full MCP protocol test

@@ -1,5 +1,6 @@
 import { RefreshCw, Download } from 'lucide-react';
 import { ProjectIndexRows } from '../context/ProjectIndex';
+import { MemoryIndexRows } from '../context/MemoryIndex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { SettingsSection } from '../settings/SettingsSection';
@@ -21,11 +22,12 @@ interface GeneralSettingsProps {
 }
 
 /**
- * Project "General" page: Auto-Build (initialize, then the project index), laid out as
- * claude.ai settings sections (CLAUDE.md usage lives on the Memory page).
+ * Project page: initialize Auto Claude for the project, then its project index and Graphify memory
+ * graph, laid out as claude.ai settings sections (CLAUDE.md and Graphify usage live on the Memory page).
  */
 export function GeneralSettings({
   project,
+  settings,
   isUpdating,
   handleInitialize
 }: GeneralSettingsProps) {
@@ -55,7 +57,10 @@ export function GeneralSettings({
               </Button>
             </SettingsRow>
           ) : (
-            <ProjectIndexRows projectId={project.id} />
+            <>
+              <ProjectIndexRows projectId={project.id} />
+              <MemoryIndexRows projectId={project.id} useGraphify={!!settings.useGraphify} />
+            </>
           )}
         </SettingsRows>
       </SettingsSection>

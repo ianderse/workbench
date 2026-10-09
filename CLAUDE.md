@@ -21,6 +21,8 @@ resolves issues → User reviews and merges.
 - **Memory** — Local knowledge store that retains insights across sessions
 - **Connectors** — MCP servers for agents (Context7, Electron/Puppeteer for QA, user-added servers) with
   app-wide defaults in Settings and per-task choices in the task dialog
+- **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
+  project's code, built into `.auto-claude/memory` and offered to agents
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
 - **Flexible Authentication** — Claude Code subscription (OAuth) or API profiles with any Anthropic-compatible endpoint
 - **Multi-Account Swapping** — When one Claude account hits a rate limit, switch to an available one automatically
@@ -223,6 +225,15 @@ starts, `AgentManager.resolveTaskMcpOptions()` passes that task's connectors to 
 affect each other); `getRequiredMcpServers()` gives every MCP-using agent all enabled connectors and
 `src/main/ai/mcp/registry.ts` builds configs for built-in and custom servers. Helpers live in
 `src/shared/utils/mcp-connectors.ts`.
+
+### Graphify Memory Graph
+
+`src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
+Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
+.auto-claude/memory` (Settings > Project > Memory index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
+`index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Memory page) is on,
+`AgentManager.resolveGraphifyContext()` passes query instructions to the worker, which appends them to the system
+prompt. Project memory settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
 
 ### Electron MCP (agent QA of the app)
 

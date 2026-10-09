@@ -78,5 +78,25 @@
       "next": "Next",
       "stable": "Stable"
     }
+  },
+  "graphify": {
+    "title": "Graphify",
+    "description": "The Graphify CLI that builds each project's memory graph: status, version and installation",
+    "status": "Status",
+    "version": "Version",
+    "changelog": "Changelog",
+    "install": "Install",
+    "update": "Update",
+    "refresh": "Refresh",
+    "checking": "Checking Graphify...",
+    "upToDate": "Graphify is up to date",
+    "updateAvailable": "Graphify update available",
+    "notInstalled": "Graphify not installed",
+    "error": "Error checking Graphify",
+    "latest": "Latest",
+    "lastChecked": "Last checked",
+    "installFailed": "Failed to open a terminal for the installation",
+    "viewChangelog": "View changelog",
+    "viewChangelogAriaLabel": "View Graphify changelog (opens in new window)"
   }
 }

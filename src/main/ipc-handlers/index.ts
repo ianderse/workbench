@@ -23,6 +23,7 @@ import { registerMemoryHandlers } from './memory-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
 import { registerDebugHandlers } from './debug-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
+import { registerGraphifyHandlers } from './graphify-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
@@ -90,6 +91,9 @@ export function setupIpcHandlers(
   // Claude Code CLI handlers (version checking, installation)
   registerClaudeCodeHandlers();
 
+  // Graphify CLI handlers (version, installation, project memory graph)
+  registerGraphifyHandlers();
+
   // MCP server health check handlers
   registerMcpHandlers();
 
@@ -118,6 +122,7 @@ export {
   registerAppUpdateHandlers,
   registerDebugHandlers,
   registerClaudeCodeHandlers,
+  registerGraphifyHandlers,
   registerMcpHandlers,
   registerProfileHandlers,
   registerCodexAuthHandlers

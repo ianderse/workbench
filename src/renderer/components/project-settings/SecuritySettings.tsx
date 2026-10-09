@@ -13,6 +13,7 @@ import {
 import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { OllamaModelSelector } from '../onboarding/OllamaModelSelector';
+import { useGraphifyVersion } from '../../hooks/useGraphifyVersion';
 import type { ProjectEnvConfig, ProjectSettings as ProjectSettingsType, MemoryEmbeddingProvider } from '../../../shared/types';
 
 interface SecuritySettingsProps {
@@ -71,7 +72,8 @@ function KeyLink({ href, children }: { href: string; children: React.ReactNode }
 }
 
 /**
- * Project "Memory" page: memory toggle, embedding provider and storage, as claude.ai sections.
+ * Project "Memory" page: memory, Graphify and CLAUDE.md toggles, embedding provider and storage,
+ * as claude.ai sections.
  */
 export function SecuritySettings({
   envConfig,
@@ -84,6 +86,7 @@ export function SecuritySettings({
   onToggle: _onToggle
 }: SecuritySettingsProps) {
   const { t } = useTranslation('settings');
+  const graphifyInstalled = !!useGraphifyVersion().info?.installed;
 
   // Password visibility for multiple providers
   const [showApiKey, setShowApiKey] = useState<Record<string, boolean>>({
@@ -302,6 +305,22 @@ export function SecuritySettings({
                 setSettings({ ...settings, memoryBackend: checked ? 'memory' : 'file' });
               }}
               aria-label={t('projectPages.memory.enable')}
+            />
+          </SettingsRow>
+          {/* The switch needs the Graphify CLI (Settings > Updates) */}
+          <SettingsRow
+            label={t('projectSections.general.useGraphify')}
+            description={
+              graphifyInstalled
+                ? t('projectSections.general.useGraphifyDescription')
+                : t('projectSections.general.useGraphifyNotInstalled')
+            }
+          >
+            <Switch
+              checked={graphifyInstalled && !!settings.useGraphify}
+              onCheckedChange={(checked) => setSettings({ ...settings, useGraphify: checked })}
+              disabled={!graphifyInstalled}
+              aria-label={t('projectSections.general.useGraphify')}
             />
           </SettingsRow>
           <SettingsRow

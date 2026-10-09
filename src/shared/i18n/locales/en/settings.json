@@ -361,7 +361,10 @@
       "title": "General",
       "description": "Auto-Build and agent config",
       "useClaudeMd": "Use CLAUDE.md",
-      "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context"
+      "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context",
+      "useGraphify": "Use Graphify",
+      "useGraphifyDescription": "Give agents the project's memory graph, built under Memory index on the Project page",
+      "useGraphifyNotInstalled": "Install Graphify on the Updates page to use the project's memory graph"
     },
     "queue": {
       "title": "Queue",
@@ -1055,7 +1058,7 @@
   "projectPages": {
     "initializeFirst": "Initialize Auto-Build in the project's General settings to configure this page.",
     "general": {
-      "autoBuildTitle": "Auto-Build",
+      "autoBuildTitle": "Project",
       "notInitialized": "Not initialized",
       "notInitializedDescription": "Initialize Auto-Build to enable task creation and agent workflows",
       "initialize": "Initialize",
@@ -1115,7 +1118,16 @@
       "loadFailed": "Failed to load project index",
       "score": "Score {{score}}",
       "filter": "Filter",
-      "loadingMemories": "Loading memories..."
+      "loadingMemories": "Loading memories...",
+      "memoryIndex": "Memory index",
+      "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
+      "noMemoryIndex": "Map the project's code into a Graphify graph in .auto-claude/memory",
+      "memoryIndexNotInstalled": "Install Graphify on the Updates page to build a memory graph",
+      "memoryIndexNotEnabled": "Turn on Use Graphify on the Memory page to build a memory graph",
+      "buildMemoryIndex": "Build",
+      "rebuildMemoryIndex": "Rebuild",
+      "buildingMemoryIndex": "Building the memory graph...",
+      "memoryIndexFailed": "Couldn't build the memory graph"
     },
     "mcp": {
       "serversTitle": "MCP servers",

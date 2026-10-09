@@ -22,6 +22,8 @@ export interface ProjectSettings {
   pushNewBranches?: boolean;
   /** Include CLAUDE.md instructions in agent system prompt (default: true) */
   useClaudeMd?: boolean;
+  /** Point agents at the project's Graphify memory graph (default: false; needs Graphify installed) */
+  useGraphify?: boolean;
   /** Maximum parallel tasks allowed (default: 3) */
   maxParallelTasks?: number;
 }

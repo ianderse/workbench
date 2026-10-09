@@ -24,6 +24,7 @@ import { ThemeSettings } from './ThemeSettings';
 import { GeneralSettings } from './GeneralSettings';
 import { AdvancedSettings } from './AdvancedSettings';
 import { ClaudeCodeSettings } from './ClaudeCodeSettings';
+import { GraphifySettings } from './GraphifySettings';
 import { DevToolsSettings } from './DevToolsSettings';
 import { DebugSettings } from './DebugSettings';
 import { AccountSettings } from './AccountSettings';
@@ -240,6 +241,8 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
             <AdvancedSettings settings={settings} onSettingsChange={setSettings} section="updates" version={version} />
             {/* Claude Code CLI (status, install/update, version and installation switching) */}
             <ClaudeCodeSettings />
+            {/* Graphify CLI (builds the projects' memory graphs) */}
+            <GraphifySettings />
           </>
         );
       default:

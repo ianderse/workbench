@@ -223,11 +223,12 @@ async function assemblePrompt(
     }
   }
 
-  return injectContext(basePrompt, {
+  const prompt = injectContext(basePrompt, {
     specDir: session.specDir,
     projectDir: session.projectDir,
     projectInstructions: cachedProjectInstructions,
   });
+  return session.graphifyContext ? `${prompt}\n\n${session.graphifyContext}` : prompt;
 }
 
 // =============================================================================

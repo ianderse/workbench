@@ -14,6 +14,7 @@ import {
 import { resetStuckSubtasks } from '../ipc-handlers/task/plan-file-utils';
 import { AUTO_BUILD_PATHS, getSpecsDir } from '../../shared/constants';
 import { projectStore } from '../project-store';
+import { getGraphifyPromptContext } from '../graphify';
 import { resolveAuth, resolveAuthFromQueue } from '../ai/auth/resolver';
 import { resolveModelId } from '../ai/config/phase-config';
 import { detectProviderFromModel } from '../ai/providers/factory';
@@ -393,6 +394,7 @@ export class AgentManager extends EventEmitter {
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
       mcpOptions: this.resolveTaskMcpOptions(resolvedSpecDir, metadata?.mcpConnectors),
+      graphifyContext: await this.resolveGraphifyContext(projectPath),
       toolContext: {
         cwd: projectPath,
         projectDir: projectPath,
@@ -513,6 +515,7 @@ export class AgentManager extends EventEmitter {
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
       mcpOptions: this.resolveTaskMcpOptions(specDir),
+      graphifyContext: await this.resolveGraphifyContext(projectPath),
       toolContext: {
         cwd: effectiveCwd,
         projectDir: effectiveProjectDir,
@@ -612,6 +615,7 @@ export class AgentManager extends EventEmitter {
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
       mcpOptions: this.resolveTaskMcpOptions(specDir),
+      graphifyContext: await this.resolveGraphifyContext(projectPath),
       toolContext: {
         cwd: effectiveCwd,
         projectDir: effectiveProjectDir,
@@ -861,6 +865,13 @@ export class AgentManager extends EventEmitter {
         shellScripts: profile.customScripts.shellScripts,
       },
     };
+  }
+
+  /** Memory graph instructions for the project's agents, when its "Use Graphify" setting is on */
+  private async resolveGraphifyContext(projectPath: string): Promise<string | undefined> {
+    const project = projectStore.getProjects().find((p) => p.path === projectPath);
+    if (!project?.settings?.useGraphify) return undefined;
+    return (await getGraphifyPromptContext(projectPath)) ?? undefined;
   }
 
   /**

@@ -194,6 +194,15 @@ const browserMockAPI: ElectronAPI = {
   },
 
   // Claude Code Operations
+  // Graphify CLI (memory graph)
+  checkGraphifyVersion: async () => ({
+    success: true,
+    data: { installed: null, latest: null, isOutdated: false }
+  }),
+  installGraphify: async () => ({ success: true, data: { command: 'uv tool install graphifyy' } }),
+  getGraphifyIndex: async () => ({ success: true, data: null }),
+  buildGraphifyIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
+
   checkClaudeCodeVersion: async () => ({
     success: true,
     data: {

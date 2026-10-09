@@ -76,3 +76,28 @@ export interface ClaudeInstallationList {
   /** Path to the currently active installation (from settings or auto-detected) */
   activePath: string | null;
 }
+
+/**
+ * Graphify CLI (https://github.com/Graphify-Labs/graphify): installed vs latest version
+ */
+export interface GraphifyVersionInfo {
+  /** Installed version, null when the graphify command is not found */
+  installed: string | null;
+  /** Latest version on PyPI, null when it could not be fetched */
+  latest: string | null;
+  /** Whether a newer version than the installed one is available */
+  isOutdated: boolean;
+}
+
+/**
+ * A project's memory graph, built by Graphify into .auto-claude/memory
+ */
+export interface GraphifyIndexInfo {
+  nodes: number;
+  edges: number;
+  communities: number;
+  /** ISO timestamp of the last build */
+  builtAt: string;
+  /** Graphify version that built it */
+  version: string | null;
+}
