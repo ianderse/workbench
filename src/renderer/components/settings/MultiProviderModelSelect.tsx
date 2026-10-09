@@ -1,9 +1,11 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ChevronDown, Search, Check, Brain, Eye, Wrench, ExternalLink, Loader2 } from 'lucide-react';
+import { ChevronDown, Search, Check, Brain, Eye, Wrench, Loader2 } from 'lucide-react';
+import { ExternalLink } from '../ui/external-link';
 import { ALL_AVAILABLE_MODELS, resolveModelEquivalent, type ModelOption } from '@shared/constants/models';
 import { PROVIDER_REGISTRY } from '@shared/constants/providers';
 import type { BuiltinProvider } from '@shared/types/provider-account';
+import { useOllamaLlmModels } from '../../hooks/useOllamaLlmModels';
 import { useSettingsStore } from '@/stores/settings-store';
 import { cn } from '../../lib/utils';
 import { Input } from '../ui/input';
@@ -13,6 +15,12 @@ interface MultiProviderModelSelectProps {
   onChange: (value: string) => void;
   className?: string;
   filterProvider?: BuiltinProvider;  // When set, only show models for this provider
+  /**
+   * 'inline': compact borderless "Value ⌄" trigger for a settings row's control slot
+   * (claude.ai style); the dropdown opens right-aligned under it.
+   */
+  variant?: 'default' | 'inline';
+  ariaLabel?: string;
 }
 
 function formatContextWindow(size: number): string {
@@ -20,7 +28,15 @@ function formatContextWindow(size: number): string {
   return `${(size / 1000).toFixed(0)}K`;
 }
 
-export function MultiProviderModelSelect({ value, onChange, className, filterProvider }: MultiProviderModelSelectProps) {
+export function MultiProviderModelSelect({
+  value,
+  onChange,
+  className,
+  filterProvider,
+  variant = 'default',
+  ariaLabel,
+}: MultiProviderModelSelectProps) {
+  const isInline = variant === 'inline';
   const { t } = useTranslation(['settings']);
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState('');
@@ -31,46 +47,19 @@ export function MultiProviderModelSelect({ value, onChange, className, filterPro
   const settings = useSettingsStore(s => s.settings);
   const providerAccounts = settings.providerAccounts ?? [];
 
-  // Dynamic Ollama model fetching
-  const [ollamaModels, setOllamaModels] = useState<ModelOption[]>([]);
-  const [ollamaLoading, setOllamaLoading] = useState(false);
-
-  useEffect(() => {
-    if (filterProvider && filterProvider !== 'ollama') return;
-    // Only fetch if there's an Ollama account configured
-    const hasOllamaAccount = providerAccounts.some(a => a.provider === 'ollama');
-    if (!hasOllamaAccount) {
-      setOllamaModels([]);
-      return;
-    }
-
-    const controller = new AbortController();
-    setOllamaLoading(true);
-
-    (async () => {
-      try {
-        const result = await window.electronAPI.listOllamaModels();
-        if (controller.signal.aborted) return;
-        if (result?.success && result.data?.models) {
-          const llmModels = result.data.models
-            .filter((m: { is_embedding: boolean }) => !m.is_embedding)
-            .map((m: { name: string; size_bytes: number; size_gb: number }): ModelOption => ({
-              value: m.name,
-              label: m.name,
-              provider: 'ollama' as BuiltinProvider,
-              description: m.size_gb >= 1 ? `${m.size_gb.toFixed(1)} GB` : `${Math.round(m.size_bytes / 1e6)} MB`,
-            }));
-          setOllamaModels(llmModels);
-        }
-      } catch {
-        // Non-fatal — leave models empty
-      } finally {
-        if (!controller.signal.aborted) setOllamaLoading(false);
-      }
-    })();
-
-    return () => controller.abort();
-  }, [filterProvider, providerAccounts]);
+  // Installed Ollama models: the saved list (fetched once if never fetched), only when an
+  // Ollama account exists and Ollama models are wanted here
+  const wantsOllama = (!filterProvider || filterProvider === 'ollama') && providerAccounts.some(a => a.provider === 'ollama');
+  const { models: installedOllamaModels, isLoading: ollamaLoading } = useOllamaLlmModels(wantsOllama);
+  const ollamaModels = useMemo<ModelOption[]>(() => installedOllamaModels.map((m) => {
+    const sizeGb = m.size_bytes / 1e9;
+    return {
+      value: m.name,
+      label: m.name,
+      provider: 'ollama' as BuiltinProvider,
+      description: sizeGb >= 1 ? `${sizeGb.toFixed(1)} GB` : `${Math.round(m.size_bytes / 1e6)} MB`,
+    };
+  }), [installedOllamaModels]);
 
   // Determine if all OpenAI accounts are OAuth-only (Codex subscription)
   const openaiIsOAuthOnly = useMemo(() => {
@@ -246,23 +235,46 @@ export function MultiProviderModelSelect({ value, onChange, className, filterPro
       <button
         type="button"
         onClick={open ? handleClose : handleOpen}
+        aria-label={ariaLabel}
+        aria-expanded={open}
         className={cn(
-          'flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm',
-          'ring-offset-background',
-          'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
-          'disabled:cursor-not-allowed disabled:opacity-50',
-          'hover:bg-accent/50 transition-colors'
+          isInline
+            ? cn(
+                'flex h-8 max-w-64 items-center gap-1.5 rounded-lg px-2 text-sm text-foreground',
+                'outline-none focus-visible:shadow-(--shadow-focus)',
+                'hover:bg-nav-hover transition-colors',
+                open && 'bg-nav-hover'
+              )
+            : cn(
+                'flex h-9 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm',
+                'ring-offset-background',
+                'focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2',
+                'hover:bg-accent/50 transition-colors'
+              ),
+          'disabled:cursor-not-allowed disabled:opacity-50'
         )}
       >
         <span className={cn('truncate', !value && 'text-muted-foreground')}>
           {value ? displayLabel : t('settings:modelSelect.placeholder', { defaultValue: 'Select a model' })}
         </span>
-        <ChevronDown className={cn('h-4 w-4 text-muted-foreground shrink-0 ml-2 transition-transform', open && 'rotate-180')} />
+        <ChevronDown
+          className={cn(
+            'h-4 w-4 text-muted-foreground shrink-0 transition-transform',
+            !isInline && 'ml-2',
+            open && 'rotate-180'
+          )}
+        />
       </button>
 
       {/* Dropdown panel */}
       {open && (
-        <div className="absolute z-50 min-w-full w-max max-w-[400px] mt-1 bg-popover border border-border rounded-md shadow-lg flex flex-col max-h-80">
+        <div
+          className={cn(
+            'absolute z-50 min-w-full w-max max-w-[400px] mt-1 flex flex-col max-h-80 overflow-hidden',
+            'bg-popover border border-border rounded-xl shadow-lg',
+            isInline && 'right-0'
+          )}
+        >
           {/* Search */}
           <div className="p-2 border-b border-border">
             <div className="relative">
@@ -310,23 +322,23 @@ export function MultiProviderModelSelect({ value, onChange, className, filterPro
                   <div key={provider}>
                     {/* Provider header */}
                     <div className={cn(
-                      'flex items-center justify-between px-3 py-1.5 bg-muted/50 sticky top-0',
+                      'flex items-center justify-between px-3 py-1.5 bg-popover sticky top-0',
                       !configured && 'opacity-60'
                     )}>
-                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                      <span className="text-xs font-medium text-(--nav-label-color)">
                         {providerInfo?.name ?? provider}
                       </span>
                       {!configured && providerInfo?.website && (
-                        <a
-                          href={providerInfo.website}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="flex items-center gap-1 text-[10px] text-primary hover:underline"
-                          onClick={e => e.stopPropagation()}
+                        <ExternalLink
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (providerInfo?.website) window.electronAPI?.openExternal?.(providerInfo.website);
+                          }}
+                          className="gap-1 text-[10px]"
+                          iconClassName="h-2.5 w-2.5"
                         >
                           {t('settings:modelSelect.configureProvider', { defaultValue: 'Configure' })}
-                          <ExternalLink className="h-2.5 w-2.5" />
-                        </a>
+                        </ExternalLink>
                       )}
                     </div>
 
@@ -340,22 +352,21 @@ export function MultiProviderModelSelect({ value, onChange, className, filterPro
                           onClick={() => configured ? handleSelect(model.value) : undefined}
                           disabled={!configured}
                           className={cn(
-                            'w-full px-3 py-2 text-left text-sm flex items-start gap-2',
-                            'hover:bg-accent transition-colors',
-                            isSelected && 'bg-accent',
+                            'mx-1.5 flex w-[calc(100%-0.75rem)] items-start gap-2 rounded-lg px-3 py-2 text-left text-sm',
+                            'hover:bg-nav-hover transition-colors',
                             !configured && 'opacity-50 cursor-not-allowed'
                           )}
                         >
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-medium">{model.label}</span>
+                              <span>{model.label}</span>
                               {model.description && (
                                 <span className="text-[10px] text-muted-foreground shrink-0">
                                   {model.description}
                                 </span>
                               )}
                               {model.apiKeyOnly && openaiHasMixedAuth && (
-                                <span className="text-[9px] font-medium px-1 py-0.5 rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 shrink-0">
+                                <span className="text-[10px] text-muted-foreground shrink-0">
                                   {t('settings:modelSelect.apiKeyOnly', { defaultValue: 'API key' })}
                                 </span>
                               )}
@@ -389,7 +400,7 @@ export function MultiProviderModelSelect({ value, onChange, className, filterPro
                             )}
                           </div>
                           {isSelected && (
-                            <Check className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                            <Check className="mt-0.5 h-4 w-4 shrink-0 text-(--menu-check)" strokeWidth={2} />
                           )}
                         </button>
                       );
@@ -419,7 +430,7 @@ export function MultiProviderModelSelect({ value, onChange, className, filterPro
                 disabled={!customInput.trim()}
                 className={cn(
                   'shrink-0 px-2 h-7 rounded-md text-xs font-medium transition-colors',
-                  'bg-primary text-primary-foreground hover:bg-primary/90',
+                  'bg-fill-control text-foreground hover:bg-fill-control-hover',
                   'disabled:opacity-50 disabled:cursor-not-allowed'
                 )}
               >

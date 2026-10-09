@@ -4,7 +4,8 @@ import type {
   AppSettings,
   IPCResult,
   ToolDetectionResult,
-  ProviderAccount
+  ProviderAccount,
+  ProviderKeyCheckResult
 } from '../../shared/types';
 
 export interface SettingsAPI {
@@ -26,10 +27,6 @@ export interface SettingsAPI {
   // App Info
   getAppVersion: () => Promise<string>;
 
-  // Sentry error reporting
-  notifySentryStateChanged: (enabled: boolean) => void;
-  getSentryDsn: () => Promise<string>;
-  getSentryConfig: () => Promise<{ dsn: string; tracesSampleRate: number; profilesSampleRate: number }>;
 
   // Spell check
   setSpellCheckLanguages: (language: string) => Promise<IPCResult<{ success: boolean }>>;
@@ -42,7 +39,7 @@ export interface SettingsAPI {
   setProviderAccountQueueOrder: (order: string[]) => Promise<IPCResult>;
   setCrossProviderQueueOrder: (order: string[]) => Promise<IPCResult>;
   saveModelOverrides: (overrides: Record<string, unknown>) => Promise<IPCResult>;
-  testProviderConnection: (provider: string, config: any) => Promise<IPCResult<{ success: boolean; error?: string }>>;
+  testProviderConnection: (provider: string, config: { apiKey?: string; baseUrl?: string; region?: string }) => Promise<IPCResult<ProviderKeyCheckResult>>;
   checkEnvCredentials: () => Promise<IPCResult<Record<string, boolean>>>;
 
   // Codex OAuth authentication
@@ -76,17 +73,6 @@ export const createSettingsAPI = (): SettingsAPI => ({
   getAppVersion: (): Promise<string> =>
     ipcRenderer.invoke(IPC_CHANNELS.APP_VERSION),
 
-  // Sentry error reporting - notify main process when setting changes
-  notifySentryStateChanged: (enabled: boolean): void =>
-    ipcRenderer.send(IPC_CHANNELS.SENTRY_STATE_CHANGED, enabled),
-
-  // Get Sentry DSN from main process (loaded from environment variable)
-  getSentryDsn: (): Promise<string> =>
-    ipcRenderer.invoke(IPC_CHANNELS.GET_SENTRY_DSN),
-
-  // Get full Sentry config from main process (DSN + sample rates)
-  getSentryConfig: (): Promise<{ dsn: string; tracesSampleRate: number; profilesSampleRate: number }> =>
-    ipcRenderer.invoke(IPC_CHANNELS.GET_SENTRY_CONFIG),
 
   // Spell check - sync spell checker language with app language
   setSpellCheckLanguages: (language: string): Promise<IPCResult<{ success: boolean }>> =>
@@ -107,7 +93,7 @@ export const createSettingsAPI = (): SettingsAPI => ({
     ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_ACCOUNTS_SET_CROSS_PROVIDER_QUEUE_ORDER, order),
   saveModelOverrides: (overrides: Record<string, unknown>): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.MODEL_OVERRIDES_SAVE, overrides),
-  testProviderConnection: (provider: string, config: any): Promise<IPCResult<{ success: boolean; error?: string }>> =>
+  testProviderConnection: (provider: string, config: { apiKey?: string; baseUrl?: string; region?: string }): Promise<IPCResult<ProviderKeyCheckResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_ACCOUNTS_TEST_CONNECTION, provider, config),
   checkEnvCredentials: (): Promise<IPCResult<Record<string, boolean>>> =>
     ipcRenderer.invoke(IPC_CHANNELS.PROVIDER_ACCOUNTS_CHECK_ENV),

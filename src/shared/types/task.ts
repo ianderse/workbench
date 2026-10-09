@@ -155,6 +155,7 @@ export interface TaskDraft {
   referencedFiles: ReferencedFile[];
   requireReviewBeforeCoding?: boolean;
   fastMode?: boolean;
+  mcpConnectors?: string[];
   pushNewBranches?: boolean;
   savedAt: Date;
 }
@@ -183,19 +184,14 @@ export interface TaskMetadata {
   userDescription?: string;
 
   // Origin tracking
-  sourceType?: 'ideation' | 'manual' | 'imported' | 'insights' | 'roadmap' | 'linear' | 'github' | 'gitlab';
+  sourceType?: 'ideation' | 'manual' | 'imported' | 'insights' | 'roadmap' | 'github';
   ideationType?: string;  // e.g., 'code_improvements', 'security_hardening'
   ideaId?: string;  // Reference to original idea if converted
   featureId?: string;  // Reference to roadmap feature if from roadmap
-  linearIssueId?: string;  // Reference to Linear issue if from Linear
-  linearIdentifier?: string;  // Linear issue identifier (e.g., 'ABC-123')
-  linearUrl?: string;  // Linear issue URL
   githubIssueNumber?: number;  // Reference to GitHub issue number if from GitHub (single issue)
   githubIssueNumbers?: number[];  // Reference to multiple GitHub issues if from a batch
   githubUrl?: string;  // GitHub issue URL
   githubBatchTheme?: string;  // Theme/title of the GitHub issue batch
-  gitlabIssueIid?: number;  // Reference to GitLab issue IID if from GitLab
-  gitlabUrl?: string;  // GitLab issue URL
 
   // Classification
   category?: TaskCategory;
@@ -241,6 +237,9 @@ export interface TaskMetadata {
   phaseThinking?: PhaseThinkingConfig;  // Per-phase thinking configuration
   phaseProviders?: Record<string, string>;  // Per-phase provider preference (cross-provider mode)
   fastMode?: boolean;  // Fast Mode — faster Opus 4.6 output, higher cost per token
+  // MCP connectors enabled for this task (ids: context7, memory, electron, puppeteer, custom ids).
+  // Copied from the Connectors defaults when the task is created; unset means use the defaults
+  mcpConnectors?: string[];
 
   // Git/Worktree configuration
   baseBranch?: string;  // Override base branch for this task's worktree

@@ -18,20 +18,21 @@
  */
 
 import { accessSync, constants as fsConstants } from 'fs';
+import { allowWindowClose } from './app-tray';
 import path from 'path';
 import { autoUpdater } from 'electron-updater';
 import type { UpdateInfo } from 'electron-updater';
 import { app, net } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { AppUpdateInfo } from '../shared/types';
+import type { AppUpdateCheckResult, AppUpdateInfo } from '../shared/types';
 import { compareVersions } from './updater/version-manager';
 import { isMacOS } from './platform';
 import { readSettingsFile, writeSettingsFile } from './settings-utils';
 
 // GitHub repo info for API calls
-const GITHUB_OWNER = 'AndyMik90';
-const GITHUB_REPO = 'Aperant';
+const GITHUB_OWNER = 'proactive-agent';
+const GITHUB_REPO = 'auto-claude';
 
 // Debug mode - DEBUG_UPDATER=true or development mode
 const DEBUG_UPDATER = process.env.DEBUG_UPDATER === 'true' || process.env.NODE_ENV === 'development';
@@ -412,40 +413,62 @@ export function initializeAppUpdater(window: BrowserWindow, betaUpdates = false)
 }
 
 /**
- * Manually check for updates
- * Called from IPC handler when user requests manual check
+ * True when an update check failed because nothing is published for this channel (no GitHub
+ * release, or its update metadata file is missing), as opposed to a network/server failure
  */
-export async function checkForUpdates(): Promise<AppUpdateInfo | null> {
+function isNothingPublishedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /\b404\b|cannot find latest|no published versions|unable to find latest version|latest-[a-z]*\.yml/i.test(message);
+}
+
+/**
+ * Manually check for updates
+ * Called from IPC handler when user requests manual check. Reports "up-to-date" only when the
+ * newest published release is exactly the running version.
+ */
+export async function checkForUpdates(): Promise<AppUpdateCheckResult> {
+  console.warn('[app-updater] Manual update check requested');
+  let result: Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>;
   try {
-    console.warn('[app-updater] Manual update check requested');
-    const result = await autoUpdater.checkForUpdates();
-
-    if (!result) {
-      return null;
-    }
-
-    const currentVersion = autoUpdater.currentVersion.version;
-    const latestVersion = result.updateInfo.version;
-
-    // Use proper semver comparison to detect if update is actually newer
-    // This prevents offering downgrades (e.g., v2.7.1 when on v2.7.2-beta.6)
-    const isNewer = compareVersions(latestVersion, currentVersion) > 0;
-
-    console.warn(`[app-updater] Version comparison: ${latestVersion} vs ${currentVersion} -> ${isNewer ? 'UPDATE' : 'NO UPDATE'}`);
-
-    if (!isNewer) {
-      return null;
-    }
-
-    return {
-      version: result.updateInfo.version,
-      releaseNotes: formatReleaseNotes(result.updateInfo.releaseNotes),
-      releaseDate: result.updateInfo.releaseDate
-    };
+    result = await autoUpdater.checkForUpdates();
   } catch (error) {
+    if (isNothingPublishedError(error)) {
+      console.warn('[app-updater] No published release found for this channel');
+      return { status: 'unpublished' };
+    }
     console.error('[app-updater] Manual update check failed:', error);
-    throw error;
+    return { status: 'error', error: error instanceof Error ? error.message : String(error) };
   }
+
+  // electron-updater skips the check for unpackaged (development) builds
+  if (!result) {
+    return { status: 'unpublished' };
+  }
+
+  const currentVersion = autoUpdater.currentVersion.version;
+  const latestVersion = result.updateInfo.version;
+  const comparison = compareVersions(latestVersion, currentVersion);
+
+  console.warn(`[app-updater] Version comparison: ${latestVersion} vs ${currentVersion} -> ${comparison}`);
+
+  if (comparison > 0) {
+    return {
+      status: 'update-available',
+      latestVersion,
+      update: {
+        version: result.updateInfo.version,
+        releaseNotes: formatReleaseNotes(result.updateInfo.releaseNotes),
+        releaseDate: result.updateInfo.releaseDate
+      }
+    };
+  }
+
+  // Running a version newer than anything published (e.g. a local or pre-release build)
+  if (comparison < 0) {
+    return { status: 'unpublished', latestVersion };
+  }
+
+  return { status: 'up-to-date', latestVersion };
 }
 
 /**
@@ -511,6 +534,7 @@ export function quitAndInstall(): boolean {
   }
 
   console.warn('[app-updater] Quitting and installing update');
+  allowWindowClose(); // don't let hide-to-tray block the updater from closing the window
   autoUpdater.quitAndInstall(false, true);
   return true;
 }

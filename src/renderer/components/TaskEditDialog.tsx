@@ -26,13 +26,12 @@
  * />
  * ```
  */
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
-import { type FileReferenceData } from './task-form/useImageUpload';
 import { persistUpdateTask } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
 import type { Task, ImageAttachment, TaskCategory, TaskPriority, TaskComplexity, TaskImpact, ModelType, ThinkingLevel } from '../../shared/types';
@@ -46,6 +45,7 @@ import {
 } from '../../shared/constants';
 import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
 import { useSettingsStore } from '../stores/settings-store';
+import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import { useActiveProvider } from '../hooks/useActiveProvider';
 
 /**
@@ -90,7 +90,6 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   const [description, setDescription] = useState(task.description);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showClassification, setShowClassification] = useState(false);
 
   // Classification fields
   const [category, setCategory] = useState<TaskCategory | ''>(task.metadata?.category || '');
@@ -134,6 +133,11 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
 
   // Fast mode
   const [fastMode, setFastMode] = useState(task.metadata?.fastMode ?? false);
+
+  // MCP connectors: the task's own choice, or the Connectors defaults for tasks created before
+  // connectors were per task. Saving changes only this task
+  const taskConnectors = task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors);
+  const [mcpConnectors, setMcpConnectors] = useState<string[]>(taskConnectors);
 
   // Show Fast Mode toggle when any phase uses an Opus model
   const showFastModeToggle = useMemo(() => {
@@ -186,29 +190,10 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       setImages(task.metadata?.attachedImages || []);
       setRequireReviewBeforeCoding(task.metadata?.requireReviewBeforeCoding ?? false);
       setFastMode(task.metadata?.fastMode ?? false);
+      setMcpConnectors(task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors));
       setError(null);
-
-      // Auto-expand classification if it has content
-      if (task.metadata?.category || task.metadata?.priority || task.metadata?.complexity || task.metadata?.impact) {
-        setShowClassification(true);
-      } else {
-        setShowClassification(false);
-      }
     }
-  }, [open, task, resolvedProfileId, selectedProfile.model, selectedProfile.thinkingLevel, profilePhaseModels, profilePhaseThinking]);
-
-  /**
-   * Handle file reference drop from FileTreeItem drag
-   * Appends @filename to the end of the description (no textarea ref in edit dialog)
-   */
-  const handleFileReferenceDrop = useCallback((reference: string, _data: FileReferenceData) => {
-    // Append to description using functional update to ensure latest state
-    // This prevents stale closure issues with rapid consecutive drops
-    setDescription(prev => {
-      const separator = prev.endsWith(' ') || prev === '' ? '' : ' ';
-      return prev + separator + reference + ' ';
-    });
-  }, []);
+  }, [open, task, resolvedProfileId, selectedProfile.model, selectedProfile.thinkingLevel, profilePhaseModels, profilePhaseThinking, settings.mcpConnectors]);
 
   const handleSave = async () => {
     // Validate input
@@ -231,6 +216,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       thinkingLevel !== (task.metadata?.thinkingLevel || '') ||
       requireReviewBeforeCoding !== (task.metadata?.requireReviewBeforeCoding ?? false) ||
       fastMode !== (task.metadata?.fastMode ?? false) ||
+      [...mcpConnectors].sort().join(',') !== [...taskConnectors].sort().join(',') ||
       JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []) ||
       JSON.stringify(phaseModels) !== JSON.stringify(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS) ||
       JSON.stringify(phaseThinking) !== JSON.stringify(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
@@ -261,6 +247,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     metadataUpdates.attachedImages = images.length > 0 ? images : [];
     metadataUpdates.requireReviewBeforeCoding = requireReviewBeforeCoding;
     metadataUpdates.fastMode = fastMode;
+    metadataUpdates.mcpConnectors = mcpConnectors;
 
     const success = await persistUpdateTask(task.id, {
       title: trimmedTitle,
@@ -288,14 +275,14 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       description={t('tasks:edit.description')}
       disabled={isSaving}
       footer={
-        <div className="flex items-center justify-end gap-3">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isSaving}>
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isSaving}>
             {t('common:buttons.cancel')}
           </Button>
-          <Button onClick={handleSave} disabled={isSaving || !isValid}>
+          <Button size="sm" onClick={handleSave} disabled={isSaving || !isValid}>
             {isSaving ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                 {t('common:buttons.saving')}
               </>
             ) : (
@@ -334,19 +321,18 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         onPriorityChange={setPriority}
         onComplexityChange={setComplexity}
         onImpactChange={setImpact}
-        showClassification={showClassification}
-        onShowClassificationChange={setShowClassification}
         images={images}
         onImagesChange={setImages}
         requireReviewBeforeCoding={requireReviewBeforeCoding}
         onRequireReviewChange={setRequireReviewBeforeCoding}
         fastMode={fastMode}
         onFastModeChange={setFastMode}
+        mcpConnectors={mcpConnectors}
+        onMcpConnectorsChange={setMcpConnectors}
         showFastModeToggle={showFastModeToggle && isFastModeEditable}
         disabled={isSaving}
         error={error}
         onError={setError}
-        onFileReferenceDrop={handleFileReferenceDrop}
         idPrefix="edit"
       />
     </TaskModalLayout>

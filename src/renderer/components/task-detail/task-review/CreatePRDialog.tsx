@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { GitPullRequest, Loader2, ExternalLink } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
+import { ExternalLink } from '../../ui/external-link';
 import { useTranslation } from 'react-i18next';
 import {
   Dialog,
@@ -11,8 +12,8 @@ import {
 } from '../../ui/dialog';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
-import { Label } from '../../ui/label';
-import { Checkbox } from '../../ui/checkbox';
+import { Switch } from '../../ui/switch';
+import { SettingsRow, SettingsRows } from '../../settings/SettingsRow';
 import type { Task, WorktreeStatus, WorktreeCreatePRResult } from '../../../../shared/types';
 
 interface CreatePRDialogProps {
@@ -126,8 +127,7 @@ export function CreatePRDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <GitPullRequest className="h-5 w-5 text-primary" />
+          <DialogTitle>
             {t('taskReview:pr.title')}
           </DialogTitle>
           <DialogDescription>
@@ -137,136 +137,132 @@ export function CreatePRDialog({
 
         {/* Success State */}
         {result?.success && (
-          <div className="space-y-4">
-            <div className="bg-success/10 border border-success/30 rounded-lg p-4">
-              <p className="text-sm text-success font-medium mb-2">
+          <>
+            <div className="mt-4 space-y-1 text-sm">
+              <p className="flex items-center gap-1.5 text-foreground">
                 {result.alreadyExists
                   ? t('taskReview:pr.success.alreadyExists')
                   : t('taskReview:pr.success.created')}
               </p>
               {result.prUrl && (
-                <button
-                  type="button"
+                <ExternalLink
                   data-testid="pr-link-button"
                   onClick={handleOpenPR}
-                  className="text-sm text-primary hover:underline flex items-center gap-1 bg-transparent border-none cursor-pointer p-0"
+                  className="break-all"
                 >
                   {result.prUrl}
-                  <ExternalLink className="h-3 w-3" />
-                </button>
+                </ExternalLink>
               )}
             </div>
             <DialogFooter>
-              <Button onClick={handleClose}>
+              <Button size="sm" onClick={handleClose}>
                 {t('common:buttons.close')}
               </Button>
             </DialogFooter>
-          </div>
+          </>
         )}
 
         {/* Error State */}
         {error && !result?.success && (
-          <div className="space-y-4">
-            <div className="bg-destructive/10 border border-destructive/30 rounded-lg p-4">
-              <p className="text-sm text-destructive">{error}</p>
-            </div>
+          <>
+            <p className="mt-4 text-sm text-destructive">{error}</p>
             <DialogFooter>
-              <Button variant="outline" onClick={handleClose}>
+              <Button variant="ghost" size="sm" onClick={handleClose}>
                 {t('common:buttons.cancel')}
               </Button>
-              <Button onClick={handleCreatePR} disabled={isCreating}>
+              <Button size="sm" onClick={handleCreatePR} disabled={isCreating}>
                 {t('taskReview:pr.actions.retry')}
               </Button>
             </DialogFooter>
-          </div>
+          </>
         )}
 
         {/* Form State */}
         {!result?.success && !error && (
-          <div className="space-y-4">
-            {/* Branch Info */}
-            <div className="bg-muted/50 rounded-lg p-3 text-sm" data-testid="pr-stats-container">
-              <div className="flex justify-between mb-1">
-                <span className="text-muted-foreground">{t('taskReview:pr.labels.sourceBranch')}:</span>
-                <span className="font-mono">{worktreeStatus?.branch || t('taskReview:pr.labels.unknown')}</span>
-              </div>
-              {worktreeStatus?.exists && (
-                <>
-                  <div className="flex justify-between mb-1">
-                    <span className="text-muted-foreground">{t('taskReview:pr.labels.commits')}:</span>
-                    <span>{worktreeStatus.commitCount || 0}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">{t('taskReview:pr.labels.changes')}:</span>
-                    <span>
-                      <span className="text-success">+{worktreeStatus.additions || 0}</span>
-                      {' / '}
-                      <span className="text-destructive">-{worktreeStatus.deletions || 0}</span>
+          <>
+          <div className="-mx-6 mt-2 min-h-0 overflow-y-auto px-6">
+            <SettingsRows>
+              {/* Branch info */}
+              <div data-testid="pr-stats-container">
+                <SettingsRows>
+                  <SettingsRow label={t('taskReview:pr.labels.sourceBranch')}>
+                    <span className="font-mono text-xs text-(--nav-label-color)">
+                      {worktreeStatus?.branch || t('taskReview:pr.labels.unknown')}
                     </span>
-                  </div>
-                </>
-              )}
-            </div>
+                  </SettingsRow>
+                  {worktreeStatus?.exists && (
+                    <SettingsRow label={t('taskReview:pr.labels.commits')}>
+                      <span className="text-sm tabular-nums text-(--nav-label-color)">{worktreeStatus.commitCount || 0}</span>
+                    </SettingsRow>
+                  )}
+                  {worktreeStatus?.exists && (
+                    <SettingsRow label={t('taskReview:pr.labels.changes')}>
+                      <span className="flex gap-2 text-sm tabular-nums">
+                        <span className="text-success">+{worktreeStatus.additions || 0}</span>
+                        <span className="text-destructive">-{worktreeStatus.deletions || 0}</span>
+                      </span>
+                    </SettingsRow>
+                  )}
+                </SettingsRows>
+              </div>
 
-            {/* Target Branch */}
-            <div className="space-y-2">
-              <Label htmlFor="targetBranch">{t('taskReview:pr.labels.targetBranch')}</Label>
-              <Input
-                id="targetBranch"
-                value={targetBranch}
-                onChange={(e) => setTargetBranch(e.target.value)}
-                placeholder={worktreeStatus?.baseBranch || 'main'}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t('taskReview:pr.hints.targetBranch')}
-              </p>
-            </div>
+              {/* Target Branch */}
+              <SettingsRow
+                stacked
+                htmlFor="targetBranch"
+                label={t('taskReview:pr.labels.targetBranch')}
+                description={t('taskReview:pr.hints.targetBranch')}
+              >
+                <Input
+                  id="targetBranch"
+                  value={targetBranch}
+                  onChange={(e) => setTargetBranch(e.target.value)}
+                  placeholder={worktreeStatus?.baseBranch || 'main'}
+                />
+              </SettingsRow>
 
-            {/* PR Title (optional) */}
-            <div className="space-y-2">
-              <Label htmlFor="prTitle">{t('taskReview:pr.labels.prTitle')}</Label>
-              <Input
-                id="prTitle"
-                value={prTitle}
-                onChange={(e) => setPrTitle(e.target.value)}
-                placeholder={task.title}
-              />
-              <p className="text-xs text-muted-foreground">
-                {t('taskReview:pr.hints.prTitle')}
-              </p>
-            </div>
+              {/* PR Title (optional) */}
+              <SettingsRow
+                stacked
+                htmlFor="prTitle"
+                label={t('taskReview:pr.labels.prTitle')}
+                description={t('taskReview:pr.hints.prTitle')}
+              >
+                <Input
+                  id="prTitle"
+                  value={prTitle}
+                  onChange={(e) => setPrTitle(e.target.value)}
+                  placeholder={task.title}
+                />
+              </SettingsRow>
 
-            {/* Draft PR Checkbox */}
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="draft-pr-checkbox"
-                checked={isDraft}
-                onCheckedChange={(checked) => setIsDraft(checked === true)}
-              />
-              <label htmlFor="draft-pr-checkbox" className="text-sm cursor-pointer">
-                {t('taskReview:pr.labels.draftPR')}
-              </label>
-            </div>
-
-            <DialogFooter>
-              <Button variant="outline" onClick={handleClose} disabled={isCreating}>
-                {t('common:buttons.cancel')}
-              </Button>
-              <Button onClick={handleCreatePR} disabled={isCreating}>
-                {isCreating ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {t('taskReview:pr.actions.creating')}
-                  </>
-                ) : (
-                  <>
-                    <GitPullRequest className="mr-2 h-4 w-4" />
-                    {t('taskReview:pr.actions.create')}
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
+              {/* Draft PR */}
+              <SettingsRow htmlFor="draft-pr-switch" label={t('taskReview:pr.labels.draftPR')}>
+                <Switch
+                  id="draft-pr-switch"
+                  checked={isDraft}
+                  onCheckedChange={setIsDraft}
+                />
+              </SettingsRow>
+            </SettingsRows>
           </div>
+
+          <DialogFooter>
+            <Button variant="ghost" size="sm" onClick={handleClose} disabled={isCreating}>
+              {t('common:buttons.cancel')}
+            </Button>
+            <Button size="sm" onClick={handleCreatePR} disabled={isCreating}>
+              {isCreating ? (
+                <>
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                  {t('taskReview:pr.actions.creating')}
+                </>
+              ) : (
+                t('taskReview:pr.actions.create')
+              )}
+            </Button>
+          </DialogFooter>
+          </>
         )}
       </DialogContent>
     </Dialog>

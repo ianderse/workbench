@@ -4,6 +4,10 @@
     "app": "App Settings",
     "project": "Project Settings"
   },
+  "nav": {
+    "app": "Settings",
+    "project": "Project"
+  },
   "sections": {
     "appearance": {
       "title": "Appearance",
@@ -13,12 +17,16 @@
       "title": "Display",
       "description": "Adjust the size of UI elements"
     },
+    "connectors": {
+      "title": "Connectors",
+      "description": "Default MCP servers for new tasks"
+    },
     "devtools": {
-      "title": "Developer Tools",
+      "title": "Developer",
       "description": "IDE and terminal preferences"
     },
     "agent": {
-      "title": "Agent Settings",
+      "title": "Agents",
       "description": "Default model and framework"
     },
     "paths": {
@@ -38,12 +46,16 @@
       "description": "Alert preferences"
     },
     "debug": {
-      "title": "Debug & Logs",
+      "title": "Debug & logs",
       "description": "Troubleshooting tools"
     },
     "terminal-fonts": {
-      "title": "Terminal Fonts",
+      "title": "Terminal",
       "description": "Customize terminal font appearance"
+    },
+    "general": {
+      "title": "General",
+      "description": "Appearance, display and notifications"
     }
   },
   "apiProfiles": {
@@ -81,25 +93,25 @@
       "apiKeyInvalid": "Invalid API Key format"
     },
     "actions": {
-      "save": "Save Profile",
+      "save": "Save profile",
       "saving": "Saving...",
       "cancel": "Cancel",
       "changeKey": "Change",
       "cancelKeyChange": "Cancel"
     },
     "testConnection": {
-      "label": "Test Connection",
+      "label": "Test connection",
       "testing": "Testing...",
-      "success": "Connection Successful",
-      "failure": "Connection Failed"
+      "success": "Connection successful",
+      "failure": "Connection failed"
     },
     "models": {
-      "title": "Optional: Model Name Mappings",
+      "title": "Model name mappings (optional)",
       "description": "Select models from your API provider. Leave blank to use defaults.",
-      "defaultLabel": "Default Model (Optional)",
-      "haikuLabel": "Haiku Model (Optional)",
-      "sonnetLabel": "Sonnet Model (Optional)",
-      "opusLabel": "Opus Model (Optional)",
+      "defaultLabel": "Default model",
+      "haikuLabel": "Haiku model",
+      "sonnetLabel": "Sonnet model",
+      "opusLabel": "Opus model",
       "defaultPlaceholder": "e.g., claude-sonnet-4-6",
       "haikuPlaceholder": "e.g., claude-haiku-4-5-20251001",
       "sonnetPlaceholder": "e.g., claude-sonnet-4-6",
@@ -152,10 +164,10 @@
       }
     },
     "dialog": {
-      "createTitle": "Add API Profile",
-      "editTitle": "Edit Profile",
+      "createTitle": "Add API profile",
+      "editTitle": "Edit profile",
       "description": "Configure a custom Anthropic-compatible API endpoint for your builds.",
-      "deleteTitle": "Delete Profile?",
+      "deleteTitle": "Delete profile?",
       "deleteDescription": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
       "cancel": "Cancel",
       "delete": "Delete",
@@ -173,23 +185,14 @@
     "ollamaNoModelsHint": "Install models in Agent Settings → Ollama tab",
     "apiKeyOnly": "API key"
   },
-  "scale": {
-    "presets": "Scale Presets",
-    "presetsDescription": "Quick scale options for common preferences",
-    "fineTune": "Fine-tune Scale",
-    "fineTuneDescription": "Adjust from 75% to 200% in 5% increments",
-    "default": "Default",
-    "comfortable": "Comfortable",
-    "large": "Large"
-  },
   "logOrder": {
-    "label": "Log Order",
+    "label": "Log order",
     "description": "Choose how logs are displayed in the task detail view",
-    "chronological": "Chronological (oldest first)",
-    "reverseChronological": "Reverse-chronological (newest first)"
+    "chronological": "Oldest first",
+    "reverseChronological": "Newest first"
   },
   "gpuAcceleration": {
-    "label": "GPU Acceleration",
+    "label": "GPU acceleration",
     "description": "Use WebGL for terminal rendering (experimental, faster with many terminals)",
     "auto": "Auto (use WebGL when supported)",
     "on": "Always on",
@@ -197,32 +200,28 @@
     "helperText": "Changes apply to new terminals only"
   },
   "general": {
-    "otherAgentSettings": "Other Agent Settings",
-    "otherAgentSettingsDescription": "Additional agent configuration options",
-    "agentFramework": "Agent Framework",
-    "agentFrameworkDescription": "The coding framework used for autonomous tasks",
-    "agentFrameworkAutoClaude": "Auto Claude",
-    "aiTerminalNaming": "AI Terminal Naming",
-    "aiTerminalNamingDescription": "Automatically name terminals based on commands (uses AI Naming model)",
-    "featureModelSettings": "Feature Model Settings",
-    "featureModelSettingsDescription": "Model and thinking level for Insights, Ideation, and Roadmap",
+    "limits": "Limits",
+    "maxTerminals": "Maximum windows",
+    "maxTerminalsDescription": "How many agent windows each project can have open at once ({{min}}–{{max}})",
+    "featureModelSettings": "Feature models",
+    "featureModelSettingsDescription": "Model and thinking level for Insights, MR review, and utility agents",
     "model": "Model",
-    "thinkingLevel": "Thinking Level",
+    "thinkingLevel": "Thinking level",
     "paths": "Paths",
     "pathsDescription": "Configure executable and framework paths",
-    "pythonPath": "Python Path",
+    "pythonPath": "Python path",
     "pythonPathDescription": "Path to Python executable (leave empty for auto-detection)",
     "pythonPathPlaceholder": "python3 (default)",
-    "gitPath": "Git Path",
+    "gitPath": "Git path",
     "gitPathDescription": "Path to Git executable (leave empty for auto-detection)",
     "gitPathPlaceholder": "git (default)",
-    "githubCLIPath": "GitHub CLI Path",
+    "githubCLIPath": "GitHub CLI path",
     "githubCLIPathDescription": "Path to GitHub CLI (gh) executable (leave empty for auto-detection)",
     "githubCLIPathPlaceholder": "gh (default)",
-    "gitlabCLIPath": "GitLab CLI Path",
+    "gitlabCLIPath": "GitLab CLI path",
     "gitlabCLIPathDescription": "Path to GitLab CLI (glab) executable (leave empty for auto-detection)",
     "gitlabCLIPathPlaceholder": "glab (default)",
-    "claudePath": "Claude CLI Path",
+    "claudePath": "Claude CLI path",
     "claudePathDescription": "Path to Claude CLI executable (leave empty for auto-detection)",
     "claudePathPlaceholder": "claude (default)",
     "detectedPath": "Auto-detected",
@@ -236,109 +235,126 @@
     "sourceBundled": "Bundled",
     "sourceFallback": "Fallback",
     "notDetected": "Not detected",
-    "autoClaudePath": "Auto Claude Path",
+    "autoClaudePath": "Auto Claude path",
     "autoClaudePathDescription": "Relative path to auto-claude directory in projects",
     "autoClaudePathPlaceholder": "auto-claude (default)",
     "autoNameTerminals": "Automatically name terminals",
-    "autoNameTerminalsDescription": "Use AI to generate descriptive names for terminal tabs based on their activity"
+    "autoNameTerminalsDescription": "Use AI to generate descriptive names for terminal tabs based on their activity",
+    "detecting": "Detecting..."
   },
   "theme": {
     "title": "Appearance",
     "description": "Customize how Auto Claude looks",
-    "mode": "Mode",
-    "modeDescription": "Choose between light and dark themes",
+    "mode": "Theme",
+    "modeDescription": "Use light or dark mode, or match your system",
     "light": "Light",
     "dark": "Dark",
-    "system": "System",
-    "colorTheme": "Color Theme",
-    "colorThemeDescription": "Choose your preferred color palette"
+    "system": "System"
+  },
+  "fonts": {
+    "interfaceFont": "Interface font",
+    "interfaceFontDescription": "Font for menus, settings and other app text",
+    "interfaceFonts": {
+      "anthropic-sans": "Anthropic Sans",
+      "system": "System",
+      "sans-serif": "Sans serif",
+      "inter": "Inter"
+    },
+    "terminalFont": "Command line font",
+    "terminalFontDescription": "Font for terminals and agent windows",
+    "textSize": "Command line text size",
+    "textSizeDescription": "Size of the text in terminals and agent windows",
+    "textSizes": {
+      "small": "Small",
+      "medium": "Medium",
+      "large": "Large"
+    }
   },
   "devtools": {
-    "title": "Developer Tools",
+    "title": "Developer tools",
     "description": "Configure your preferred IDE, terminal, and terminal font settings",
     "detecting": "Detecting installed tools...",
-    "detectAgain": "Detect Again",
+    "detectAgain": "Detect again",
     "tabTools": "Tools",
-    "tabTerminalFonts": "Terminal Fonts",
+    "tabTerminalFonts": "Terminal fonts",
     "ide": {
       "label": "Preferred IDE",
       "description": "Auto Claude will open worktrees in this editor",
       "placeholder": "Select IDE...",
-      "customPath": "Custom IDE Path",
+      "customPath": "Custom IDE path",
       "customPathPlaceholder": "/path/to/your/ide"
     },
     "terminal": {
-      "label": "Preferred Terminal",
+      "label": "Preferred terminal",
       "description": "Auto Claude will open terminal sessions here",
       "placeholder": "Select terminal...",
-      "customPath": "Custom Terminal Path",
+      "customPath": "Custom terminal path",
       "customPathPlaceholder": "/path/to/your/terminal"
     },
     "cli": {
       "label": "Preferred CLI",
       "description": "CLI tool used for AI-powered terminal sessions",
       "placeholder": "Select CLI...",
-      "customPath": "Custom CLI Path",
+      "customPath": "Custom CLI path",
       "customPathPlaceholder": "/path/to/your/cli"
     },
-    "detected": "Detected",
+    "detected": "Detected on your system",
     "notInstalled": "Not installed",
     "detectedSummary": "Detected on your system:",
     "noToolsDetected": "No additional tools detected (VS Code and system terminal will be used)",
-    "autoNameClaude": {
-      "label": "Auto-name Claude terminals",
-      "description": "Use AI to generate a descriptive name for Claude terminals based on your first message"
-    },
     "yoloMode": {
-      "label": "YOLO Mode",
-      "description": "Start Claude with --dangerously-skip-permissions flag, bypassing all safety prompts. Use with extreme caution.",
-      "warning": "This mode bypasses Claude's permission system. Only enable if you fully trust the code being executed."
+      "label": "YOLO mode",
+      "description": "Start Claude with --dangerously-skip-permissions flag, bypassing all safety prompts. Use with extreme caution",
+      "warning": "This mode bypasses Claude's permission system. Only enable if you fully trust the code being executed"
     }
   },
   "updates": {
-    "title": "Updates",
+    "title": "Auto Claude Desktop",
     "description": "Manage Auto Claude updates",
-    "appUpdateReady": "App Update Ready",
-    "newVersion": "New Version",
+    "appUpdateReady": "Update available",
+    "newVersion": "New version",
     "released": "Released",
     "downloading": "Downloading...",
     "updateDownloaded": "Update downloaded! Click Install to restart and apply the update.",
-    "installAndRestart": "Install and Restart",
-    "downloadUpdate": "Download Update",
+    "installAndRestart": "Install and restart",
+    "downloadUpdate": "Download update",
     "version": "Version",
     "loading": "Loading...",
     "checkingForUpdates": "Checking for updates...",
     "newVersionAvailable": "New version available:",
-    "latestVersion": "You're running the latest version.",
+    "latestVersion": "You're running the latest version",
+    "unpublishedVersion": "Unpublished release: there's no published release to update from yet",
+    "checkFailed": "Couldn't check for updates",
     "viewRelease": "View full release on GitHub",
     "unableToCheck": "Unable to check for updates",
-    "checkForUpdates": "Check for Updates",
-    "autoUpdateProjects": "Auto-Update Projects",
+    "checkForUpdates": "Check for updates",
+    "autoUpdateProjects": "Auto-update projects",
     "autoUpdateProjectsDescription": "Automatically update Auto Claude in projects when a new version is available",
-    "betaUpdates": "Beta Updates",
+    "betaUpdates": "Beta updates",
     "betaUpdatesDescription": "Receive pre-release beta versions with new features (may be less stable)",
-    "stableDowngradeAvailable": "Stable Version Available",
+    "stableDowngradeAvailable": "Stable version available",
     "stableDowngradeDescription": "You're currently on a beta version. Since you've disabled beta updates, you can switch to the latest stable release.",
-    "stableVersion": "Stable Version",
-    "downloadStableVersion": "Download Stable Version",
-    "readOnlyVolumeTitle": "Cannot Install from Disk Image",
+    "stableVersion": "Stable version",
+    "downloadStableVersion": "Download stable version",
+    "readOnlyVolumeTitle": "Cannot install from disk image",
     "readOnlyVolumeDescription": "Auto Claude is running from a read-only disk image (DMG). Please drag the app to your Applications folder and relaunch it from there to install updates.",
     "downloadError": "Failed to download update"
   },
   "notifications": {
     "title": "Notifications",
     "description": "Configure default notification preferences",
-    "onTaskComplete": "On Task Complete",
+    "onTaskComplete": "On task complete",
     "onTaskCompleteDescription": "Notify when a task finishes successfully",
-    "onTaskFailed": "On Task Failed",
+    "onTaskFailed": "On task failed",
     "onTaskFailedDescription": "Notify when a task encounters an error",
-    "onReviewNeeded": "On Review Needed",
+    "onReviewNeeded": "On review needed",
     "onReviewNeededDescription": "Notify when QA requires your review",
     "sound": "Sound",
     "soundDescription": "Play sound with notifications"
   },
   "actions": {
-    "save": "Save Settings"
+    "save": "Save Settings",
+    "close": "Close settings"
   },
   "projectSections": {
     "general": {
@@ -347,42 +363,15 @@
       "useClaudeMd": "Use CLAUDE.md",
       "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context"
     },
+    "queue": {
+      "title": "Queue",
+      "description": "Parallel task limit",
+      "maxParallelTasks": "Maximum parallel tasks",
+      "maxParallelTasksDescription": "Tasks beyond this limit wait in the Queue before moving to In Progress ({{min}}–{{max}})"
+    },
     "claude": {
       "title": "Claude Auth",
       "description": "Claude authentication"
-    },
-    "linear": {
-      "title": "Linear",
-      "description": "Linear integration",
-      "integrationTitle": "Linear Integration",
-      "integrationDescription": "Connect to Linear for issue tracking and task import",
-      "syncDescription": "Sync with Linear for issue tracking"
-    },
-    "github": {
-      "title": "GitHub",
-      "description": "GitHub issues sync",
-      "integrationTitle": "GitHub Integration",
-      "integrationDescription": "Connect to GitHub for issue tracking",
-      "syncDescription": "Sync with GitHub Issues",
-      "defaultBranch": {
-        "label": "Default Branch",
-        "description": "Base branch for creating task worktrees",
-        "autoDetect": "Auto-detect (main/master)",
-        "searchPlaceholder": "Search branches...",
-        "noBranchesFound": "No branches found",
-        "selectedBranchHelp": "All new tasks will branch from {{branch}}"
-      },
-      "pushNewBranches": {
-        "label": "Automatically Push New Branches",
-        "description": "Push new task and worktree branches to GitHub and set upstream tracking automatically"
-      }
-    },
-    "gitlab": {
-      "title": "GitLab",
-      "description": "GitLab issues sync",
-      "integrationTitle": "GitLab Integration",
-      "integrationDescription": "Connect to GitLab for issue tracking",
-      "syncDescription": "Sync with GitLab Issues"
     },
     "memory": {
       "title": "Memory",
@@ -393,30 +382,31 @@
     }
   },
   "agentProfile": {
-    "label": "Agent Profile",
-    "title": "Default Agent Profile",
+    "label": "Agent profile",
+    "title": "Agent profile",
+    "profileRow": "Profile",
     "sectionDescription": "Select a preset configuration for model and thinking level",
     "profilesInfo": "Agent profiles provide preset configurations for Claude model and thinking level. When you create a new task, these settings will be used as defaults. You can always override them in the task creation wizard.",
     "custom": "Custom",
-    "customConfiguration": "Custom Configuration",
+    "customConfiguration": "Custom configuration",
     "customDescription": "Choose model & thinking level",
-    "phaseConfiguration": "Phase Configuration",
+    "phaseConfiguration": "Phase configuration",
     "phaseConfigurationDescription": "Customize model and thinking level for each phase",
-    "clickToCustomize": "Click to customize",
     "model": "Model",
     "thinking": "Thinking",
-    "thinkingLevel": "Thinking Level",
+    "thinkingLevel": "Thinking level",
     "selectModel": "Select model",
     "selectThinkingLevel": "Select thinking level",
     "perPhaseOptimization": "(per-phase optimization)",
     "resetToDefaults": "Reset to defaults",
     "resetToProfileDefaults": "Reset to {{profile}} defaults",
     "customized": "Customized",
+    "customizedDescription": "Phase settings differ from the {{profile}} profile defaults",
     "ollamaNotConfigured": "Select models below",
-    "phaseConfigNote": "These settings will be used as defaults when creating new tasks with this profile. You can override them per-task in the task creation wizard.",
+    "phaseConfigNote": "These settings will be used as defaults when creating new tasks with this profile. You can override them per-task in the task creation wizard",
     "adaptiveThinking": {
       "badge": "Adaptive",
-      "tooltip": "Opus uses adaptive thinking — it dynamically decides how much to think within the budget cap set by the thinking level."
+      "tooltip": "Opus uses adaptive thinking: it dynamically decides how much to think within the budget cap set by the thinking level."
     },
     "reasoning": {
       "adaptive": "Adaptive",
@@ -424,6 +414,12 @@
       "reasoning": "Reasoning",
       "thinking": "Thinking",
       "noThinking": "(No thinking)",
+      "hint": {
+        "adaptive_effort": "Adaptive thinking",
+        "thinking_tokens": "Thinking budget",
+        "reasoning_effort": "Reasoning effort",
+        "thinking_toggle": "Thinking on/off"
+      },
       "toggle": {
         "off": "Off",
         "on": "On"
@@ -438,7 +434,7 @@
     },
     "phases": {
       "spec": {
-        "label": "Spec Creation",
+        "label": "Spec creation",
         "description": "Discovery, requirements, context gathering"
       },
       "planning": {
@@ -450,7 +446,7 @@
         "description": "Actual code implementation"
       },
       "qa": {
-        "label": "QA Review",
+        "label": "QA review",
         "description": "Quality assurance and validation"
       }
     },
@@ -466,19 +462,20 @@
       "equivalentNote": "When a non-Anthropic provider is active, these mappings determine which model is used for each phase."
     },
     "providerTabs": {
+      "label": "Provider",
       "moreProviders": "More",
       "noProviders": "No providers connected. Add accounts in the Accounts settings to configure provider-specific agent settings.",
-      "configureFor": "Configure agent settings for {{provider}}",
-      "crossProvider": "Cross-Provider",
+      "configureFor": "The profile and models below apply to {{provider}}",
+      "crossProvider": "Cross-provider",
       "crossProviderDisabledTooltip": "Connect two or more provider accounts to enable cross-provider capabilities",
       "needsSetup": "Setup required"
     },
     "crossProviderTab": {
-      "title": "Cross-Provider Configuration",
-      "description": "Assign a different provider and model to each pipeline phase for maximum flexibility.",
-      "activateInfo": "Tasks created while this configuration is active will use the cross-provider setup.",
-      "featureModelsTitle": "Feature Models",
-      "featureModelsDescription": "Configure models for non-pipeline features (Insights, Ideation, etc.)"
+      "title": "Cross-provider configuration",
+      "description": "Assign a different provider and model to each pipeline phase for maximum flexibility",
+      "activateInfo": "Tasks created while this configuration is active will use the cross-provider setup",
+      "featureModelsTitle": "Feature models",
+      "featureModelsDescription": "Configure models for non-pipeline features (Insights, MR review, etc.)"
     },
     "customProfile": {
       "name": "Custom (Cross-Provider)",
@@ -486,18 +483,23 @@
       "phaseAssignment": "Assign a provider and model for each phase"
     },
     "ollamaModels": {
-      "title": "Ollama Models",
+      "title": "Ollama models",
       "description": "Manage locally installed models for AI agent tasks",
-      "installed": "Installed Models",
+      "installed": "Installed models",
       "installedCount": "{{count}} model(s)",
       "noModels": "No LLM models installed",
-      "recommended": "Recommended for Coding",
+      "recommended": "Recommended for coding",
       "recommendedDescription": "Popular models optimized for code generation and reasoning",
       "download": "Download",
       "downloading": "Downloading...",
       "refresh": "Refresh",
       "loading": "Loading models...",
-      "ollamaNotAvailable": "Connect Ollama in Account Settings to manage models"
+      "ollamaNotAvailable": "Connect Ollama in Account Settings to manage models",
+      "badgeRecommended": "Recommended",
+      "badgeFast": "Fast",
+      "badgeQuality": "Quality",
+      "installedLabel": "Installed",
+      "startingDownload": "Starting download..."
     }
   },
   "workspace": {
@@ -642,35 +644,37 @@
       }
     },
     "autoSwitching": {
-      "title": "Automatic Account Switching",
-      "description": "Automatically switch between accounts to avoid interruptions. Configure proactive monitoring to switch before hitting limits.",
+      "title": "Automatic account switching",
+      "description": "Automatically switch between accounts to avoid interruptions. Configure proactive monitoring to switch before hitting limits",
       "enableAutoSwitching": "Enable automatic switching",
       "masterSwitch": "Master switch for all auto-swap features",
-      "proactiveMonitoring": "Proactive Monitoring",
+      "proactiveMonitoring": "Proactive monitoring",
       "proactiveDescription": "Check usage regularly and swap before hitting limits",
       "sessionThreshold": "Session usage threshold",
       "sessionThresholdDescription": "Switch when session usage reaches this level (recommended: 95%)",
       "weeklyThreshold": "Weekly usage threshold",
       "weeklyThresholdDescription": "Switch when weekly usage reaches this level (recommended: 99%)",
-      "reactiveRecovery": "Reactive Recovery",
+      "reactiveRecovery": "Reactive recovery",
       "reactiveDescription": "Auto-swap when unexpected rate limit is hit",
       "autoSwitchOnAuthFailure": "Auto-switch on auth failure",
       "autoSwitchOnAuthFailureDescription": "Automatically switch to another authenticated account when authentication fails"
     },
     "priority": {
-      "title": "Account Priority Order",
-      "description": "Drag to reorder. System will switch to the next available account in order.",
+      "title": "Account priority order",
+      "modeLabel": "Priority mode",
+      "dragHandle": "Drag to reorder",
+      "description": "Drag to reorder. System will switch to the next available account in order",
       "tabs": {
         "default": "Default",
-        "crossProvider": "Cross-Provider"
+        "crossProvider": "Cross-provider"
       },
-      "crossProviderDescription": "This priority order is used when cross-provider mode is active. When multiple accounts share a provider, the system selects the best available one based on this order.",
-      "setActive": "Set as active",
+      "crossProviderDescription": "This priority order is used when cross-provider mode is active. When multiple accounts share a provider, the system selects the best available one based on this order",
+      "setActive": "Set active",
       "setActiveTooltip": "Make this the primary account",
       "noAccounts": "No accounts configured. Add accounts above to set priority.",
       "noEmail": "No email",
       "active": "Active",
-      "inUse": "In Use",
+      "inUse": "In use",
       "next": "Next",
       "unlimited": "Unlimited",
       "unavailable": "Unavailable",
@@ -718,48 +722,54 @@
     "card": {
       "oauth": "OAuth",
       "codex": "Codex",
-      "codexSubscription": "Codex Subscription",
+      "codexSubscription": "Codex subscription",
       "claudeCode": "Claude Code",
-      "claudeCodeSubscription": "Claude Code Subscription",
+      "claudeCodeSubscription": "Claude Code subscription",
       "zaiCodingPlan": "Coding Plan",
-      "zaiUsageBased": "Usage-Based",
+      "zaiUsageBased": "Usage-based",
       "zaiCodingPlanSubscription": "Z.AI Coding Plan",
-      "apiKey": "API Key",
+      "apiKey": "API key",
       "active": "Active",
       "setDefault": "Set Active",
       "edit": "Edit account",
+      "useAccount": "Use this account",
+      "inUse": "In use",
       "reauth": "Re-authenticate",
       "delete": "Delete account",
-      "showKey": "Show API key",
-      "hideKey": "Hide API key",
       "oauthAccount": "OAuth account",
       "oauthLinked": "Linked account",
-      "noEndpoint": "No endpoint",
-      "customModels": "{{count}} model(s) configured"
+      "noEndpoint": "No endpoint"
+    },
+    "default": {
+      "title": "Default provider",
+      "label": "Provider",
+      "description": "Agents use this provider's selected account. Other providers are only used when it's unavailable"
     },
     "section": {
       "envDetected": "From env",
       "envCredentialDetected": "Credentials detected from {{envVar}} environment variable",
       "noAccounts": "No accounts configured",
-      "addOAuth": "Add OAuth Account",
-      "addClaudeCode": "Add Claude Code Account",
-      "addCodexSubscription": "Add Codex Subscription",
-      "addCodingPlan": "Add Coding Plan",
-      "addUsageBased": "Add Usage-Based API Key",
-      "addApiKey": "Add API Key",
-      "addEndpoint": "Add Endpoint"
+      "noAccountsShort": "No accounts",
+      "accountsMenu": "{{provider}} accounts",
+      "addOAuth": "Add OAuth account",
+      "addClaudeCode": "Add Claude Code account",
+      "addCodexSubscription": "Add Codex subscription",
+      "addCodingPlan": "Add coding plan",
+      "addUsageBased": "Add usage-based API key",
+      "addApiKey": "Add API key",
+      "addEndpoint": "Add endpoint"
     },
     "dialog": {
-      "addTitle": "Add Account",
-      "editTitle": "Edit Account",
-      "deleteTitle": "Delete Account?",
+      "addTitle": "Add account",
+      "editTitle": "Edit account",
+      "deleteTitle": "Delete account?",
       "deleteDescription": "Are you sure you want to delete this account? This action cannot be undone.",
       "cancel": "Cancel",
       "close": "Close",
       "delete": "Delete",
       "deleting": "Deleting...",
-      "save": "Save Changes",
-      "add": "Add Account",
+      "save": "Save changes",
+      "add": "Add account",
       "optional": "(optional)",
       "oauthDescription": "Connect using OAuth authentication",
       "apiKeyDescription": "Add your API key and configuration",
@@ -779,19 +789,18 @@
       "oauthWaiting": "Waiting for authorization...",
       "oauthSuccess": "Authenticated as {{email}}",
       "oauthError": "Authentication failed: {{error}}",
-      "oauthFallback": "Use Terminal (Fallback)",
       "oauthFallbackDescription": "If browser login doesn't work, use the embedded terminal",
       "oauthNameRequired": "Enter an account name before authenticating",
       "modelsDescription": "Add the model IDs available at this endpoint. These will appear in the model selector.",
       "fields": {
-        "name": "Account Name",
+        "name": "Account name",
         "apiKey": "API Key",
         "baseUrl": "Base URL",
-        "region": "AWS Region",
+        "region": "AWS region",
         "models": "Models"
       },
       "placeholders": {
-        "name": "My Account",
+        "name": "My account",
         "apiKey": "sk-...",
         "baseUrl": "https://...",
         "modelId": "Model ID (e.g. llama-3.1-70b)",
@@ -801,11 +810,10 @@
         "added": "Account added",
         "updated": "Account updated",
         "error": "Failed to save account",
-        "duplicateEmail": "This email is already registered as \"{{existingName}}\"",
-        "createProfileFailed": "Failed to create profile",
-        "authPrepareFailed": "Failed to prepare terminal",
-        "unexpectedError": "Unexpected error"
-      }
+        "duplicateEmail": "This email is already registered as \"{{existingName}}\""
+      },
+      "removeModel": "Remove {{model}}",
+      "addModel": "Add model"
     },
     "toast": {
       "deleted": "Account deleted",
@@ -817,7 +825,7 @@
     "categories": {
       "popular": "Popular",
       "infrastructure": "Infrastructure",
-      "local": "Local & Custom"
+      "local": "Local & custom"
     },
     "ollama": {
       "connection": {
@@ -828,66 +836,43 @@
         "noModels": "No LLM models installed yet",
         "customUrl": "Custom URL",
         "customUrlPlaceholder": "http://localhost:11434",
-        "notInstalled": "Ollama Not Installed",
+        "notInstalled": "Ollama not installed",
         "notInstalledDescription": "Install Ollama to run open-source AI models locally",
-        "notRunning": "Ollama Not Running",
+        "notRunning": "Ollama not running",
         "notRunningDescription": "Start the Ollama service to connect",
         "install": "Install Ollama",
         "retry": "Retry",
-        "learnMore": "Learn More",
+        "learnMore": "Learn more",
         "autoConnected": "Auto-connected as local provider",
         "startCommand": "Run 'ollama serve' in your terminal"
       }
     }
   },
   "debug": {
-    "title": "Debug & Logs",
+    "title": "Debug & logs",
     "description": "Access logs and debug information for troubleshooting",
-    "errorReporting": {
-      "label": "Anonymous Error Reporting",
-      "description": "Send crash reports to help improve Auto Claude. No personal data or code is collected."
-    },
-    "openLogsFolder": "Open Logs Folder",
-    "copyDebugInfo": "Copy Debug Info",
+    "openLogsFolder": "Open logs folder",
+    "copyDebugInfo": "Copy debug info",
     "copied": "Copied!",
-    "loadInfo": "Load Debug Info",
-    "systemInfo": "System Information",
-    "logsLocation": "Logs Location",
-    "recentErrors": "Recent Errors",
+    "loadInfo": "Load debug info",
+    "systemInfo": "System information",
+    "logsLocation": "Logs location",
+    "recentErrors": "Recent errors",
     "noRecentErrors": "No recent errors",
-    "helpTitle": "Reporting Issues",
-    "helpText": "When reporting bugs, click \"Copy Debug Info\" to get system information and recent errors that help us diagnose the issue."
+    "helpTitle": "Reporting issues"
   },
   "projectSettings": {
     "noProjectSelected": {
-      "title": "No Project Selected",
-      "description": "Select a project from the sidebar to configure its settings."
+      "title": "No project selected",
+      "description": "Select a project from the sidebar to configure its settings"
     }
   },
   "mcp": {
-    "title": "MCP Server Overview",
-    "titleWithProject": "MCP Server Overview for {{projectName}}",
-    "description": "Configure which MCP servers are available for agents in this project",
-    "descriptionNoProject": "Select a project to configure MCP servers",
     "serversEnabled": "{{count}} servers enabled",
-    "configuration": "MCP Server Configuration",
-    "configurationHint": "Disabled servers reduce context usage and startup time",
-    "noProjectSelected": "No Project Selected",
-    "noProjectSelectedDescription": "Select a project from the dropdown to view and configure MCP servers.",
-    "projectNotInitialized": "Project Not Initialized",
-    "projectNotInitializedDescription": "Initialize Auto Claude for this project to configure MCP servers.",
-    "browserAutomation": "Browser Automation (QA agents only)",
+    "defaultsHint": "Defaults for new tasks; each task can change them",
+    "qaAgentsOnly": "QA agents only",
     "alwaysEnabled": "always enabled",
-    "addServer": "Add Server",
-    "addMcpTo": "Add MCP Server to {{agent}}",
-    "addMcpDescription": "Select an MCP server to add to this agent",
-    "allMcpsAdded": "All available MCP servers are already added",
-    "added": "added",
-    "removed": "removed",
-    "remove": "Remove",
-    "restore": "Restore",
-    "noMcpServers": "No MCP servers",
-    "cannotRemove": "Cannot remove (required)",
+    "addServer": "Add server",
     "servers": {
       "context7": {
         "name": "Context7",
@@ -898,11 +883,6 @@
         "description": "Knowledge graph for cross-session context",
         "notConfigured": "Requires memory configuration (see Memory settings)"
       },
-      "linear": {
-        "name": "Linear",
-        "description": "Project management integration",
-        "notConfigured": "Requires Linear integration (see Linear settings)"
-      },
       "electron": {
         "name": "Electron",
         "description": "Desktop app automation via Chrome DevTools"
@@ -912,15 +892,20 @@
         "description": "Web browser automation for testing"
       },
       "autoClaude": {
-        "name": "Auto Claude Tools",
+        "name": "Auto Claude tools",
         "description": "Build progress tracking"
+      },
+      "memory": {
+        "name": "Memory",
+        "description": "Knowledge from previous sessions",
+        "notConfigured": "Not configured (enable memory in the project's Memory settings)"
       }
     },
-    "customServers": "Custom Servers",
-    "addCustomServer": "Add Custom Server",
-    "editCustomServer": "Edit Custom Server",
+    "customServers": "Custom servers",
+    "addCustomServer": "Add custom server",
+    "editCustomServer": "Edit custom server",
     "customServerDescription": "Add a command-based or HTTP-based MCP server",
-    "serverType": "Server Type",
+    "serverType": "Server type",
     "typeCommand": "Command (npx/npm)",
     "typeHttp": "HTTP",
     "serverName": "Name",
@@ -932,25 +917,21 @@
     "argsHint": "Space-separated arguments",
     "url": "URL",
     "headers": "Headers",
-    "headerName": "Header Name",
-    "headerValue": "Header Value",
-    "noCustomServers": "No custom servers configured. Add one to use with your agents.",
+    "headerName": "Header name",
+    "headerValue": "Header value",
+    "noCustomServers": "No custom servers configured. Add one to use with your agents",
     "errorNameRequired": "Server name is required",
     "errorIdExists": "A server with this ID already exists",
     "errorCommandRequired": "Command is required for command-based servers",
     "errorUrlRequired": "URL is required for HTTP-based servers",
     "testConnection": "Test",
     "testing": "Testing...",
-    "authToken": "Authentication Token",
+    "authToken": "Authentication token",
     "authTokenPlaceholder": "Paste your API token or PAT here",
     "authTokenHint": "Used as Bearer token in the Authorization header",
-    "advancedHeaders": "Additional Headers",
+    "advancedHeaders": "Additional headers",
     "status": {
-      "healthy": "Server is responding",
-      "unhealthy": "Server is not responding",
-      "needsAuth": "Authentication required",
-      "checking": "Checking...",
-      "unknown": "Status unknown"
+      "needsAuth": "Authentication required"
     },
     "hints": {
       "github": "This looks like a GitHub MCP server. You'll need a Personal Access Token with appropriate scopes.",
@@ -961,7 +942,9 @@
       "createAnthropicKey": "Create Anthropic API Key",
       "openai": "This looks like an OpenAI API. You'll need an API key.",
       "createOpenaiKey": "Create OpenAI API Key"
-    }
+    },
+    "serverIdPreview": "ID: {{id}}",
+    "removeHeader": "Remove header {{name}}"
   },
   "terminalFonts": {
     "title": "Terminal Fonts",
@@ -969,117 +952,18 @@
     "configActions": "Configuration:",
     "export": "Export JSON",
     "import": "Import JSON",
-    "copy": "Copy to Clipboard",
-    "fontConfig": {
-      "title": "Font Configuration",
-      "description": "Customize font family, size, weight, line height, and letter spacing",
-      "fontFamily": "Font Family",
-      "fontFamilyDescription": "Primary monospace font for terminal text",
-      "selectFont": "Select a font...",
-      "searchFont": "Search fonts...",
-      "noFonts": "No fonts found",
-      "fontChain": "Font chain:",
-      "fontSize": "Font Size",
-      "fontSizeDescription": "Base font size in pixels (10-24px)",
-      "decreaseFontSize": "Decrease font size by {{step}}px",
-      "increaseFontSize": "Increase font size by {{step}}px",
-      "pixels": "pixels",
-      "fontWeight": "Font Weight",
-      "fontWeightDescription": "Font weight from 100 (thin) to 900 (black), in steps of 100",
-      "commonWeights": "Common: 400 (normal), 600 (semi-bold), 700 (bold)",
-      "decreaseFontWeight": "Decrease font weight by {{step}}",
-      "increaseFontWeight": "Increase font weight by {{step}}",
-      "lineHeight": "Line Height",
-      "lineHeightDescription": "Line height as a multiple of font size (1.0-2.0)",
-      "letterSpacing": "Letter Spacing",
-      "letterSpacingDescription": "Horizontal spacing between characters (-2 to 5px)"
-    },
+    "copy": "Copy to clipboard",
     "cursorConfig": {
-      "title": "Cursor Configuration",
-      "description": "Customize cursor style, blinking behavior, and accent color",
-      "cursorStyle": "Cursor Style",
+      "cursorStyle": "Cursor style",
       "cursorStyleDescription": "Choose the appearance of the terminal cursor",
-      "selectStyle": "Select cursor style...",
-      "currentStyle": "Current:",
       "styleBlock": "Block",
-      "styleBlockDescription": "Full block cursor",
       "styleUnderline": "Underline",
-      "styleUnderlineDescription": "Underline cursor",
-      "styleBar": "Bar",
-      "styleBarDescription": "Vertical bar cursor",
-      "cursorBlink": "Cursor Blink",
-      "cursorBlinkDescription": "Enable or disable cursor blinking animation",
-      "blinkStatus": "Status:",
-      "enabled": "Enabled",
-      "disabled": "Disabled",
-      "cursorAccentColor": "Cursor Accent Color",
-      "cursorAccentColorDescription": "Choose the color of the terminal cursor",
-      "cursorColorLabel": "Cursor accent color",
-      "cursorColorDescription": "Current color: {{color}}",
-      "pickColor": "Click to pick a color",
-      "resetColor": "Reset to black",
-      "reset": "Reset",
-      "preview": "Preview:"
+      "styleBar": "Bar"
     },
     "performanceConfig": {
-      "title": "Performance Settings",
-      "description": "Adjust scrollback limit and other performance-related settings",
-      "presets": "Quick Presets",
-      "presetsDescription": "Common scrollback limits for different use cases",
-      "scrollback": "Scrollback Limit",
+      "scrollback": "Scrollback limit",
       "scrollbackDescription": "Maximum number of lines to keep in terminal history",
-      "scrollbackPresets": "Quick Presets",
-      "presetMinimal": "Minimal",
-      "presetMinimalDescription": "Minimal history (1K lines)",
-      "presetStandard": "Standard",
-      "presetStandardDescription": "Standard history (10K lines)",
-      "presetExtended": "Extended",
-      "presetExtendedDescription": "Extended history (50K lines)",
-      "presetMaximum": "Maximum",
-      "presetMaximumDescription": "Maximum history (100K lines)",
-      "decreaseScrollback": "Decrease scrollback by {{step}}",
-      "increaseScrollback": "Increase scrollback by {{step}}",
-      "lines": "lines",
-      "kValue": "{{value}}K",
-      "scrollbackValue": "{{value}} lines"
-    },
-    "presets": {
-      "title": "Quick Presets",
-      "description": "Apply pre-configured terminal font settings or save your own",
-      "builtin": "Built-in Presets",
-      "builtinDescription": "Click to apply a pre-configured preset",
-      "vscode": "Consolas 14px, block cursor",
-      "vscodeName": "VS Code",
-      "intellij": "JetBrains Mono 13px, block cursor",
-      "intellijName": "IntelliJ IDEA",
-      "macos": "SF Mono 13px, block cursor",
-      "macosName": "macOS Terminal",
-      "ubuntu": "Ubuntu Mono 13px, block cursor",
-      "ubuntuName": "Ubuntu Terminal",
-      "reset": "Reset to Defaults",
-      "resetDescription": "Restore the default settings for your operating system",
-      "resetToOS": "Reset to {{os}} defaults",
-      "resetButton": "Reset to OS Default",
-      "custom": "Custom Presets",
-      "customDescription": "Save your current configuration as a custom preset",
-      "presetNamePlaceholder": "Preset name...",
-      "savePreset": "Save current configuration as a preset",
-      "applyPreset": "Apply this preset",
-      "deletePreset": "Delete this preset",
-      "noCustomPresets": "No custom presets yet. Save your current configuration to get started.",
-      "duplicateName": "A preset with this name already exists",
-      "saved": "Preset \"{{name}}\" saved",
-      "deleted": "Preset \"{{name}}\" deleted",
-      "unknownFont": "Unknown",
-      "applyFailed": "Failed to apply preset \"{{name}}\"",
-      "presetNameLabel": "Preset name",
-      "summary": "{{font}}, {{size}}px, {{cursor}} cursor"
-    },
-    "preview": {
-      "title": "Live Preview",
-      "description": "Preview your terminal settings in real-time (updates within 300ms)",
-      "ariaLabel": "Terminal font preview",
-      "infoText": "This preview updates within 300ms of any change to show how your settings will look in actual terminals."
+      "kValue": "{{value}}K"
     },
     "importExport": {
       "exportSuccess": "Settings exported successfully",
@@ -1090,7 +974,10 @@
       "copySuccess": "Settings copied to clipboard",
       "copyFailed": "Failed to copy to clipboard",
       "fileTooLarge": "Import file too large (max 10KB)",
-      "readError": "Failed to read file"
+      "readError": "Failed to read file",
+      "title": "Configuration",
+      "label": "Import and export",
+      "description": "Save, load or copy your terminal settings as JSON"
     },
     "slider": {
       "decrease": "Decrease {{label}} by {{step}}",
@@ -1173,6 +1060,78 @@
         "title": "Failed to save provider settings",
         "description": "An error occurred while saving your provider configuration."
       }
+    }
+  },
+  "projectPages": {
+    "initializeFirst": "Initialize Auto-Build in the project's General settings to configure this page.",
+    "general": {
+      "autoBuildTitle": "Auto-Build",
+      "notInitialized": "Not initialized",
+      "notInitializedDescription": "Initialize Auto-Build to enable task creation and agent workflows",
+      "initialize": "Initialize",
+      "initializing": "Initializing...",
+      "branches": {
+        "title": "Branches",
+        "defaultBranch": "Default branch",
+        "defaultBranchDescription": "Base branch for task and terminal worktrees",
+        "selectedBranchHelp": "All new tasks will branch from {{branch}}",
+        "autoDetect": "Auto-detect (main/master)",
+        "searchPlaceholder": "Search branches...",
+        "noBranchesFound": "No branches found",
+        "refresh": "Refresh branches",
+        "loadFailed": "Failed to load branches",
+        "pushNewBranches": "Push new branches automatically",
+        "pushNewBranchesDescription": "Push new task and worktree branches to origin and set upstream tracking"
+      }
+    },
+    "memory": {
+      "enable": "Enable memory",
+      "enableDescription": "Persistent cross-session memory using LadybugDB (embedded database)",
+      "fileBasedDescription": "Session insights are stored locally in JSON files. Enable for persistent cross-session context with semantic search",
+      "embeddingsTitle": "Embeddings",
+      "provider": "Embedding provider",
+      "providerDescription": "Used for semantic search; keyword search works without it",
+      "providerPlaceholder": "Select embedding provider",
+      "providers": {
+        "ollama": "Ollama (local, free)"
+      },
+      "apiKey": "{{name}} API key",
+      "openaiKey": "OpenAI API key",
+      "openaiKeyOverride": "OpenAI API key (override)",
+      "usingGlobalKey": "Using the key from app settings. Enter a project key to override it",
+      "requiredFor": "Required for {{name}} embeddings",
+      "getKey": "Get a key from {{name}}",
+      "overridePlaceholder": "Enter to override global key...",
+      "showKey": "Show {{name}} API key",
+      "hideKey": "Hide {{name}} API key",
+      "embeddingModel": "Embedding model",
+      "embeddingModelOptional": "Embedding model (optional)",
+      "baseUrl": "Base URL",
+      "azureKeyPlaceholder": "Azure API key",
+      "azureDeployment": "Embedding deployment name",
+      "storageTitle": "Storage",
+      "databaseName": "Database name",
+      "databaseNameDescription": "Stored in ~/.auto-claude/memories/",
+      "databasePath": "Database path",
+      "databasePathDescription": "Optional custom storage location. Default: ~/.auto-claude/memories/"
+    },
+    "context": {
+      "index": "Project index",
+      "indexDescription": "AI-discovered knowledge about your codebase",
+      "noIndex": "No index yet. Analyze the project to create one.",
+      "analyze": "Analyze project",
+      "refresh": "Refresh",
+      "analyzing": "Analyzing project...",
+      "loadFailed": "Failed to load project index",
+      "score": "Score {{score}}",
+      "filter": "Filter",
+      "loadingMemories": "Loading memories..."
+    },
+    "mcp": {
+      "serversTitle": "MCP servers",
+      "add": "Add",
+      "edit": "Edit",
+      "delete": "Delete"
     }
   }
 }

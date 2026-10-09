@@ -8,7 +8,7 @@ import { registerOutputCallback, unregisterOutputCallback, useTerminalStore } fr
 import { useTerminalFontSettingsStore } from '../../stores/terminal-font-settings-store';
 import { isWindows as checkIsWindows, isLinux as checkIsLinux } from '../../lib/os-detection';
 import { debounce } from '../../lib/debounce';
-import { DEFAULT_TERMINAL_THEME } from '../../lib/terminal-theme';
+import { getTerminalTheme } from '../../lib/terminal-theme';
 import { debugLog, debugError } from '../../../shared/utils/debug-logger';
 import { useSettingsStore } from '../../stores/settings-store';
 import type { WebGLContextManagerType } from '../../lib/webgl-context-manager';
@@ -100,7 +100,7 @@ export function useXterm({ terminalId, onCommandEnter, onResize, onDimensionsRea
       lineHeight: fontSettings.lineHeight,
       letterSpacing: fontSettings.letterSpacing,
       theme: {
-        ...DEFAULT_TERMINAL_THEME,
+        ...getTerminalTheme(),
         cursorAccent: fontSettings.cursorAccentColor,
       },
       allowProposedApi: true,
@@ -203,22 +203,6 @@ export function useXterm({ terminalId, onCommandEnter, onResize, onDimensionsRea
       const isDeleteLine = event.key === 'Backspace' && event.type === 'keydown' && isMod;
       if (isDeleteLine) {
         xterm.input('\x15'); // Ctrl+U
-        return false;
-      }
-
-      // Let Cmd/Ctrl + number keys pass through for project tab switching
-      if (isMod && event.key >= '1' && event.key <= '9') {
-        return false; // Don't handle in xterm, let it bubble up
-      }
-
-      // Let Cmd/Ctrl + Tab pass through for tab navigation
-      if (isMod && event.key === 'Tab') {
-        return false;
-      }
-
-      // Let Cmd/Ctrl + T pass through for new terminal shortcut
-      // Let Cmd/Ctrl + W pass through for close terminal shortcut
-      if (isMod && (event.key === 't' || event.key === 'T' || event.key === 'w' || event.key === 'W')) {
         return false;
       }
 
@@ -360,6 +344,17 @@ export function useXterm({ terminalId, onCommandEnter, onResize, onDimensionsRea
       // Cleanup handled by parent component
     };
   }, [terminalId, onCommandEnter, onResize, onDimensionsReady, fontSettings.cursorAccentColor, fontSettings.cursorBlink, fontSettings.cursorStyle, fontSettings.fontFamily.join, fontSettings.fontSize, fontSettings.fontWeight, fontSettings.letterSpacing, fontSettings.lineHeight, fontSettings.scrollback]);
+
+  // Follow the app's light/dark mode: swap the color theme when the `dark` class on <html> changes
+  useEffect(() => {
+    const xterm = xtermRef.current;
+    if (!xterm) return;
+    const observer = new MutationObserver(() => {
+      xterm.options.theme = { ...getTerminalTheme(), cursorAccent: xterm.options.theme?.cursorAccent };
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, [terminalId]);
 
   // Subscribe to font settings changes and update terminal reactively
   // This effect runs after xterm is created and re-runs when terminalId changes,

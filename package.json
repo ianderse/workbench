@@ -1,6 +1,6 @@
 {
   "name": "auto-claude",
-  "version": "2.8.0-beta.6",
+  "version": "1.0.0-beta",
   "author": {
     "name": "Artyom Vancyan",
     "email": "44609997+artyomvancyan@users.noreply.github.com"
@@ -72,7 +72,6 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-toast": "^1.2.15",
     "@radix-ui/react-tooltip": "^1.2.8",
-    "@sentry/electron": "^7.10.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-virtual": "^3.13.22",
     "@tavily/core": "^0.7.2",
@@ -175,10 +174,6 @@
         "to": "prompts"
       },
       {
-        "from": "resources/header-icons",
-        "to": "header-icons"
-      },
-      {
         "from": "node_modules/@libsql",
         "to": "node_modules/@libsql"
       },
@@ -193,6 +188,13 @@
       {
         "from": "node_modules/detect-libc",
         "to": "node_modules/detect-libc"
+      },
+      {
+        "from": "resources/tray",
+        "to": "tray",
+        "filter": [
+          "*.png"
+        ]
       }
     ],
     "mac": {
@@ -218,7 +220,13 @@
       "target": [
         "deb"
       ],
-      "category": "Development"
+      "category": "Development",
+      "desktop": {
+        "entry": {
+          "Name": "Auto Claude",
+          "StartupWMClass": "Auto Claude"
+        }
+      }
     }
   }
 }

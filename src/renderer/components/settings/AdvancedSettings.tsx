@@ -2,12 +2,9 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshCw,
-  CheckCircle2,
   Download,
-  Sparkles,
   ArrowDownToLine,
   X,
-  AlertTriangle,
   AlertCircle
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -15,13 +12,15 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { Button } from '../ui/button';
-import { Label } from '../ui/label';
 import { Switch } from '../ui/switch';
 import { Progress } from '../ui/progress';
 import { SettingsSection } from './SettingsSection';
+import { SettingsRow, SettingsRows } from './SettingsRow';
+import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import type {
   AppSettings,
   AppUpdateAvailableEvent,
+  AppUpdateCheckStatus,
   AppUpdateProgress,
   AppUpdateInfo,
   NotificationSettings
@@ -79,6 +78,8 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
   // Electron app update state
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateAvailableEvent | null>(null);
   const [isCheckingAppUpdate, setIsCheckingAppUpdate] = useState(false);
+  // Outcome of the last check; "latest" is only claimed when the check confirmed it
+  const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateCheckStatus | null>(null);
   const [isDownloadingAppUpdate, setIsDownloadingAppUpdate] = useState(false);
   const [appDownloadProgress, setAppDownloadProgress] = useState<AppUpdateProgress | null>(null);
   const [isAppUpdateDownloaded, setIsAppUpdateDownloaded] = useState(false);
@@ -89,7 +90,17 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
   // General update error state
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
 
-  // Check for updates on mount, including any already-downloaded updates
+  // Last update check result, per app version (a newer install starts fresh)
+  const appUpdateCacheKey = `app-update:${version}`;
+  const rememberAppUpdateCheck = (result: Awaited<ReturnType<typeof window.electronAPI.checkAppUpdate>>) => {
+    const update = result.success ? result.data?.update ?? null : null;
+    const status: AppUpdateCheckStatus = result.success && result.data ? result.data.status : 'error';
+    setAppUpdateInfo(update);
+    setAppUpdateStatus(status);
+    if (status !== 'error') writeRefreshCache(appUpdateCacheKey, { status, update });
+  };
+
+  // On open: any already-downloaded update, otherwise the last check's result
   useEffect(() => {
     if (section !== 'updates') {
       return;
@@ -118,21 +129,23 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
         if (isCancelled) return;
       }
 
-      // Only check for available updates if no update is already downloaded
-      // (electron-updater reports no available update when one is already downloaded,
-      // which would clear our appUpdateInfo and lose the version metadata)
-      // Inline the update check with cancellation support
+      // Show the last check's result for this version; only check on the button (or when this
+      // version was never checked). An already-downloaded update (above) takes precedence:
+      // electron-updater reports no available update then, which would lose the version metadata
+      const cached = readRefreshCache<{ status: AppUpdateCheckStatus; update: AppUpdateAvailableEvent | null }>(appUpdateCacheKey);
+      if (cached) {
+        setAppUpdateInfo(cached.update);
+        setAppUpdateStatus(cached.status);
+        return;
+      }
       setIsCheckingAppUpdate(true);
       try {
         const result = await window.electronAPI.checkAppUpdate();
         if (isCancelled) return;
-        if (result.success && result.data) {
-          setAppUpdateInfo(result.data);
-        } else {
-          setAppUpdateInfo(null);
-        }
+        rememberAppUpdateCheck(result);
       } catch (err) {
         console.error('Failed to check for app updates:', err);
+        if (!isCancelled) setAppUpdateStatus('error');
       } finally {
         if (!isCancelled) {
           setIsCheckingAppUpdate(false);
@@ -201,14 +214,10 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
     setIsCheckingAppUpdate(true);
     try {
       const result = await window.electronAPI.checkAppUpdate();
-      if (result.success && result.data) {
-        setAppUpdateInfo(result.data);
-      } else {
-        // No update available
-        setAppUpdateInfo(null);
-      }
+      rememberAppUpdateCheck(result);
     } catch (err) {
       console.error('Failed to check for app updates:', err);
+      setAppUpdateStatus('error');
     } finally {
       setIsCheckingAppUpdate(false);
     }
@@ -258,183 +267,221 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
   };
 
   if (section === 'updates') {
+    const renderDownloadProgress = () =>
+      isDownloadingAppUpdate && appDownloadProgress ? (
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">{t('updates.downloading')}</span>
+            <span className="text-foreground">{Math.round(appDownloadProgress.percent)}%</span>
+          </div>
+          <Progress value={appDownloadProgress.percent} className="h-1.5" />
+          <p className="text-right text-xs text-muted-foreground">
+            {(appDownloadProgress.transferred / 1024 / 1024).toFixed(2)} MB / {(appDownloadProgress.total / 1024 / 1024).toFixed(2)} MB
+          </p>
+        </div>
+      ) : null;
+
     return (
       <SettingsSection
         title={t('updates.title')}
         description={t('updates.description')}
       >
-        <div className="space-y-6">
+        <SettingsRows>
           {/* Current Version Display */}
-          <div className="rounded-lg border border-border bg-muted/50 p-5 space-y-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">{t('updates.version')}</p>
-                <p className="text-base font-medium text-foreground">
-                  {version || t('updates.loading')}
-                </p>
-              </div>
-              {isCheckingAppUpdate ? (
-                <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground" />
-              ) : appUpdateInfo ? (
-                <Download className="h-6 w-6 text-info" />
-              ) : (
-                <CheckCircle2 className="h-6 w-6 text-success" />
-              )}
-            </div>
+          <SettingsRow
+            label={t('updates.version')}
+            description={
+              <span className="flex items-center gap-1.5">
+                <span className="font-mono">{version || t('updates.loading')}</span>
+                {appUpdateInfo ? (
+                  <span>· {t('updates.newVersionAvailable')} {appUpdateInfo.version}</span>
+                ) : (
+                  !isCheckingAppUpdate &&
+                  appUpdateStatus && (
+                    <span>
+                      ·{' '}
+                      {appUpdateStatus === 'up-to-date'
+                        ? t('updates.latestVersion')
+                        : appUpdateStatus === 'unpublished'
+                          ? t('updates.unpublishedVersion')
+                          : t('updates.checkFailed')}
+                    </span>
+                  )
+                )}
+              </span>
+            }
+            footer={
+              (appUpdateInfo || isAppUpdateDownloaded) ? (
+                /* Electron App Update - shows when an update is available */
+                <div className="space-y-4 rounded-xl border border-border p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm text-foreground">
+                        {t('updates.appUpdateReady')}: <span className="font-mono">{appUpdateInfo?.version || 'Unknown'}</span>
+                      </p>
+                      {appUpdateInfo?.releaseDate && (
+                        <p className="mt-0.5 text-sm text-(--nav-label-color)">
+                          {t('updates.released')} {new Date(appUpdateInfo.releaseDate).toLocaleDateString()}
+                        </p>
+                      )}
+                    </div>
+                    {isAppUpdateDownloaded ? (
+                      <Button size="sm" onClick={handleInstallAppUpdate} disabled={showReadOnlyWarning}>
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
+                        {t('updates.installAndRestart')}
+                      </Button>
+                    ) : (
+                      <Button size="sm" onClick={handleDownloadAppUpdate} disabled={isDownloadingAppUpdate}>
+                        {isDownloadingAppUpdate ? (
+                          <>
+                            <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+                            {t('updates.downloading')}
+                          </>
+                        ) : (
+                          <>
+                            <Download className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
+                            {t('updates.downloadUpdate')}
+                          </>
+                        )}
+                      </Button>
+                    )}
+                  </div>
 
-            {/* Update status */}
-            {!appUpdateInfo && !isCheckingAppUpdate && (
-              <p className="text-sm text-muted-foreground">
-                {t('updates.latestVersion')}
-              </p>
-            )}
+                  {/* Release Notes */}
+                  {appUpdateInfo?.releaseNotes && (
+                    <div className="max-h-48 overflow-y-auto rounded-lg bg-segment-track px-4 py-3">
+                      <ReleaseNotesRenderer content={appUpdateInfo.releaseNotes} />
+                    </div>
+                  )}
 
-            <div className="pt-2">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={checkForAppUpdates}
-                disabled={isCheckingAppUpdate}
-              >
-                <RefreshCw className={`mr-2 h-4 w-4 ${isCheckingAppUpdate ? 'animate-spin' : ''}`} />
-                {t('updates.checkForUpdates')}
-              </Button>
-            </div>
-          </div>
+                  {renderDownloadProgress()}
 
-          {/* Electron App Update Section - shows when update available */}
-          {(appUpdateInfo || isAppUpdateDownloaded) && (
-            <div className="rounded-lg border-2 border-info/50 bg-info/5 p-5 space-y-4">
-              <div className="flex items-center gap-2 text-info">
-                <Sparkles className="h-5 w-5" />
-                <h3 className="font-semibold">{t('updates.appUpdateReady')}</h3>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
-                    {t('updates.newVersion')}
-                  </p>
-                  <p className="text-base font-medium text-foreground">
-                    {appUpdateInfo?.version || 'Unknown'}
-                  </p>
-                  {appUpdateInfo?.releaseDate && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {t('updates.released')} {new Date(appUpdateInfo.releaseDate).toLocaleDateString()}
+                  {/* Update Error */}
+                  {appUpdateError && (
+                    <p className="flex items-center gap-1.5 text-sm text-destructive">
+                      <AlertCircle className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                      {appUpdateError}
                     </p>
                   )}
+
+                  {/* Downloaded Success */}
+                  {isAppUpdateDownloaded && !showReadOnlyWarning && (
+                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                      {t('updates.updateDownloaded')}
+                    </p>
+                  )}
+
+                  {/* Read-Only Volume Warning */}
+                  {showReadOnlyWarning && (
+                    <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
+                      <p className="text-foreground">{t('updates.readOnlyVolumeTitle')}</p>
+                      <p className="mt-0.5 text-muted-foreground">{t('updates.readOnlyVolumeDescription')}</p>
+                    </div>
+                  )}
                 </div>
-                {isAppUpdateDownloaded ? (
-                  <CheckCircle2 className="h-6 w-6 text-success" />
-                ) : isDownloadingAppUpdate ? (
-                  <RefreshCw className="h-6 w-6 animate-spin text-info" />
-                ) : (
-                  <Download className="h-6 w-6 text-info" />
-                )}
-              </div>
+              ) : undefined
+            }
+          >
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={checkForAppUpdates}
+              disabled={isCheckingAppUpdate}
+            >
+              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isCheckingAppUpdate ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+              {t('updates.checkForUpdates')}
+            </Button>
+          </SettingsRow>
 
-              {/* Release Notes */}
-              {appUpdateInfo?.releaseNotes && (
-                <div className="bg-background rounded-lg p-4 max-h-48 overflow-y-auto border border-border/50">
-                  <ReleaseNotesRenderer content={appUpdateInfo.releaseNotes} />
-                </div>
-              )}
-
-              {/* Download Progress */}
-              {isDownloadingAppUpdate && appDownloadProgress && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{t('updates.downloading')}</span>
-                    <span className="text-foreground font-medium">
-                      {Math.round(appDownloadProgress.percent)}%
-                    </span>
-                  </div>
-                  <Progress value={appDownloadProgress.percent} className="h-2" />
-                  <p className="text-xs text-muted-foreground text-right">
-                    {(appDownloadProgress.transferred / 1024 / 1024).toFixed(2)} MB / {(appDownloadProgress.total / 1024 / 1024).toFixed(2)} MB
-                  </p>
-                </div>
-              )}
-
-              {/* Update Error */}
-              {appUpdateError && (
-                <div className="flex items-center gap-3 text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg p-3">
-                  <AlertCircle className="h-5 w-5 shrink-0" />
-                  <span>{appUpdateError}</span>
-                </div>
-              )}
-
-              {/* Downloaded Success */}
-              {isAppUpdateDownloaded && !showReadOnlyWarning && (
-                <div className="flex items-center gap-3 text-sm text-success bg-success/10 border border-success/30 rounded-lg p-3">
-                  <CheckCircle2 className="h-5 w-5 shrink-0" />
-                  <span>{t('updates.updateDownloaded')}</span>
-                </div>
-              )}
-
-              {/* Read-Only Volume Warning */}
-              {showReadOnlyWarning && (
-                <div className="flex items-start gap-3 text-sm text-warning bg-warning/10 border border-warning/30 rounded-lg p-3">
-                  <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="font-medium text-warning">{t('updates.readOnlyVolumeTitle')}</p>
-                    <p className="text-muted-foreground">{t('updates.readOnlyVolumeDescription')}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="flex gap-3">
-                {isAppUpdateDownloaded ? (
-                  <Button onClick={handleInstallAppUpdate} disabled={showReadOnlyWarning}>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    {t('updates.installAndRestart')}
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={handleDownloadAppUpdate}
-                    disabled={isDownloadingAppUpdate}
-                  >
-                    {isDownloadingAppUpdate ? (
-                      <>
-                        <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        {t('updates.downloading')}
-                      </>
-                    ) : (
-                      <>
-                        <Download className="mr-2 h-4 w-4" />
-                        {t('updates.downloadUpdate')}
-                      </>
-                    )}
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between p-4 rounded-lg border border-border">
-            <div className="space-y-1">
-              <Label className="font-medium text-foreground">{t('updates.autoUpdateProjects')}</Label>
-              <p className="text-sm text-muted-foreground">
-                {t('updates.autoUpdateProjectsDescription')}
-              </p>
-            </div>
+          <SettingsRow
+            label={t('updates.autoUpdateProjects')}
+            description={t('updates.autoUpdateProjectsDescription')}
+            htmlFor="autoUpdateAutoBuild"
+          >
             <Switch
+              id="autoUpdateAutoBuild"
               checked={settings.autoUpdateAutoBuild}
               onCheckedChange={(checked) =>
                 onSettingsChange({ ...settings, autoUpdateAutoBuild: checked })
               }
             />
-          </div>
+          </SettingsRow>
 
-          <div className="flex items-center justify-between p-4 rounded-lg border border-border">
-            <div className="space-y-1">
-              <Label className="font-medium text-foreground">{t('updates.betaUpdates')}</Label>
-              <p className="text-sm text-muted-foreground">
-                {t('updates.betaUpdatesDescription')}
-              </p>
-            </div>
+          <SettingsRow
+            label={t('updates.betaUpdates')}
+            description={t('updates.betaUpdatesDescription')}
+            htmlFor="betaUpdates"
+            footer={
+              /* Stable Downgrade - shown when user turns off beta while on prerelease */
+              stableDowngradeInfo && !appUpdateInfo ? (
+                <div className="space-y-4 rounded-xl border border-border p-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="text-sm text-foreground">{t('updates.stableDowngradeAvailable')}</p>
+                      <p className="mt-0.5 text-sm text-(--nav-label-color)">
+                        {t('updates.stableDowngradeDescription')}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 shrink-0 text-muted-foreground"
+                      onClick={dismissStableDowngrade}
+                      aria-label={t('common:accessibility.dismissAriaLabel')}
+                    >
+                      <X className="h-4 w-4" strokeWidth={1.75} />
+                    </Button>
+                  </div>
+
+                  <div className="text-sm">
+                    <span className="text-(--nav-label-color)">{t('updates.stableVersion')}: </span>
+                    <span className="font-mono text-foreground">{stableDowngradeInfo.version}</span>
+                    {stableDowngradeInfo.releaseDate && (
+                      <span className="text-(--nav-label-color)">
+                        {' · '}{t('updates.released')} {new Date(stableDowngradeInfo.releaseDate).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Release Notes */}
+                  {stableDowngradeInfo.releaseNotes && (
+                    <div className="max-h-48 overflow-y-auto rounded-lg bg-segment-track px-4 py-3">
+                      <ReleaseNotesRenderer content={stableDowngradeInfo.releaseNotes} />
+                    </div>
+                  )}
+
+                  {renderDownloadProgress()}
+
+                  {/* Action Buttons */}
+                  <div className="flex gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={handleDownloadStableVersion}
+                      disabled={isDownloadingAppUpdate}
+                    >
+                      {isDownloadingAppUpdate ? (
+                        <>
+                          <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+                          {t('updates.downloading')}
+                        </>
+                      ) : (
+                        <>
+                          <ArrowDownToLine className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
+                          {t('updates.downloadStableVersion')}
+                        </>
+                      )}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={dismissStableDowngrade}>
+                      {t('common:actions.dismiss')}
+                    </Button>
+                  </div>
+                </div>
+              ) : undefined
+            }
+          >
             <Switch
+              id="betaUpdates"
               checked={settings.betaUpdates ?? false}
               onCheckedChange={(checked) => {
                 onSettingsChange({ ...settings, betaUpdates: checked });
@@ -447,104 +494,8 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
                 }
               }}
             />
-          </div>
-
-          {/* Stable Downgrade Section - shown when user turns off beta while on prerelease */}
-          {stableDowngradeInfo && !appUpdateInfo && (
-            <div className="rounded-lg border-2 border-warning/50 bg-warning/5 p-5 space-y-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-warning">
-                  <ArrowDownToLine className="h-5 w-5" />
-                  <h3 className="font-semibold">{t('updates.stableDowngradeAvailable')}</h3>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6"
-                  onClick={dismissStableDowngrade}
-                  aria-label={t('common:accessibility.dismissAriaLabel')}
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <p className="text-sm text-muted-foreground">
-                {t('updates.stableDowngradeDescription')}
-              </p>
-
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
-                    {t('updates.stableVersion')}
-                  </p>
-                  <p className="text-base font-medium text-foreground">
-                    {stableDowngradeInfo.version}
-                  </p>
-                  {stableDowngradeInfo.releaseDate && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {t('updates.released')} {new Date(stableDowngradeInfo.releaseDate).toLocaleDateString()}
-                    </p>
-                  )}
-                </div>
-                {isDownloadingAppUpdate ? (
-                  <RefreshCw className="h-6 w-6 animate-spin text-warning" />
-                ) : (
-                  <ArrowDownToLine className="h-6 w-6 text-warning" />
-                )}
-              </div>
-
-              {/* Release Notes */}
-              {stableDowngradeInfo.releaseNotes && (
-                <div className="bg-background rounded-lg p-4 max-h-48 overflow-y-auto border border-border/50">
-                  <ReleaseNotesRenderer content={stableDowngradeInfo.releaseNotes} />
-                </div>
-              )}
-
-              {/* Download Progress */}
-              {isDownloadingAppUpdate && appDownloadProgress && (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{t('updates.downloading')}</span>
-                    <span className="text-foreground font-medium">
-                      {Math.round(appDownloadProgress.percent)}%
-                    </span>
-                  </div>
-                  <Progress value={appDownloadProgress.percent} className="h-2" />
-                  <p className="text-xs text-muted-foreground text-right">
-                    {(appDownloadProgress.transferred / 1024 / 1024).toFixed(2)} MB / {(appDownloadProgress.total / 1024 / 1024).toFixed(2)} MB
-                  </p>
-                </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="flex gap-3">
-                <Button
-                  onClick={handleDownloadStableVersion}
-                  disabled={isDownloadingAppUpdate}
-                  variant="outline"
-                >
-                  {isDownloadingAppUpdate ? (
-                    <>
-                      <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                      {t('updates.downloading')}
-                    </>
-                  ) : (
-                    <>
-                      <ArrowDownToLine className="mr-2 h-4 w-4" />
-                      {t('updates.downloadStableVersion')}
-                    </>
-                  )}
-                </Button>
-                <Button
-                  variant="ghost"
-                  onClick={dismissStableDowngrade}
-                >
-                  {t('common:actions.dismiss')}
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
+          </SettingsRow>
+        </SettingsRows>
       </SettingsSection>
     );
   }
@@ -566,14 +517,16 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
       title={t('notifications.title')}
       description={t('notifications.description')}
     >
-      <div className="space-y-4">
+      <SettingsRows>
         {notificationItems.map((item) => (
-          <div key={item.key} className="flex items-center justify-between p-4 rounded-lg border border-border">
-            <div className="space-y-1">
-              <Label className="font-medium text-foreground">{t(item.labelKey)}</Label>
-              <p className="text-sm text-muted-foreground">{t(item.descriptionKey)}</p>
-            </div>
+          <SettingsRow
+            key={item.key}
+            label={t(item.labelKey)}
+            description={t(item.descriptionKey)}
+            htmlFor={`notification-${item.key}`}
+          >
             <Switch
+              id={`notification-${item.key}`}
               checked={settings.notifications[item.key]}
               onCheckedChange={(checked) =>
                 onSettingsChange({
@@ -585,9 +538,9 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
                 })
               }
             />
-          </div>
+          </SettingsRow>
         ))}
-      </div>
+      </SettingsRows>
     </SettingsSection>
   );
 }

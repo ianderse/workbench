@@ -15,7 +15,6 @@ import {
   claudeProfileMock,
   contextMock,
   integrationMock,
-  changelogMock,
   insightsMock,
   infrastructureMock,
   settingsMock
@@ -47,71 +46,11 @@ const browserMockAPI: ElectronAPI = {
   // Settings
   ...settingsMock,
 
-  // Roadmap Operations
-  getRoadmap: async () => ({
-    success: true,
-    data: null
-  }),
-
-  getRoadmapStatus: async () => ({
-    success: true,
-    data: { isRunning: false }
-  }),
-
-  saveRoadmap: async () => ({
-    success: true
-  }),
-
-  saveCompetitorAnalysis: async () => ({
-    success: true
-  }),
-
-  generateRoadmap: (_projectId: string, _enableCompetitorAnalysis?: boolean, _refreshCompetitorAnalysis?: boolean) => {
-    console.warn('[Browser Mock] generateRoadmap called');
-  },
-
-  refreshRoadmap: (_projectId: string, _enableCompetitorAnalysis?: boolean, _refreshCompetitorAnalysis?: boolean) => {
-    console.warn('[Browser Mock] refreshRoadmap called');
-  },
-
-  updateFeatureStatus: async () => ({ success: true }),
-
-  convertFeatureToSpec: async (projectId: string, _featureId: string) => ({
-    success: true,
-    data: {
-      id: `task-${Date.now()}`,
-      specId: '',
-      projectId,
-      title: 'Converted Feature',
-      description: 'Feature converted from roadmap',
-      status: 'backlog' as const,
-      subtasks: [],
-      logs: [],
-      createdAt: new Date(),
-      updatedAt: new Date()
-    }
-  }),
-
-  stopRoadmap: async () => ({ success: true }),
-
-  // Roadmap Progress Persistence
-  saveRoadmapProgress: async () => ({ success: true }),
-  loadRoadmapProgress: async () => ({ success: true, data: null }),
-  clearRoadmapProgress: async () => ({ success: true }),
-
-  // Roadmap Event Listeners
-  onRoadmapProgress: () => () => {},
-  onRoadmapComplete: () => () => {},
-  onRoadmapError: () => () => {},
-  onRoadmapStopped: () => () => {},
   // Context Operations
   ...contextMock,
 
   // Environment Configuration & Integration Operations
   ...integrationMock,
-
-  // Changelog & Release Operations
-  ...changelogMock,
 
   // Insights Operations
   ...insightsMock,
@@ -218,7 +157,7 @@ const browserMockAPI: ElectronAPI = {
 
   testProviderConnection: async (_provider: string, _config) => ({
     success: true,
-    data: { success: true }
+    data: { status: 'valid' as const }
   }),
 
   checkEnvCredentials: async () => ({
@@ -240,86 +179,6 @@ const browserMockAPI: ElectronAPI = {
   codexAuthLogout: async () => ({
     success: true
   }),
-
-  // GitHub API
-  github: {
-    getGitHubRepositories: async () => ({ success: true, data: [] }),
-    getGitHubIssues: async () => ({ success: true, data: { issues: [], hasMore: false } }),
-    getGitHubIssue: async () => ({ success: true, data: null as any }),
-    getIssueComments: async () => ({ success: true, data: [] }),
-    checkGitHubConnection: async () => ({ success: true, data: { connected: false, repoFullName: undefined, error: undefined } }),
-    investigateGitHubIssue: () => {},
-    importGitHubIssues: async () => ({ success: true, data: { success: true, imported: 0, failed: 0, issues: [] } }),
-    createGitHubRelease: async () => ({ success: true, data: { url: '' } }),
-    suggestReleaseVersion: async () => ({ success: true, data: { suggestedVersion: '1.0.0', currentVersion: '0.0.0', bumpType: 'minor' as const, commitCount: 0, reason: 'Initial' } }),
-    checkGitHubCli: async () => ({ success: true, data: { installed: false } }),
-    checkGitHubAuth: async () => ({ success: true, data: { authenticated: false } }),
-    startGitHubAuth: async () => ({ success: true, data: { success: false } }),
-    getGitHubToken: async () => ({ success: true, data: { token: '' } }),
-    getGitHubUser: async () => ({ success: true, data: { username: '' } }),
-    listGitHubUserRepos: async () => ({ success: true, data: { repos: [] } }),
-    detectGitHubRepo: async () => ({ success: true, data: '' }),
-    getGitHubBranches: async () => ({ success: true, data: [] }),
-    createGitHubRepo: async () => ({ success: true, data: { fullName: '', url: '' } }),
-    addGitRemote: async () => ({ success: true, data: { remoteUrl: '' } }),
-    listGitHubOrgs: async () => ({ success: true, data: { orgs: [] } }),
-    onGitHubAuthDeviceCode: () => () => {},
-    onGitHubAuthChanged: () => () => {},
-    onGitHubInvestigationProgress: () => () => {},
-    onGitHubInvestigationComplete: () => () => {},
-    onGitHubInvestigationError: () => () => {},
-    getAutoFixConfig: async () => null,
-    saveAutoFixConfig: async () => true,
-    getAutoFixQueue: async () => [],
-    checkAutoFixLabels: async () => [],
-    checkNewIssues: async () => [],
-    startAutoFix: () => {},
-    onAutoFixProgress: () => () => {},
-    onAutoFixComplete: () => () => {},
-    onAutoFixError: () => () => {},
-    listPRs: async () => ({ prs: [], hasNextPage: false }),
-    listMorePRs: async () => ({ prs: [], hasNextPage: false }),
-    getPR: async () => null,
-    runPRReview: () => {},
-    cancelPRReview: async () => true,
-    postPRReview: async () => true,
-    postPRComment: async () => true,
-    mergePR: async () => true,
-    assignPR: async () => true,
-    markReviewPosted: async () => true,
-    getPRReview: async () => null,
-    getPRReviewsBatch: async () => ({}),
-    notifyExternalReviewComplete: async () => {},
-    deletePRReview: async () => true,
-    checkNewCommits: async () => ({ hasNewCommits: false, newCommitCount: 0 }),
-    checkMergeReadiness: async () => ({ isDraft: false, mergeable: 'UNKNOWN' as const, isBehind: false, ciStatus: 'none' as const, blockers: [] }),
-    updatePRBranch: async () => ({ success: true }),
-    runFollowupReview: () => {},
-    getPRLogs: async () => null,
-    getWorkflowsAwaitingApproval: async () => ({ awaiting_approval: 0, workflow_runs: [], can_approve: false }),
-    approveWorkflow: async () => true,
-    onPRReviewProgress: () => () => {},
-    onPRReviewComplete: () => () => {},
-    onPRReviewError: () => () => {},
-    onPRReviewStateChange: () => () => {},
-    onPRLogsUpdated: () => () => {},
-    batchAutoFix: () => {},
-    getBatches: async () => [],
-    onBatchProgress: () => () => {},
-    onBatchComplete: () => () => {},
-    onBatchError: () => () => {},
-    // Analyze & Group Issues (proactive workflow)
-    analyzeIssuesPreview: () => {},
-    approveBatches: async () => ({ success: true, batches: [] }),
-    onAnalyzePreviewProgress: () => () => {},
-    onAnalyzePreviewComplete: () => () => {},
-    onAnalyzePreviewError: () => () => {},
-    // PR status polling
-    startStatusPolling: async () => true,
-    stopStatusPolling: async () => true,
-    getPollingMetadata: async () => null,
-    onPRStatusUpdate: () => () => {}
-  },
 
   // Queue Routing API (rate limit recovery)
   queue: {
@@ -425,16 +284,6 @@ const browserMockAPI: ElectronAPI = {
       success: false,
       message: 'Connection test not available in browser mode'
     }
-  }),
-
-  // Screenshot capture operations
-  getSources: async () => ({
-    success: true,
-    data: []
-  }),
-  capture: async (_options: { sourceId: string }) => ({
-    success: false,
-    error: 'Screenshot capture not available in browser mode'
   }),
 
   // Debug Operations

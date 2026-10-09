@@ -3,7 +3,8 @@ import { arrayMove } from '@dnd-kit/sortable';
 import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft, ImageAttachment, TaskOrderState } from '../../shared/types';
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
 import { useProjectStore } from './project-store';
-import { DEFAULT_MAX_PARALLEL_TASKS } from '../../shared/constants/task';
+import { useSettingsStore } from './settings-store';
+import { DEFAULT_MAX_PARALLEL_TASKS, resolveMaxParallelTasks } from '../../shared/constants/task';
 
 /** Default max parallel tasks when no project setting is configured */
 export { DEFAULT_MAX_PARALLEL_TASKS };
@@ -852,7 +853,10 @@ export async function forceCompleteTask(taskId: string): Promise<PersistStatusRe
  * @param excludeTaskId - Task ID to exclude from the count (e.g., when restarting a stuck task already in in_progress)
  */
 export function isQueueAtCapacity(excludeTaskId?: string): boolean {
-  const maxParallelTasks = useProjectStore.getState().getActiveProject()?.settings?.maxParallelTasks ?? DEFAULT_MAX_PARALLEL_TASKS;
+  const maxParallelTasks = resolveMaxParallelTasks(
+    useSettingsStore.getState().settings.maxParallelTasks,
+    useProjectStore.getState().getActiveProject()?.settings?.maxParallelTasks
+  );
   const currentTasks = useTaskStore.getState().tasks;
   const inProgressCount = currentTasks.filter((t) =>
     t.status === 'in_progress' && !t.metadata?.archivedAt && (!excludeTaskId || t.id !== excludeTaskId)
@@ -1077,6 +1081,35 @@ export async function archiveTasks(
     };
   } catch (error) {
     console.error('Error archiving tasks:', error);
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+}
+
+/**
+ * Unarchive tasks
+ * Removes the archivedAt timestamp so the tasks show up on the board again
+ */
+export async function unarchiveTasks(
+  projectId: string,
+  taskIds: string[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const result = await window.electronAPI.unarchiveTasks(projectId, taskIds);
+
+    if (result.success) {
+      await loadTasks(projectId);
+      return { success: true };
+    }
+
+    return {
+      success: false,
+      error: result.error || 'Failed to unarchive tasks'
+    };
+  } catch (error) {
+    console.error('Error unarchiving tasks:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'

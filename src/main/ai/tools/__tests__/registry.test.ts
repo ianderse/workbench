@@ -10,7 +10,6 @@ import {
   BASE_WRITE_TOOLS,
   WEB_TOOLS,
   CONTEXT7_TOOLS,
-  LINEAR_TOOLS,
   MEMORY_MCP_TOOLS, GRAPHITI_MCP_TOOLS,
   PUPPETEER_TOOLS,
   ELECTRON_TOOLS,
@@ -63,7 +62,6 @@ describe('tool constants', () => {
 
   it('should export MCP tool arrays matching agent-configs', () => {
     expect(CONTEXT7_TOOLS).toHaveLength(2);
-    expect(LINEAR_TOOLS).toHaveLength(16);
     expect(MEMORY_MCP_TOOLS).toHaveLength(5);
     expect(PUPPETEER_TOOLS).toHaveLength(8);
     expect(ELECTRON_TOOLS).toHaveLength(4);
@@ -76,7 +74,7 @@ describe('tool constants', () => {
 
 describe('AGENT_CONFIGS (registry)', () => {
   it('should have all expected agent types', () => {
-    expect(Object.keys(AGENT_CONFIGS).length).toBeGreaterThanOrEqual(26);
+    expect(Object.keys(AGENT_CONFIGS).length).toBeGreaterThanOrEqual(19);
   });
 
   it('should match tool assignments between config and registry', () => {

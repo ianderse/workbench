@@ -11,6 +11,13 @@ import {
   isValidHexColor,
   isValidFontFamily,
 } from '../lib/terminal-font-constants';
+import {
+  TERMINAL_FONTS,
+  TERMINAL_FONT_SIZES,
+  SCROLLBACK_PRESETS,
+  nearestOption,
+  terminalFontChain,
+} from '../lib/font-options';
 
 /**
  * Terminal font settings interface
@@ -33,8 +40,8 @@ export interface TerminalFontSettings {
 function getOSDefaults(): TerminalFontSettings {
   if (isWindows()) {
     return {
-      fontFamily: ['Cascadia Code', 'Consolas', 'Courier New', 'monospace'],
-      fontSize: 14,
+      fontFamily: ['Dank Mono', 'Cascadia Code', 'Consolas', 'Courier New', 'monospace'],
+      fontSize: 13,
       fontWeight: 400,
       lineHeight: 1.2,
       letterSpacing: 0,
@@ -47,7 +54,7 @@ function getOSDefaults(): TerminalFontSettings {
 
   if (isMacOS()) {
     return {
-      fontFamily: ['SF Mono', 'Menlo', 'Monaco', 'monospace'],
+      fontFamily: ['Dank Mono', 'SF Mono', 'Menlo', 'Monaco', 'monospace'],
       fontSize: 13,
       fontWeight: 400,
       lineHeight: 1.2,
@@ -61,7 +68,7 @@ function getOSDefaults(): TerminalFontSettings {
 
   if (isLinux()) {
     return {
-      fontFamily: ['Ubuntu Mono', 'Source Code Pro', 'Liberation Mono', 'DejaVu Sans Mono', 'monospace'],
+      fontFamily: ['Dank Mono', 'Ubuntu Mono', 'Source Code Pro', 'Liberation Mono', 'DejaVu Sans Mono', 'monospace'],
       fontSize: 13,
       fontWeight: 400,
       lineHeight: 1.2,
@@ -75,8 +82,8 @@ function getOSDefaults(): TerminalFontSettings {
 
   // Fallback for unknown platforms
   return {
-    fontFamily: ['monospace'],
-    fontSize: 14,
+    fontFamily: ['Dank Mono', 'monospace'],
+    fontSize: 13,
     fontWeight: 400,
     lineHeight: 1.2,
     letterSpacing: 0,
@@ -377,6 +384,38 @@ export const useTerminalFontSettingsStore = create<TerminalFontSettingsStore>()(
     }),
     {
       name: 'terminal-font-settings',
+      // v1: Dank Mono (bundled) became the default terminal font; put it first in saved chains
+      // v2: Appearance offers a fixed set of fonts and text sizes; snap saved values to them and reset
+      // the line height, letter spacing and weight (no longer adjustable) to the defaults
+      // v3: scrollback is picked from presets (snap saved values to the nearest one); cursor blink
+      // and accent color are no longer adjustable, so reset them to the defaults
+      version: 3,
+      migrate: (persistedState, version) => {
+        const state = persistedState as Partial<TerminalFontSettings> | undefined;
+        if (version < 1 && state && Array.isArray(state.fontFamily) && state.fontFamily[0] !== 'Dank Mono') {
+          state.fontFamily = ['Dank Mono', ...state.fontFamily.filter((f) => f !== 'Dank Mono')];
+        }
+        if (version < 3 && state) {
+          if (typeof state.scrollback === 'number') {
+            state.scrollback = nearestOption(
+              Object.fromEntries(SCROLLBACK_PRESETS.map((v) => [String(v), v])),
+              state.scrollback
+            );
+          }
+          state.cursorBlink = true;
+          state.cursorAccentColor = '#000000';
+        }
+        if (version < 2 && state) {
+          if (Array.isArray(state.fontFamily) && !(TERMINAL_FONTS as readonly string[]).includes(state.fontFamily[0])) {
+            state.fontFamily = terminalFontChain('Dank Mono');
+          }
+          if (typeof state.fontSize === 'number') state.fontSize = nearestOption(TERMINAL_FONT_SIZES, state.fontSize);
+          state.lineHeight = 1.2;
+          state.letterSpacing = 0;
+          state.fontWeight = 400;
+        }
+        return state as TerminalFontSettingsStore;
+      },
       onRehydrateStorage: () => (state) => {
         // Validate state after rehydration from localStorage
         if (!state) return;

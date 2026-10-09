@@ -1,13 +1,55 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* Bundled UI font (shipped with the build, no network needed). Only the Regular cut is bundled,
+   so it is declared as weight 400 and the browser synthesizes bold for semibold/bold text.
+   Dank Mono, the terminal font, is registered from main.tsx before terminals open. */
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('../assets/fonts/AnthropicSans-Text-Regular-Static.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Inter: an optional interface font */
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/Inter-Regular.otf') format('opentype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Serif';
+  src: url('../assets/fonts/AnthropicSerif-Display-Medium-Static.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* Pointer cursor on everything that changes color on hover (Tailwind v4 no longer gives buttons one).
+   Disabled controls and text fields keep their cursor, and explicit cursor-* utilities still win
+   (this lives in the base layer). */
+@layer base {
+  [class*='hover:']:hover:not(:disabled, [aria-disabled='true'], [data-disabled], input, textarea, [contenteditable='true']) {
+    cursor: pointer;
+  }
+  /* Menu, select and list items light up through focus/highlight styles instead of hover:
+     they get the pointer too */
+  :is([role='menuitem'], [role='menuitemcheckbox'], [role='menuitemradio'], [role='option'], [class*='focus:bg-'], [class*='data-[highlighted]:bg-']):hover:not(:disabled, [aria-disabled='true'], [data-disabled], input, textarea) {
+    cursor: pointer;
+  }
+}
+
 /* Auto-Build UI Design System - Oscura Midnight Theme */
 /* A modern, professional design system with deep dark mode and warm yellow accents */
 
 /* Define custom theme colors for Tailwind CSS v4 */
 @theme {
   /* Font families */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: 'Anthropic Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
   /* Display/heading font - same as sans in @theme; the Default theme overrides it with a serif stack */
   --font-heading: var(--font-sans);
@@ -56,6 +98,20 @@
   --color-segment: var(--segment);
   --color-segment-active: var(--segment-active);
   --color-nav-hover: var(--nav-hover);
+  --color-switch-track: var(--switch-track);
+  --color-switch-track-hover: var(--switch-track-hover);
+  --color-switch-on: var(--switch-on);
+  --color-switch-on-hover: var(--switch-on-hover);
+  --color-switch-knob: var(--switch-knob);
+  --color-segment-track: var(--segment-track);
+  --color-segment-thumb: var(--segment-thumb);
+  --color-settings-surface: var(--settings-surface);
+  --color-settings-nav: var(--settings-nav);
+  --color-settings-divider: var(--settings-divider);
+  --color-fill-control: var(--fill-control);
+  --color-fill-control-hover: var(--fill-control-hover);
+  --ease-snap: cubic-bezier(.32, .72, 0, 1);
+  --ease-overshoot: cubic-bezier(.34, 1.3, .64, 1);
   --color-nav-hover-foreground: var(--nav-hover-foreground);
   --color-nav-active: var(--nav-active);
   --color-nav-active-foreground: var(--nav-active-foreground);
@@ -144,42 +200,49 @@
 
 /* ============================================
    DEFAULT THEME (Light)
-   Flat, warm neutrals with terracotta accent — inspired by Claude Desktop.
+   Anthropic product styling — surfaces, text and nav states measured from claude.ai.
    Also defines the shared design tokens other themes override.
    ============================================ */
 :root {
+  /* Native controls (number input arrows, scrollbars, pickers) follow the theme */
+  color-scheme: light;
   /* Backgrounds */
-  --background: #FAF9F5;
-  --foreground: #141413;
+  --background: #FCFCFB;
+  --foreground: #0B0B0B;
 
   --card: #FFFFFF;
-  --card-foreground: #141413;
+  --card-foreground: #0B0B0B;
 
   /* Accent - deeper terracotta for legibility on light surfaces */
   --primary: #C6613F;
   --primary-foreground: #FFFFFF;
 
-  --secondary: #F0EEE6;
-  --secondary-foreground: #141413;
+  --secondary: #F0EFEC;
+  --secondary-foreground: #0B0B0B;
 
-  --muted: #F0EEE6;
-  --muted-foreground: #73726C;
+  --muted: #F0EFEC;
+  --muted-foreground: #52514E;
 
-  --accent: #EDEBE3;
-  --accent-foreground: #141413;
+  --accent: #F0EFEC;
+  --accent-foreground: #0B0B0B;
 
   --destructive: #B5463A;
   --destructive-foreground: #FFFFFF;
 
-  --border: #E8E6DC;
-  --input: #E8E6DC;
-  --ring: #C6613F;
+  --border: rgba(11, 11, 11, 0.1);
+  --input: rgba(11, 11, 11, 0.2);
+  /* Neutral focus indicators: the same hairline as a focused field */
+  --ring: var(--field-border-focus);
 
-  --sidebar: #F5F4ED;
-  --sidebar-foreground: #141413;
+  --sidebar: #FBFBF9;
+  --sidebar-foreground: #0B0B0B;
+  /* Dialog fields (claude.ai composer): hairline border, stronger on focus */
+  --field-border-color: rgb(31 30 29 / 0.15);
+  --field-border-focus: rgb(31 30 29 / 0.3);
+  --field-placeholder: #73726C;
 
   --popover: #FFFFFF;
-  --popover-foreground: #141413;
+  --popover-foreground: #0B0B0B;
 
   /* Semantic colors - muted, earthy */
   --success: #5A7F4A;
@@ -199,7 +262,7 @@
   --shadow-md: 0 0 #0000;
   --shadow-lg: 0 4px 16px -4px rgba(20, 20, 19, 0.08);
   --shadow-xl: 0 8px 24px -8px rgba(20, 20, 19, 0.12);
-  --shadow-focus: 0 0 0 3px rgba(198, 97, 63, 0.2);
+  --shadow-focus: 0 0 0 1px var(--field-border-focus);
 
   /* Border radius */
   --radius: 8px;
@@ -211,33 +274,49 @@
   --radius-3xl: 20px;
 
   /* Typography */
-  --font-heading: 'Tiempos Headline', 'Copernicus', ui-serif, Georgia, 'Times New Roman', serif;
+  --font-heading: var(--font-sans);
 
   /* Elevation (Tailwind shadow utilities) */
   --elevation-sm: 0 0 #0000;
   --elevation-md: 0 0 #0000;
-  --elevation-lg: 0 4px 16px -4px rgba(20, 20, 19, 0.08);
-  --elevation-xl: 0 8px 24px -8px rgba(20, 20, 19, 0.12);
+  --elevation-lg: 0 2px 8px rgba(0, 0, 0, 0.04), 0 12px 32px rgba(0, 0, 0, 0.03), 0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --elevation-xl: 0 4px 12px rgba(0, 0, 0, 0.06), 0 16px 40px rgba(0, 0, 0, 0.08), 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --elevation-2xl: 0 12px 32px -12px rgba(20, 20, 19, 0.16);
 
   /* Surfaces */
-  --card-border: #E8E6DC;
+  --card-border: rgba(11, 11, 11, 0.1);
   --field: #FFFFFF;
-  --field-border: #DEDCD1;
-  --radius-composer: 16px;
-  --segment: #F0EEE6;
+  --field-border: rgba(11, 11, 11, 0.2);
+  --radius-composer: 14px;
+  --segment: #F0EFEC;
   --segment-active: #FFFFFF;
+
+  /* claude.ai settings controls (switch, segmented control, settings dialog surfaces) */
+  --switch-track: rgba(11, 11, 11, 0.12);
+  --switch-track-hover: rgba(11, 11, 11, 0.2);
+  --switch-on: #2A78D6;
+  --switch-on-hover: #3987E5;
+  --menu-check: #2A78D6;
+  --switch-knob: #FFFFFF;
+  --segment-track: rgba(11, 11, 11, 0.05);
+  --segment-thumb: #FFFFFF;
+  --segment-thumb-ring: rgba(11, 11, 11, 0.1);
+  --settings-surface: #FFFFFF;
+  --settings-nav: #F9F9F7;
+  --settings-divider: rgba(11, 11, 11, 0.06);
+  --fill-control: rgba(11, 11, 11, 0.06);
+  --fill-control-hover: rgba(11, 11, 11, 0.1);
 
   /* Sidebar navigation */
   --nav-item-py: 0.375rem;
-  --nav-item-gap: 0.625rem;
+  --nav-item-gap: 0.5rem;
   --nav-item-radius: 8px;
-  --nav-hover: #EDEBE3;
-  --nav-hover-foreground: #141413;
-  --nav-active: #E6E4DA;
-  --nav-active-foreground: #141413;
-  --nav-label-color: #8A8880;
-  --nav-label-weight: 500;
+  --nav-hover: #F0EFEC;
+  --nav-hover-foreground: #0B0B0B;
+  --nav-active: #EDECE8;
+  --nav-active-foreground: #0B0B0B;
+  --nav-label-color: #898781;
+  --nav-label-weight: 400;
   --nav-label-transform: none;
   --nav-label-tracking: 0;
 
@@ -249,20 +328,20 @@
   --accent-glow-rgb: 198, 97, 63;
   --warning-glow-rgb: 168, 116, 31;
   --card-surface-shadow: none;
-  --card-hover-border: #D6D3C7;
+  --card-hover-border: rgba(11, 11, 11, 0.2);
   --surface-elevated: #FFFFFF;
-  --scrollbar-thumb: rgba(20, 20, 19, 0.15);
-  --scrollbar-thumb-hover: rgba(20, 20, 19, 0.3);
+  --scrollbar-thumb: rgba(11, 11, 11, 0.28);
+  --scrollbar-thumb-hover: rgba(11, 11, 11, 0.24);
   --progress-sweep-gradient: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.35) 50%, transparent 100%);
   --task-card-hover-shadow: none;
-  --task-card-hover-border: #D6D3C7;
+  --task-card-hover-border: rgba(11, 11, 11, 0.2);
   --task-card-enhanced-shadow: none;
   --task-card-hover-lift: none;
   --drag-overlay-shadow: 0 0 0 1px var(--card-border), 0 8px 24px -8px rgba(20, 20, 19, 0.15);
   --drag-overlay-card-shadow: 0 8px 24px -8px rgba(20, 20, 19, 0.15);
   --drag-overlay-transform: rotate(1deg);
   --tooltip-bg: #FFFFFF;
-  --tooltip-shadow: 0 2px 8px rgba(20, 20, 19, 0.06);
+  --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
   --review-highlight-border: var(--card-border);
   --review-highlight-bg: var(--muted);
 }
@@ -272,39 +351,45 @@
    Near-black warm neutrals sampled from Claude Desktop
    ============================================ */
 .dark {
+  /* Native controls (number input arrows, scrollbars, pickers) follow the theme */
+  color-scheme: dark;
   /* Backgrounds */
   --background: #151515;
-  --foreground: #ECEBE4;
+  --foreground: #F0EFEC;
 
   --card: #20201F;
-  --card-foreground: #ECEBE4;
+  --card-foreground: #F0EFEC;
 
-  /* Accent - Claude terracotta; near-black text has better contrast than white */
+  /* Accent - Claude terracotta; text and icons on it use the default text color */
   --primary: #D97757;
-  --primary-foreground: #141413;
+  --primary-foreground: var(--foreground);
 
   --secondary: #262625;
-  --secondary-foreground: #ECEBE4;
+  --secondary-foreground: #F0EFEC;
 
-  --muted: #1D1D1D;
-  --muted-foreground: #9C9B92;
+  --muted: #1A1A19;
+  --muted-foreground: #C3C2B7;
 
-  --accent: #2A2A29;
-  --accent-foreground: #F5F4EE;
+  --accent: rgba(255, 255, 255, 0.075);
+  --accent-foreground: #F0EFEC;
 
   --destructive: #D1655A;
   --destructive-foreground: #141413;
 
   /* Hairline dividers */
-  --border: #262626;
-  --input: #2E2E2E;
-  --ring: #D97757;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.2);
+  /* Neutral focus indicators: the same hairline as a focused field */
+  --ring: var(--field-border-focus);
 
   --sidebar: #111111;
-  --sidebar-foreground: #ECEBE4;
+  --sidebar-foreground: #F0EFEC;
+  --field-border-color: rgb(222 220 209 / 0.15);
+  --field-border-focus: rgb(222 220 209 / 0.3);
+  --field-placeholder: #85847F;
 
   --popover: #20201F;
-  --popover-foreground: #ECEBE4;
+  --popover-foreground: #F0EFEC;
 
   /* Semantic colors - muted, desaturated for warm-neutral dark UI */
   --success: #8DB07A;
@@ -324,7 +409,7 @@
   --shadow-md: 0 0 #0000;
   --shadow-lg: 0 4px 16px -4px rgba(0, 0, 0, 0.4);
   --shadow-xl: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
-  --shadow-focus: 0 0 0 2px rgba(217, 119, 87, 0.25);
+  --shadow-focus: 0 0 0 1px var(--field-border-focus);
 
   /* Border radius */
   --radius: 8px;
@@ -336,33 +421,49 @@
   --radius-3xl: 20px;
 
   /* Typography */
-  --font-heading: 'Tiempos Headline', 'Copernicus', ui-serif, Georgia, 'Times New Roman', serif;
+  --font-heading: var(--font-sans);
 
   /* Elevation (Tailwind shadow utilities) */
   --elevation-sm: 0 0 #0000;
   --elevation-md: 0 0 #0000;
-  --elevation-lg: 0 4px 16px -4px rgba(0, 0, 0, 0.4);
-  --elevation-xl: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
+  --elevation-lg: 0 2px 8px rgba(0, 0, 0, 0.3), 0 12px 32px rgba(0, 0, 0, 0.25), 0 0 0 0.5px rgba(255, 255, 255, 0.06);
+  --elevation-xl: 0 4px 12px rgba(0, 0, 0, 0.4), 0 16px 40px rgba(0, 0, 0, 0.5), 0 0 0 0.5px rgba(255, 255, 255, 0.08);
   --elevation-2xl: 0 12px 32px -12px rgba(0, 0, 0, 0.6);
 
   /* Surfaces */
-  --card-border: #333332;
-  --field: #1D1D1D;
-  --field-border: #2E2E2E;
-  --radius-composer: 16px;
-  --segment: #1D1D1D;
+  --card-border: rgba(255, 255, 255, 0.1);
+  --field: #1A1A19;
+  --field-border: rgba(255, 255, 255, 0.2);
+  --radius-composer: 14px;
+  --segment: #1A1A19;
   --segment-active: #343434;
+
+  /* claude.ai settings controls (values measured from claude.ai dark mode) */
+  --switch-track: rgba(255, 255, 255, 0.1);
+  --switch-track-hover: rgba(255, 255, 255, 0.2);
+  --switch-on: #2A78D6;
+  --switch-on-hover: #3987E5;
+  --menu-check: #6DA7EC;
+  --switch-knob: #FFFFFF;
+  --segment-track: rgba(255, 255, 255, 0.05);
+  --segment-thumb: rgba(255, 255, 255, 0.1);
+  --segment-thumb-ring: rgba(255, 255, 255, 0.1);
+  --settings-surface: #1A1A19;
+  --settings-nav: #151515;
+  --settings-divider: rgba(255, 255, 255, 0.05);
+  --fill-control: rgba(255, 255, 255, 0.1);
+  --fill-control-hover: rgba(255, 255, 255, 0.2);
 
   /* Sidebar navigation */
   --nav-item-py: 0.375rem;
-  --nav-item-gap: 0.625rem;
+  --nav-item-gap: 0.5rem;
   --nav-item-radius: 8px;
-  --nav-hover: #1F1F1F;
-  --nav-hover-foreground: #ECEBE4;
-  --nav-active: #343434;
-  --nav-active-foreground: #F5F4EE;
-  --nav-label-color: #8B8A82;
-  --nav-label-weight: 500;
+  --nav-hover: rgba(255, 255, 255, 0.075);
+  --nav-hover-foreground: #F0EFEC;
+  --nav-active: rgba(255, 255, 255, 0.15);
+  --nav-active-foreground: #F0EFEC;
+  --nav-label-color: #898781;
+  --nav-label-weight: 400;
   --nav-label-transform: none;
   --nav-label-tracking: 0;
 
@@ -374,246 +475,39 @@
   --accent-glow-rgb: 217, 119, 87;
   --warning-glow-rgb: 212, 166, 87;
   --card-surface-shadow: none;
-  --card-hover-border: #45453F;
+  --card-hover-border: rgba(255, 255, 255, 0.2);
   --surface-elevated: #20201F;
-  --scrollbar-thumb: rgba(236, 235, 228, 0.12);
-  --scrollbar-thumb-hover: rgba(236, 235, 228, 0.24);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.28);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.24);
   --progress-sweep-gradient: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.15) 50%, transparent 100%);
   --task-card-hover-shadow: none;
-  --task-card-hover-border: #45453F;
+  --task-card-hover-border: rgba(255, 255, 255, 0.2);
   --task-card-enhanced-shadow: none;
   --task-card-hover-lift: none;
   --drag-overlay-shadow: 0 0 0 1px var(--card-border), 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --drag-overlay-card-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.5);
   --drag-overlay-transform: rotate(1deg);
   --tooltip-bg: #20201F;
-  --tooltip-shadow: none;
+  --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.2);
   --review-highlight-border: var(--card-border);
   --review-highlight-bg: var(--muted);
 }
 
-/* ============================================
-   LIME THEME (Light)
-   Oscura-inspired warm off-white with olive/yellow accent (former default)
-   ============================================ */
-[data-theme="lime"] {
-  /* Light Mode - Warm off-white tones */
-  --background: #F2F2ED;
-  --foreground: #0B0B0F;
-
-  --card: #FFFFFF;
-  --card-foreground: #0B0B0F;
-
-  /* Accent - Muted olive/yellow for light mode */
-  --primary: #A5A66A;
-  --primary-foreground: #0B0B0F;
-
-  --secondary: #E8E8E3;
-  --secondary-foreground: #0B0B0F;
-
-  --muted: #EDEDE8;
-  --muted-foreground: #5C6974;
-
-  --accent: #EFEFE0;
-  --accent-foreground: #A5A66A;
-
-  --destructive: #D84F68;
-  --destructive-foreground: #FFFFFF;
-
-  --border: #DEDED9;
-  --input: #DEDED9;
-  --ring: #A5A66A;
-
-  --sidebar: #FFFFFF;
-  --sidebar-foreground: #0B0B0F;
-
-  --popover: #FFFFFF;
-  --popover-foreground: #0B0B0F;
-
-  /* Semantic colors */
-  --success: #4EBE96;
-  --success-foreground: #FFFFFF;
-  --success-light: #E0F5ED;
-  --warning: #D2D714;
-  --warning-foreground: #0B0B0F;
-  --warning-light: #F5F5D0;
-  --info: #479FFA;
-  --info-foreground: #FFFFFF;
-  --info-light: #E8F4FF;
-  --error: #D84F68;
-  --error-light: #FCE8EC;
-
-  /* Shadows - soft and diffused for light mode */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
-  --shadow-focus: 0 0 0 3px rgba(165, 166, 106, 0.2);
-
-  /* Border radius */
-  --radius: 12px;
-
-  /* Shared design tokens */
-  /* Tailwind shadow utilities (shadow-sm … shadow-2xl) resolve to these.
-     Defaults equal Tailwind's built-in shadow scale. */
-  --elevation-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
-  --elevation-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --elevation-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
-  --elevation-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
-  --elevation-2xl: 0 25px 50px -12px rgb(0 0 0 / 0.25);
-
-  /* Surfaces */
-  --card-border: var(--border);
-  --field: var(--card);
-  --field-border: var(--border);
-  --radius-composer: var(--radius-lg);
-  --segment: var(--secondary);
-  --segment-active: var(--card);
-
-  /* Sidebar navigation */
-  --nav-item-py: 0.625rem;
-  --nav-item-gap: 0.75rem;
-  --nav-item-radius: var(--radius-lg);
-  --nav-hover: var(--accent);
-  --nav-hover-foreground: var(--accent-foreground);
-  --nav-active: var(--accent);
-  --nav-active-foreground: var(--accent-foreground);
-  --nav-label-color: var(--muted-foreground);
-  --nav-label-weight: 600;
-  --nav-label-transform: uppercase;
-  --nav-label-tracking: 0.05em;
-
-  /* Kanban columns */
-  --column-bg: linear-gradient(to bottom in oklab, color-mix(in oklab, var(--secondary) 30%, transparent) 0%, transparent 100%);
-  --column-top-width: 2px;
-
-  /* Glows, gradients and decorative shadows */
-  --accent-glow-rgb: 214, 216, 118;
-  --warning-glow-rgb: 210, 215, 20;
-  --card-surface-shadow: var(--shadow-md);
-  --card-hover-border: var(--primary);
-  --surface-elevated: var(--card);
-  --scrollbar-thumb: var(--muted-foreground);
-  --scrollbar-thumb-hover: var(--muted-foreground);
-  --progress-sweep-gradient: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(165, 166, 106, 0.3) 25%,
-    rgba(165, 166, 106, 0.6) 50%,
-    rgba(165, 166, 106, 0.3) 75%,
-    transparent 100%
-  );
-  --task-card-hover-shadow: 0 0 0 1px var(--primary), var(--shadow-lg);
-  --task-card-hover-border: rgba(214, 216, 118, 0.4);
-  --task-card-enhanced-shadow: 0 0 0 1px rgba(214, 216, 118, 0.1), 0 4px 12px rgba(0, 0, 0, 0.15);
-  --task-card-hover-lift: translateY(-1px);
-  --drag-overlay-shadow:
-    0 20px 25px -5px rgba(0, 0, 0, 0.25),
-    0 10px 10px -5px rgba(0, 0, 0, 0.15),
-    0 0 0 1px var(--primary);
-  --drag-overlay-card-shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
-  --drag-overlay-transform: rotate(2deg) scale(1.02);
-  --tooltip-bg: var(--card);
-  --tooltip-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  --review-highlight-border: rgba(168, 85, 247, 0.3);
-  --review-highlight-bg: linear-gradient(
-    135deg,
-    rgba(168, 85, 247, 0.08) 0%,
-    rgba(168, 85, 247, 0.02) 100%
-  );
-
-  /* Border radius scale and heading font (Tailwind @theme defaults) */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
-  --radius-2xl: 20px;
-  --radius-3xl: 24px;
-  --font-heading: var(--font-sans);
-}
-
-/* ============================================
-   LIME THEME (Dark)
-   Oscura Midnight: near-black with saturated yellow accent
-   ============================================ */
-[data-theme="lime"].dark {
-  /* Near-black backgrounds - OLED optimized */
-  --background: #0B0B0F;
-  --foreground: #E6E6E6;
-
-  /* Card surfaces - subtle elevation */
-  --card: #121216;
-  --card-foreground: #E6E6E6;
-
-  /* Accent - Saturated yellow for vibrant contrast */
-  --primary: #D6D876;
-  --primary-foreground: #0B0B0F;
-
-  --secondary: #1A1A1F;
-  --secondary-foreground: #E6E6E6;
-
-  --muted: #1A1A1F;
-  --muted-foreground: #868F97;
-
-  --accent: #2A2A1F;
-  --accent-foreground: #D6D876;
-
-  --destructive: #FF5C5C;
-  --destructive-foreground: #0B0B0F;
-
-  /* Subtle dark borders for card definition */
-  --border: #232323;
-  --input: #232323;
-  --ring: #D6D876;
-
-  --sidebar: #0E0E12;
-  --sidebar-foreground: #E6E6E6;
-
-  --popover: #1A1A1F;
-  --popover-foreground: #E6E6E6;
-
-  /* Semantic colors - muted for dark mode */
-  --success: #4EBE96;
-  --success-foreground: #0B0B0F;
-  --success-light: #1A2924;
-  --warning: #D2D714;
-  --warning-foreground: #0B0B0F;
-  --warning-light: #262618;
-  --info: #479FFA;
-  --info-foreground: #0B0B0F;
-  --info-light: #1A2230;
-  --error: #FF5C5C;
-  --error-light: #2A1A1A;
-
-  /* Shadows - deeper for dark mode, but cards use borders primarily */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.6);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.7);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.8);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.9);
-  --shadow-focus: 0 0 0 2px rgba(214, 216, 118, 0.2);
-
-  /* Shared design tokens (dark overrides) */
-  --card-hover-border: rgba(214, 216, 118, 0.5);
-  --surface-elevated: #1A1A1F;
-  --scrollbar-thumb: rgba(134, 143, 151, 0.3);
-  --scrollbar-thumb-hover: rgba(134, 143, 151, 0.5);
-  --task-card-enhanced-shadow: 0 0 0 1px rgba(214, 216, 118, 0.15), 0 4px 20px rgba(0, 0, 0, 0.4);
-  --drag-overlay-card-shadow: 0 20px 50px rgba(0, 0, 0, 0.6);
-  --tooltip-bg: #1A1A1F;
-  --tooltip-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
-}
-
 /* Default theme: serif display headings use a lighter weight, like Claude Desktop */
-html:not([data-theme="lime"]) h1,
-html:not([data-theme="lime"]) .font-heading {
+:root h1,
+:root .font-heading {
   font-weight: 500;
   letter-spacing: -0.01em;
 }
 
 
 /* Base styles */
-* {
-  border-color: var(--border);
+/* Default border color lives in the base layer so border-color utilities
+   (border-transparent, border-primary, ...) can still override it */
+@layer base {
+  * {
+    border-color: var(--border);
+  }
 }
 
 body {
@@ -654,6 +548,7 @@ body {
 }
 
 .card-interactive:hover {
+  cursor: pointer;
   border-color: var(--card-hover-border);
 }
 
@@ -664,10 +559,11 @@ body {
   border-radius: var(--radius-lg);
 }
 
-/* Custom scrollbar - following design system */
+/* Scrollbars (claude.ai style): a 1px line 1px in from the edge that widens to a 3px rounded
+   thumb on hover. The 10px gutter is transparent; borders inset the painted thumb within it. */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 10px;
+  height: 10px;
 }
 
 /* Scroll anchoring - prevent scroll position jumps during DOM updates
@@ -689,16 +585,46 @@ body {
   background: transparent;
 }
 
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  opacity: 0.3;
-  border-radius: var(--radius-full);
-  transition: background 0.2s;
+::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scrollbar-thumb-hover);
-  opacity: 0.5;
+::-webkit-scrollbar-thumb {
+  background-color: var(--scrollbar-thumb);
+  background-clip: content-box;
+  border-style: solid;
+  border-color: transparent;
+  border-width: 2px 1px 2px 8px;
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:horizontal {
+  border-width: 8px 2px 1px 2px;
+}
+
+::-webkit-scrollbar-thumb:hover,
+::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-hover);
+  border-width: 2px 1px 2px 6px;
+}
+
+::-webkit-scrollbar-thumb:horizontal:hover,
+::-webkit-scrollbar-thumb:horizontal:active {
+  border-width: 6px 2px 1px 2px;
+}
+
+/* Terminal (xterm) scrollbar: same line/thumb, widening while the pointer is over the bar */
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  left: auto !important;
+  right: 1px;
+  width: 1px !important;
+  border-radius: 9999px;
+  background: var(--scrollbar-thumb) !important;
+}
+.xterm .xterm-scrollable-element > .scrollbar.vertical:hover > .slider,
+.xterm .xterm-scrollable-element > .scrollbar.vertical > .slider.active {
+  width: 3px !important;
+  background: var(--scrollbar-thumb-hover) !important;
 }
 
 /* Electron window dragging area */
@@ -797,6 +723,7 @@ body {
 }
 
 .task-card-glow:hover {
+  cursor: pointer;
   box-shadow: var(--task-card-hover-shadow);
 }
 
@@ -886,6 +813,7 @@ body {
 }
 
 .subtask-dot:hover {
+  cursor: pointer;
   transform: scale(1.5);
 }
 
@@ -938,6 +866,7 @@ body {
 }
 
 .task-card-enhanced:hover {
+  cursor: pointer;
   border-color: var(--task-card-hover-border);
   box-shadow: var(--task-card-enhanced-shadow);
   transform: var(--task-card-hover-lift);
@@ -1002,6 +931,7 @@ body {
 }
 
 .subtask-dot:hover {
+  cursor: pointer;
   transform: scale(1.5);
 }
 
@@ -1031,6 +961,7 @@ body {
 
 .empty-column-dropzone:hover,
 .empty-column-dropzone.active {
+  cursor: pointer;
   border-color: rgba(var(--accent-glow-rgb), 0.4);
   background-color: rgba(var(--accent-glow-rgb), 0.05);
 }
@@ -1055,6 +986,27 @@ body {
   border-color: var(--primary) !important;
   background-color: rgba(var(--accent-glow-rgb), 0.08) !important;
 }
+
+/* Kanban columns and cards at 80% of the regular size (the page header buttons keep the
+   regular size): scales Tailwind's rem-based spacing and type, like a 0.8 root font size */
+.kanban-compact {
+  --spacing: 0.2rem;
+  --text-xs: 0.6rem;
+  --text-sm: 0.7rem;
+  --text-base: 0.8rem;
+  --text-lg: 0.9rem;
+  --text-xl: 1rem;
+  --text-2xl: 1.2rem;
+  font-size: 0.8rem;
+}
+
+.kanban-compact .column-count-badge {
+  min-width: 1.2rem;
+  height: 1.2rem;
+  padding: 0 0.3rem;
+  font-size: 0.6rem;
+}
+
 
 /* Column count badge styling */
 .column-count-badge {
@@ -1229,40 +1181,77 @@ body {
   animation: zoom-out-98 0.2s ease-in;
 }
 
-/* ============================================
-   UI Scale System (75% - 200%)
-   ============================================ */
-
 /* Explicit base font size */
 :root {
   font-size: 16px;
-  transition: font-size 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Scale levels via data-ui-scale attribute */
-[data-ui-scale="75"] { font-size: 12px; }
-[data-ui-scale="80"] { font-size: 12.8px; }
-[data-ui-scale="85"] { font-size: 13.6px; }
-[data-ui-scale="90"] { font-size: 14.4px; }
-[data-ui-scale="95"] { font-size: 15.2px; }
-[data-ui-scale="100"] { font-size: 16px; }
-[data-ui-scale="105"] { font-size: 16.8px; }
-[data-ui-scale="110"] { font-size: 17.6px; }
-[data-ui-scale="115"] { font-size: 18.4px; }
-[data-ui-scale="120"] { font-size: 19.2px; }
-[data-ui-scale="125"] { font-size: 20px; }
-[data-ui-scale="130"] { font-size: 20.8px; }
-[data-ui-scale="135"] { font-size: 21.6px; }
-[data-ui-scale="140"] { font-size: 22.4px; }
-[data-ui-scale="145"] { font-size: 23.2px; }
-[data-ui-scale="150"] { font-size: 24px; }
-[data-ui-scale="155"] { font-size: 24.8px; }
-[data-ui-scale="160"] { font-size: 25.6px; }
-[data-ui-scale="165"] { font-size: 26.4px; }
-[data-ui-scale="170"] { font-size: 27.2px; }
-[data-ui-scale="175"] { font-size: 28px; }
-[data-ui-scale="180"] { font-size: 28.8px; }
-[data-ui-scale="185"] { font-size: 29.6px; }
-[data-ui-scale="190"] { font-size: 30.4px; }
-[data-ui-scale="195"] { font-size: 31.2px; }
-[data-ui-scale="200"] { font-size: 32px; }
+/* ============================================
+   Dialog controls (claude.ai settings look)
+   Scoped to dialogs (DIALOG_SURFACE_CLASS adds `claude-dialog`) so pages keep their own controls.
+   ============================================ */
+
+/* Fields (claude.ai composer): translucent fill, hairline border that strengthens on focus
+   (no focus ring), muted placeholder; 32px tall */
+.claude-dialog .field-border {
+  height: 2rem;
+  border-color: var(--field-border-color);
+  background-color: var(--segment-track);
+  box-shadow: none;
+  border-radius: 8px;
+}
+.claude-dialog textarea.field-border {
+  height: auto;
+}
+.claude-dialog .field-border:focus,
+.claude-dialog .field-border:focus-visible,
+.claude-dialog .field-border:focus-within {
+  border-color: var(--field-border-focus);
+  box-shadow: none;
+  outline: none;
+}
+.claude-dialog .field-border::placeholder,
+.claude-dialog .field-border input::placeholder,
+.claude-dialog .field-border [data-placeholder] {
+  color: var(--field-placeholder);
+}
+
+/* Dropdowns in a row's control slot: borderless "Value ⌄" trigger, like claude.ai's settings */
+.claude-dialog [data-settings-control] button[role='combobox'].field-border {
+  width: auto;
+  gap: 0.375rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-color: transparent;
+  background-color: transparent;
+  box-shadow: none;
+}
+.claude-dialog [data-settings-control] button[role='combobox'].field-border:hover,
+.claude-dialog [data-settings-control] button[role='combobox'][data-state='open'] {
+  cursor: pointer;
+  background-color: var(--nav-hover);
+}
+.claude-dialog [data-settings-control] button[role='combobox'].field-border:focus-visible {
+  box-shadow: var(--shadow-focus);
+}
+
+/* Buttons: claude.ai's soft filled secondary button and 14px small buttons */
+.claude-dialog [data-variant='outline'] {
+  border-color: transparent;
+  background-color: var(--fill-control);
+}
+.claude-dialog [data-variant='outline']:hover {
+  cursor: pointer;
+  background-color: var(--fill-control-hover);
+  color: var(--foreground);
+}
+.claude-dialog [data-variant='outline'],
+.claude-dialog [data-variant='secondary'],
+.claude-dialog [data-variant='default'],
+.claude-dialog [data-variant='ghost'] {
+  border-radius: 8px;
+}
+.claude-dialog [data-size='sm'] {
+  height: 2rem;
+  font-size: 0.875rem;
+}

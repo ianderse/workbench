@@ -5,7 +5,6 @@ import {
   EyeOff,
   Info,
   Loader2,
-  CheckCircle2,
   AlertCircle,
   Plus,
   Trash2,
@@ -38,7 +37,7 @@ interface OAuthStepProps {
 /**
  * OAuth step component for the onboarding wizard.
  * Guides users through Claude profile management and OAuth authentication,
- * reusing patterns from IntegrationSettings.tsx.
+ * reusing the project settings patterns.
  */
 export function OAuthStep({ onNext, onBack, onSkip }: OAuthStepProps) {
   const { t } = useTranslation(['onboarding', 'common']);
@@ -102,7 +101,7 @@ export function OAuthStep({ onNext, onBack, onSkip }: OAuthStepProps) {
     loadClaudeProfiles();
   }, [loadClaudeProfiles]);
 
-  // Profile management handlers - following patterns from IntegrationSettings.tsx
+  // Profile management handlers
   const handleAddProfile = async () => {
     if (!newProfileName.trim()) return;
 
@@ -700,7 +699,6 @@ export function OAuthStep({ onNext, onBack, onSkip }: OAuthStepProps) {
               <Card className="border border-success/30 bg-success/10">
                 <CardContent className="p-4">
                   <div className="flex items-start gap-3">
-                    <CheckCircle2 className="h-5 w-5 text-success shrink-0 mt-0.5" />
                     <p className="text-sm text-success">
                       {t('common:oauth.hasAuthenticatedAccount')}
                     </p>

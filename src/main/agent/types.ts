@@ -7,15 +7,12 @@ import type { TaskEventPayload } from './task-event-schema';
  * Agent-specific types for process and state management
  */
 
-export type QueueProcessType = 'ideation' | 'roadmap';
-
 export interface AgentProcess {
   taskId: string;
   process: ChildProcess | null; // null during async spawn setup before ChildProcess is created
   startedAt: Date;
-  projectPath?: string; // For ideation processes to load session on completion
+  projectPath?: string;
   spawnId: number; // Unique ID to identify this specific spawn
-  queueProcessType?: QueueProcessType; // Type of queue process (ideation or roadmap)
   /** Worker thread instance for TypeScript AI SDK agent execution */
   worker?: Worker | null;
 }
@@ -40,13 +37,6 @@ export interface AgentManagerEvents {
   'task-event': (taskId: string, event: TaskEventPayload, projectId?: string) => void;
 }
 
-// IdeationConfig now imported from shared types to maintain consistency
-
-export interface RoadmapConfig {
-  model?: string;          // Model shorthand (opus, sonnet, haiku)
-  thinkingLevel?: string;  // Thinking level (low, medium, high)
-}
-
 export interface TaskExecutionOptions {
   parallel?: boolean;
   workers?: number;
@@ -57,6 +47,8 @@ export interface TaskExecutionOptions {
 }
 
 export interface SpecCreationMetadata {
+  /** MCP connectors enabled for the task (unset: Connectors defaults) */
+  mcpConnectors?: string[];
   requireReviewBeforeCoding?: boolean;
   // Auto profile - phase-based model and thinking configuration
   isAutoProfile?: boolean;
@@ -82,17 +74,4 @@ export interface SpecCreationMetadata {
   // Workspace mode - whether to use worktree isolation
   useWorktree?: boolean; // If false, use --direct mode (no worktree isolation)
   useLocalBranch?: boolean; // If true, use local branch directly instead of preferring origin/branch
-}
-
-export interface IdeationProgressData {
-  phase: string;
-  progress: number;
-  message: string;
-  completedTypes?: string[];
-}
-
-export interface RoadmapProgressData {
-  phase: string;
-  progress: number;
-  message: string;
 }

@@ -19,14 +19,6 @@ import {
   ALLOWED_IMAGE_TYPES_DISPLAY
 } from '../../../shared/constants';
 
-/** Data structure for file reference drops from FileTreeItem */
-export interface FileReferenceData {
-  type: 'file-reference';
-  path: string;
-  name: string;
-  isDirectory: boolean;
-}
-
 /** Error messages that can be customized/translated by callers */
 interface ImageUploadErrorMessages {
   maxImagesReached?: string;
@@ -47,8 +39,8 @@ interface UseImageUploadOptions {
   onError?: (error: string | null) => void;
   /** Custom error messages for i18n support */
   errorMessages?: ImageUploadErrorMessages;
-  /** Callback when a file reference is dropped (from FileTreeItem drag) */
-  onFileReferenceDrop?: (reference: string, data: FileReferenceData) => void;
+  /** Accept any file type (not just images); non-image files are attached without a thumbnail */
+  acceptAllFiles?: boolean;
 }
 
 interface UseImageUploadReturn {
@@ -58,12 +50,14 @@ interface UseImageUploadReturn {
   pasteSuccess: boolean;
   /** Handle paste event on textarea */
   handlePaste: (e: ClipboardEvent<HTMLTextAreaElement>) => Promise<void>;
-  /** Handle drag over event on textarea */
-  handleDragOver: (e: DragEvent<HTMLTextAreaElement>) => void;
-  /** Handle drag leave event on textarea */
-  handleDragLeave: (e: DragEvent<HTMLTextAreaElement>) => void;
-  /** Handle drop event on textarea */
-  handleDrop: (e: DragEvent<HTMLTextAreaElement>) => Promise<void>;
+  /** Handle drag over event on the drop target */
+  handleDragOver: (e: DragEvent<HTMLElement>) => void;
+  /** Handle drag leave event on the drop target */
+  handleDragLeave: (e: DragEvent<HTMLElement>) => void;
+  /** Handle drop event on the drop target */
+  handleDrop: (e: DragEvent<HTMLElement>) => Promise<void>;
+  /** Add files picked outside drag/paste (e.g. from a file input) */
+  addFiles: (files: File[]) => Promise<void>;
   /** Remove an image by ID */
   removeImage: (imageId: string) => void;
   /** Whether more images can be added */
@@ -87,7 +81,7 @@ export function useImageUpload({
   disabled = false,
   onError,
   errorMessages = {},
-  onFileReferenceDrop
+  acceptAllFiles = false
 }: UseImageUploadOptions): UseImageUploadReturn {
   const [isDragOver, setIsDragOver] = useState(false);
   const [pasteSuccess, setPasteSuccess] = useState(false);
@@ -145,8 +139,9 @@ export function useImageUpload({
 
         if (!file) continue;
 
-        // Validate image type
-        if (!isValidImageMimeType(file.type)) {
+        // Validate image type (any file type is allowed in acceptAllFiles mode)
+        const isImage = isValidImageMimeType(file.type);
+        if (!isImage && !acceptAllFiles) {
           onError?.(errors.invalidImageType);
           continue;
         }
@@ -159,7 +154,7 @@ export function useImageUpload({
 
         try {
           const dataUrl = await blobToBase64(file);
-          const thumbnail = await createThumbnail(dataUrl);
+          const thumbnail = isImage ? await createThumbnail(dataUrl) : undefined;
 
           // Generate filename based on source
           let baseFilename: string;
@@ -178,7 +173,7 @@ export function useImageUpload({
           newImages.push({
             id: generateImageId(),
             filename: resolvedFilename,
-            mimeType: file.type,
+            mimeType: file.type || 'application/octet-stream',
             size: file.size,
             data: dataUrl.split(',')[1], // Store base64 without data URL prefix
             thumbnail
@@ -199,7 +194,7 @@ export function useImageUpload({
         successTimeoutRef.current = setTimeout(() => setPasteSuccess(false), 2000);
       }
     },
-    [images, onImagesChange, disabled, remainingSlots, onError, errors]
+    [images, onImagesChange, disabled, remainingSlots, onError, errors, acceptAllFiles]
   );
 
   /**
@@ -233,7 +228,7 @@ export function useImageUpload({
   /**
    * Handle drag over textarea
    */
-  const handleDragOver = useCallback((e: DragEvent<HTMLTextAreaElement>) => {
+  const handleDragOver = useCallback((e: DragEvent<HTMLElement>) => {
     e.preventDefault();
     e.stopPropagation();
     setIsDragOver(true);
@@ -242,53 +237,20 @@ export function useImageUpload({
   /**
    * Handle drag leave from textarea
    */
-  const handleDragLeave = useCallback((e: DragEvent<HTMLTextAreaElement>) => {
+  const handleDragLeave = useCallback((e: DragEvent<HTMLElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    // Ignore leave events fired when moving between children of the drop target
+    const next = e.relatedTarget as Node | null;
+    if (next && e.currentTarget.contains(next)) return;
     setIsDragOver(false);
   }, []);
 
   /**
-   * Parse file reference data from drag event dataTransfer
-   * Returns the parsed data if valid, null otherwise
-   */
-  const parseFileReferenceData = useCallback((dataTransfer: DataTransfer): FileReferenceData | null => {
-    // Check for application/json data (set by FileTreeItem)
-    const jsonData = dataTransfer.getData('application/json');
-    if (!jsonData) return null;
-
-    try {
-      const data = JSON.parse(jsonData) as Record<string, unknown>;
-      // Validate required fields - path and name must be non-empty strings
-      // isDirectory is optional and defaults to false if missing or not a boolean
-      // This aligns with parseFileReferenceDrop in shell-escape.ts
-      if (
-        data.type === 'file-reference' &&
-        typeof data.path === 'string' &&
-        data.path.length > 0 &&
-        typeof data.name === 'string' &&
-        data.name.length > 0
-      ) {
-        return {
-          type: 'file-reference',
-          path: data.path,
-          name: data.name,
-          isDirectory: typeof data.isDirectory === 'boolean' ? data.isDirectory : false
-        };
-      }
-    } catch {
-      // Invalid JSON, not a file reference
-    }
-    return null;
-  }, []);
-
-  /**
-   * Handle drop on textarea for image files and file references
-   * File references from FileTreeItem (drag from file tree) are detected and handled
-   * via the onFileReferenceDrop callback. Image files are processed as attachments.
+   * Handle drop of image files (or any files in acceptAllFiles mode) as attachments
    */
   const handleDrop = useCallback(
-    async (e: DragEvent<HTMLTextAreaElement>) => {
+    async (e: DragEvent<HTMLElement>) => {
       // Check disabled state first, before any state changes or preventDefault calls
       // This ensures drops are properly rejected when the component is disabled
       if (disabled) {
@@ -298,23 +260,6 @@ export function useImageUpload({
 
       setIsDragOver(false);
 
-      // First, check for file reference drops from FileTreeItem
-      // These have 'application/json' with type: 'file-reference' and 'text/plain' with @filename
-      const fileRefData = parseFileReferenceData(e.dataTransfer);
-      if (fileRefData) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        // Get the @filename reference text
-        const reference = e.dataTransfer.getData('text/plain') || `@${fileRefData.name}`;
-
-        // Call the callback if provided
-        if (onFileReferenceDrop) {
-          onFileReferenceDrop(reference, fileRefData);
-        }
-        return;
-      }
-
       const files = e.dataTransfer?.files;
 
       // Filter for image files
@@ -322,7 +267,7 @@ export function useImageUpload({
       if (files && files.length > 0) {
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
-          if (file.type.startsWith('image/')) {
+          if (acceptAllFiles || file.type.startsWith('image/')) {
             imageFiles.push(file);
           }
         }
@@ -337,7 +282,12 @@ export function useImageUpload({
 
       await processImageItems(imageFiles, { isFromPaste: false });
     },
-    [disabled, processImageItems, parseFileReferenceData, onFileReferenceDrop]
+    [disabled, processImageItems, acceptAllFiles]
+  );
+
+  const addFiles = useCallback(
+    (files: File[]) => processImageItems(files, { isFromPaste: false }),
+    [processImageItems]
   );
 
   /**
@@ -357,6 +307,7 @@ export function useImageUpload({
     handleDragOver,
     handleDragLeave,
     handleDrop,
+    addFiles,
     removeImage,
     canAddMore,
     remainingSlots

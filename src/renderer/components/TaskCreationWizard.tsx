@@ -12,20 +12,19 @@
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2, ChevronDown, ChevronUp, RotateCcw, FolderTree, GitBranch, Info } from 'lucide-react';
+import { Loader2, RotateCcw } from 'lucide-react';
 import { Button } from './ui/button';
-import { Label } from './ui/label';
+import { Switch } from './ui/switch';
+import { SettingsRow, SettingsRows } from './settings/SettingsRow';
+import { SettingsSection } from './settings/SettingsSection';
 import { Combobox } from './ui/combobox';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
-import { type FileReferenceData } from './task-form/useImageUpload';
-import { TaskFileExplorerDrawer } from './TaskFileExplorerDrawer';
 import { FileAutocomplete } from './FileAutocomplete';
 import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
 import { buildBranchOptions } from '../lib/branch-utils';
-import { cn } from '../lib/utils';
-import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile, GitBranchDetail } from '../../shared/types';
+import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile } from '../../shared/types';
 import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
 import {
   DEFAULT_AGENT_PROFILES,
@@ -36,6 +35,8 @@ import {
   getProviderPreset
 } from '../../shared/constants';
 import { useSettingsStore } from '../stores/settings-store';
+import { useProjectBranches } from '../hooks/useProjectBranches';
+import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import { useActiveProvider } from '../hooks/useActiveProvider';
 
 interface TaskCreationWizardProps {
@@ -78,15 +79,9 @@ export function TaskCreationWizard({
   const [description, setDescription] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [showClassification, setShowClassification] = useState(false);
-  const [showFileExplorer, setShowFileExplorer] = useState(false);
-  const [showGitOptions, setShowGitOptions] = useState(false);
 
   // Git options state - using structured GitBranchDetail for type indicators
-  const [branches, setBranches] = useState<GitBranchDetail[]>([]);
-  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
   const [baseBranch, setBaseBranch] = useState<string>(PROJECT_DEFAULT_BRANCH);
-  const [projectDefaultBranch, setProjectDefaultBranch] = useState<string>('');
   // Worktree isolation - default to true for safety
   const [useWorktree, setUseWorktree] = useState(true);
   const [pushNewBranches, setPushNewBranches] = useState(true);
@@ -97,6 +92,13 @@ export function TaskCreationWizard({
     const project = projects.find((p) => p.id === projectId);
     return project?.path ?? null;
   }, [projects, projectId]);
+  // Saved branch list shared with the other branch pickers (no git calls when the dialog opens);
+  // the default is the project settings' branch, otherwise the repository's default
+  const { branches, detectedBranch, isLoading: isLoadingBranches } = useProjectBranches(projectPath);
+  const projectDefaultBranch = useMemo(() => {
+    const project = projects.find((p) => p.id === projectId);
+    return project?.settings?.mainBranch || detectedBranch;
+  }, [projects, projectId, detectedBranch]);
   const projectPushNewBranches = useMemo(() => {
     const project = projects.find((p) => p.id === projectId);
     return project?.settings?.pushNewBranches !== false;
@@ -104,7 +106,7 @@ export function TaskCreationWizard({
 
   // Build branch options using shared utility - groups by local/remote with type indicators
   const branchOptions = useMemo(() => {
-    return buildBranchOptions(branches, {
+    const options = buildBranchOptions(branches, {
       t,
       includeProjectDefault: {
         value: PROJECT_DEFAULT_BRANCH,
@@ -113,6 +115,21 @@ export function TaskCreationWizard({
           ? 'tasks:wizard.gitOptions.useProjectDefaultWithBranch'
           : 'tasks:wizard.gitOptions.useProjectDefault',
       },
+    });
+    // Show the branch type ("Local" / "Remote") as plain muted text instead of a colored badge
+    return options.map((option) => {
+      if (!option.badge) return option;
+      const branchName = option.value === PROJECT_DEFAULT_BRANCH ? projectDefaultBranch : option.value;
+      const branchType = branches.find((b) => b.name === branchName)?.type;
+      if (!branchType) return option;
+      return {
+        ...option,
+        badge: (
+          <span className="text-xs text-(--nav-label-color)">
+            {t(branchType === 'local' ? 'common:git.branchType.local' : 'common:git.branchType.remote')}
+          </span>
+        ),
+      };
     });
   }, [branches, projectDefaultBranch, t]);
 
@@ -145,6 +162,9 @@ export function TaskCreationWizard({
 
   // Fast mode
   const [fastMode, setFastMode] = useState(false);
+  // MCP connectors start from the Connectors defaults; changes stay with this task
+  const defaultConnectors = useMemo(() => getDefaultMcpConnectorIds(settings.mcpConnectors), [settings.mcpConnectors]);
+  const [mcpConnectors, setMcpConnectors] = useState<string[]>(defaultConnectors);
 
   // Show Fast Mode toggle when any phase uses an Opus model
   const showFastModeToggle = useMemo(() => {
@@ -158,19 +178,12 @@ export function TaskCreationWizard({
 
   // @ autocomplete state
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
-  // Ref to track latest description value (avoids stale closure in handleFileReferenceDrop)
-  const descriptionValueRef = useRef(description);
   const [autocomplete, setAutocomplete] = useState<{
     show: boolean;
     query: string;
     startPos: number;
     position: { top: number; left: number };
   } | null>(null);
-
-  // Keep description ref in sync for use in callbacks
-  useEffect(() => {
-    descriptionValueRef.current = description;
-  }, [description]);
 
   // Load draft when dialog opens
   useEffect(() => {
@@ -192,12 +205,9 @@ export function TaskCreationWizard({
         setReferencedFiles(draft.referencedFiles ?? []);
         setRequireReviewBeforeCoding(draft.requireReviewBeforeCoding ?? false);
         setFastMode(draft.fastMode ?? false);
+        setMcpConnectors(draft.mcpConnectors ?? defaultConnectors);
         setPushNewBranches(draft.pushNewBranches ?? projectPushNewBranches);
         setIsDraftRestored(true);
-
-        if (draft.category || draft.priority || draft.complexity || draft.impact) {
-          setShowClassification(true);
-        }
       } else {
         // No draft - reset to clean state for new task creation
         // This ensures no stale data from previous task creation persists
@@ -216,63 +226,15 @@ export function TaskCreationWizard({
         setReferencedFiles([]);
         setRequireReviewBeforeCoding(false);
         setFastMode(false);
+        setMcpConnectors(defaultConnectors);
         setBaseBranch(PROJECT_DEFAULT_BRANCH);
         setUseWorktree(true);
         setPushNewBranches(projectPushNewBranches);
         setIsDraftRestored(false);
-        setShowClassification(false);
-        setShowFileExplorer(false);
-        setShowGitOptions(false);
       }
     }
   }, [open, projectId, projectPushNewBranches, resolvedProfileId, resolvedPhaseModels, resolvedPhaseThinking, selectedProfile.model, selectedProfile.thinkingLevel]);
 
-  // Fetch branches when dialog opens - using structured branch data with type indicators
-  useEffect(() => {
-    let isMounted = true;
-
-    const fetchBranches = async () => {
-      if (!projectPath) return;
-      if (isMounted) setIsLoadingBranches(true);
-      try {
-        // Use structured branch data with type indicators
-        const result = await window.electronAPI.getGitBranchesWithInfo(projectPath);
-        if (isMounted && result.success && result.data) {
-          setBranches(result.data);
-        }
-      } catch (err) {
-        console.error('Failed to fetch branches:', err);
-      } finally {
-        if (isMounted) setIsLoadingBranches(false);
-      }
-    };
-
-    const fetchProjectDefaultBranch = async () => {
-      if (!projectId) return;
-      try {
-        const result = await window.electronAPI.getProjectEnv(projectId);
-        if (isMounted && result.success && result.data?.defaultBranch) {
-          setProjectDefaultBranch(result.data.defaultBranch);
-        } else if (projectPath) {
-          const detectResult = await window.electronAPI.detectMainBranch(projectPath);
-          if (isMounted && detectResult.success && detectResult.data) {
-            setProjectDefaultBranch(detectResult.data);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch project default branch:', err);
-      }
-    };
-
-    if (open && projectPath) {
-      fetchBranches();
-      fetchProjectDefaultBranch();
-    }
-
-    return () => {
-      isMounted = false;
-    };
-  }, [open, projectPath, projectId]);
 
   /**
    * Get current form state as a draft
@@ -294,9 +256,10 @@ export function TaskCreationWizard({
     referencedFiles,
     requireReviewBeforeCoding,
     fastMode,
+    mcpConnectors,
     pushNewBranches,
     savedAt: new Date()
-  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModels, phaseThinking, images, referencedFiles, requireReviewBeforeCoding, fastMode, pushNewBranches]);
+  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModels, phaseThinking, images, referencedFiles, requireReviewBeforeCoding, fastMode, mcpConnectors, pushNewBranches]);
 
   /**
    * Detect @ mention being typed and show autocomplete
@@ -369,46 +332,6 @@ export function TaskCreationWizard({
       textarea.setSelectionRange(newCursorPos, newCursorPos);
     });
   }, [autocomplete, description]);
-
-  /**
-   * Handle file reference drop from FileTreeItem drag
-   * Inserts @filename at cursor position or end of description
-   * Uses descriptionValueRef to avoid stale closure issues with rapid consecutive drops
-   */
-  const handleFileReferenceDrop = useCallback((_reference: string, data: FileReferenceData) => {
-    // Construct reference from validated data to avoid using unvalidated text/plain input
-    const reference = `@${data.name}`;
-    // Dismiss any active autocomplete when file is dropped
-    if (autocomplete?.show) {
-      setAutocomplete(null);
-    }
-
-    // Get latest description from ref to avoid stale closure
-    const currentDescription = descriptionValueRef.current;
-
-    // Insert reference at cursor position if textarea is available
-    const textarea = descriptionRef.current;
-    if (textarea) {
-      const start = textarea.selectionStart ?? currentDescription.length;
-      const end = textarea.selectionEnd ?? currentDescription.length;
-      const newDescription =
-        currentDescription.substring(0, start) +
-        reference + ' ' +
-        currentDescription.substring(end);
-      handleDescriptionChange(newDescription);
-      // Focus textarea and set cursor after inserted text
-      // Use queueMicrotask for consistency with handleAutocompleteSelect
-      queueMicrotask(() => {
-        textarea.focus();
-        const newCursorPos = start + reference.length + 1;
-        textarea.setSelectionRange(newCursorPos, newCursorPos);
-      });
-    } else {
-      // Fallback: append to end
-      const separator = currentDescription.endsWith(' ') || currentDescription === '' ? '' : ' ';
-      handleDescriptionChange(currentDescription + separator + reference + ' ');
-    }
-  }, [handleDescriptionChange, autocomplete?.show]);
 
   /**
    * Parse @mentions from description
@@ -507,6 +430,7 @@ export function TaskCreationWizard({
       if (isSelectedBranchLocal) metadata.useLocalBranch = true;
       if (!pushNewBranches) metadata.pushNewBranches = false;
       metadata.fastMode = fastMode;
+      metadata.mcpConnectors = mcpConnectors;
 
       const task = await createTask(projectId, title.trim(), description.trim(), metadata);
       if (task) {
@@ -539,13 +463,11 @@ export function TaskCreationWizard({
     setReferencedFiles([]);
     setRequireReviewBeforeCoding(false);
     setFastMode(false);
+    setMcpConnectors(defaultConnectors);
     setBaseBranch(PROJECT_DEFAULT_BRANCH);
     setUseWorktree(true);
     setPushNewBranches(projectPushNewBranches);
     setError(null);
-    setShowClassification(false);
-    setShowFileExplorer(false);
-    setShowGitOptions(false);
     setIsDraftRestored(false);
   };
 
@@ -572,7 +494,7 @@ export function TaskCreationWizard({
   // Render @ mention highlight overlay for the description textarea
   const descriptionOverlay = (
     <div
-      className="absolute inset-0 pointer-events-none overflow-hidden rounded-md border border-transparent"
+      className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg border border-transparent"
       style={{
         padding: '0.5rem 0.75rem',
         font: 'inherit',
@@ -599,6 +521,46 @@ export function TaskCreationWizard({
     </div>
   );
 
+  // Git options - unique to creation; rendered as the last section of the form
+  const gitOptionsSection = (
+    <SettingsSection title={t('tasks:wizard.gitOptions.title')}>
+      <SettingsRows>
+        <SettingsRow
+          label={t('tasks:wizard.gitOptions.baseBranchLabel')}
+          description={t('tasks:wizard.gitOptions.helpText')}
+          htmlFor="base-branch"
+        >
+          <Combobox
+            id="base-branch"
+            value={baseBranch}
+            onValueChange={setBaseBranch}
+            options={branchOptions}
+            placeholder={projectDefaultBranch
+              ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
+              : t('tasks:wizard.gitOptions.useProjectDefault')
+            }
+            searchPlaceholder={t('tasks:wizard.gitOptions.searchBranches')}
+            emptyMessage={t('tasks:wizard.gitOptions.noBranchesFound')}
+            disabled={isCreating || isLoadingBranches}
+            className="h-8 w-auto max-w-[18rem] gap-1.5 border-transparent bg-transparent px-2 hover:bg-nav-hover focus:border-transparent focus:ring-0 focus-visible:shadow-(--shadow-focus) data-[state=open]:bg-nav-hover"
+          />
+        </SettingsRow>
+        <SettingsRow
+          label={t('tasks:wizard.gitOptions.pushNewBranchesLabel')}
+          description={t('tasks:wizard.gitOptions.pushNewBranchesDescription')}
+          htmlFor="push-new-branches"
+        >
+          <Switch
+            id="push-new-branches"
+            checked={pushNewBranches}
+            onCheckedChange={setPushNewBranches}
+            disabled={isCreating}
+          />
+        </SettingsRow>
+      </SettingsRows>
+    </SettingsSection>
+  );
+
   return (
     <TaskModalLayout
       open={open}
@@ -606,61 +568,36 @@ export function TaskCreationWizard({
       title={t('tasks:wizard.createTitle')}
       description={t('tasks:wizard.createDescription')}
       disabled={isCreating}
-      sidebar={
-        projectPath && (
-          <TaskFileExplorerDrawer
-            isOpen={showFileExplorer}
-            onClose={() => setShowFileExplorer(false)}
-            projectPath={projectPath}
-          />
-        )
-      }
-      sidebarOpen={showFileExplorer}
       footer={
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             {/* Draft restored indicator */}
             {isDraftRestored && (
               <div className="flex items-center gap-2">
-                <span className="text-xs bg-info/10 text-info px-2 py-1 rounded-md">
+                <span className="text-sm text-(--nav-label-color)">
                   {t('tasks:wizard.draftRestored')}
                 </span>
                 <Button
                   variant="ghost"
                   size="sm"
-                  className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  className="gap-1.5 text-muted-foreground hover:text-foreground"
                   onClick={handleDiscardDraft}
                 >
-                  <RotateCcw className="h-3 w-3 mr-1" />
+                  <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} />
                   {t('tasks:wizard.startFresh')}
                 </Button>
               </div>
             )}
-
-            {/* File Explorer Toggle */}
-            {projectPath && (
-              <Button
-                type="button"
-                variant={showFileExplorer ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setShowFileExplorer(!showFileExplorer)}
-                disabled={isCreating}
-                className="gap-1.5"
-              >
-                <FolderTree className="h-4 w-4" />
-                {showFileExplorer ? t('tasks:wizard.hideFiles') : t('tasks:wizard.browseFiles')}
-              </Button>
-            )}
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button variant="outline" onClick={handleClose} disabled={isCreating}>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleClose} disabled={isCreating}>
               {t('common:buttons.cancel')}
             </Button>
-            <Button onClick={handleCreate} disabled={isCreating || !description.trim()}>
+            <Button size="sm" onClick={handleCreate} disabled={isCreating || !description.trim()}>
               {isCreating ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                   {t('tasks:wizard.creating')}
                 </>
               ) : (
@@ -671,158 +608,63 @@ export function TaskCreationWizard({
         </div>
       }
     >
-      <div className="space-y-6">
-        {/* Worktree isolation info banner */}
-        <div className="flex items-start gap-3 p-4 bg-info/10 border border-info/30 rounded-lg">
-          <Info className="h-5 w-5 text-info flex-shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <h4 className="text-sm font-medium text-foreground mb-1">
-              {t('tasks:wizard.worktreeNotice.title')}
-            </h4>
-            <p className="text-sm text-muted-foreground">
-              {t('tasks:wizard.worktreeNotice.description')}
-            </p>
-          </div>
-        </div>
-
-        {/* Main form fields */}
-        <TaskFormFields
-          description={description}
-          onDescriptionChange={handleDescriptionChange}
-          descriptionPlaceholder={t('tasks:wizard.descriptionPlaceholder')}
-          descriptionOverlay={descriptionOverlay}
-          descriptionRef={descriptionRef}
-          title={title}
-          onTitleChange={setTitle}
-          profileId={profileId}
-          model={model}
-          thinkingLevel={thinkingLevel}
-          phaseModels={phaseModels}
-          phaseThinking={phaseThinking}
-          onProfileChange={(newProfileId, newModel, newThinkingLevel) => {
-            setProfileId(newProfileId);
-            setModel(newModel);
-            setThinkingLevel(newThinkingLevel);
-          }}
-          onModelChange={setModel}
-          onThinkingLevelChange={setThinkingLevel}
-          onPhaseModelsChange={setPhaseModels}
-          onPhaseThinkingChange={setPhaseThinking}
-          category={category}
-          priority={priority}
-          complexity={complexity}
-          impact={impact}
-          onCategoryChange={setCategory}
-          onPriorityChange={setPriority}
-          onComplexityChange={setComplexity}
-          onImpactChange={setImpact}
-          showClassification={showClassification}
-          onShowClassificationChange={setShowClassification}
-          images={images}
-          onImagesChange={setImages}
-          requireReviewBeforeCoding={requireReviewBeforeCoding}
-          onRequireReviewChange={setRequireReviewBeforeCoding}
-          fastMode={fastMode}
-          onFastModeChange={setFastMode}
-          showFastModeToggle={showFastModeToggle}
-          disabled={isCreating}
-          error={error}
-          onError={setError}
-          onFileReferenceDrop={handleFileReferenceDrop}
-          idPrefix="create"
-        >
-          {/* File autocomplete popup - positioned relative to TaskFormFields */}
-          {autocomplete?.show && projectPath && (
-            <FileAutocomplete
-              query={autocomplete.query}
-              projectPath={projectPath}
-              position={autocomplete.position}
-              onSelect={handleAutocompleteSelect}
-              onClose={() => setAutocomplete(null)}
-            />
-          )}
-        </TaskFormFields>
-
-        {/* Git Options Toggle - unique to creation */}
-        <button
-          type="button"
-          onClick={() => setShowGitOptions(!showGitOptions)}
-          className={cn(
-            'flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors',
-            'w-full justify-between py-2 px-3 rounded-md hover:bg-muted/50'
-          )}
-          disabled={isCreating}
-          aria-expanded={showGitOptions}
-          aria-controls="git-options-section"
-        >
-          <span className="flex items-center gap-2">
-            <GitBranch className="h-4 w-4" />
-            {t('tasks:wizard.gitOptions.title')}
-            {baseBranch && baseBranch !== PROJECT_DEFAULT_BRANCH && (
-              <span className="text-xs bg-primary/10 text-primary px-1.5 py-0.5 rounded">
-                {baseBranch}
-              </span>
-            )}
-          </span>
-          {showGitOptions ? (
-            <ChevronUp className="h-4 w-4" />
-          ) : (
-            <ChevronDown className="h-4 w-4" />
-          )}
-        </button>
-
-        {/* Git Options */}
-        {showGitOptions && (
-          <div id="git-options-section" className="space-y-4 p-4 rounded-lg border border-border bg-muted/30">
-            <div className="space-y-2">
-              <Label htmlFor="base-branch" className="text-sm font-medium text-foreground">
-                {t('tasks:wizard.gitOptions.baseBranchLabel')}
-              </Label>
-              <Combobox
-                id="base-branch"
-                value={baseBranch}
-                onValueChange={setBaseBranch}
-                options={branchOptions}
-                placeholder={projectDefaultBranch
-                  ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
-                  : t('tasks:wizard.gitOptions.useProjectDefault')
-                }
-                searchPlaceholder={t('tasks:wizard.gitOptions.searchBranches')}
-                emptyMessage={t('tasks:wizard.gitOptions.noBranchesFound')}
-                disabled={isCreating || isLoadingBranches}
-                className="h-9"
-              />
-              <p className="text-xs text-muted-foreground">
-                {t('tasks:wizard.gitOptions.helpText')}
-              </p>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <div className="space-y-0.5">
-                <Label className="text-sm font-medium text-foreground">
-                  {t('tasks:wizard.gitOptions.pushNewBranchesLabel')}
-                </Label>
-                <p className="text-xs text-muted-foreground">
-                  {t('tasks:wizard.gitOptions.pushNewBranchesDescription')}
-                </p>
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className={cn(
-                  'h-8 px-3 border',
-                  pushNewBranches ? 'border-primary/40 text-primary' : 'border-border text-muted-foreground'
-                )}
-                onClick={() => setPushNewBranches((current) => !current)}
-                disabled={isCreating}
-              >
-                {pushNewBranches ? 'On' : 'Off'}
-              </Button>
-            </div>
-          </div>
+      {/* Main form fields (Git options are appended as an extra section) */}
+      <TaskFormFields
+        description={description}
+        onDescriptionChange={handleDescriptionChange}
+        descriptionPlaceholder={t('tasks:wizard.descriptionPlaceholder')}
+        descriptionOverlay={descriptionOverlay}
+        descriptionRef={descriptionRef}
+        title={title}
+        onTitleChange={setTitle}
+        profileId={profileId}
+        model={model}
+        thinkingLevel={thinkingLevel}
+        phaseModels={phaseModels}
+        phaseThinking={phaseThinking}
+        onProfileChange={(newProfileId, newModel, newThinkingLevel) => {
+          setProfileId(newProfileId);
+          setModel(newModel);
+          setThinkingLevel(newThinkingLevel);
+        }}
+        onModelChange={setModel}
+        onThinkingLevelChange={setThinkingLevel}
+        onPhaseModelsChange={setPhaseModels}
+        onPhaseThinkingChange={setPhaseThinking}
+        category={category}
+        priority={priority}
+        complexity={complexity}
+        impact={impact}
+        onCategoryChange={setCategory}
+        onPriorityChange={setPriority}
+        onComplexityChange={setComplexity}
+        onImpactChange={setImpact}
+        images={images}
+        onImagesChange={setImages}
+        requireReviewBeforeCoding={requireReviewBeforeCoding}
+        onRequireReviewChange={setRequireReviewBeforeCoding}
+        fastMode={fastMode}
+        onFastModeChange={setFastMode}
+        mcpConnectors={mcpConnectors}
+        onMcpConnectorsChange={setMcpConnectors}
+        showFastModeToggle={showFastModeToggle}
+        disabled={isCreating}
+        error={error}
+        onError={setError}
+        idPrefix="create"
+        extraSections={gitOptionsSection}
+      >
+        {/* File autocomplete popup - positioned relative to TaskFormFields */}
+        {autocomplete?.show && projectPath && (
+          <FileAutocomplete
+            query={autocomplete.query}
+            projectPath={projectPath}
+            position={autocomplete.position}
+            onSelect={handleAutocompleteSelect}
+            onClose={() => setAutocomplete(null)}
+          />
         )}
-      </div>
+      </TaskFormFields>
     </TaskModalLayout>
   );
 }

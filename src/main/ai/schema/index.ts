@@ -46,34 +46,6 @@ export {
 } from './structured-output';
 
 export {
-  ScanResultSchema,
-  ReviewFindingSchema,
-  ReviewFindingsArraySchema,
-  StructuralIssueSchema,
-  AICommentTriageSchema,
-  MRReviewResultSchema,
-  SynthesisResultSchema,
-  VerificationItemSchema,
-  ResolutionVerificationSchema,
-  SpecialistOutputSchema,
-  type ValidatedScanResult,
-  type ValidatedReviewFinding,
-  type ValidatedReviewFindingsArray,
-  type ValidatedStructuralIssue,
-  type ValidatedAICommentTriage,
-  type ValidatedMRReviewResult,
-  type ValidatedSynthesisResult,
-  type ValidatedVerificationItem,
-  type ValidatedResolutionVerification,
-  type ValidatedSpecialistOutput,
-} from './pr-review';
-
-export {
-  TriageResultSchema,
-  type ValidatedTriageResult,
-} from './triage';
-
-export {
   ExtractedInsightsSchema,
   TaskSuggestionSchema,
   type ValidatedExtractedInsights,
@@ -88,8 +60,6 @@ export {
   type ImplementationPlanOutput,
   QASignoffOutputSchema,
   type QASignoffOutput,
-  TriageResultOutputSchema,
-  type TriageResultOutput,
   ExtractedInsightsOutputSchema,
   type ExtractedInsightsOutput,
 } from './output';

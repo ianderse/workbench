@@ -1,11 +1,10 @@
 // Polyfill CommonJS require for ESM compatibility
-// This MUST be at the very top, before any imports that might trigger Sentry's
-// require-in-the-middle hooks. Sentry's hooks expect require.cache to exist,
-// which is only available in CommonJS. Without this, node-pty native module
-// loading fails with "ReferenceError: require is not defined".
+// This MUST be at the very top, before any imports that load CommonJS native
+// modules. Without this, node-pty native module loading fails with
+// "ReferenceError: require is not defined".
 import Module, { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-// Make require globally available for Sentry's require-in-the-middle hooks
+// Make require globally available to dependencies that expect it
 globalThis.require = require;
 
 // In packaged Electron apps, native modules (e.g. @libsql/client) are placed in
@@ -52,30 +51,22 @@ import { accessSync, readFileSync, writeFileSync, rmSync, cpSync } from 'fs';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { setupIpcHandlers } from './ipc-setup';
 import { rateLimitResumeScheduler } from './services/rate-limit-resume-scheduler';
-import {
-  AppIconRotator,
-  HEADER_ICON_MODES,
-  HEADER_ICON_ROTATION_INTERVAL_MS,
-  HEADER_ICONS_DIR_NAME,
-  seedRotationIcons,
-  type HeaderIconMode,
-} from './services/app-icon-rotator';
 import { AgentManager } from './agent';
 import { TerminalManager } from './terminal-manager';
 import { getUsageMonitor } from './claude-profile/usage-monitor';
 import { initializeUsageMonitorForwarding } from './ipc-handlers/terminal-handlers';
 import { initializeAppUpdater, stopPeriodicUpdates } from './app-updater';
-import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, ADD_TO_DICTIONARY_LABELS } from '../shared/constants';
+import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, ADD_TO_DICTIONARY_LABELS } from '../shared/constants';
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
 import { registerSettingsAccessor } from './ai/auth/resolver';
 import { appLog, setupErrorLogging } from './app-logger';
-import { initSentryMain } from './sentry';
-import { preWarmToolCache } from './cli-tool-manager';
+import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
-import { isProfileAuthenticated } from './claude-profile/profile-utils';
+import { isProfileAuthenticated, getPlanFromConfigDir } from './claude-profile/profile-utils';
 import { isMacOS, isWindows } from './platform';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
+import { AppTray, isWindowCloseAllowed } from './app-tray';
 import type { AppSettings, AuthFailureInfo } from '../shared/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,9 +108,6 @@ const DEFAULT_SCREEN_HEIGHT: number = 1080;
 
 // Setup error logging early (captures uncaught exceptions)
 setupErrorLogging();
-
-// Initialize Sentry for error tracking (respects user's sentryEnabled setting)
-initSentryMain();
 
 // Wire up settings accessor for the AI auth resolver.
 // This lets resolveAuth() / buildDefaultQueueConfig() read provider accounts
@@ -188,7 +176,19 @@ function getIconPath(): string {
 
 // Keep a global reference of the window object to prevent garbage collection
 let mainWindow: BrowserWindow | null = null;
-let headerIconRotators: AppIconRotator[] = [];
+// System tray (background mode); while it exists, closing the window only hides it
+let appTray: AppTray | null = null;
+
+/** Bring the main window back from the tray (recreating it if it was destroyed) */
+function showMainWindow(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
 let agentManager: AgentManager | null = null;
 let terminalManager: TerminalManager | null = null;
 
@@ -296,8 +296,14 @@ function createWindow(): void {
     minHeight,
     show: false,
     autoHideMenuBar: true,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 15, y: 10 },
+    // No OS title bar: macOS keeps its inset traffic lights; Windows/Linux get Electron-drawn
+    // window controls over the top-right corner, recolored by the renderer to match the theme
+    ...(isMacOS()
+      ? { titleBarStyle: 'hiddenInset' as const, trafficLightPosition: { x: 15, y: 10 } }
+      : {
+          titleBarStyle: 'hidden' as const,
+          titleBarOverlay: { color: '#151515', symbolColor: '#F0EFEC', height: TITLE_BAR_OVERLAY_HEIGHT }
+        }),
     icon: getIconPath(),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
@@ -308,6 +314,17 @@ function createWindow(): void {
       spellcheck: true // Enable spell check for text inputs
     }
   });
+
+  // Background mode: the close button hides the window to the tray; agents and terminals keep
+  // running. Real quits (tray "Quit", OS quit) set isQuitting first and close normally.
+  mainWindow.on('close', (event) => {
+    if (!isQuitting && appTray && !isWindowCloseAllowed()) {
+      event.preventDefault();
+      mainWindow?.hide();
+    }
+  });
+  mainWindow.on('show', () => appTray?.refresh());
+  mainWindow.on('hide', () => appTray?.refresh());
 
   // Show window when ready to avoid visual flash
   mainWindow.on('ready-to-show', () => {
@@ -625,41 +642,41 @@ app.whenReady().then(() => {
   // Create window
   createWindow();
 
-  // Seed <userData>/header-icons/{dark,light} with the icons bundled in resources/
-  // (first run only; user icons are never overwritten)
-  const bundledResourcesPath = is.dev ? join(__dirname, '../../resources') : process.resourcesPath;
-  for (const dirName of HEADER_ICON_MODES.map((mode) => join(HEADER_ICONS_DIR_NAME, mode))) {
-    try {
-      seedRotationIcons(join(bundledResourcesPath, dirName), join(app.getPath('userData'), dirName));
-    } catch (error) {
-      console.warn(`[main] Failed to seed ${dirName}:`, error);
-    }
+  // Tray icon for background mode (a desktop without a tray just keeps the old close-to-quit behavior)
+  try {
+    appTray = new AppTray({
+      iconsDir: is.dev ? join(__dirname, '../../resources/tray') : join(process.resourcesPath, 'tray'),
+      onShowApp: showMainWindow,
+      onQuit: () => app.quit(),
+      getStatus: () => {
+        // Plan and usage are only shown while a Claude account is signed in
+        try {
+          const profile = getClaudeProfileManager().getActiveProfile();
+          if (!profile || !isProfileAuthenticated(profile)) return { planName: null, sessionPercent: null };
+          return {
+            planName: getPlanFromConfigDir(profile.configDir),
+            sessionPercent: getUsageMonitor().getCurrentUsage()?.sessionPercent ?? null
+          };
+        } catch {
+          // Profile manager not ready yet
+          return { planName: null, sessionPercent: null };
+        }
+      }
+    });
+    getUsageMonitor().on('usage-updated', () => appTray?.refresh());
+  } catch (error) {
+    appLog.warn('[main] System tray unavailable, closing the window will quit the app:', error);
+    appTray = null;
   }
 
-  // Rotate the sidebar header icons through <userData>/header-icons/{dark,light}/1.png … n.png.
-  // Both sets rotate in step; the renderer shows the one matching the appearance mode
-  // (null = no icons in that set)
-  const headerIconDataUrls: Record<HeaderIconMode, string | null> = { dark: null, light: null };
-  const sendHeaderIcon = (mode: HeaderIconMode, dataUrl: string | null): void => {
-    headerIconDataUrls[mode] = dataUrl;
-    mainWindow?.webContents.send(IPC_CHANNELS.APP_ICON_CHANGED, mode, dataUrl);
-  };
-  ipcMain.handle(IPC_CHANNELS.APP_ICON_GET, () => headerIconDataUrls);
-  headerIconRotators = HEADER_ICON_MODES.map(
-    (mode) =>
-      new AppIconRotator({
-        iconsDir: join(app.getPath('userData'), HEADER_ICONS_DIR_NAME, mode),
-        applyIcon: (iconPath) => {
-          const icon = nativeImage.createFromPath(iconPath);
-          if (icon.isEmpty()) return false;
-          sendHeaderIcon(mode, icon.resize({ height: 96 }).toDataURL());
-          return true;
-        },
-        restoreDefaultIcon: () => sendHeaderIcon(mode, null),
-        intervalMs: HEADER_ICON_ROTATION_INTERVAL_MS,
-      })
-  );
-  for (const rotator of headerIconRotators) rotator.start();
+  // Recolor the Windows/Linux window controls to match the active theme
+  const HEX_COLOR = /^#[0-9a-f]{6}$/i;
+  ipcMain.on(IPC_CHANNELS.WINDOW_SET_TITLE_BAR_COLORS, (event, colors: { color?: unknown; symbolColor?: unknown }) => {
+    if (isMacOS()) return;
+    const { color, symbolColor } = colors ?? {};
+    if (typeof color !== 'string' || typeof symbolColor !== 'string' || !HEX_COLOR.test(color) || !HEX_COLOR.test(symbolColor)) return;
+    BrowserWindow.fromWebContents(event.sender)?.setTitleBarOverlay({ color, symbolColor, height: TITLE_BAR_OVERLAY_HEIGHT });
+  });
 
 
   // Pre-warm CLI tool cache in background (non-blocking)
@@ -669,6 +686,8 @@ app.whenReady().then(() => {
     preWarmToolCache(['claude', 'git', 'gh', 'python']).catch((error) => {
       console.warn('[main] Failed to pre-warm CLI cache:', error);
     });
+    // Detection details for Settings > Developer > Paths, so the page opens instantly
+    warmToolInfo();
   });
 
   // Initialize Claude profile manager, then start usage monitor
@@ -773,11 +792,9 @@ app.whenReady().then(() => {
     }
   }
 
-  // macOS: re-create window when dock icon is clicked
+  // macOS: clicking the dock icon re-creates the window, or shows it if it was hidden to the tray
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
-    }
+    showMainWindow();
   });
 });
 
@@ -804,11 +821,13 @@ app.on('before-quit', (event) => {
   // Stop synchronous services immediately
   stopPeriodicUpdates();
   rateLimitResumeScheduler.dispose();
-  for (const rotator of headerIconRotators) rotator.stop();
 
   const usageMonitor = getUsageMonitor();
   usageMonitor.stop();
   console.warn('[main] Usage monitor stopped');
+
+  appTray?.destroy();
+  appTray = null;
 
   // Perform async cleanup, then allow quit to proceed
   (async () => {

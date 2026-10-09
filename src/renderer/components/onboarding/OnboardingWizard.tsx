@@ -1,6 +1,5 @@
 import { useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Wand2 } from 'lucide-react';
 import {
   FullScreenDialog,
   FullScreenDialogContent,
@@ -14,7 +13,6 @@ import { WizardProgress, WizardStep } from './WizardProgress';
 import { WelcomeStep } from './WelcomeStep';
 import { AccountsStep } from './AccountsStep';
 import { DevToolsStep } from './DevToolsStep';
-import { PrivacyStep } from './PrivacyStep';
 import { MemoryStep } from './MemoryStep';
 import { CompletionStep } from './CompletionStep';
 import { useSettingsStore } from '../../stores/settings-store';
@@ -27,14 +25,13 @@ interface OnboardingWizardProps {
 }
 
 // Wizard step identifiers
-type WizardStepId = 'welcome' | 'accounts' | 'devtools' | 'privacy' | 'memory' | 'completion';
+type WizardStepId = 'welcome' | 'accounts' | 'devtools' | 'memory' | 'completion';
 
 // Step configuration with translation keys
 const WIZARD_STEPS: { id: WizardStepId; labelKey: string }[] = [
   { id: 'welcome', labelKey: 'steps.welcome' },
   { id: 'accounts', labelKey: 'steps.accounts' },
   { id: 'devtools', labelKey: 'steps.devtools' },
-  { id: 'privacy', labelKey: 'steps.privacy' },
   { id: 'memory', labelKey: 'steps.memory' },
   { id: 'completion', labelKey: 'steps.done' }
 ];
@@ -151,13 +148,6 @@ export function OnboardingWizard({
             onBack={goToPreviousStep}
           />
         );
-      case 'privacy':
-        return (
-          <PrivacyStep
-            onNext={goToNextStep}
-            onBack={goToPreviousStep}
-          />
-        );
       case 'memory':
         return (
           <MemoryStep
@@ -192,8 +182,7 @@ export function OnboardingWizard({
     <FullScreenDialog open={open} onOpenChange={handleOpenChange}>
       <FullScreenDialogContent>
         <FullScreenDialogHeader>
-          <FullScreenDialogTitle className="flex items-center gap-3">
-            <Wand2 className="h-6 w-6" />
+          <FullScreenDialogTitle>
             {t('wizard.title')}
           </FullScreenDialogTitle>
           <FullScreenDialogDescription>

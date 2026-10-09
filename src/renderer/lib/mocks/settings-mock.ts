@@ -13,13 +13,6 @@ export const settingsMock = {
 
   saveSettings: async () => ({ success: true }),
 
-  // Sentry error reporting
-  notifySentryStateChanged: (_enabled: boolean) => {
-    console.warn('[browser-mock] notifySentryStateChanged called');
-  },
-  getSentryDsn: async () => '',  // No DSN in browser mode
-  getSentryConfig: async () => ({ dsn: '', tracesSampleRate: 0, profilesSampleRate: 0 }),
-
   // Spell check (no-op in browser mode)
   setSpellCheckLanguages: async () => ({ success: true, data: { success: true } }),
 
@@ -44,7 +37,7 @@ export const settingsMock = {
   getAppVersion: async () => '0.1.0-browser',
 
   // App Update Operations (mock - no updates in browser mode)
-  checkAppUpdate: async () => ({ success: true, data: null }),
+  checkAppUpdate: async () => ({ success: true, data: { status: 'unpublished' as const } }),
   downloadAppUpdate: async () => ({ success: true }),
   downloadStableUpdate: async () => ({ success: true }),
   installAppUpdate: () => { console.warn('[browser-mock] installAppUpdate called'); },
@@ -52,8 +45,7 @@ export const settingsMock = {
   skipAppUpdate: async (_version: string) => ({ success: true }),
   snoozeAppUpdate: async () => ({ success: true }),
   isAppUpdateSuppressed: async (_version: string) => ({ success: true, data: false }),
-  getAppIcon: async () => ({ dark: null, light: null }),
-  onAppIconChanged: () => () => {},
+  setTitleBarColors: () => {},
 
   // App Update Event Listeners (no-op in browser mode)
   onAppUpdateAvailable: () => () => {},

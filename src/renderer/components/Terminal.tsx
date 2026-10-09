@@ -1,11 +1,7 @@
 import { useEffect, useRef, useCallback, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
-import { useDroppable, useDndContext } from '@dnd-kit/core';
+import { useDroppable } from '@dnd-kit/core';
 import '@xterm/xterm/css/xterm.css';
-import { FileDown } from 'lucide-react';
-import { cn } from '../lib/utils';
 import { useTerminalStore } from '../stores/terminal-store';
-import { useSettingsStore } from '../stores/settings-store';
-import { useToast } from '../hooks/use-toast';
 import type { TerminalProps } from './terminal/types';
 import type { TerminalWorktreeConfig } from '../../shared/types';
 import { TerminalHeader } from './terminal/TerminalHeader';
@@ -13,8 +9,6 @@ import { CreateWorktreeDialog } from './terminal/CreateWorktreeDialog';
 import { useXterm } from './terminal/useXterm';
 import { usePtyProcess } from './terminal/usePtyProcess';
 import { useTerminalEvents } from './terminal/useTerminalEvents';
-import { useAutoNaming } from './terminal/useAutoNaming';
-import { useTerminalFileDrop } from './terminal/useTerminalFileDrop';
 import { debugLog } from '../../shared/utils/debug-logger';
 import { isWindows as checkIsWindows } from '../lib/os-detection';
 
@@ -110,39 +104,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Use cwd from store if available (for worktree), otherwise use prop
   const effectiveCwd = terminal?.cwd || cwd;
 
-  // Settings store for IDE preferences
-  const { settings } = useSettingsStore();
-
-  // Toast for user feedback
-  const { toast } = useToast();
-
   const associatedTask = terminal?.associatedTaskId
     ? tasks.find((t) => t.id === terminal.associatedTaskId)
     : undefined;
 
-  // Setup drop zone for file drag-and-drop
-  const { setNodeRef: setDropRef, isOver } = useDroppable({
+  // Drop zone used when reordering terminals by dragging their headers
+  const { setNodeRef: setDropRef } = useDroppable({
     id: `terminal-${id}`,
     data: { type: 'terminal', terminalId: id }
   });
 
-  // Check if a terminal is being dragged (vs a file)
-  const { active } = useDndContext();
-  const isDraggingTerminal = active?.data.current?.type === 'terminal-panel';
-
-  // Use custom hook for native HTML5 file drop handling from FileTreeItem
-  // This hook is extracted to enable proper unit testing with renderHook()
-  const { isNativeDragOver, handleNativeDragOver, handleNativeDragLeave, handleNativeDrop } =
-    useTerminalFileDrop({ terminalId: id });
-
-  // Only show file drop overlay when dragging files (via @dnd-kit or native), not terminals
-  const showFileDropOverlay = (isOver && !isDraggingTerminal) || isNativeDragOver;
-
-  // Auto-naming functionality
-  const { handleCommandEnter, cleanup: cleanupAutoNaming } = useAutoNaming({
-    terminalId: id,
-    cwd: effectiveCwd,
-  });
 
   // Track when xterm dimensions are ready for PTY creation
   const [readyDimensions, setReadyDimensions] = useState<{ cols: number; rows: number } | null>(null);
@@ -281,7 +252,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     rows,
   } = useXterm({
     terminalId: id,
-    onCommandEnter: handleCommandEnter,
     onResize: (cols, rows) => {
       // PTY dimension sync validation:
       // 1. Only resize if PTY is created
@@ -340,6 +310,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     isRecreatingRef,
     onCreated: () => {
       isCreatedRef.current = true;
+      // "New agent" terminals (and agents moved to another worktree) start Claude Code as soon as
+      // the shell is ready; the store holds the current cwd (the worktree path after a switch)
+      const created = useTerminalStore.getState().getTerminal(id);
+      if (created?.launchCLIOnCreate) {
+        useTerminalStore.getState().updateTerminal(id, { launchCLIOnCreate: false });
+        setCLIMode(id, true);
+        window.electronAPI.invokeCLIInTerminal(id, created.cwd || effectiveCwd);
+      }
       // ALWAYS force PTY resize on creation/remount
       // This ensures PTY matches xterm even if PTY existed before remount (expand/minimize)
       // The root cause of text alignment issues is that when terminal remounts:
@@ -598,40 +576,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
   }, [isActive, id, terminal?.pendingCLIResume]);
 
-  // Handle keyboard shortcuts for this terminal
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Only handle if this terminal is active
-      if (!isActive) return;
-
-      // Cmd/Ctrl+W to close terminal
-      if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
-        e.preventDefault();
-        e.stopPropagation();
-        onClose();
-      }
-
-      // Cmd/Ctrl+Shift+E to toggle expand/collapse
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'e') {
-        e.preventDefault();
-        e.stopPropagation();
-        onToggleExpand?.();
-      }
-    };
-
-    // Use capture phase to get the event before xterm
-    window.addEventListener('keydown', handleKeyDown, true);
-    return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isActive, onClose, onToggleExpand]);
-
   // Cleanup on unmount
   useEffect(() => {
     isMountedRef.current = true;
 
     return () => {
       isMountedRef.current = false;
-      cleanupAutoNaming();
-
       // Clear post-creation dimension check timeout to prevent operations on unmounted component
       if (postCreationTimeoutRef.current !== null) {
         clearTimeout(postCreationTimeoutRef.current);
@@ -644,23 +594,14 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       dispose();
       isCreatedRef.current = false;
     };
-  }, [id, dispose, cleanupAutoNaming]);
+  }, [id, dispose]);
 
-  const handleInvokeClaude = useCallback(() => {
-    setCLIMode(id, true);
-    window.electronAPI.invokeCLIInTerminal(id, effectiveCwd);
-  }, [id, effectiveCwd, setCLIMode]);
+
 
   const handleClick = useCallback(() => {
     onActivate();
     focus();
   }, [onActivate, focus]);
-
-  const handleTitleChange = useCallback((newTitle: string) => {
-    updateTerminal(id, { title: newTitle });
-    // Sync to main process so title persists across hot reloads
-    window.electronAPI.setTerminalTitle(id, newTitle);
-  }, [id, updateTerminal]);
 
   const handleTaskSelect = useCallback((taskId: string) => {
     const selectedTask = tasks.find((t) => t.id === taskId);
@@ -694,6 +635,12 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
   }, []);
 
   const applyWorktreeConfig = useCallback(async (config: TerminalWorktreeConfig) => {
+    // Recreating the PTY ends Claude Code, so an agent window relaunches it in the new worktree
+    // as soon as the new shell is ready (same flag as "New agent", handled in onCreated)
+    if (useTerminalStore.getState().getTerminal(id)?.isCLIMode) {
+      updateTerminal(id, { launchCLIOnCreate: true });
+    }
+
     // IMPORTANT: Set isRecreatingRef BEFORE destruction to signal deliberate recreation
     // This prevents exit handlers from triggering auto-removal during controlled recreation
     isRecreatingRef.current = true;
@@ -739,73 +686,24 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
     await applyWorktreeConfig(config);
   }, [applyWorktreeConfig]);
 
-  const handleOpenInIDE = useCallback(async () => {
-    const worktreePath = terminal?.worktreeConfig?.worktreePath;
-    if (!worktreePath) return;
-
-    const preferredIDE = settings.preferredIDE || 'vscode';
-    try {
-      await window.electronAPI.worktreeOpenInIDE(
-        worktreePath,
-        preferredIDE,
-        settings.customIDEPath
-      );
-    } catch (err) {
-      console.error('Failed to open in IDE:', err);
-      toast({
-        title: 'Failed to open IDE',
-        description: err instanceof Error ? err.message : 'Could not launch IDE',
-        variant: 'destructive',
-      });
-    }
-  }, [terminal?.worktreeConfig?.worktreePath, settings.preferredIDE, settings.customIDEPath, toast]);
 
   // Get backlog tasks for worktree dialog
   const backlogTasks = tasks.filter((t) => t.status === 'backlog');
 
-  // Determine border color based on Claude busy state
-  // Red (busy) = Claude is actively processing
-  // Green (idle) = Claude is ready for input
-  const isClaudeBusy = terminal?.isClaudeBusy;
-  const showClaudeBusyIndicator = terminal?.isCLIMode && isClaudeBusy !== undefined;
-
   return (
     <div
       ref={setDropRef}
-      className={cn(
-        'flex h-full flex-col rounded-lg border bg-[#0B0B0F] overflow-hidden transition-all relative',
-        // Default border states
-        isActive ? 'border-primary ring-1 ring-primary/20' : 'border-border',
-        // File drop overlay
-        showFileDropOverlay && 'ring-2 ring-info border-info',
-        // Claude busy state indicator (subtle colored border when in Claude mode)
-        showClaudeBusyIndicator && isClaudeBusy && 'border-red-500/60 ring-1 ring-red-500/20',
-        showClaudeBusyIndicator && !isClaudeBusy && 'border-green-500/60 ring-1 ring-green-500/20'
-      )}
+      // Same background and border as the sidebar (the xterm themes in lib/terminal-theme.ts match it)
+      className="relative flex h-full flex-col overflow-hidden rounded-xl border border-border bg-sidebar"
       onClick={handleClick}
-      onDragOver={handleNativeDragOver}
-      onDragLeave={handleNativeDragLeave}
-      onDrop={handleNativeDrop}
     >
-      {showFileDropOverlay && (
-        <div className="absolute inset-0 bg-info/10 z-10 flex items-center justify-center pointer-events-none">
-          <div className="flex items-center gap-2 bg-info/90 text-info-foreground px-3 py-2 rounded-md">
-            <FileDown className="h-4 w-4" />
-            <span className="text-sm font-medium">Drop to insert path</span>
-          </div>
-        </div>
-      )}
 
       <TerminalHeader
         terminalId={id}
-        title={terminal?.title || 'Terminal'}
-        status={terminal?.status || 'idle'}
         isCLIMode={terminal?.isCLIMode || false}
         tasks={tasks}
         associatedTask={associatedTask}
         onClose={onClose}
-        onInvokeClaude={handleInvokeClaude}
-        onTitleChange={handleTitleChange}
         onTaskSelect={handleTaskSelect}
         onClearTask={handleClearTask}
         onNewTaskClick={onNewTaskClick}
@@ -814,7 +712,6 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
         projectPath={projectPath}
         onCreateWorktree={handleCreateWorktree}
         onSelectWorktree={handleSelectWorktree}
-        onOpenInIDE={handleOpenInIDE}
         dragHandleListeners={dragHandleListeners}
         isExpanded={isExpanded}
         onToggleExpand={onToggleExpand}
@@ -823,7 +720,7 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
 
       <div
         ref={terminalRef}
-        className="flex-1 p-1"
+        className="flex-1 px-2 py-1.5"
         style={{ minHeight: 0 }}
       />
 

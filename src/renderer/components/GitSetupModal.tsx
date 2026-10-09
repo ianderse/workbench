@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { GitBranch, Terminal, CheckCircle2, AlertCircle, Loader2, FolderGit2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import {
   Dialog,
@@ -76,8 +76,7 @@ export function GitSetupModal({
   const renderInfoStep = () => (
     <>
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <FolderGit2 className="h-5 w-5 text-primary" />
+        <DialogTitle>
           {t('gitSetup.title')}
         </DialogTitle>
         <DialogDescription>
@@ -85,40 +84,27 @@ export function GitSetupModal({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="py-4 space-y-4">
-        {/* Status indicator */}
-        <div className="rounded-lg bg-muted p-4">
-          <div className="flex items-start gap-3">
-            <AlertCircle className="h-5 w-5 text-warning mt-0.5 shrink-0" />
-            <div className="space-y-1">
-              <p className="font-medium text-sm">
-                {needsGitInit
-                  ? t('gitSetup.notGitRepo')
-                  : t('gitSetup.noCommits')}
-              </p>
-              <p className="text-sm text-muted-foreground">
-                {needsGitInit
-                  ? t('gitSetup.needsInit')
-                  : t('gitSetup.needsCommit')}
-              </p>
-            </div>
-          </div>
+      <div className="pt-4 space-y-4">
+        {/* Status */}
+        <div className="rounded-xl bg-segment-track px-4 py-3 text-sm space-y-1">
+          <p className="text-foreground">
+            {needsGitInit
+              ? t('gitSetup.notGitRepo')
+              : t('gitSetup.noCommits')}
+          </p>
+          <p className="text-muted-foreground">
+            {needsGitInit
+              ? t('gitSetup.needsInit')
+              : t('gitSetup.needsCommit')}
+          </p>
         </div>
 
         {/* What will happen */}
-        <div className="rounded-lg border border-border p-4">
-          <p className="font-medium text-sm mb-3">{t('gitSetup.willSetup')}</p>
-          <ul className="space-y-2">
-            {needsGitInit && (
-              <li className="flex items-center gap-2 text-sm text-muted-foreground">
-                <GitBranch className="h-4 w-4 text-primary" />
-                {t('gitSetup.initRepo')}
-              </li>
-            )}
-            <li className="flex items-center gap-2 text-sm text-muted-foreground">
-              <CheckCircle2 className="h-4 w-4 text-primary" />
-              {t('gitSetup.createCommit')}
-            </li>
+        <div className="text-sm">
+          <p className="text-foreground mb-2">{t('gitSetup.willSetup')}</p>
+          <ul className="list-disc list-inside space-y-1 text-muted-foreground">
+            {needsGitInit && <li>{t('gitSetup.initRepo')}</li>}
+            <li>{t('gitSetup.createCommit')}</li>
           </ul>
         </div>
 
@@ -127,8 +113,8 @@ export function GitSetupModal({
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
             {t('gitSetup.manual')}
           </summary>
-          <div className="mt-3 rounded-lg bg-muted/50 p-3 font-mono text-xs space-y-1">
-            <p className="text-muted-foreground">Open a terminal in your project folder and run:</p>
+          <div className="mt-3 rounded-xl bg-segment-track px-4 py-3 font-mono text-xs space-y-1">
+            <p className="text-muted-foreground">{t('gitSetup.manualInstructions')}</p>
             {needsGitInit && <p>git init</p>}
             <p>git add .</p>
             <p>git commit -m "Initial commit"</p>
@@ -136,19 +122,18 @@ export function GitSetupModal({
         </details>
 
         {error && (
-          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive">
+          <p className="text-sm text-destructive" role="alert">
             {error}
-          </div>
+          </p>
         )}
       </div>
 
       <DialogFooter>
-        <Button variant="outline" onClick={handleSkip}>
-          Skip for now
+        <Button variant="ghost" size="sm" onClick={handleSkip}>
+          {t('gitSetup.skipForNow')}
         </Button>
-        <Button onClick={handleInitializeGit} disabled={isInitializing}>
-          <GitBranch className="mr-2 h-4 w-4" />
-          Initialize Git
+        <Button size="sm" onClick={handleInitializeGit} disabled={isInitializing}>
+          {t('gitSetup.initializeGit')}
         </Button>
       </DialogFooter>
     </>
@@ -157,19 +142,14 @@ export function GitSetupModal({
   const renderInitializingStep = () => (
     <>
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+        <DialogTitle>
           {t('gitSetup.settingUp')}
         </DialogTitle>
       </DialogHeader>
 
-      <div className="py-8 flex flex-col items-center justify-center">
-        <div className="space-y-3 text-center">
-          <Terminal className="h-12 w-12 text-muted-foreground mx-auto" />
-          <p className="text-sm text-muted-foreground">
-            {t('gitSetup.initializingRepo')}
-          </p>
-        </div>
+      <div className="py-8 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" />
+        {t('gitSetup.initializingRepo')}
       </div>
     </>
   );
@@ -177,21 +157,13 @@ export function GitSetupModal({
   const renderSuccessStep = () => (
     <>
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2">
-          <CheckCircle2 className="h-5 w-5 text-success" />
+        <DialogTitle>
           {t('gitSetup.success')}
         </DialogTitle>
       </DialogHeader>
 
-      <div className="py-8 flex flex-col items-center justify-center">
-        <div className="space-y-3 text-center">
-          <div className="h-16 w-16 rounded-full bg-success/10 flex items-center justify-center mx-auto">
-            <CheckCircle2 className="h-8 w-8 text-success" />
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {t('gitSetup.readyToUse')}
-          </p>
-        </div>
+      <div className="py-8 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+        {t('gitSetup.readyToUse')}
       </div>
     </>
   );

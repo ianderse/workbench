@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Terminal, Loader2, Check, AlertTriangle, X, RefreshCw, Download, Info, ExternalLink } from 'lucide-react';
+import { Terminal, Loader2, AlertTriangle, RefreshCw, Download, Info } from 'lucide-react';
+import { ExternalLink } from '../ui/external-link';
 import { Button } from '../ui/button';
 import { Card, CardContent } from '../ui/card';
 import type { ClaudeCodeVersionInfo } from '../../../shared/types/cli';
@@ -103,11 +104,11 @@ export function ClaudeCodeStep({ onNext, onBack, onSkip }: ClaudeCodeStepProps) 
       case 'loading':
         return <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />;
       case 'installed':
-        return <Check className="h-6 w-6 text-green-500" />;
+        return null;
       case 'outdated':
         return <AlertTriangle className="h-6 w-6 text-yellow-500" />;
       case 'not-found':
-        return <X className="h-6 w-6 text-destructive" />;
+        return null;
       case 'error':
         return <AlertTriangle className="h-6 w-6 text-destructive" />;
     }
@@ -278,15 +279,9 @@ export function ClaudeCodeStep({ onNext, onBack, onSkip }: ClaudeCodeStepProps) 
 
           {/* Documentation link */}
           <div className="flex justify-center">
-            <Button
-              variant="link"
-              size="sm"
-              className="text-muted-foreground gap-1"
-              onClick={() => window.electronAPI?.openExternal?.('https://claude.ai/code')}
-            >
+            <ExternalLink href="https://claude.ai/code">
               {t('claudeCode.learnMore', 'Learn more about Claude Code')}
-              <ExternalLink className="h-3 w-3" />
-            </Button>
+            </ExternalLink>
           </div>
         </div>
 

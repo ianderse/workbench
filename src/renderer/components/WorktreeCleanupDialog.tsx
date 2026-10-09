@@ -1,5 +1,5 @@
 import { useTranslation, Trans } from 'react-i18next';
-import { AlertCircle, CheckCircle2, FolderX, Loader2, RefreshCw } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,16 +39,11 @@ export function WorktreeCleanupDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2">
-            {error ? (
-              <AlertCircle className="h-5 w-5 text-destructive" />
-            ) : (
-              <CheckCircle2 className="h-5 w-5 text-success" />
-            )}
+          <AlertDialogTitle>
             {error ? t('dialogs:worktreeCleanup.errorTitle') : t('dialogs:worktreeCleanup.title')}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div className="text-sm text-muted-foreground space-y-3">
+            <div className="space-y-3">
               {error ? (
                 <p className="text-destructive">{error}</p>
               ) : (
@@ -57,7 +52,7 @@ export function WorktreeCleanupDialog({
                     <Trans
                       i18nKey="dialogs:worktreeCleanup.hasWorktree"
                       values={{ taskTitle }}
-                      components={{ strong: <strong className="text-foreground" /> }}
+                      components={{ strong: <span className="text-foreground" /> }}
                     />
                   </p>
                   <p>
@@ -66,12 +61,12 @@ export function WorktreeCleanupDialog({
                 </>
               )}
               {worktreePath && (
-                <div className="bg-muted/50 rounded-lg p-3 font-mono text-xs break-all">
+                <div className="rounded-xl border border-border px-4 py-3 font-mono text-xs break-all text-foreground">
                   {worktreePath}
                 </div>
               )}
               {!error && (
-                <p className="text-amber-600 dark:text-amber-500">
+                <p className="rounded-xl bg-segment-track px-4 py-3 text-foreground">
                   {t('dialogs:worktreeCleanup.warning')}
                 </p>
               )}
@@ -86,23 +81,16 @@ export function WorktreeCleanupDialog({
               onConfirm();
             }}
             disabled={isProcessing}
-            className={error ? "bg-primary text-primary-foreground hover:bg-primary/90" : "bg-success text-success-foreground hover:bg-success/90"}
           >
             {isProcessing ? (
               <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                 {t('dialogs:worktreeCleanup.completing')}
               </>
             ) : error ? (
-              <>
-                <RefreshCw className="mr-2 h-4 w-4" />
-                {t('dialogs:worktreeCleanup.retry')}
-              </>
+              t('dialogs:worktreeCleanup.retry')
             ) : (
-              <>
-                <FolderX className="mr-2 h-4 w-4" />
-                {t('dialogs:worktreeCleanup.confirm')}
-              </>
+              t('dialogs:worktreeCleanup.confirm')
             )}
           </AlertDialogAction>
         </AlertDialogFooter>

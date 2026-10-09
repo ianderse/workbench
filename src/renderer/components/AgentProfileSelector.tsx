@@ -7,12 +7,12 @@
  *
  * Used in TaskCreationWizard and TaskEditDialog.
  */
-import { useState, useMemo, useEffect, useCallback } from 'react';
+import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useOllamaLlmModels } from '../hooks/useOllamaLlmModels';
 import { useActiveProvider } from '../hooks/useActiveProvider';
 import { getProviderModelLabel } from '../../shared/utils/model-display';
-import { Brain, Scale, Zap, Sliders, Sparkles, ChevronDown, ChevronUp, Pencil } from 'lucide-react';
-import { Label } from './ui/label';
+import { Brain, Scale, Zap, Sliders, Sparkles } from 'lucide-react';
 import {
   Select,
   SelectContent,
@@ -20,7 +20,8 @@ import {
   SelectTrigger,
   SelectValue
 } from './ui/select';
-import { ThinkingLevelSelect } from './settings/ThinkingLevelSelect';
+import { ThinkingLevelSelect, ReasoningTypeHint } from './settings/ThinkingLevelSelect';
+import { SettingsRow, SettingsRows } from './settings/SettingsRow';
 import {
   DEFAULT_AGENT_PROFILES,
   AVAILABLE_MODELS,
@@ -30,7 +31,6 @@ import {
 } from '../../shared/constants';
 import type { ModelType, ThinkingLevel } from '../../shared/types';
 import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
-import { cn } from '../lib/utils';
 
 interface AgentProfileSelectorProps {
   /** Currently selected profile ID ('auto', 'complex', 'balanced', 'quick', or 'custom') */
@@ -87,35 +87,13 @@ export function AgentProfileSelector({
 }: AgentProfileSelectorProps) {
   const { t } = useTranslation('settings');
   const { provider: activeProvider } = useActiveProvider();
-  const [showPhaseDetails, setShowPhaseDetails] = useState(false);
 
-  // Ollama models are user-installed — fetch dynamically from the local server
-  const [ollamaModels, setOllamaModels] = useState<Array<{ value: string; label: string }>>([]);
-
-  const fetchOllamaModels = useCallback(async (signal?: AbortSignal) => {
-    try {
-      const result = await window.electronAPI.listOllamaModels();
-      if (signal?.aborted) return;
-      if (result?.success && Array.isArray(result?.data?.models)) {
-        const llmModels = (result.data.models as Array<{ name: string; is_embedding: boolean }>)
-          .filter(m => !m.is_embedding)
-          .map(m => ({ value: m.name, label: m.name }));
-        setOllamaModels(llmModels);
-      }
-    } catch {
-      // Ollama not available — leave empty
-    }
-  }, []);
-
-  useEffect(() => {
-    if (activeProvider !== 'ollama') {
-      setOllamaModels([]);
-      return;
-    }
-    const controller = new AbortController();
-    fetchOllamaModels(controller.signal);
-    return () => { controller.abort(); };
-  }, [activeProvider, fetchOllamaModels]);
+  // Ollama models are user-installed: the saved list (fetched once if never fetched)
+  const { models: installedOllamaModels } = useOllamaLlmModels(activeProvider === 'ollama');
+  const ollamaModels = useMemo(
+    () => installedOllamaModels.map((m) => ({ value: m.name, label: m.name })),
+    [installedOllamaModels]
+  );
 
   const isCustom = profileId === 'custom';
   const _isAuto = profileId === 'auto';
@@ -206,26 +184,19 @@ export function AgentProfileSelector({
   const display = getProfileDisplay();
 
   return (
-    <div className="space-y-4">
-      {/* Agent Profile Selection */}
-      <div className="space-y-2">
-        <Label htmlFor="agent-profile" className="text-sm font-medium text-foreground">
-          {t('agentProfile.label')}
-        </Label>
-        <Select
-          value={profileId}
-          onValueChange={handleProfileSelect}
-          disabled={disabled}
-        >
-          <SelectTrigger id="agent-profile" className="h-10">
+    <SettingsRows>
+      {/* Agent profile: select in the row's control slot (borderless) */}
+      <SettingsRow label={t('agentProfile.label')} description={display.description} htmlFor="agent-profile">
+        <Select value={profileId} onValueChange={handleProfileSelect} disabled={disabled}>
+          <SelectTrigger id="agent-profile" className="h-8 w-auto">
             <SelectValue>
-              <div className="flex items-center gap-2">
-                <display.icon className="h-4 w-4" />
+              <span className="flex items-center gap-2">
+                <display.icon className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
                 <span>{display.label}</span>
-              </div>
+              </span>
             </SelectValue>
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent align="end">
             {DEFAULT_AGENT_PROFILES.map((profile) => {
               const ProfileIcon = iconMap[profile.icon || 'Scale'] || Scale;
               const modelLabel = activeProvider
@@ -234,9 +205,9 @@ export function AgentProfileSelector({
               return (
                 <SelectItem key={profile.id} value={profile.id}>
                   <div className="flex items-center gap-2">
-                    <ProfileIcon className="h-4 w-4 shrink-0" />
+                    <ProfileIcon className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
                     <div>
-                      <span className="font-medium">{profile.name}</span>
+                      <span>{profile.name}</span>
                       <span className="ml-2 text-xs text-muted-foreground">
                         ({modelLabel} + {profile.thinkingLevel})
                       </span>
@@ -247,9 +218,9 @@ export function AgentProfileSelector({
             })}
             <SelectItem value="custom">
               <div className="flex items-center gap-2">
-                <Sliders className="h-4 w-4 shrink-0" />
+                <Sliders className="h-4 w-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
                 <div>
-                  <span className="font-medium">{t('agentProfile.custom')}</span>
+                  <span>{t('agentProfile.custom')}</span>
                   <span className="ml-2 text-xs text-muted-foreground">
                     ({t('agentProfile.customDescription')})
                   </span>
@@ -258,125 +229,34 @@ export function AgentProfileSelector({
             </SelectItem>
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">
-          {display.description}
-        </p>
-      </div>
+      </SettingsRow>
 
-      {/* Phase Configuration - shown for all preset profiles */}
-      {!isCustom && (
-        <div className="rounded-lg border border-border bg-muted/30 overflow-hidden">
-          {/* Clickable Header */}
-          <button
-            type="button"
-            onClick={() => setShowPhaseDetails(!showPhaseDetails)}
-            className={cn(
-              'flex w-full items-center justify-between p-4 text-left',
-              'hover:bg-muted/50 transition-colors',
-              !disabled && 'cursor-pointer'
-            )}
-            disabled={disabled}
+      {/* Phase configuration - one row per phase for all preset profiles */}
+      {!isCustom &&
+        (Object.keys(PHASE_LABEL_KEYS) as Array<keyof PhaseModelConfig>).map((phase) => (
+          <SettingsRow
+            key={phase}
+            label={t(PHASE_LABEL_KEYS[phase].label)}
+            description={
+              <>
+                {t(PHASE_LABEL_KEYS[phase].description)}
+                <ReasoningTypeHint
+                  withSeparator
+                  modelValue={currentPhaseModels[phase]}
+                  provider={activeProvider ?? 'anthropic'}
+                />
+              </>
+            }
           >
-            <div className="flex items-center gap-2">
-              <span className="font-medium text-sm text-foreground">{t('agentProfile.phaseConfiguration')}</span>
-              {!showPhaseDetails && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Pencil className="h-3 w-3" />
-                  <span>{t('agentProfile.clickToCustomize')}</span>
-                </span>
-              )}
-            </div>
-            {showPhaseDetails ? (
-              <ChevronUp className="h-4 w-4 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
-            )}
-          </button>
-
-          {/* Compact summary when collapsed */}
-          {!showPhaseDetails && (
-            <div className="px-4 pb-4 -mt-1">
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {(Object.keys(PHASE_LABEL_KEYS) as Array<keyof PhaseModelConfig>).map((phase) => {
-                  const modelLabel = activeProvider
-                    ? getProviderModelLabel(currentPhaseModels[phase], activeProvider)
-                    : (AVAILABLE_MODELS.find(m => m.value === currentPhaseModels[phase])?.label?.replace('Claude ', '') || currentPhaseModels[phase]);
-                  return (
-                    <div key={phase} className="flex items-center justify-between rounded bg-background/50 px-2 py-1">
-                      <span className="text-muted-foreground">{t(PHASE_LABEL_KEYS[phase].label)}:</span>
-                      <span className="font-medium">{modelLabel}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Detailed Phase Configuration */}
-          {showPhaseDetails && (
-            <div className="px-4 pb-4 space-y-4 border-t border-border pt-4">
-              {(Object.keys(PHASE_LABEL_KEYS) as Array<keyof PhaseModelConfig>).map((phase) => (
-                <div key={phase} className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <Label className="text-xs font-medium text-foreground">
-                      {t(PHASE_LABEL_KEYS[phase].label)}
-                    </Label>
-                    <span className="text-[10px] text-muted-foreground">
-                      {t(PHASE_LABEL_KEYS[phase].description)}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-[10px] text-muted-foreground">{t('agentProfile.model')}</Label>
-                      <Select
-                        value={currentPhaseModels[phase]}
-                        onValueChange={(value) => handlePhaseModelChange(phase, value as ModelType)}
-                        disabled={disabled}
-                      >
-                        <SelectTrigger className="h-8 text-xs">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {phaseModelOptions.map((m) => (
-                            <SelectItem key={m.value} value={m.value}>
-                              {m.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <ThinkingLevelSelect
-                      value={currentPhaseThinking[phase]}
-                      onChange={(value) => handlePhaseThinkingChange(phase, value as ThinkingLevel)}
-                      modelValue={currentPhaseModels[phase]}
-                      provider={activeProvider ?? 'anthropic'}
-                      disabled={disabled}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Custom Configuration (shown only when custom is selected) */}
-      {isCustom && (
-        <div className="space-y-4 rounded-lg border border-border bg-muted/30 p-4">
-          {/* Model Selection */}
-          <div className="space-y-2">
-            <Label htmlFor="custom-model" className="text-xs font-medium text-muted-foreground">
-              {t('agentProfile.model')}
-            </Label>
             <Select
-              value={model}
-              onValueChange={(value) => onModelChange(value as ModelType)}
+              value={currentPhaseModels[phase]}
+              onValueChange={(value) => handlePhaseModelChange(phase, value as ModelType)}
               disabled={disabled}
             >
-              <SelectTrigger id="custom-model" className="h-9">
-                <SelectValue placeholder={t('agentProfile.selectModel')} />
+              <SelectTrigger className="h-8 w-auto" aria-label={t('agentProfile.model')}>
+                <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent align="end">
                 {phaseModelOptions.map((m) => (
                   <SelectItem key={m.value} value={m.value}>
                     {m.label}
@@ -384,18 +264,52 @@ export function AgentProfileSelector({
                 ))}
               </SelectContent>
             </Select>
-          </div>
+            <ThinkingLevelSelect
+              inline
+              value={currentPhaseThinking[phase]}
+              onChange={(value) => handlePhaseThinkingChange(phase, value as ThinkingLevel)}
+              modelValue={currentPhaseModels[phase]}
+              provider={activeProvider ?? 'anthropic'}
+              disabled={disabled}
+            />
+          </SettingsRow>
+        ))}
 
-          {/* Thinking Level Selection */}
+      {/* Custom configuration (shown only when custom is selected) */}
+      {isCustom && (
+        <SettingsRow
+          label={t('agentProfile.model')}
+          htmlFor="custom-model"
+          description={
+            <ReasoningTypeHint modelValue={model || 'sonnet'} provider={activeProvider ?? 'anthropic'} />
+          }
+        >
+          <Select
+            value={model}
+            onValueChange={(value) => onModelChange(value as ModelType)}
+            disabled={disabled}
+          >
+            <SelectTrigger id="custom-model" className="h-8 w-auto">
+              <SelectValue placeholder={t('agentProfile.selectModel')} />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {phaseModelOptions.map((m) => (
+                <SelectItem key={m.value} value={m.value}>
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <ThinkingLevelSelect
+            inline
             value={thinkingLevel || 'low'}
             onChange={(value) => onThinkingLevelChange(value as ThinkingLevel)}
             modelValue={model || 'sonnet'}
             provider={activeProvider ?? 'anthropic'}
             disabled={disabled}
           />
-        </div>
+        </SettingsRow>
       )}
-    </div>
+    </SettingsRows>
   );
 }

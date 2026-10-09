@@ -4,16 +4,13 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { AgentState } from './agent-state';
 import { AgentEvents } from './agent-events';
 import { AgentProcessManager } from './agent-process';
-import { AgentQueueManager } from './agent-queue';
 import { getClaudeProfileManager, initializeClaudeProfileManager } from '../claude-profile-manager';
 import type { ClaudeProfileManager } from '../claude-profile-manager';
 import { getOperationRegistry } from '../claude-profile/operation-registry';
 import {
   SpecCreationMetadata,
-  TaskExecutionOptions,
-  RoadmapConfig
+  TaskExecutionOptions
 } from './types';
-import type { IdeationConfig } from '../../shared/types';
 import { resetStuckSubtasks } from '../ipc-handlers/task/plan-file-utils';
 import { AUTO_BUILD_PATHS, getSpecsDir } from '../../shared/constants';
 import { projectStore } from '../project-store';
@@ -27,6 +24,8 @@ import { getSecurityProfile } from '../ai/security/security-profile';
 import { createOrGetWorktree } from '../ai/worktree';
 import { findTaskWorktree } from '../worktree-paths';
 import { readSettingsFile } from '../settings-utils';
+import { getDefaultMcpConnectorIds, getUsableCustomServers } from '../../shared/utils/mcp-connectors';
+import type { McpConnectorSettings } from '../../shared/types/settings';
 import type { ProviderAccount } from '../../shared/types/provider-account';
 import { tryLoadPrompt } from '../ai/prompts/prompt-loader';
 
@@ -38,7 +37,6 @@ export class AgentManager extends EventEmitter {
   private state: AgentState;
   private events: AgentEvents;
   private processManager: AgentProcessManager;
-  private queueManager: AgentQueueManager;
   private taskExecutionContext: Map<string, {
     projectPath: string;
     specId: string;
@@ -61,7 +59,6 @@ export class AgentManager extends EventEmitter {
     this.state = new AgentState();
     this.events = new AgentEvents();
     this.processManager = new AgentProcessManager(this.state, this.events, this);
-    this.queueManager = new AgentQueueManager(this.state, this.events, this.processManager, this);
 
     // Listen for auto-swap restart events
     this.on('auto-swap-restart-task', (taskId: string, newProfileId: string) => {
@@ -395,11 +392,7 @@ export class AgentManager extends EventEmitter {
       baseURL: resolved.auth?.baseURL,
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
-      mcpOptions: {
-        context7Enabled: true,
-        memoryEnabled: !!process.env.GRAPHITI_MCP_URL,
-        linearEnabled: !!process.env.LINEAR_API_KEY,
-      },
+      mcpOptions: this.resolveTaskMcpOptions(resolvedSpecDir, metadata?.mcpConnectors),
       toolContext: {
         cwd: projectPath,
         projectDir: projectPath,
@@ -519,11 +512,7 @@ export class AgentManager extends EventEmitter {
       baseURL: resolved.auth?.baseURL,
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
-      mcpOptions: {
-        context7Enabled: true,
-        memoryEnabled: !!process.env.GRAPHITI_MCP_URL,
-        linearEnabled: !!process.env.LINEAR_API_KEY,
-      },
+      mcpOptions: this.resolveTaskMcpOptions(specDir),
       toolContext: {
         cwd: effectiveCwd,
         projectDir: effectiveProjectDir,
@@ -622,11 +611,7 @@ export class AgentManager extends EventEmitter {
       baseURL: resolved.auth?.baseURL,
       configDir: resolved.configDir,
       oauthTokenFilePath: resolved.auth?.oauthTokenFilePath,
-      mcpOptions: {
-        context7Enabled: true,
-        memoryEnabled: !!process.env.GRAPHITI_MCP_URL,
-        linearEnabled: !!process.env.LINEAR_API_KEY,
-      },
+      mcpOptions: this.resolveTaskMcpOptions(specDir),
       toolContext: {
         cwd: effectiveCwd,
         projectDir: effectiveProjectDir,
@@ -651,64 +636,10 @@ export class AgentManager extends EventEmitter {
   }
 
   /**
-   * Start roadmap generation process
-   */
-  startRoadmapGeneration(
-    projectId: string,
-    projectPath: string,
-    refresh: boolean = false,
-    enableCompetitorAnalysis: boolean = false,
-    refreshCompetitorAnalysis: boolean = false,
-    config?: RoadmapConfig
-  ): void {
-    this.queueManager.startRoadmapGeneration(projectId, projectPath, refresh, enableCompetitorAnalysis, refreshCompetitorAnalysis, config);
-  }
-
-  /**
-   * Start ideation generation process
-   */
-  startIdeationGeneration(
-    projectId: string,
-    projectPath: string,
-    config: IdeationConfig,
-    refresh: boolean = false
-  ): void {
-    this.queueManager.startIdeationGeneration(projectId, projectPath, config, refresh);
-  }
-
-  /**
    * Kill a specific task's process
    */
   killTask(taskId: string): boolean {
     return this.processManager.killProcess(taskId);
-  }
-
-  /**
-   * Stop ideation generation for a project
-   */
-  stopIdeation(projectId: string): boolean {
-    return this.queueManager.stopIdeation(projectId);
-  }
-
-  /**
-   * Check if ideation is running for a project
-   */
-  isIdeationRunning(projectId: string): boolean {
-    return this.queueManager.isIdeationRunning(projectId);
-  }
-
-  /**
-   * Stop roadmap generation for a project
-   */
-  stopRoadmap(projectId: string): boolean {
-    return this.queueManager.stopRoadmap(projectId);
-  }
-
-  /**
-   * Check if roadmap is running for a project
-   */
-  isRoadmapRunning(projectId: string): boolean {
-    return this.queueManager.isRoadmapRunning(projectId);
   }
 
   /**
@@ -929,6 +860,35 @@ export class AgentManager extends EventEmitter {
       customScripts: {
         shellScripts: profile.customScripts.shellScripts,
       },
+    };
+  }
+
+  /**
+   * MCP options for a task's session: the connectors chosen for the task (passed in, or from
+   * task_metadata.json), otherwise the Connectors defaults. Each task's worker gets its own
+   * copy, so tasks running at the same time don't affect each other or the defaults.
+   */
+  private resolveTaskMcpOptions(specDir?: string, taskConnectors?: string[]): SerializableSessionConfig['mcpOptions'] {
+    const defaults = (readSettingsFile() as { mcpConnectors?: McpConnectorSettings } | undefined)?.mcpConnectors;
+    let ids = taskConnectors;
+    if (!ids && specDir) {
+      try {
+        const metadataPath = path.join(specDir, 'task_metadata.json');
+        if (existsSync(metadataPath)) {
+          const metadata = JSON.parse(readFileSync(metadataPath, 'utf-8')) as { mcpConnectors?: unknown };
+          if (Array.isArray(metadata.mcpConnectors)) ids = metadata.mcpConnectors as string[];
+        }
+      } catch {
+        // Unreadable metadata: use the defaults
+      }
+    }
+    const enabled = ids ?? getDefaultMcpConnectorIds(defaults);
+    return {
+      context7Enabled: enabled.includes('context7'),
+      memoryEnabled: enabled.includes('memory') && !!process.env.GRAPHITI_MCP_URL,
+      electronMcpEnabled: enabled.includes('electron'),
+      puppeteerMcpEnabled: enabled.includes('puppeteer'),
+      customServers: getUsableCustomServers(defaults).filter((server) => enabled.includes(server.id)),
     };
   }
 

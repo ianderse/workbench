@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Download, RefreshCw, CheckCircle2, AlertCircle, AlertTriangle, ExternalLink } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import { ExternalLink } from "./ui/external-link";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { Button } from "./ui/button";
 import { Progress } from "./ui/progress";
+import { SettingsRow } from "./settings/SettingsRow";
 import {
   Dialog,
   DialogContent,
@@ -193,9 +195,8 @@ export function AppUpdateNotification() {
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Download className="h-5 w-5" />
-            {t("dialogs:appUpdate.title", "App Update Available")}
+          <DialogTitle>
+            {t("dialogs:appUpdate.title", "App update available")}
           </DialogTitle>
           <DialogDescription>
             {t(
@@ -205,35 +206,30 @@ export function AppUpdateNotification() {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="-mx-6 mt-4 min-h-0 space-y-4 overflow-y-auto px-6">
           {/* Version Info */}
-          <div className="rounded-lg border border-border bg-muted/50 p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs text-muted-foreground uppercase tracking-wider mb-1">
-                  {t("dialogs:appUpdate.newVersion", "New Version")}
-                </p>
-                <p className="text-base font-medium text-foreground">{updateInfo.version}</p>
-                {updateInfo.releaseDate && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {t("dialogs:appUpdate.released", "Released")}{" "}
-                    {new Date(updateInfo.releaseDate).toLocaleDateString()}
-                  </p>
-                )}
-              </div>
+          <SettingsRow
+            className="py-0"
+            label={t("dialogs:appUpdate.newVersion", "New version")}
+            description={
+              updateInfo.releaseDate
+                ? `${t("dialogs:appUpdate.released", "Released")} ${new Date(updateInfo.releaseDate).toLocaleDateString()}`
+                : undefined
+            }
+          >
+            <span className="flex items-center gap-1.5 text-sm text-foreground">
+              {updateInfo.version}
               {isDownloaded ? (
-                <CheckCircle2 className="h-6 w-6 text-success" />
+                null
               ) : isDownloading ? (
-                <RefreshCw className="h-6 w-6 animate-spin text-info" />
-              ) : (
-                <Download className="h-6 w-6 text-info" />
-              )}
-            </div>
-          </div>
+                <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
+              ) : null}
+            </span>
+          </SettingsRow>
 
           {/* Release Notes */}
           {updateInfo.releaseNotes && (
-            <div className="bg-background rounded-lg p-4 max-h-64 overflow-y-auto border border-border/50">
+            <div className="max-h-64 overflow-y-auto rounded-xl border border-border px-4 py-3 text-sm">
               <div className="prose prose-sm dark:prose-invert max-w-none">
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}
@@ -247,19 +243,16 @@ export function AppUpdateNotification() {
           )}
 
           {/* Claude Code Changelog Link */}
-          <Button
-            variant="link"
-            size="sm"
-            className="w-full text-xs text-muted-foreground gap-1"
-            onClick={() => window.electronAPI.openExternal(CLAUDE_CODE_CHANGELOG_URL)}
+          <ExternalLink
+            href={CLAUDE_CODE_CHANGELOG_URL}
+            className="self-start"
             aria-label={t(
               "dialogs:appUpdate.claudeCodeChangelogAriaLabel",
-              "View Claude Code Changelog (opens in new window)"
+              "View Claude Code changelog (opens in new window)"
             )}
           >
-            {t("dialogs:appUpdate.claudeCodeChangelog", "View Claude Code Changelog")}
-            <ExternalLink className="h-3 w-3" aria-hidden="true" />
-          </Button>
+            {t("dialogs:appUpdate.claudeCodeChangelog", "View Claude Code changelog")}
+          </ExternalLink>
 
           {/* Download Progress */}
           {isDownloading && downloadProgress && (
@@ -282,18 +275,16 @@ export function AppUpdateNotification() {
 
           {/* Download Error */}
           {downloadError && (
-            <div className="flex items-center gap-3 text-sm text-destructive bg-destructive/10 border border-destructive/30 rounded-lg p-3">
-              <AlertCircle className="h-5 w-5 shrink-0" />
-              <span>{downloadError}</span>
-            </div>
+            <p className="text-sm text-destructive" role="alert">
+              {downloadError}
+            </p>
           )}
 
           {/* Read-Only Volume Warning (DMG install on macOS) */}
           {showReadOnlyWarning && (
-            <div className="flex items-start gap-3 text-sm text-warning bg-warning/10 border border-warning/30 rounded-lg p-3">
-              <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
+            <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
               <div className="space-y-1">
-                <p className="font-medium">
+                <p className="text-foreground">
                   {t("dialogs:appUpdate.readOnlyVolumeTitle", "Cannot install from disk image")}
                 </p>
                 <p className="text-muted-foreground">
@@ -305,8 +296,7 @@ export function AppUpdateNotification() {
 
           {/* Downloaded Success */}
           {isDownloaded && !showReadOnlyWarning && (
-            <div className="flex items-center gap-3 text-sm text-success bg-success/10 border border-success/30 rounded-lg p-3">
-              <CheckCircle2 className="h-5 w-5 shrink-0" />
+            <div className="flex items-center gap-3 rounded-xl bg-segment-track px-4 py-3 text-sm">
               <span>
                 {t(
                   "dialogs:appUpdate.updateDownloaded",
@@ -317,35 +307,31 @@ export function AppUpdateNotification() {
           )}
         </div>
 
-        <DialogFooter className="flex flex-col sm:flex-row gap-3">
+        <DialogFooter>
           {!isDownloading && (
-            <Button variant="ghost" onClick={handleSkipVersion} className="text-muted-foreground">
-              {t("dialogs:appUpdate.skipThisVersion", "Skip This Version")}
+            <Button variant="ghost" size="sm" onClick={handleSkipVersion} className="text-muted-foreground sm:mr-auto">
+              {t("dialogs:appUpdate.skipThisVersion", "Skip this version")}
             </Button>
           )}
-          <Button variant="outline" onClick={isDownloaded ? handleDismiss : handleRemindLater} disabled={isDownloading}>
+          <Button variant="ghost" size="sm" onClick={isDownloaded ? handleDismiss : handleRemindLater} disabled={isDownloading}>
             {isDownloaded
-              ? t("dialogs:appUpdate.installLater", "Install Later")
-              : t("dialogs:appUpdate.remindMeLater", "Remind Me Later")}
+              ? t("dialogs:appUpdate.installLater", "Install later")
+              : t("dialogs:appUpdate.remindMeLater", "Remind me later")}
           </Button>
 
           {isDownloaded ? (
-            <Button onClick={handleInstall} disabled={showReadOnlyWarning}>
-              <RefreshCw className="mr-2 h-4 w-4" />
-              {t("dialogs:appUpdate.installAndRestart", "Install and Restart")}
+            <Button size="sm" onClick={handleInstall} disabled={showReadOnlyWarning}>
+              {t("dialogs:appUpdate.installAndRestart", "Install and restart")}
             </Button>
           ) : (
-            <Button onClick={handleDownload} disabled={isDownloading}>
+            <Button size="sm" onClick={handleDownload} disabled={isDownloading}>
               {isDownloading ? (
                 <>
-                  <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                   {t("dialogs:appUpdate.downloading", "Downloading...")}
                 </>
               ) : (
-                <>
-                  <Download className="mr-2 h-4 w-4" />
-                  {t("dialogs:appUpdate.downloadUpdate", "Download Update")}
-                </>
+                t("dialogs:appUpdate.downloadUpdate", "Download update")
               )}
             </Button>
           )}

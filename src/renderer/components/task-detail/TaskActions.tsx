@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { Play, Square, CheckCircle2, RotateCcw, Trash2, Loader2, AlertTriangle } from 'lucide-react';
+import { Play, Square, RotateCcw, Trash2, Loader2, AlertTriangle } from 'lucide-react';
 import { Button } from '../ui/button';
 import {
   AlertDialog,
@@ -99,7 +99,6 @@ export function TaskActions({
         )}
         {task.status === 'done' && (
           <div className="completion-state text-sm">
-            <CheckCircle2 className="h-5 w-5" />
             <span className="font-medium">Task completed successfully</span>
           </div>
         )}
@@ -122,7 +121,7 @@ export function TaskActions({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-destructive" />
+              <AlertTriangle className="h-4 w-4 text-destructive" />
               {t('tasks:deleteDialog.title')}
             </AlertDialogTitle>
             <AlertDialogDescription asChild>
@@ -137,9 +136,9 @@ export function TaskActions({
                   </div>
                 )}
                 {worktreeChangesInfo?.hasChanges && (
-                  <div className="bg-amber-500/10 border border-amber-500/30 px-3 py-2 rounded-lg text-sm space-y-1">
-                    <p className="font-medium text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                      <AlertTriangle className="h-4 w-4" />
+                  <div className="rounded-lg border border-warning/30 bg-warning/5 px-4 py-3 text-sm space-y-1">
+                    <p className="font-medium text-foreground flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 text-warning" />
                       {t('tasks:deleteDialog.uncommittedChanges', { count: worktreeChangesInfo.changedFileCount })}
                     </p>
                     <p className="text-muted-foreground text-xs">
@@ -151,7 +150,7 @@ export function TaskActions({
                   {t('tasks:deleteDialog.destructiveWarning')}
                 </p>
                 {deleteError && (
-                  <p className="text-destructive bg-destructive/10 px-3 py-2 rounded-lg text-sm">
+                  <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
                     {deleteError}
                   </p>
                 )}
@@ -170,12 +169,12 @@ export function TaskActions({
             >
               {isDeleting ? (
                 <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
                   {t('tasks:deleteDialog.deleting')}
                 </>
               ) : (
                 <>
-                  <Trash2 className="mr-2 h-4 w-4" />
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                   {t('tasks:deleteDialog.deletePermanently')}
                 </>
               )}

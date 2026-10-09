@@ -16,14 +16,8 @@ import { registerTerminalHandlers } from './terminal-handlers';
 import { registerAgenteventsHandlers } from './agent-events-handlers';
 import { registerSettingsHandlers } from './settings-handlers';
 import { registerFileHandlers } from './file-handlers';
-import { registerRoadmapHandlers } from './roadmap-handlers';
 import { registerContextHandlers } from './context-handlers';
 import { registerEnvHandlers } from './env-handlers';
-import { registerLinearHandlers } from './linear-handlers';
-import { registerGithubHandlers } from './github-handlers';
-import { registerGitlabHandlers } from './gitlab-handlers';
-import { registerIdeationHandlers } from './ideation-handlers';
-import { registerChangelogHandlers } from './changelog-handlers';
 import { registerInsightsHandlers } from './insights-handlers';
 import { registerMemoryHandlers } from './memory-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
@@ -31,7 +25,6 @@ import { registerDebugHandlers } from './debug-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
-import { registerScreenshotHandlers } from './screenshot-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
 import { registerCodexAuthHandlers } from './codex-auth-handlers';
 import { notificationService } from '../notification-service';
@@ -76,29 +69,11 @@ export function setupIpcHandlers(
   // File explorer handlers
   registerFileHandlers();
 
-  // Roadmap handlers
-  registerRoadmapHandlers(agentManager, getMainWindow);
-
   // Context and memory handlers
   registerContextHandlers(getMainWindow);
 
   // Environment configuration handlers
   registerEnvHandlers(getMainWindow);
-
-  // Linear integration handlers
-  registerLinearHandlers(agentManager, getMainWindow);
-
-  // GitHub integration handlers
-  registerGithubHandlers(agentManager, getMainWindow);
-
-  // GitLab integration handlers
-  registerGitlabHandlers(agentManager, getMainWindow);
-
-  // Ideation handlers
-  registerIdeationHandlers(agentManager, getMainWindow);
-
-  // Changelog handlers
-  registerChangelogHandlers(getMainWindow);
 
   // Insights handlers
   registerInsightsHandlers(getMainWindow);
@@ -121,9 +96,6 @@ export function setupIpcHandlers(
   // API Profile handlers (custom Anthropic-compatible endpoints)
   registerProfileHandlers();
 
-  // Screenshot capture handlers
-  registerScreenshotHandlers();
-
   // Codex OAuth authentication handlers
   registerCodexAuthHandlers();
 
@@ -139,14 +111,8 @@ export {
   registerAgenteventsHandlers,
   registerSettingsHandlers,
   registerFileHandlers,
-  registerRoadmapHandlers,
   registerContextHandlers,
   registerEnvHandlers,
-  registerLinearHandlers,
-  registerGithubHandlers,
-  registerGitlabHandlers,
-  registerIdeationHandlers,
-  registerChangelogHandlers,
   registerInsightsHandlers,
   registerMemoryHandlers,
   registerAppUpdateHandlers,
@@ -154,6 +120,5 @@ export {
   registerClaudeCodeHandlers,
   registerMcpHandlers,
   registerProfileHandlers,
-  registerScreenshotHandlers,
   registerCodexAuthHandlers
 };

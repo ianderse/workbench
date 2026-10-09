@@ -1,16 +1,16 @@
 /**
  * Shared utilities for branch selection across the application.
- * Used by TaskCreationWizard, CreateWorktreeDialog, and GitHubIntegration.
+ * Used by TaskCreationWizard, CreateWorktreeDialog, and the project branch settings.
  */
 import { GitBranch, Cloud } from 'lucide-react';
 import type { ComboboxOption } from '../components/ui/combobox';
 import type { GitBranchDetail } from '../../shared/types';
 import { cn } from './utils';
 
-// Badge styling constants for branch type indicators
-const BADGE_BASE_CLASSES = 'text-xs px-1.5 py-0.5 rounded';
-const LOCAL_BADGE_CLASSES = 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400';
-const REMOTE_BADGE_CLASSES = 'bg-blue-500/10 text-blue-600 dark:text-blue-400';
+// Branch type indicators ("Local" / "Remote"): plain muted text, like claude.ai status labels
+const BADGE_BASE_CLASSES = 'text-xs';
+const LOCAL_BADGE_CLASSES = 'text-(--nav-label-color)';
+const REMOTE_BADGE_CLASSES = 'text-(--nav-label-color)';
 
 /**
  * Configuration for building branch options
@@ -27,7 +27,7 @@ export interface BranchOptionsConfig {
     /** Translation key for the label (will receive { branch } interpolation) */
     labelKey: string;
   };
-  /** Optional: Include an "auto-detect" option (used in GitHub settings) */
+  /** Optional: Include an "auto-detect" option (used in the project branch settings) */
   includeAutoDetect?: {
     /** The value to use for auto-detect (usually empty string) */
     value: string;
@@ -79,7 +79,7 @@ export function buildBranchOptions(
   // Build final options array
   const options: ComboboxOption[] = [];
 
-  // Add auto-detect option if configured (for GitHub settings)
+  // Add auto-detect option if configured (for the project branch settings)
   if (includeAutoDetect) {
     options.push({
       value: includeAutoDetect.value,

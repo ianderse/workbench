@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useMemo } from 'react';
+import { useProjectBranches } from '../../hooks/useProjectBranches';
 import { useTranslation } from 'react-i18next';
-import { GitBranch, Loader2, FolderGit, ListTodo } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -13,6 +14,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Switch } from '../ui/switch';
+import { SettingsRow } from '../settings/SettingsRow';
 import {
   Select,
   SelectContent,
@@ -23,7 +25,7 @@ import {
 import { Combobox } from '../ui/combobox';
 import { useToast } from '../../hooks/use-toast';
 import { buildBranchOptions } from '../../lib/branch-utils';
-import type { Task, TerminalWorktreeConfig, GitBranchDetail } from '../../../shared/types';
+import type { Task, TerminalWorktreeConfig } from '../../../shared/types';
 import { useProjectStore } from '../../stores/project-store';
 
 // Special value to represent "use project default" since Radix UI Select doesn't allow empty string values
@@ -98,10 +100,11 @@ export function CreateWorktreeDialog({
   );
 
   // Branch selection state - using structured GitBranchDetail for type indicators
-  const [branches, setBranches] = useState<GitBranchDetail[]>([]);
-  const [isLoadingBranches, setIsLoadingBranches] = useState(false);
+  // Saved branch list shared with the other branch pickers (no git calls when the dialog opens)
+  const { branches, detectedBranch, isLoading: isLoadingBranches } = useProjectBranches(projectPath);
   const [baseBranch, setBaseBranch] = useState<string>(PROJECT_DEFAULT_BRANCH);
-  const [projectDefaultBranch, setProjectDefaultBranch] = useState<string>('');
+  // Project settings' branch, otherwise the repository's default
+  const projectDefaultBranch = project?.settings?.mainBranch || detectedBranch;
 
   // Sanitized name for validation (without display fallback)
   const sanitizedName = useMemo(() => sanitizeWorktreeName(name, undefined, true), [name]);
@@ -109,50 +112,6 @@ export function CreateWorktreeDialog({
   // Preview name with fallback for display (using i18n)
   const previewName = sanitizedName || t('terminal:worktree.namePlaceholder');
 
-  // Fetch branches when dialog opens
-  useEffect(() => {
-    if (!open || !projectPath) return;
-
-    let isMounted = true;
-
-    const fetchBranches = async () => {
-      setIsLoadingBranches(true);
-      try {
-        // Use structured branch data with type indicators
-        const result = await window.electronAPI.getGitBranchesWithInfo(projectPath);
-        if (!isMounted) return;
-
-        if (result.success && result.data) {
-          setBranches(result.data);
-        }
-
-        // Use project settings mainBranch if available, otherwise auto-detect
-        if (project?.settings?.mainBranch) {
-          setProjectDefaultBranch(project.settings.mainBranch);
-        } else {
-          // Fallback to auto-detect if no project setting
-          const defaultResult = await window.electronAPI.detectMainBranch(projectPath);
-          if (!isMounted) return;
-
-          if (defaultResult.success && defaultResult.data) {
-            setProjectDefaultBranch(defaultResult.data);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to fetch branches:', err);
-      } finally {
-        if (isMounted) {
-          setIsLoadingBranches(false);
-        }
-      }
-    };
-
-    fetchBranches();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [open, projectPath, project?.settings?.mainBranch]);
 
   const handleNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     // Apply lowercase and convert spaces to hyphens as user types
@@ -273,8 +232,7 @@ export function CreateWorktreeDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <FolderGit className="h-5 w-5" />
+          <DialogTitle>
             {t('terminal:worktree.createTitle')}
           </DialogTitle>
           <DialogDescription>
@@ -282,8 +240,8 @@ export function CreateWorktreeDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
-          {/* Worktree Name */}
+        <div className="-mx-6 min-h-0 space-y-4 overflow-y-auto px-6 pt-4">
+          {/* Worktree name */}
           <div className="space-y-2">
             <Label htmlFor="worktree-name">{t('terminal:worktree.name')}</Label>
             <Input
@@ -294,20 +252,19 @@ export function CreateWorktreeDialog({
               disabled={isCreating}
               autoFocus
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-(--nav-label-color)">
               {t('terminal:worktree.nameHelp')}
             </p>
           </div>
 
           {/* Task Association (Optional) */}
           <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <ListTodo className="h-4 w-4" />
-              {t('terminal:worktree.associateTask')}
-              <span className="text-muted-foreground text-xs">({t('common:labels.optional')})</span>
+            <Label htmlFor="worktree-task">
+              {t('terminal:worktree.associateTask')}{' '}
+              <span className="text-muted-foreground font-normal">({t('common:labels.optional')})</span>
             </Label>
             <Select value={selectedTaskId || 'none'} onValueChange={handleTaskSelect}>
-              <SelectTrigger>
+              <SelectTrigger id="worktree-task">
                 <SelectValue placeholder={t('terminal:worktree.selectTask')} />
               </SelectTrigger>
               <SelectContent>
@@ -322,28 +279,23 @@ export function CreateWorktreeDialog({
           </div>
 
           {/* Git Branch Toggle */}
-          <div className="flex items-center justify-between space-x-2 rounded-lg border p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="create-branch" className="flex items-center gap-2 cursor-pointer">
-                <GitBranch className="h-4 w-4" />
-                {t('terminal:worktree.createBranch')}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {t('terminal:worktree.branchHelp', { branch: `terminal/${previewName}` })}
-              </p>
-            </div>
+          <SettingsRow
+            className="py-0"
+            label={t('terminal:worktree.createBranch')}
+            description={t('terminal:worktree.branchHelp', { branch: `terminal/${previewName}` })}
+            htmlFor="create-branch"
+          >
             <Switch
               id="create-branch"
               checked={createGitBranch}
               onCheckedChange={setCreateGitBranch}
               disabled={isCreating}
             />
-          </div>
+          </SettingsRow>
 
           {/* Base Branch Selection - Searchable */}
           <div className="space-y-2">
-            <Label htmlFor="base-branch" className="flex items-center gap-2">
-              <GitBranch className="h-4 w-4" />
+            <Label htmlFor="base-branch">
               {t('terminal:worktree.baseBranch')}
             </Label>
             <Combobox
@@ -356,7 +308,7 @@ export function CreateWorktreeDialog({
               emptyMessage={t('terminal:worktree.noBranchFound')}
               disabled={isCreating || isLoadingBranches}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-sm text-(--nav-label-color)">
               {t('terminal:worktree.baseBranchHelp')}
             </p>
           </div>
@@ -367,13 +319,13 @@ export function CreateWorktreeDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isCreating}>
+          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isCreating}>
             {t('common:buttons.cancel')}
           </Button>
-          <Button onClick={handleCreate} disabled={isCreating || !sanitizedName}>
+          <Button size="sm" onClick={handleCreate} disabled={isCreating || !sanitizedName}>
             {isCreating ? (
               <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                 {t('common:labels.creating')}
               </>
             ) : (

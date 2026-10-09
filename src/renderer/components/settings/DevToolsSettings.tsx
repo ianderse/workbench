@@ -1,13 +1,17 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Code, Terminal, RefreshCw, Loader2, Check, FolderOpen, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Loader2, FolderOpen } from 'lucide-react';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Button } from '../ui/button';
 import { Switch } from '../ui/switch';
 import { SettingsSection } from './SettingsSection';
+import { SettingsRow, SettingsRows } from './SettingsRow';
+import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import type { AppSettings, SupportedIDE, SupportedTerminal, SupportedCLI } from '../../../shared/types';
+
+const TOOLS_CACHE_KEY = 'detected-tools';
 
 interface DevToolsSettingsProps {
   settings: AppSettings;
@@ -94,7 +98,7 @@ export function DevToolsSettings({ settings, onSettingsChange }: DevToolsSetting
   const [isDetecting, setIsDetecting] = useState(false);
   const [detectError, setDetectError] = useState<string | null>(null);
 
-  // Detect installed tools on mount
+  // Detect installed IDEs and terminals
   const detectTools = useCallback(async () => {
     setIsDetecting(true);
     setDetectError(null);
@@ -109,6 +113,7 @@ export function DevToolsSettings({ settings, onSettingsChange }: DevToolsSetting
       const result = await window.electronAPI.worktreeDetectTools();
       if (result.success && result.data) {
         setDetectedTools(result.data as DetectedTools);
+        writeRefreshCache(TOOLS_CACHE_KEY, result.data);
       } else {
         setDetectError(result.error || 'Failed to detect tools');
       }
@@ -119,8 +124,14 @@ export function DevToolsSettings({ settings, onSettingsChange }: DevToolsSetting
     }
   }, []);
 
+  // Show the last detection; only detect on Refresh (or when it never ran)
   useEffect(() => {
-    detectTools();
+    const cached = readRefreshCache<DetectedTools>(TOOLS_CACHE_KEY);
+    if (cached) {
+      setDetectedTools(cached);
+    } else {
+      void detectTools();
+    }
   }, [detectTools]);
 
   const handleIDEChange = (ide: SupportedIDE) => {
@@ -264,14 +275,238 @@ export function DevToolsSettings({ settings, onSettingsChange }: DevToolsSetting
 
   cliOptions.push({ value: 'custom', label: 'Custom...', detected: false });
 
+  const noToolsDetected = !!detectedTools &&
+    detectedTools.ides.length === 0 &&
+    detectedTools.terminals.filter(t => t.id !== 'system').length === 0 &&
+    (!detectedTools.clis || detectedTools.clis.length === 0);
+
   return (
     <SettingsSection
-      title={t('devtools.title', 'Developer Tools')}
+      title={t('devtools.title', 'Developer tools')}
       description={t('devtools.description', 'Configure your preferred IDE and terminal for working with worktrees')}
     >
-      <div className="space-y-6">
-        {/* Detect Tools Button */}
-        <div className="flex justify-end">
+      {detectError && <p className="mb-2 text-sm text-destructive">{detectError}</p>}
+
+      <SettingsRows>
+        <SettingsRow
+          label={t('devtools.ide.label', 'Preferred IDE')}
+          description={t('devtools.ide.description', 'Auto Claude will open worktrees in this editor')}
+          htmlFor="preferred-ide"
+          footer={
+            settings.preferredIDE === 'custom' ? (
+              <div className="space-y-2">
+                <Label htmlFor="custom-ide-path" className="text-xs font-normal text-muted-foreground">
+                  {t('devtools.customPath', 'Custom path')}
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="custom-ide-path"
+                    value={settings.customIDEPath || ''}
+                    onChange={(e) => handleCustomIDEPathChange(e.target.value)}
+                    placeholder="/path/to/your/ide"
+                    className="h-8 flex-1"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-8 px-0"
+                    onClick={async () => {
+                      const result = await window.electronAPI.selectDirectory();
+                      if (result) {
+                        handleCustomIDEPathChange(result);
+                      }
+                    }}
+                    aria-label={t('common:accessibility.browseFilesAriaLabel')}
+                  >
+                    <FolderOpen className="h-4 w-4" strokeWidth={1.75} />
+                  </Button>
+                </div>
+              </div>
+            ) : undefined
+          }
+        >
+          <Select
+            value={settings.preferredIDE || 'vscode'}
+            onValueChange={(value) => handleIDEChange(value as SupportedIDE)}
+          >
+            <SelectTrigger id="preferred-ide" className="h-8 w-56">
+              <SelectValue placeholder={t('devtools.ide.placeholder', 'Select IDE...')} />
+            </SelectTrigger>
+            <SelectContent>
+              {ideOptions.map((option) => (
+                <SelectItem
+                  key={option.value}
+                  value={option.value}
+                  // Tools that weren't detected can't be picked ("Custom..." always can)
+                  disabled={!option.detected && option.value !== 'custom'}
+                >
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
+        <SettingsRow
+          label={t('devtools.terminal.label', 'Preferred terminal')}
+          description={t('devtools.terminal.description', 'Auto Claude will open terminal sessions here')}
+          htmlFor="preferred-terminal"
+          footer={
+            settings.preferredTerminal === 'custom' ? (
+              <div className="space-y-2">
+                <Label htmlFor="custom-terminal-path" className="text-xs font-normal text-muted-foreground">
+                  {t('devtools.customPath', 'Custom path')}
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="custom-terminal-path"
+                    value={settings.customTerminalPath || ''}
+                    onChange={(e) => handleCustomTerminalPathChange(e.target.value)}
+                    placeholder="/path/to/your/terminal"
+                    className="h-8 flex-1"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-8 px-0"
+                    onClick={async () => {
+                      const result = await window.electronAPI.selectDirectory();
+                      if (result) {
+                        handleCustomTerminalPathChange(result);
+                      }
+                    }}
+                    aria-label={t('common:accessibility.browseFilesAriaLabel')}
+                  >
+                    <FolderOpen className="h-4 w-4" strokeWidth={1.75} />
+                  </Button>
+                </div>
+              </div>
+            ) : undefined
+          }
+        >
+          <Select
+            value={settings.preferredTerminal || 'system'}
+            onValueChange={(value) => handleTerminalChange(value as SupportedTerminal)}
+          >
+            <SelectTrigger id="preferred-terminal" className="h-8 w-56">
+              <SelectValue placeholder={t('devtools.terminal.placeholder', 'Select terminal...')} />
+            </SelectTrigger>
+            <SelectContent>
+              {terminalOptions.map((option) => (
+                <SelectItem
+                  key={option.value}
+                  value={option.value}
+                  // Tools that weren't detected can't be picked ("Custom..." always can)
+                  disabled={!option.detected && option.value !== 'custom'}
+                >
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
+        <SettingsRow
+          label={t('devtools.cli.label', 'Preferred CLI')}
+          description={t('devtools.cli.description', 'CLI tool used for AI-powered terminal sessions')}
+          htmlFor="preferred-cli"
+          footer={
+            settings.preferredCLI === 'custom' ? (
+              <div className="space-y-2">
+                <Label htmlFor="custom-cli-path" className="text-xs font-normal text-muted-foreground">
+                  {t('devtools.customPath', 'Custom path')}
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="custom-cli-path"
+                    value={settings.customCLIPath || ''}
+                    onChange={(e) => handleCustomCLIPathChange(e.target.value)}
+                    placeholder="/path/to/your/cli"
+                    className="h-8 flex-1"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-8 px-0"
+                    onClick={async () => {
+                      const result = await window.electronAPI.selectDirectory();
+                      if (result) {
+                        handleCustomCLIPathChange(result);
+                      }
+                    }}
+                    aria-label={t('common:accessibility.browseFilesAriaLabel')}
+                  >
+                    <FolderOpen className="h-4 w-4" strokeWidth={1.75} />
+                  </Button>
+                </div>
+              </div>
+            ) : undefined
+          }
+        >
+          <Select
+            value={settings.preferredCLI || 'claude-code'}
+            onValueChange={(value) => handleCLIChange(value as SupportedCLI)}
+          >
+            <SelectTrigger id="preferred-cli" className="h-8 w-56">
+              <SelectValue placeholder={t('devtools.cli.placeholder', 'Select CLI...')} />
+            </SelectTrigger>
+            <SelectContent>
+              {cliOptions.map((option) => (
+                <SelectItem
+                  key={option.value}
+                  value={option.value}
+                  // Tools that weren't detected can't be picked ("Custom..." always can)
+                  disabled={!option.detected && option.value !== 'custom'}
+                >
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </SettingsRow>
+
+        {/* YOLO Mode Toggle */}
+        <SettingsRow
+          label={t('devtools.yoloMode.label', 'YOLO mode')}
+          description={
+            <>
+              {t('devtools.yoloMode.description', 'Start Claude with --dangerously-skip-permissions flag, bypassing all safety prompts. Use with extreme caution')}
+              {settings.dangerouslySkipPermissions && (
+                <span className="mt-1 block text-xs text-destructive">
+                  {t('devtools.yoloMode.warning', 'This mode bypasses Claude\'s permission system. Only enable if you fully trust the code being executed')}
+                </span>
+              )}
+            </>
+          }
+          htmlFor="yolo-mode"
+        >
+          <Switch
+            id="yolo-mode"
+            checked={settings.dangerouslySkipPermissions ?? false}
+            onCheckedChange={(checked) => {
+              onSettingsChange({
+                ...settings,
+                dangerouslySkipPermissions: checked
+              });
+            }}
+          />
+        </SettingsRow>
+
+        {/* Detection Summary */}
+        <SettingsRow
+          label={t('devtools.detected', 'Detected on your system')}
+          description={detectedTools && !isDetecting ? (
+            noToolsDetected ? (
+              t('devtools.noToolsDetected', 'No additional tools detected')
+            ) : (
+              [
+                ...detectedTools.ides.map((ide) => ide.name),
+                ...detectedTools.terminals.filter(t => t.id !== 'system').map((term) => term.name),
+                ...(detectedTools.clis?.filter(c => c.installed).map((cli) => cli.name) ?? [])
+              ].join(', ')
+            )
+          ) : undefined}
+        >
           <Button
             variant="outline"
             size="sm"
@@ -279,283 +514,14 @@ export function DevToolsSettings({ settings, onSettingsChange }: DevToolsSetting
             disabled={isDetecting}
           >
             {isDetecting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4 mr-2" />
+              <RefreshCw className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
             )}
-            {t('devtools.detectAgain', 'Detect Again')}
+            {t('devtools.detectAgain', 'Detect again')}
           </Button>
-        </div>
-
-        {detectError && (
-          <div className="text-sm text-destructive bg-destructive/10 p-3 rounded-md">
-            {detectError}
-          </div>
-        )}
-
-        {/* IDE Selection */}
-        <div className="space-y-2">
-          <Label htmlFor="preferred-ide" className="flex items-center gap-2">
-            <Code className="h-4 w-4" />
-            {t('devtools.ide.label', 'Preferred IDE')}
-          </Label>
-          <Select
-            value={settings.preferredIDE || 'vscode'}
-            onValueChange={(value) => handleIDEChange(value as SupportedIDE)}
-          >
-            <SelectTrigger id="preferred-ide">
-              <SelectValue placeholder={t('devtools.ide.placeholder', 'Select IDE...')} />
-            </SelectTrigger>
-            <SelectContent>
-              {ideOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  <div className="flex items-center gap-2">
-                    <span>{option.label}</span>
-                    {option.detected && (
-                      <Check className="h-3 w-3 text-green-500" />
-                    )}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t('devtools.ide.description', 'Auto Claude will open worktrees in this editor')}
-          </p>
-
-          {/* Custom IDE Path */}
-          {settings.preferredIDE === 'custom' && (
-            <div className="mt-3 space-y-2">
-              <Label htmlFor="custom-ide-path">
-                {t('devtools.customPath', 'Custom path')}
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="custom-ide-path"
-                  value={settings.customIDEPath || ''}
-                  onChange={(e) => handleCustomIDEPathChange(e.target.value)}
-                  placeholder="/path/to/your/ide"
-                  className="flex-1"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={async () => {
-                    const result = await window.electronAPI.selectDirectory();
-                    if (result) {
-                      handleCustomIDEPathChange(result);
-                    }
-                  }}
-                  aria-label={t('common:accessibility.browseFilesAriaLabel')}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Terminal Selection */}
-        <div className="space-y-2">
-          <Label htmlFor="preferred-terminal" className="flex items-center gap-2">
-            <Terminal className="h-4 w-4" />
-            {t('devtools.terminal.label', 'Preferred Terminal')}
-          </Label>
-          <Select
-            value={settings.preferredTerminal || 'system'}
-            onValueChange={(value) => handleTerminalChange(value as SupportedTerminal)}
-          >
-            <SelectTrigger id="preferred-terminal">
-              <SelectValue placeholder={t('devtools.terminal.placeholder', 'Select terminal...')} />
-            </SelectTrigger>
-            <SelectContent>
-              {terminalOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  <div className="flex items-center gap-2">
-                    <span>{option.label}</span>
-                    {option.detected && (
-                      <Check className="h-3 w-3 text-green-500" />
-                    )}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t('devtools.terminal.description', 'Auto Claude will open terminal sessions here')}
-          </p>
-
-          {/* Custom Terminal Path */}
-          {settings.preferredTerminal === 'custom' && (
-            <div className="mt-3 space-y-2">
-              <Label htmlFor="custom-terminal-path">
-                {t('devtools.customPath', 'Custom path')}
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="custom-terminal-path"
-                  value={settings.customTerminalPath || ''}
-                  onChange={(e) => handleCustomTerminalPathChange(e.target.value)}
-                  placeholder="/path/to/your/terminal"
-                  className="flex-1"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={async () => {
-                    const result = await window.electronAPI.selectDirectory();
-                    if (result) {
-                      handleCustomTerminalPathChange(result);
-                    }
-                  }}
-                  aria-label={t('common:accessibility.browseFilesAriaLabel')}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* CLI Selection */}
-        <div className="space-y-2">
-          <Label htmlFor="preferred-cli" className="flex items-center gap-2">
-            <Terminal className="h-4 w-4" />
-            {t('devtools.cli.label', 'Preferred CLI')}
-          </Label>
-          <Select
-            value={settings.preferredCLI || 'claude-code'}
-            onValueChange={(value) => handleCLIChange(value as SupportedCLI)}
-          >
-            <SelectTrigger id="preferred-cli">
-              <SelectValue placeholder={t('devtools.cli.placeholder', 'Select CLI...')} />
-            </SelectTrigger>
-            <SelectContent>
-              {cliOptions.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  <div className="flex items-center gap-2">
-                    <span>{option.label}</span>
-                    {option.detected && (
-                      <Check className="h-3 w-3 text-green-500" />
-                    )}
-                  </div>
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">
-            {t('devtools.cli.description', 'CLI tool used for AI-powered terminal sessions')}
-          </p>
-
-          {/* Custom CLI Path */}
-          {settings.preferredCLI === 'custom' && (
-            <div className="mt-3 space-y-2">
-              <Label htmlFor="custom-cli-path">
-                {t('devtools.customPath', 'Custom path')}
-              </Label>
-              <div className="flex gap-2">
-                <Input
-                  id="custom-cli-path"
-                  value={settings.customCLIPath || ''}
-                  onChange={(e) => handleCustomCLIPathChange(e.target.value)}
-                  placeholder="/path/to/your/cli"
-                  className="flex-1"
-                />
-                <Button
-                  variant="outline"
-                  size="icon"
-                  onClick={async () => {
-                    const result = await window.electronAPI.selectDirectory();
-                    if (result) {
-                      handleCustomCLIPathChange(result);
-                    }
-                  }}
-                  aria-label={t('common:accessibility.browseFilesAriaLabel')}
-                >
-                  <FolderOpen className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Auto-name Claude Terminals Toggle */}
-        <div className="space-y-3 pt-2 border-t border-border">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-              <Label htmlFor="auto-name-claude-terminals" className="text-sm font-medium">
-                {t('devtools.autoNameClaude.label', 'Auto-name Claude terminals')}
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {t('devtools.autoNameClaude.description', 'Use AI to generate a descriptive name for Claude terminals based on your first message')}
-              </p>
-            </div>
-            {/* Fallback to true for existing users who don't have this setting in persisted config */}
-            <Switch
-              id="auto-name-claude-terminals"
-              checked={settings.autoNameClaudeTerminals ?? true}
-              onCheckedChange={(checked) => {
-                onSettingsChange({
-                  ...settings,
-                  autoNameClaudeTerminals: checked
-                });
-              }}
-            />
-          </div>
-        </div>
-
-        {/* YOLO Mode Toggle */}
-        <div className="space-y-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-500" />
-              <Label htmlFor="yolo-mode" className="text-amber-200">
-                {t('devtools.yoloMode.label', 'YOLO Mode')}
-              </Label>
-            </div>
-            <Switch
-              id="yolo-mode"
-              checked={settings.dangerouslySkipPermissions ?? false}
-              onCheckedChange={(checked) => {
-                onSettingsChange({
-                  ...settings,
-                  dangerouslySkipPermissions: checked
-                });
-              }}
-            />
-          </div>
-          <p className="text-xs text-amber-400/80">
-            {t('devtools.yoloMode.description', 'Start Claude with --dangerously-skip-permissions flag, bypassing all safety prompts. Use with extreme caution.')}
-          </p>
-          {settings.dangerouslySkipPermissions && (
-            <p className="text-xs text-amber-500 font-medium flex items-center gap-1">
-              <AlertTriangle className="h-3 w-3" />
-              {t('devtools.yoloMode.warning', 'This mode bypasses Claude\'s permission system. Only enable if you fully trust the code being executed.')}
-            </p>
-          )}
-        </div>
-
-        {/* Detection Summary */}
-        {detectedTools && !isDetecting && (
-          <div className="text-xs text-muted-foreground bg-muted/50 p-3 rounded-md">
-            <p className="font-medium mb-1">{t('devtools.detected', 'Detected on your system')}:</p>
-            <ul className="list-disc list-inside space-y-0.5">
-              {detectedTools.ides.map((ide) => (
-                <li key={ide.id}>{ide.name}</li>
-              ))}
-              {detectedTools.terminals.filter(t => t.id !== 'system').map((term) => (
-                <li key={term.id}>{term.name}</li>
-              ))}
-              {detectedTools.clis?.filter(c => c.installed).map((cli) => (
-                <li key={cli.id}>{cli.name}</li>
-              ))}
-              {detectedTools.ides.length === 0 && detectedTools.terminals.filter(t => t.id !== 'system').length === 0 && (!detectedTools.clis || detectedTools.clis.length === 0) && (
-                <li>{t('devtools.noToolsDetected', 'No additional tools detected')}</li>
-              )}
-            </ul>
-          </div>
-        )}
-      </div>
+        </SettingsRow>
+      </SettingsRows>
     </SettingsSection>
   );
 }

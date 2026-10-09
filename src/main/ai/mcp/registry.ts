@@ -10,6 +10,7 @@
  */
 
 import type { McpServerConfig, McpServerId } from './types';
+import type { CustomMcpServer } from '../../../shared/types/project';
 
 // =============================================================================
 // Server Configuration Definitions
@@ -28,23 +29,6 @@ const CONTEXT7_SERVER: McpServerConfig = {
     type: 'stdio',
     command: 'npx',
     args: ['-y', '@upstash/context7-mcp@latest'],
-  },
-};
-
-/**
- * Linear MCP server - project management.
- * Conditionally enabled when project has Linear integration active.
- * Requires LINEAR_API_KEY environment variable.
- */
-const LINEAR_SERVER: McpServerConfig = {
-  id: 'linear',
-  name: 'Linear',
-  description: 'Project management integration for issues and tasks',
-  enabledByDefault: false,
-  transport: {
-    type: 'stdio',
-    command: 'npx',
-    args: ['-y', '@linear/mcp-server'],
   },
 };
 
@@ -128,10 +112,10 @@ export interface McpRegistryOptions {
   specDir?: string;
   /** Memory MCP server URL (if enabled) */
   memoryMcpUrl?: string;
-  /** Linear API key (if available) */
-  linearApiKey?: string;
   /** Environment variables for server processes */
   env?: Record<string, string>;
+  /** User-added servers (Settings > Connectors), resolved by id */
+  customServers?: CustomMcpServer[];
 }
 
 /**
@@ -148,20 +132,6 @@ export function getMcpServerConfig(
   switch (serverId) {
     case 'context7':
       return CONTEXT7_SERVER;
-
-    case 'linear': {
-      if (!options.linearApiKey && !options.env?.LINEAR_API_KEY) return null;
-      const server = { ...LINEAR_SERVER };
-      // Pass LINEAR_API_KEY to the server process
-      const apiKey = options.linearApiKey ?? options.env?.LINEAR_API_KEY;
-      if (apiKey && server.transport.type === 'stdio') {
-        server.transport = {
-          ...server.transport,
-          env: { ...server.transport.env, LINEAR_API_KEY: apiKey },
-        };
-      }
-      return server;
-    }
 
     case 'memory': {
       const url = options.memoryMcpUrl ?? options.env?.GRAPHITI_MCP_URL;
@@ -180,9 +150,33 @@ export function getMcpServerConfig(
       return createAutoClaudeServer(specDir);
     }
 
-    default:
-      return null;
+    default: {
+      const custom = options.customServers?.find((server) => server.id === serverId);
+      return custom ? createCustomServer(custom) : null;
+    }
   }
+}
+
+/** MCP server config for a user-added server: stdio command or streamable HTTP */
+function createCustomServer(server: CustomMcpServer): McpServerConfig | null {
+  if (server.type === 'command') {
+    if (!server.command) return null;
+    return {
+      id: server.id,
+      name: server.name,
+      description: server.description,
+      enabledByDefault: true,
+      transport: { type: 'stdio', command: server.command, args: server.args ?? [] },
+    };
+  }
+  if (!server.url) return null;
+  return {
+    id: server.id,
+    name: server.name,
+    description: server.description,
+    enabledByDefault: true,
+    transport: { type: 'streamable-http', url: server.url, headers: server.headers },
+  };
 }
 
 /**

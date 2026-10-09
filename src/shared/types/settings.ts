@@ -2,13 +2,32 @@
  * Application settings types
  */
 
-import type { NotificationSettings, MemoryEmbeddingProvider } from './project';
-import type { ChangelogFormat, ChangelogAudience, ChangelogEmojiLevel } from './changelog';
+import type { NotificationSettings, MemoryEmbeddingProvider, CustomMcpServer } from './project';
 import type { ProviderAccount, BuiltinProvider } from './provider-account';
 import type { ProviderModelSpec } from '../constants/models';
 
 // Color theme types for multi-theme support
-export type ColorTheme = 'default' | 'lime';
+export type ColorTheme = 'default';
+
+/**
+ * MCP connector defaults (Settings > Connectors). New tasks start from these and can change them
+ * per task (TaskMetadata.mcpConnectors) without affecting the defaults or other tasks.
+ */
+export interface McpConnectorSettings {
+  /** Context7 documentation lookup (default on) */
+  context7Enabled?: boolean;
+  /** Memory knowledge graph (default on; also needs the memory server configured) */
+  memoryEnabled?: boolean;
+  /** Electron automation, QA agents only (default off) */
+  electronEnabled?: boolean;
+  /** Puppeteer browser automation, QA agents only (default off) */
+  puppeteerEnabled?: boolean;
+  /** User-added servers; only ones that passed a connection test can be used */
+  customServers?: CustomMcpServer[];
+}
+
+/** Interface font choice (Appearance settings) */
+export type InterfaceFont = 'anthropic-sans' | 'system' | 'sans-serif' | 'inter';
 
 // Developer tools preferences - IDE and terminal selection
 // Comprehensive list based on Stack Overflow Developer Survey 2024, JetBrains Survey, and market research
@@ -198,10 +217,6 @@ export interface PhaseThinkingConfig {
 // Values can be Claude shorthands or concrete model IDs
 export interface FeatureModelConfig {
   insights: string;    // Insights chat feature
-  ideation: string;    // Ideation generation
-  roadmap: string;     // Roadmap generation
-  githubIssues: string; // GitHub Issues automation
-  githubPrs: string;    // GitHub PR review automation
   utility: string;      // Utility agents (commit message, merge resolver)
   naming: string;       // AI naming (task titles, terminal names)
 }
@@ -209,10 +224,6 @@ export interface FeatureModelConfig {
 // Feature-specific thinking level configuration
 export interface FeatureThinkingConfig {
   insights: ThinkingLevel;
-  ideation: ThinkingLevel;
-  roadmap: ThinkingLevel;
-  githubIssues: ThinkingLevel;
-  githubPrs: ThinkingLevel;
   utility: ThinkingLevel;
   naming: ThinkingLevel;
 }
@@ -262,7 +273,6 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   colorTheme?: ColorTheme;
   defaultModel: string;
-  agentFramework: string;
   pythonPath?: string;
   gitPath?: string;
   githubCLIPath?: string;
@@ -270,7 +280,8 @@ export interface AppSettings {
   claudePath?: string;
   autoBuildPath?: string;
   autoUpdateAutoBuild: boolean;
-  autoNameTerminals: boolean;
+  // Maximum agent terminals per project (MIN_TERMINALS..MAX_TERMINALS_LIMIT)
+  maxTerminals?: number;
   notifications: NotificationSettings;
   // Global API keys (used as defaults for all projects)
   globalOpenAIApiKey?: string;
@@ -313,15 +324,15 @@ export interface AppSettings {
   // Custom phase configuration for Auto profile (overrides defaults)
   customPhaseModels?: PhaseModelConfig;
   customPhaseThinking?: PhaseThinkingConfig;
-  // Feature-specific configuration (insights, ideation, roadmap)
+  // Feature-specific configuration (insights, PR/MR review, utility, naming)
   featureModels?: FeatureModelConfig;
   featureThinking?: FeatureThinkingConfig;
-  // Changelog preferences
-  changelogFormat?: ChangelogFormat;
-  changelogAudience?: ChangelogAudience;
-  changelogEmojiLevel?: ChangelogEmojiLevel;
-  // UI Scale setting (75-200%, default 100)
-  uiScale?: number;
+  // Interface font (default Anthropic Sans)
+  interfaceFont?: InterfaceFont;
+  // Maximum tasks in progress at once per project; others wait in the Queue (Settings > Terminal)
+  maxParallelTasks?: number;
+  // MCP connector defaults for new tasks (Settings > Connectors)
+  mcpConnectors?: McpConnectorSettings;
   // Log order setting for task detail view
   logOrder?: 'chronological' | 'reverse-chronological';
   // Beta updates opt-in (receive pre-release updates)
@@ -345,10 +356,6 @@ export interface AppSettings {
   customCLIPath?: string;
   // YOLO mode: invoke Claude with --dangerously-skip-permissions flag
   dangerouslySkipPermissions?: boolean;
-  // Anonymous error reporting (Sentry) - enabled by default to help improve the app
-  sentryEnabled?: boolean;
-  // Auto-name Claude terminals based on initial message (only triggers once per session)
-  autoNameClaudeTerminals?: boolean;
   // Track which version warnings have been shown (e.g., ["2.7.5"])
   seenVersionWarnings?: string[];
   // Version the user has permanently skipped for update notifications

@@ -1,24 +1,19 @@
-import { Separator } from '../ui/separator';
-
 interface SettingsSectionProps {
   title: string;
-  description: string;
+  /** Kept for context in code; claude.ai section headings have no subtitle, so it is not rendered */
+  description?: string;
   children: React.ReactNode;
 }
 
 /**
- * Reusable wrapper component for settings sections
- * Provides consistent layout and styling
+ * A settings section (claude.ai): a 15px semibold heading followed by its rows;
+ * sections are spaced 40px apart.
  */
-export function SettingsSection({ title, description, children }: SettingsSectionProps) {
+export function SettingsSection({ title, children }: SettingsSectionProps) {
   return (
-    <div className="space-y-6">
-      <div>
-        <h3 className="text-lg font-semibold text-foreground mb-1">{title}</h3>
-        <p className="text-sm text-muted-foreground">{description}</p>
-      </div>
-      <Separator />
-      {children}
-    </div>
+    <section className="mb-10 last:mb-0">
+      <h3 className="text-[0.9375rem] font-semibold leading-5 text-foreground">{title}</h3>
+      <div className="mt-4">{children}</div>
+    </section>
   );
 }

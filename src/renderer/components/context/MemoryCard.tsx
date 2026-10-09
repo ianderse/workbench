@@ -1,6 +1,5 @@
 import { useState, useMemo } from 'react';
 import {
-  Clock,
   CheckCircle2,
   XCircle,
   Lightbulb,
@@ -16,10 +15,9 @@ import {
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
-import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import type { RendererMemory } from '../../../shared/types';
-import { memoryTypeIcons, memoryTypeColors, memoryTypeLabels } from './constants';
+import { memoryTypeLabels } from './constants';
 import { formatDate } from './utils';
 import { PRReviewCard } from './PRReviewCard';
 import { cn } from '../../lib/utils';
@@ -117,19 +115,6 @@ function ListItem({
   );
 }
 
-function ConfidenceBar({ confidence }: { confidence: number }) {
-  const pct = Math.round(confidence * 100);
-  const color =
-    pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500';
-  return (
-    <div className="flex items-center gap-1.5" title={`Confidence: ${pct}%`}>
-      <div className="h-1.5 w-16 bg-muted rounded-full overflow-hidden">
-        <div className={cn('h-full rounded-full', color)} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="text-xs text-muted-foreground">{pct}%</span>
-    </div>
-  );
-}
 
 // Check if memory content looks like a PR review (by content structure only)
 function isPRReviewMemory(memory: RendererMemory): boolean {
@@ -233,8 +218,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
     return <PRReviewCard memory={memory} />;
   }
 
-  const Icon = memoryTypeIcons[memory.type] || memoryTypeIcons.module_insight;
-  const typeColor = memoryTypeColors[memory.type] || '';
   const typeLabel =
     memoryTypeLabels[memory.type] ||
     t(`memory.types.${memory.type}`, { defaultValue: memory.type.replace(/_/g, ' ') });
@@ -264,81 +247,39 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
   const isWorkflowRecipe = memory.type === 'workflow_recipe';
 
   return (
-    <Card className="bg-muted/30 border-border/50 hover:border-border transition-colors">
-      <CardContent className="pt-4 pb-4">
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 flex-1 min-w-0">
-            <div className="p-2 rounded-lg bg-accent/10 shrink-0">
-              <Icon className="h-4 w-4 text-accent" />
-            </div>
-            <div className="flex-1 min-w-0">
-              {/* Type badge + session label */}
-              <div className="flex items-center gap-2 flex-wrap">
-                <Badge
-                  variant="outline"
-                  className={cn('text-xs capitalize font-medium', typeColor)}
-                >
-                  {typeLabel}
-                </Badge>
-                {sessionLabel && (
-                  <span className="text-sm font-medium text-foreground">{sessionLabel}</span>
-                )}
-                {memory.pinned && (
-                  <Pin className="h-3.5 w-3.5 text-accent shrink-0" aria-label={t('memory.badges.pinned')} />
-                )}
-                {memory.needsReview && (
-                  <Flag
-                    className="h-3.5 w-3.5 text-amber-400 shrink-0"
-                    aria-label={t('memory.badges.needsReview')}
-                  />
-                )}
-                {memory.userVerified && (
-                  <ShieldCheck
-                    className="h-3.5 w-3.5 text-green-400 shrink-0"
-                    aria-label={t('memory.badges.verified')}
-                  />
-                )}
-              </div>
-
-              {/* Confidence + source + timestamp */}
-              <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3 shrink-0" />
-                  {formatDate(memory.createdAt)}
-                </div>
-                <ConfidenceBar confidence={memory.confidence} />
-                <Badge variant="secondary" className="text-xs px-1.5 py-0">
-                  {sourceLabel}
-                </Badge>
-                {specId && (
-                  <span
-                    className="text-xs text-muted-foreground truncate max-w-[180px]"
-                    title={specId}
-                  >
-                    {specId}
-                  </span>
-                )}
-              </div>
-
-              {/* Tags row */}
-              {memory.tags.length > 0 && (
-                <div className="flex items-center gap-1 mt-1.5 flex-wrap">
-                  {memory.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="text-xs px-1.5 py-0 font-normal">
-                      {tag}
-                    </Badge>
-                  ))}
-                </div>
+    <div className="py-3">
+      <div>
+        {/* Header: settings-row style title and muted meta lines */}
+        <div className="flex items-start justify-between gap-7">
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-x-2 text-sm text-foreground">
+              <span>{typeLabel}</span>
+              {sessionLabel && <span className="text-(--nav-label-color)">{sessionLabel}</span>}
+              {memory.pinned && (
+                <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={t('memory.badges.pinned')} />
               )}
-
-              {/* Content preview for simple types */}
-              {!hasContent && memory.content && (
-                <p className="text-sm text-muted-foreground mt-2 line-clamp-2">
-                  {memory.content}
-                </p>
+              {memory.needsReview && (
+                <Flag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={t('memory.badges.needsReview')} />
+              )}
+              {memory.userVerified && (
+                <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={t('memory.badges.verified')} />
               )}
             </div>
+            <div className="mt-0.5 truncate text-sm text-(--nav-label-color)" title={specId}>
+              {[formatDate(memory.createdAt), t('memory.confidence', { value: Math.round(memory.confidence * 100) }), sourceLabel, specId]
+                .filter(Boolean)
+                .join(' · ')}
+            </div>
+            {memory.tags.length > 0 && (
+              <div className="mt-0.5 text-sm text-(--nav-label-color)">
+                {memory.tags.map((tag) => `#${tag}`).join(' ')}
+              </div>
+            )}
+
+            {/* Content preview for simple types */}
+            {!hasContent && memory.content && (
+              <p className="mt-1 line-clamp-2 text-sm text-(--nav-label-color)">{memory.content}</p>
+            )}
           </div>
 
           {hasContent && (
@@ -370,7 +311,7 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 gap-1 text-xs text-muted-foreground hover:text-green-400"
+                className="h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
                 onClick={() => onVerify(memory.id)}
                 title={t('memory.actions.verify')}
               >
@@ -384,7 +325,7 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
                 size="sm"
                 className={cn(
                   'h-7 gap-1 text-xs',
-                  memory.pinned ? 'text-accent' : 'text-muted-foreground hover:text-accent'
+                  memory.pinned ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
                 )}
                 onClick={() => onPin(memory.id, !memory.pinned)}
                 title={memory.pinned ? t('memory.actions.unpin') : t('memory.actions.pin')}
@@ -410,10 +351,10 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
 
         {/* Expanded Content */}
         {expanded && (
-          <div className="mt-4 space-y-4 pt-4 border-t border-border/50">
+          <div className="mt-4 space-y-4 pl-7">
             {/* Plain content display for non-JSON or simple memories */}
             {!parsed && memory.content && (
-              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono p-3 bg-background rounded-lg max-h-64 overflow-auto border border-border/50">
+              <pre className="text-xs text-muted-foreground whitespace-pre-wrap font-mono p-3 rounded-xl bg-segment-track max-h-64 overflow-auto">
                 {memory.content}
               </pre>
             )}
@@ -664,7 +605,7 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
         {!hasContent && !memory.content && expanded && (
           <p className="mt-4 text-xs text-muted-foreground italic">No additional details available.</p>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

@@ -15,13 +15,12 @@ resolves issues → User reviews and merges.
 
 - **Autonomous Tasks** — Multi-agent pipeline (planner, coder, QA) that builds features end-to-end
 - **Kanban Board** — Visual task management from planning through completion
-- **Agent Terminals** — Up to 12 parallel AI-powered terminals with task context injection
+- **Agent Terminals** — Parallel AI-powered terminals (12 by default, up to 24) with task context injection
 - **Insights** — AI chat interface for exploring and understanding a codebase
-- **Roadmap** — AI-assisted feature planning
-- **Ideation** — Discover improvements, performance issues, and security vulnerabilities
-- **GitHub/GitLab Integration** — Import issues, AI-powered investigation, PR/MR review and creation
-- **Changelog** — Generate release notes from completed tasks
+- **Pull Requests** — Create a GitHub pull request from a task's worktree (via the `gh` CLI)
 - **Memory** — Local knowledge store that retains insights across sessions
+- **Connectors** — MCP servers for agents (Context7, Memory, Electron/Puppeteer for QA, user-added servers) with
+  app-wide defaults in Settings and per-task choices in the task dialog
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
 - **Flexible Authentication** — Claude Code subscription (OAuth) or API profiles with any Anthropic-compatible endpoint
 - **Multi-Account Swapping** — When one Claude account hits a rate limit, switch to an available one automatically
@@ -38,12 +37,21 @@ resolves issues → User reviews and merges.
 **Platform abstraction** — Never use `process.platform` directly. Import from `src/main/platform/` (see
 [Cross-Platform](#cross-platform)).
 
-**No console.log in production code** — `console.log` output is invisible in bundled Electron apps. Use Sentry for error
-tracking in production; reserve `console.log` for development only.
+**No console.log in production code** — `console.log` output is invisible in bundled Electron apps. Log errors in the
+main process with `appLog` (`src/main/app-logger.ts`, written to the logs folder); reserve `console.log` for development
+only.
 
 **No time estimates** — Provide priority-based ordering instead of duration predictions.
 
 **PR target** — Always target the `develop` branch for PRs, not `main`. Main is reserved for releases.
+
+**Never block the main process** — IPC handlers reachable from the UI must not run synchronous child processes
+(`execFileSync`/`execSync`) or network calls; use async `execFile` (promisified). A sync `git fetch` used to freeze the
+whole app every time a dialog opened.
+
+**Don't re-fetch on open** — Pages and dialogs show stored values (Zustand stores, settings, or
+`src/renderer/lib/refresh-cache.ts` for results of slow checks) and only fetch when the user presses a refresh
+button, or once when nothing was fetched before. Shared hooks: `useProjectBranches()`, `useOllamaLlmModels()`.
 
 ## Work Approach: Orchestrator-First
 
@@ -100,11 +108,11 @@ npm run test:e2e       # End-to-end tests (Playwright)
 
 ### Packaging
 
-| Command                 | Output                                  |
-|-------------------------|-----------------------------------------|
-| `npm run package`       | Package for the current platform        |
-| `npm run package:mac`   | macOS `.dmg` + `.zip`                   |
-| `npm run package:win`   | Windows `.exe` (NSIS installer)         |
+| Command                 | Output                                           |
+|-------------------------|--------------------------------------------------|
+| `npm run package`       | Package for the current platform                 |
+| `npm run package:mac`   | macOS `.dmg` + `.zip`                            |
+| `npm run package:win`   | Windows `.exe` (NSIS installer)                  |
 | `npm run package:linux` | Linux `.deb` (check with `npm run verify:linux`) |
 
 Packages are written to `dist/`.
@@ -133,21 +141,21 @@ auto-claude/
 │   │   │   ├── security/        # Bash validator, command parser, path containment
 │   │   │   ├── config/          # Agent configs, phase config, model resolution
 │   │   │   ├── prompts/         # Prompt loading and assembly
-│   │   │   ├── runners/         # Insights, roadmap, ideation, PR review, etc.
+│   │   │   ├── runners/         # Insights, PR creation, commit messages, etc.
 │   │   │   ├── memory/          # Local memory store (libSQL)
 │   │   │   ├── mcp/             # MCP client integration
 │   │   │   └── auth/            # Token resolution (reuses claude-profile/)
-│   │   ├── agent/           # Agent queue, process, state, events
+│   │   ├── agent/           # Agent manager, process, state, events
 │   │   ├── claude-profile/  # Multi-profile credentials, token refresh, usage
 │   │   ├── terminal/        # PTY daemon, lifecycle, CLI integration
 │   │   ├── platform/        # Cross-platform abstraction
 │   │   ├── ipc-handlers/    # IPC handler modules by domain
-│   │   └── services/        # App services (session recovery, rate-limit resume, header icon rotation, PR status)
+│   │   └── services/        # App services (session recovery, rate-limit resume, provider API key check)
 │   ├── preload/             # Preload scripts (electronAPI bridge)
 │   ├── renderer/            # React UI (components, stores, contexts, hooks, styles)
 │   └── shared/              # Shared types, i18n, constants, utils
 ├── prompts/                 # Agent system prompts (.md)
-├── resources/               # App icons, macOS entitlements, bundled header icons
+├── resources/               # App and tray icons, macOS entitlements
 ├── e2e/                     # Playwright end-to-end tests
 └── .github/                 # Workflows and scripts (postinstall, prebuilds, deb check, bump-version)
 ```
@@ -196,8 +204,6 @@ const readTool = tool({
 | `complexity_assessor.md`                              | Complexity assessment                           |
 | `planner.md`, `coder.md`                              | Implementation plan / subtask implementation    |
 | `qa_reviewer.md`, `qa_fixer.md`                       | Acceptance validation / issue fixes             |
-| `roadmap_*.md`, `ideation_*.md`                       | Roadmap and ideation runners                    |
-| `github/pr_*_agent.md`, `github/pr_finding_validator.md` | Parallel PR review specialists and validator |
 | `mcp_tools/*.md`                                      | Tool guidance injected for MCP-enabled projects |
 
 In dev, prompts load from `prompts/`; packaged builds load them from `process.resourcesPath/prompts` (extraResources).
@@ -208,10 +214,21 @@ Each spec in `.auto-claude/specs/XXX-name/` contains `spec.md`, `requirements.js
 `implementation_plan.json`, `qa_report.md`, and `QA_FIX_REQUEST.md`, plus runtime files such as `task_metadata.json`,
 `task_logs.json`, and `build-progress.txt`.
 
+### MCP Connectors
+
+Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Memory, Electron
+and Puppeteer (QA agents only), plus custom servers, which must pass a connection test before they can be switched on.
+New tasks copy the enabled ids into `TaskMetadata.mcpConnectors` and can change them in the task dialog. When a task
+starts, `AgentManager.resolveTaskMcpOptions()` passes that task's connectors to its worker (so concurrent tasks don't
+affect each other); `getRequiredMcpServers()` gives every MCP-using agent all enabled connectors and
+`src/main/ai/mcp/registry.ts` builds configs for built-in and custom servers. Helpers live in
+`src/shared/utils/mcp-connectors.ts`.
+
 ### Electron MCP (agent QA of the app)
 
-Run `npm run dev:mcp` and enable the Electron MCP server for the project (`ELECTRON_MCP_ENABLED=true`). QA agents then
-drive the running app over the Chrome DevTools Protocol with `get_electron_window_info`, `take_screenshot`, `send_command_to_electron`, and `read_electron_logs`.
+Run `npm run dev:mcp` and switch on Electron in Settings > Connectors (or in the task's connectors). QA agents then
+drive the running app over the Chrome DevTools Protocol with `get_electron_window_info`, `take_screenshot`,
+`send_command_to_electron`, and `read_electron_logs`.
 
 ## Frontend
 
@@ -221,18 +238,29 @@ xterm.js 6, electron-vite 5 (Vite 7), Vitest 4 + React Testing Library + jsdom, 
 **Path aliases:** `@/*` → `src/renderer/*`, `@shared/*` → `src/shared/*`, `@preload/*` → `src/preload/*`.
 
 **State (Zustand)** — Renderer stores live in `src/renderer/stores/` (`project-store.ts`, `task-store.ts`,
-`terminal-store.ts`, `settings-store.ts`, `insights-store.ts`, `roadmap-store.ts`, `kanban-settings-store.ts`,
-`github/issues-store.ts`, `github/pr-review-store.ts`). Main-process stores: `src/main/project-store.ts`,
+`terminal-store.ts`, `settings-store.ts`, `insights-store.ts`, `context-store.ts`, `kanban-settings-store.ts`,
+`terminal-font-settings-store.ts`). Main-process stores: `src/main/project-store.ts`,
 `src/main/terminal-session-store.ts`.
 
 **Styling** — Tailwind CSS v4 via `@tailwindcss/postcss`; `clsx` + `tailwind-merge` through `cn()`; variants with
-`class-variance-authority`. Two color themes, **Default** and **Lime** (`src/shared/constants/themes.ts`), each with
-light/dark variants via CSS custom properties in `src/renderer/styles/globals.css`.
+`class-variance-authority`. One color theme (**Default**, `src/shared/constants/themes.ts`) with light/dark variants
+via CSS custom properties in `src/renderer/styles/globals.css`. Elements with a `hover:` (or focus/highlight) style get
+the pointer cursor automatically from a base rule.
+
+**Fonts** — Bundled in `src/renderer/assets/fonts/`: Anthropic Sans (UI), Dank Mono (terminals and agent windows,
+loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "Auto Claude" title only) and Inter
+(optional interface font). Settings > General > Appearance picks the interface and command line fonts.
+
+**Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Agents,
+Connectors, Developer, then the selected project's pages (Project, Memory), then Updates. Build pages from `SettingsSection` +
+`SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
+`SETTINGS_MENU_TRIGGER_CLASS` (no collapsible rows). UI copy conventions: sentence case, no em dashes, no trailing
+period in setting descriptions, and no green check / red x status icons (state the status in text).
 
 **IPC** — Handlers in `src/main/ipc-handlers/` (by domain), safe APIs exposed in `src/preload/`, renderer calls
 `window.electronAPI.*`.
 
-**Agent management** (`src/main/agent/`) — `agent-queue.ts` (routing, prioritization, spec number locking),
+**Agent management** (`src/main/agent/`) — `agent-manager.ts` (task lifecycle facade),
 `agent-process.ts` (spawns workers via `WorkerBridge`), `agent-state.ts`, `agent-events.ts`.
 
 **Claude profiles** (`src/main/claude-profile/`) — `credential-utils.ts` (OS keychain), `token-refresh.ts` (OAuth
@@ -246,15 +274,15 @@ refresh), `usage-monitor.ts` (usage and rate limits), `profile-scorer.ts` (profi
 English is the only supported language. Translation files: `src/shared/i18n/locales/en/*.json`.
 
 **Namespaces:** `common`, `navigation`, `settings`, `dialogs`, `tasks`, `taskReview`, `terminal`, `errors`,
-`onboarding`, `welcome`, `gitlab`.
+`onboarding`, `welcome`.
 
 ```tsx
 import { useTranslation } from 'react-i18next';
 
 const { t } = useTranslation(['navigation', 'common']);
 
-<span>{t('navigation:items.githubPRs')}</span>       // CORRECT
-<span>GitHub PRs</span>                               // WRONG
+<span>{t('navigation:items.kanban')}</span>          // CORRECT
+<span>Kanban</span>                                   // WRONG
 <span>{t('errors:task.parseError', { error })}</span> // With interpolation
 ```
 
@@ -275,11 +303,3 @@ Supports Windows, macOS, and Linux; CI runs tests on all three. Use `src/main/pl
 **Electron path resolution** — Paths often differ between dev and packaged builds (`app.isPackaged`,
 `process.resourcesPath`). In dev, `__dirname` is `out/main`; in production, bundled assets live under
 `process.resourcesPath`. Verify both contexts.
-
-**Resetting PR review state** — To make PR reviews run fresh, in the project's `.auto-claude/github/`:
-
-1. `rm pr/logs_*.json` — review logs
-2. `rm pr/review_*.json` — review results
-3. Reset `pr/index.json` to `{"reviews": [], "last_updated": null}`
-4. Reset `bot_detection_state.json` to `{"reviewed_commits": {}}` — without this, the bot detector skips already-seen
-   commits

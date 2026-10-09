@@ -19,8 +19,9 @@ import type { BrowserWindow } from 'electron';
 import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { resetMemoryService } from './context/memory-service-factory';
-import { configureTools, getToolPath, getToolInfo, isPathFromWrongPlatform, preWarmToolCache } from '../cli-tool-manager';
-import type { ProviderAccount } from '../../shared/types/provider-account';
+import { configureTools, getToolPath, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache } from '../cli-tool-manager';
+import type { ProviderAccount, ProviderKeyCheckResult } from '../../shared/types/provider-account';
+import { checkProviderKey } from '../services/provider-key-check';
 import type { APIProfile } from '../../shared/types/profile';
 import type { ClaudeProfile } from '../../shared/types/agent';
 import { loadProfilesFile } from '../utils/profile-manager';
@@ -382,7 +383,6 @@ export function registerSettingsHandlers(
       // Migration: Clear CLI tool paths that are from a different platform
       // Fixes issue where Windows paths persisted on macOS (and vice versa)
       // when settings were synced/transferred between platforms
-      // See: https://github.com/AndyMik90/Auto-Claude/issues/XXX
       const pathFields = ['pythonPath', 'gitPath', 'githubCLIPath', 'gitlabCLIPath', 'claudePath', 'autoBuildPath'] as const;
       for (const field of pathFields) {
         const pathValue = settings[field];
@@ -537,16 +537,15 @@ export function registerSettingsHandlers(
       claude: ReturnType<typeof getToolInfo>;
     }>> => {
       try {
-        return {
-          success: true,
-          data: {
-            python: getToolInfo('python'),
-            git: getToolInfo('git'),
-            gh: getToolInfo('gh'),
-            glab: getToolInfo('glab'),
-            claude: getToolInfo('claude'),
-          },
-        };
+        // Detected asynchronously at app start (warmToolInfo) and reused, so this doesn't block
+        const [python, git, gh, glab, claude] = await Promise.all([
+          getToolInfoAsync('python'),
+          getToolInfoAsync('git'),
+          getToolInfoAsync('gh'),
+          getToolInfoAsync('glab'),
+          getToolInfoAsync('claude'),
+        ]);
+        return { success: true, data: { python, git, gh, glab, claude } };
       } catch (error) {
         return {
           success: false,
@@ -1112,9 +1111,8 @@ export function registerSettingsHandlers(
   // TEST CONNECTION for a provider account
   ipcMain.handle(
     IPC_CHANNELS.PROVIDER_ACCOUNTS_TEST_CONNECTION,
-    async (_event, _provider: string, _config: { apiKey?: string; baseUrl?: string; region?: string }): Promise<IPCResult<{ success: boolean; error?: string }>> => {
-      // Basic stub - connection testing can be enhanced later per-provider
-      return { success: true, data: { success: true } };
+    async (_event, provider: string, config: { apiKey?: string; baseUrl?: string; region?: string }): Promise<IPCResult<ProviderKeyCheckResult>> => {
+      return { success: true, data: await checkProviderKey(provider, config) };
     }
   );
 

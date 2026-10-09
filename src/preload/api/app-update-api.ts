@@ -1,5 +1,7 @@
+import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type {
+  AppUpdateCheckResult,
   AppUpdateInfo,
   AppUpdateProgress,
   AppUpdateAvailableEvent,
@@ -15,7 +17,7 @@ import { createIpcListener, invokeIpc, IpcListenerCleanup } from './modules/ipc-
  */
 export interface AppUpdateAPI {
   // Operations
-  checkAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
+  checkAppUpdate: () => Promise<IPCResult<AppUpdateCheckResult>>;
   downloadAppUpdate: () => Promise<IPCResult>;
   downloadStableUpdate: () => Promise<IPCResult>;
   installAppUpdate: () => void;
@@ -24,10 +26,10 @@ export interface AppUpdateAPI {
   skipAppUpdate: (version: string) => Promise<IPCResult>;
   snoozeAppUpdate: () => Promise<IPCResult>;
   isAppUpdateSuppressed: (version: string) => Promise<IPCResult<boolean>>;
-  getAppIcon: () => Promise<Record<'dark' | 'light', string | null>>;
+  /** Match the Windows/Linux window controls to the theme (hex colors) */
+  setTitleBarColors: (colors: { color: string; symbolColor: string }) => void;
 
   // Event Listeners
-  onAppIconChanged: (callback: (mode: 'dark' | 'light', dataUrl: string | null) => void) => IpcListenerCleanup;
   onAppUpdateAvailable: (
     callback: (info: AppUpdateAvailableEvent) => void
   ) => IpcListenerCleanup;
@@ -53,7 +55,7 @@ export interface AppUpdateAPI {
  */
 export const createAppUpdateAPI = (): AppUpdateAPI => ({
   // Operations
-  checkAppUpdate: (): Promise<IPCResult<AppUpdateInfo | null>> =>
+  checkAppUpdate: (): Promise<IPCResult<AppUpdateCheckResult>> =>
     invokeIpc(IPC_CHANNELS.APP_UPDATE_CHECK),
 
   downloadAppUpdate: (): Promise<IPCResult> =>
@@ -83,15 +85,10 @@ export const createAppUpdateAPI = (): AppUpdateAPI => ({
   isAppUpdateSuppressed: (version: string): Promise<IPCResult<boolean>> =>
     invokeIpc(IPC_CHANNELS.APP_UPDATE_IS_SUPPRESSED, version),
 
-  getAppIcon: (): Promise<Record<'dark' | 'light', string | null>> =>
-    invokeIpc(IPC_CHANNELS.APP_ICON_GET),
+  setTitleBarColors: (colors: { color: string; symbolColor: string }): void =>
+    ipcRenderer.send(IPC_CHANNELS.WINDOW_SET_TITLE_BAR_COLORS, colors),
 
   // Event Listeners
-  onAppIconChanged: (
-    callback: (mode: 'dark' | 'light', dataUrl: string | null) => void
-  ): IpcListenerCleanup =>
-    createIpcListener(IPC_CHANNELS.APP_ICON_CHANGED, callback),
-
   onAppUpdateAvailable: (
     callback: (info: AppUpdateAvailableEvent) => void
   ): IpcListenerCleanup =>

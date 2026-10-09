@@ -386,12 +386,14 @@ async function run(): Promise<void> {
       mcpClients = await createMcpClientsForAgent(session.agentType, {
         context7Enabled: session.mcpOptions?.context7Enabled ?? true,
         memoryEnabled: session.mcpOptions?.memoryEnabled ?? false,
-        linearEnabled: session.mcpOptions?.linearEnabled ?? false,
         electronMcpEnabled: session.mcpOptions?.electronMcpEnabled ?? false,
         puppeteerMcpEnabled: session.mcpOptions?.puppeteerMcpEnabled ?? false,
         projectCapabilities: session.mcpOptions?.projectCapabilities,
         agentMcpAdd: session.mcpOptions?.agentMcpAdd,
         agentMcpRemove: session.mcpOptions?.agentMcpRemove,
+        enabledCustomServerIds: session.mcpOptions?.customServers?.map((s) => s.id),
+      }, {
+        customServers: session.mcpOptions?.customServers,
       });
       if (mcpClients.length > 0) {
         postLog(`MCP initialized: ${mcpClients.map(c => c.serverId).join(', ')}`);
@@ -598,7 +600,7 @@ async function runBuildOrchestrator(
   });
 
   orchestrator.on('phase-change', (phase: ExecutionPhase, message: string) => {
-    postLog(`Phase: ${phase} — ${message}`);
+    postLog(`Phase: ${phase}: ${message}`);
     // Start the phase in the log writer at orchestrator level (not per-session)
     const logPhase = mapExecutionPhaseToPhase(phase);
     if (logWriter && logPhase) {
@@ -697,7 +699,7 @@ async function runBuildOrchestrator(
   if (outcome.rateLimitHold) {
     // Provider limit hit with a known reset time: the main process queues the
     // task and resumes it at resetAt (progress is preserved in the plan/worktree).
-    postLog(`Rate limit reached — holding task until ${outcome.rateLimitHold.resetAt}`);
+    postLog(`Rate limit reached, holding task until ${outcome.rateLimitHold.resetAt}`);
     postTaskEvent('RATE_LIMIT_HOLD', {
       resetAt: outcome.rateLimitHold.resetAt,
       message: outcome.rateLimitHold.message,
@@ -799,7 +801,7 @@ async function runQALoop(
 
   // Emit task events so XState machine transitions correctly.
   if (outcome.rateLimitHold) {
-    postLog(`Rate limit reached — holding task until ${outcome.rateLimitHold.resetAt}`);
+    postLog(`Rate limit reached, holding task until ${outcome.rateLimitHold.resetAt}`);
     postTaskEvent('RATE_LIMIT_HOLD', {
       resetAt: outcome.rateLimitHold.resetAt,
       message: outcome.rateLimitHold.message,

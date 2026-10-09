@@ -5,7 +5,11 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { useToast } from '../../hooks/use-toast';
 import { PROVIDER_REGISTRY } from '@shared/constants/providers';
 import { ProviderSection } from './ProviderSection';
+import { SettingsSection } from './SettingsSection';
+import { SettingsRow, SettingsRows } from './SettingsRow';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { AddAccountDialog } from './AddAccountDialog';
+import { buttonVariants } from '../ui/button';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,7 +31,9 @@ export function ProviderAccountsList() {
     checkEnvCredentials,
     loadProviderAccounts,
     envCredentials,
+    setQueueOrder,
   } = useSettingsStore();
+  const priorityOrder = useSettingsStore((state) => state.settings.globalPriorityOrder);
   const { toast } = useToast();
 
   const [isLoading] = useState(false);
@@ -58,6 +64,53 @@ export function ProviderAccountsList() {
   }, [loadProviderAccounts, checkEnvCredentials]);
 
   const allAccounts = providerAccounts;
+
+  // Agents use a provider's first account in the priority order (accounts missing from the
+  // saved order come after it, in their natural order)
+  const effectiveOrder = [
+    ...(priorityOrder ?? []).filter((id) => allAccounts.some((a) => a.id === id)),
+    ...allAccounts.map((a) => a.id).filter((id) => !(priorityOrder ?? []).includes(id)),
+  ];
+  const activeAccountId = (provider: BuiltinProvider) =>
+    effectiveOrder.find((id) => allAccounts.find((a) => a.id === id)?.provider === provider);
+
+  // Default provider: the provider of the first account in the order. Agents use it; other
+  // providers' accounts are only fallbacks when it's unavailable (rate limited, failing auth)
+  const defaultProvider = effectiveOrder.length > 0
+    ? allAccounts.find((a) => a.id === effectiveOrder[0])?.provider
+    : undefined;
+  const providersWithAccounts = PROVIDER_REGISTRY.filter((p) => allAccounts.some((a) => a.provider === p.id));
+
+  // Choosing a default provider moves its selected account to the front of the order
+  const handleDefaultProviderChange = async (provider: string) => {
+    const accountId = activeAccountId(provider as BuiltinProvider);
+    if (!accountId || effectiveOrder[0] === accountId) return;
+    const result = await setQueueOrder([accountId, ...effectiveOrder.filter((id) => id !== accountId)]);
+    if (!result.success) {
+      toast({
+        variant: 'destructive',
+        title: t('accounts.toast.settingsUpdateFailed'),
+        description: t('accounts.toast.tryAgain'),
+      });
+    }
+  };
+
+  // Selecting an account moves it ahead of the provider's other accounts only, so the order
+  // of other providers (and which provider comes first) stays the same
+  const handleSelectAccount = async (account: ProviderAccount) => {
+    const currentId = activeAccountId(account.provider);
+    if (!currentId || currentId === account.id) return;
+    const rest = effectiveOrder.filter((id) => id !== account.id);
+    rest.splice(rest.indexOf(currentId), 0, account.id);
+    const result = await setQueueOrder(rest);
+    if (!result.success) {
+      toast({
+        variant: 'destructive',
+        title: t('accounts.toast.settingsUpdateFailed'),
+        description: t('accounts.toast.tryAgain'),
+      });
+    }
+  };
 
   // Group accounts by provider, preserving PROVIDER_REGISTRY order
   const accountsByProvider = PROVIDER_REGISTRY.reduce<Map<BuiltinProvider, ProviderAccount[]>>(
@@ -186,34 +239,57 @@ export function ProviderAccountsList() {
   }
 
   return (
-    <div className="space-y-5">
+    <>
+      {providersWithAccounts.length > 0 && (
+        <SettingsSection title={t('providers.default.title')}>
+          <SettingsRows>
+            <SettingsRow
+              label={t('providers.default.label')}
+              description={t('providers.default.description')}
+              htmlFor="default-provider"
+            >
+              <Select value={defaultProvider ?? ''} onValueChange={handleDefaultProviderChange}>
+                <SelectTrigger id="default-provider" className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {providersWithAccounts.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+          </SettingsRows>
+        </SettingsSection>
+      )}
+
       {categories.map(({ key, label, providers: categoryProviders }) => {
         if (categoryProviders.length === 0) return null;
         return (
-          <div key={key} className="space-y-2">
-            <div className="flex items-center gap-2 pt-1 first:pt-0">
-              <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">
-                {label}
-              </span>
-              <div className="flex-1 h-px bg-border/40" />
-            </div>
-            {categoryProviders.map((providerInfo) => {
-              const accounts = accountsByProvider.get(providerInfo.id) ?? [];
-              const envDetected = providerInfo.envVars.some(v => envCredentials?.[v]);
-              return (
-                <ProviderSection
-                  key={providerInfo.id}
-                  provider={providerInfo}
-                  accounts={accounts}
-                  envDetected={envDetected}
-                  onAddAccount={handleAddAccount}
-                  onEditAccount={handleEditAccount}
-                  onDeleteAccount={handleDeleteAccount}
-                  onReauthAccount={handleReauthAccount}
-                />
-              );
-            })}
-          </div>
+          <SettingsSection key={key} title={label}>
+            <SettingsRows>
+              {categoryProviders.map((providerInfo) => {
+                const accounts = accountsByProvider.get(providerInfo.id) ?? [];
+                const envDetected = providerInfo.envVars.some(v => envCredentials?.[v]);
+                return (
+                  <ProviderSection
+                    key={providerInfo.id}
+                    provider={providerInfo}
+                    accounts={accounts}
+                    activeAccountId={activeAccountId(providerInfo.id)}
+                    onSelectAccount={handleSelectAccount}
+                    envDetected={envDetected}
+                    onAddAccount={handleAddAccount}
+                    onEditAccount={handleEditAccount}
+                    onDeleteAccount={handleDeleteAccount}
+                    onReauthAccount={handleReauthAccount}
+                  />
+                );
+              })}
+            </SettingsRows>
+          </SettingsSection>
         );
       })}
 
@@ -246,7 +322,7 @@ export function ProviderAccountsList() {
             <AlertDialogAction
               onClick={confirmDelete}
               disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className={buttonVariants({ variant: 'destructive', size: 'sm' })}
             >
               {isDeleting ? (
                 <>
@@ -260,6 +336,6 @@ export function ProviderAccountsList() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

@@ -12,23 +12,17 @@ export * from './ipc';
 // Task-related constants
 export * from './task';
 
-// Roadmap constants
-export * from './roadmap';
-
-// Ideation constants
-export * from './ideation';
-
-// Changelog constants
-export * from './changelog';
-
 // Model and agent profile constants
 export * from './models';
 
+// Insights chat constants
+export * from './insights';
+
+// System tray (background mode)
+export * from './tray';
+
 // Theme constants
 export * from './themes';
-
-// GitHub integration constants
-export * from './github';
 
 // API profile presets
 export * from './api-profiles';

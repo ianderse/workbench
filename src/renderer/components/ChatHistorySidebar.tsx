@@ -1,23 +1,19 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  Plus,
-  MessageSquare,
   Trash2,
   Pencil,
   Check,
   X,
-  MoreVertical,
+  MoreHorizontal,
   Loader2,
-  CheckSquare,
   Archive,
   ArchiveRestore
 } from 'lucide-react';
-import { Button } from './ui/button';
+import { Button, buttonVariants } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Checkbox } from './ui/checkbox';
-import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -45,7 +41,6 @@ interface ChatHistorySidebarProps {
   onSelectSession: (sessionId: string) => void;
   onDeleteSession: (sessionId: string) => Promise<boolean>;
   onRenameSession: (sessionId: string, newTitle: string) => Promise<boolean>;
-  onArchiveSession?: (sessionId: string) => Promise<void>;
   onUnarchiveSession?: (sessionId: string) => Promise<void>;
   onDeleteSessions?: (sessionIds: string[]) => Promise<void>;
   onArchiveSessions?: (sessionIds: string[]) => Promise<void>;
@@ -61,7 +56,6 @@ export function ChatHistorySidebar({
   onSelectSession,
   onDeleteSession,
   onRenameSession,
-  onArchiveSession,
   onUnarchiveSession,
   onDeleteSessions,
   onArchiveSessions,
@@ -77,15 +71,6 @@ export function ChatHistorySidebar({
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkArchiveOpen, setBulkArchiveOpen] = useState(false);
 
-  // Clear selection when exiting selection mode
-  const handleToggleSelectionMode = useCallback(() => {
-    setIsSelectionMode((prev) => {
-      if (prev) {
-        setSelectedIds(new Set());
-      }
-      return !prev;
-    });
-  }, []);
 
   // Prune selectedIds when sessions change - removes IDs for sessions no longer displayed
   // Also resets when showArchived toggles
@@ -206,69 +191,12 @@ export function ChatHistorySidebar({
   const sessionsToDelete = sessions.filter((s) => selectedIds.has(s.id));
 
   return (
-    <div className="flex h-full w-64 flex-col border-r border-border bg-muted/30">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-border px-3 py-3">
-        <h3 className="text-sm font-medium text-foreground">{t('insights.chatHistory')}</h3>
-        <div className="flex items-center gap-1">
-          {/* Selection mode toggle */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant={isSelectionMode ? 'secondary' : 'ghost'}
-                size="icon"
-                className="h-7 w-7"
-                onClick={handleToggleSelectionMode}
-                aria-label={isSelectionMode ? t('insights.exitSelectMode') : t('insights.selectMode')}
-              >
-                <CheckSquare className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {isSelectionMode ? t('insights.exitSelectMode') : t('insights.selectMode')}
-            </TooltipContent>
-          </Tooltip>
-
-          {/* Show archived toggle */}
-          {onToggleShowArchived && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant={showArchived ? 'secondary' : 'ghost'}
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={onToggleShowArchived}
-                  aria-label={showArchived ? t('insights.hideArchived') : t('insights.showArchived')}
-                >
-                  <Archive className={cn('h-4 w-4', showArchived && 'text-primary')} />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                {showArchived ? t('insights.hideArchived') : t('insights.showArchived')}
-              </TooltipContent>
-            </Tooltip>
-          )}
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={onNewSession}
-                aria-label={t('accessibility.newConversationAriaLabel')}
-              >
-                <Plus className="h-4 w-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t('accessibility.newConversationAriaLabel')}</TooltipContent>
-          </Tooltip>
-        </div>
-      </div>
-
+    <div className="relative flex h-full w-64 shrink-0 flex-col border-r border-border bg-sidebar">
+      {/* Window drag band over the top padding; the first row below sits level with the app sidebar's header row */}
+      <div className="electron-drag absolute inset-x-0 top-0 z-10 h-6" />
       {/* Select All / Clear links */}
       {isSelectionMode && sessions.length > 0 && (
-        <div className="flex items-center justify-between border-b border-border px-3 py-1.5">
+        <div className="flex items-center justify-between px-4 pb-1.5">
           <button
             type="button"
             className="text-xs text-primary hover:underline"
@@ -289,18 +217,18 @@ export function ChatHistorySidebar({
       {/* Session list */}
       <ScrollArea className="flex-1">
         {isLoading ? (
-          <div className="flex items-center justify-center py-8">
+          <div className="flex h-14 items-center justify-center pt-6">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : sessions.length === 0 ? (
-          <div className="px-3 py-8 text-center text-sm text-muted-foreground">
+          <div className="flex h-14 items-center justify-center px-3 pt-6 text-sm text-muted-foreground">
             {t('insights.noConversations')}
           </div>
         ) : (
-          <div className="py-2">
+          <div className="px-2 pb-2 pt-6">
             {Object.entries(groupedSessions).map(([dateLabel, dateSessions]) => (
-              <div key={dateLabel} className="mb-2">
-                <div className="px-3 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              <div key={dateLabel} className="mb-3 space-y-px">
+                <div className="nav-section-label flex h-8 items-center px-2 text-[0.8125rem]">
                   {dateLabel}
                 </div>
                 {dateSessions.map((session) => (
@@ -316,7 +244,6 @@ export function ChatHistorySidebar({
                     onCancelEdit={handleCancelEdit}
                     onEditTitleChange={setEditTitle}
                     onDelete={() => setDeleteSessionId(session.id)}
-                    onArchive={onArchiveSession ? () => onArchiveSession(session.id) : undefined}
                     onUnarchive={
                       onUnarchiveSession ? () => onUnarchiveSession(session.id) : undefined
                     }
@@ -334,7 +261,7 @@ export function ChatHistorySidebar({
 
       {/* Bulk action toolbar */}
       {isSelectionMode && selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 overflow-hidden min-w-0 border-t border-border px-3 py-2">
+        <div className="flex items-center gap-2 overflow-hidden min-w-0 border-t border-border px-2 py-2">
           <Button
             variant="destructive"
             size="sm"
@@ -369,7 +296,7 @@ export function ChatHistorySidebar({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t('buttons.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete}>{t('actions.delete')}</AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className={buttonVariants({ variant: 'destructive', size: 'sm' })}>{t('actions.delete')}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -384,7 +311,7 @@ export function ChatHistorySidebar({
             </AlertDialogDescription>
           </AlertDialogHeader>
           {sessionsToDelete.length > 0 && (
-            <div className="max-h-32 overflow-y-auto rounded border border-border p-2">
+            <div className="mt-4 max-h-32 overflow-y-auto rounded-xl bg-segment-track px-4 py-3">
               <p className="mb-1 text-xs font-medium text-muted-foreground">
                 {t('insights.conversationsToDelete')}:
               </p>
@@ -399,7 +326,7 @@ export function ChatHistorySidebar({
           )}
           <AlertDialogFooter>
             <AlertDialogCancel>{t('buttons.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBulkDelete}>
+            <AlertDialogAction onClick={handleBulkDelete} className={buttonVariants({ variant: 'destructive', size: 'sm' })}>
               {t('insights.bulkDeleteConfirm', { count: selectedIds.size })}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -438,7 +365,6 @@ interface SessionItemProps {
   onCancelEdit: () => void;
   onEditTitleChange: (title: string) => void;
   onDelete: () => void;
-  onArchive?: () => Promise<void>;
   onUnarchive?: () => Promise<void>;
   isArchived: boolean;
   isSelectionMode: boolean;
@@ -457,7 +383,6 @@ function SessionItem({
   onCancelEdit,
   onEditTitleChange,
   onDelete,
-  onArchive,
   onUnarchive,
   isArchived,
   isSelectionMode,
@@ -476,31 +401,36 @@ function SessionItem({
 
   if (isEditing) {
     return (
-      <div className="group flex items-center gap-1 px-2 py-1">
+      <div className="group flex h-8 items-center gap-1">
         <Input
           value={editTitle}
           onChange={(e) => onEditTitleChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          className="h-7 text-sm"
+          // Same field look as the dialogs: hairline border, stronger on focus, no ring
+          className={cn(
+            'h-8 rounded-(--nav-item-radius) border-(--field-border-color) px-2 text-sm shadow-none placeholder:text-(--field-placeholder)',
+            'focus-visible:border-(--field-border-focus) focus-visible:ring-0'
+          )}
           autoFocus
         />
+        {/* Same icon buttons as the page header (toggle history, new chat) */}
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 shrink-0"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-nav-hover hover:text-foreground"
           onClick={onSaveEdit}
           aria-label={t('accessibility.saveEditAriaLabel')}
         >
-          <Check className="h-3.5 w-3.5 text-success" />
+          <Check className="h-4 w-4" />
         </Button>
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7 shrink-0"
+          className="h-8 w-8 shrink-0 text-muted-foreground hover:bg-nav-hover hover:text-foreground"
           onClick={onCancelEdit}
           aria-label={t('accessibility.cancelEditAriaLabel')}
         >
-          <X className="h-3.5 w-3.5 text-muted-foreground" />
+          <X className="h-4 w-4" />
         </Button>
       </div>
     );
@@ -511,9 +441,13 @@ function SessionItem({
       role={isSelectionMode ? 'checkbox' : 'button'}
       aria-checked={isSelectionMode ? isSelected : undefined}
       tabIndex={0}
+      title={`${session.title} · ${t('insights.messageCount', { count: session.messageCount })}`}
       className={cn(
-        'group relative cursor-pointer px-2 py-2 transition-colors hover:bg-muted',
-        isActive && 'bg-primary/10 hover:bg-primary/15',
+        'group relative flex h-8 cursor-pointer items-center rounded-(--nav-item-radius) px-2 text-sm text-muted-foreground',
+        'transition-colors duration-150 ease-out',
+        'hover:bg-nav-hover hover:text-nav-hover-foreground',
+        'focus-visible:outline-none focus-visible:shadow-(--shadow-focus)',
+        isActive && 'bg-nav-active text-nav-active-foreground hover:bg-nav-active hover:text-nav-active-foreground',
         isArchived && 'opacity-50'
       )}
       onClick={isSelectionMode ? onToggleSelect : onSelect}
@@ -525,9 +459,9 @@ function SessionItem({
       }}
     >
       {/* Content with reserved space for the menu button */}
-      <div className="flex items-center gap-1.5 pr-7">
-        {isSelectionMode ? (
-          <div className="shrink-0">
+      <div className={cn('flex min-w-0 flex-1 items-center gap-2', !isSelectionMode && 'group-hover:pr-6 group-focus-within:pr-6')}>
+        {isSelectionMode && (
+          <div className="flex shrink-0 items-center">
             <Checkbox
               checked={isSelected}
               className="h-4 w-4"
@@ -535,35 +469,14 @@ function SessionItem({
               tabIndex={-1}
             />
           </div>
-        ) : (
-          <MessageSquare
-            className={cn(
-              'h-4 w-4 shrink-0',
-              isActive ? 'text-primary' : 'text-muted-foreground'
-            )}
-          />
         )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1">
-            <p
-              className={cn(
-                'line-clamp-2 text-sm leading-tight break-words',
-                isActive ? 'font-medium text-foreground' : 'text-foreground/80'
-              )}
-            >
-              {session.title}
-            </p>
-            {isArchived && (
-              <span className="inline-flex items-center gap-0.5 rounded bg-muted px-1 py-0.5 text-[9px] font-medium text-muted-foreground">
-                <Archive className="h-2.5 w-2.5" />
-                {t('insights.archived')}
-              </span>
-            )}
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
-            {t('insights.messageCount', { count: session.messageCount })}
-          </p>
-        </div>
+        <span className="min-w-0 flex-1 truncate">{session.title}</span>
+        {isArchived && (
+          <span className="inline-flex shrink-0 items-center gap-0.5 text-[0.6875rem] text-(--nav-label-color)">
+            <Archive className="h-3 w-3" />
+            <span className="sr-only">{t('insights.archived')}</span>
+          </span>
+        )}
       </div>
 
       {/* Absolutely positioned menu button - hidden in selection mode */}
@@ -573,10 +486,10 @@ function SessionItem({
             <Button
               variant="ghost"
               size="icon"
-              className="absolute right-1 top-1/2 -translate-y-1/2 h-6 w-6 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100 hover:bg-muted-foreground/20 transition-opacity"
+              className="absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-transparent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100"
               aria-label={t('accessibility.moreOptionsAriaLabel')}
             >
-              <MoreVertical className="h-3.5 w-3.5" />
+              <MoreHorizontal className="h-4 w-4" />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" sideOffset={5} className="w-36 z-[100]">
@@ -584,20 +497,11 @@ function SessionItem({
               <Pencil className="mr-2 h-3.5 w-3.5" />
               {t('accessibility.renameAriaLabel')}
             </DropdownMenuItem>
-            {isArchived ? (
-              onUnarchive && (
-                <DropdownMenuItem onSelect={onUnarchive}>
-                  <ArchiveRestore className="mr-2 h-3.5 w-3.5" />
-                  {t('insights.unarchive')}
-                </DropdownMenuItem>
-              )
-            ) : (
-              onArchive && (
-                <DropdownMenuItem onSelect={onArchive}>
-                  <Archive className="mr-2 h-3.5 w-3.5" />
-                  {t('insights.archive')}
-                </DropdownMenuItem>
-              )
+            {isArchived && onUnarchive && (
+              <DropdownMenuItem onSelect={onUnarchive}>
+                <ArchiveRestore className="mr-2 h-3.5 w-3.5" />
+                {t('insights.unarchive')}
+              </DropdownMenuItem>
             )}
             <DropdownMenuItem
               onSelect={onDelete}

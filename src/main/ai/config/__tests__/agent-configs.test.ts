@@ -7,7 +7,6 @@ import {
   getRequiredMcpServers,
   mapMcpServerName,
   CONTEXT7_TOOLS,
-  LINEAR_TOOLS,
   MEMORY_MCP_TOOLS, GRAPHITI_MCP_TOOLS,
   PUPPETEER_TOOLS,
   ELECTRON_TOOLS,
@@ -15,7 +14,7 @@ import {
 } from '../agent-configs';
 
 // =============================================================================
-// All Agent Types (26 total)
+// All Agent Types (19 total)
 // =============================================================================
 
 const ALL_AGENT_TYPES: AgentType[] = [
@@ -35,22 +34,12 @@ const ALL_AGENT_TYPES: AgentType[] = [
   'merge_resolver',
   'commit_message',
   'pr_template_filler',
-  'pr_reviewer',
-  'pr_orchestrator_parallel',
-  'pr_followup_parallel',
-  'pr_followup_extraction',
-  'pr_finding_validator',
   'analysis',
-  'batch_analysis',
-  'batch_validation',
-  'roadmap_discovery',
-  'competitor_analysis',
-  'ideation',
 ];
 
 describe('AGENT_CONFIGS', () => {
   it('should have all expected agent types configured', () => {
-    expect(Object.keys(AGENT_CONFIGS).length).toBeGreaterThanOrEqual(26);
+    expect(Object.keys(AGENT_CONFIGS).length).toBeGreaterThanOrEqual(19);
   });
 
   it('should contain all expected agent types', () => {
@@ -92,7 +81,6 @@ describe('AGENT_CONFIGS', () => {
     expect(config.mcpServers).toContain('context7');
     expect(config.mcpServers).toContain('memory');
     expect(config.mcpServers).toContain('auto-claude');
-    expect(config.mcpServersOptional).toContain('linear');
     expect(config.thinkingDefault).toBe('high');
   });
 
@@ -142,10 +130,6 @@ describe('MCP tool arrays', () => {
     expect(CONTEXT7_TOOLS).toContain('mcp__context7__resolve-library-id');
   });
 
-  it('LINEAR_TOOLS should have 16 tools', () => {
-    expect(LINEAR_TOOLS).toHaveLength(16);
-  });
-
   it('MEMORY_MCP_TOOLS should have 5 tools', () => {
     expect(MEMORY_MCP_TOOLS).toHaveLength(5);
   });
@@ -181,7 +165,6 @@ describe('getDefaultThinkingLevel', () => {
     ['qa_reviewer', 'high'],
     ['qa_fixer', 'medium'],
     ['spec_gatherer', 'medium'],
-    ['ideation', 'high'],
     ['insights', 'low'],
   ] as [AgentType, string][])(
     'should return %s thinking level for %s',
@@ -196,7 +179,6 @@ describe('mapMcpServerName', () => {
     expect(mapMcpServerName('context7')).toBe('context7');
     expect(mapMcpServerName('graphiti')).toBe('memory');
     expect(mapMcpServerName('graphiti-memory')).toBe('memory');
-    expect(mapMcpServerName('linear')).toBe('linear');
     expect(mapMcpServerName('auto-claude')).toBe('auto-claude');
   });
 
@@ -221,6 +203,17 @@ describe('mapMcpServerName', () => {
 });
 
 describe('getRequiredMcpServers', () => {
+  it('gives every MCP-using agent the enabled connectors, including custom servers', () => {
+    const servers = getRequiredMcpServers('spec_researcher', { memoryEnabled: true, enabledCustomServerIds: ['docs'] });
+    expect(servers).toEqual(expect.arrayContaining(['context7', 'memory', 'docs']));
+    expect(getRequiredMcpServers('merge_resolver', { enabledCustomServerIds: ['docs'] })).toEqual([]);
+  });
+
+  it('keeps browser connectors with the QA agents, using the switched-on ones when the project type is unknown', () => {
+    expect(getRequiredMcpServers('qa_reviewer', { electronMcpEnabled: true })).toContain('electron');
+    expect(getRequiredMcpServers('coder', { electronMcpEnabled: true })).not.toContain('electron');
+  });
+
   it('should return base MCP servers for an agent', () => {
     const servers = getRequiredMcpServers('spec_researcher');
     expect(servers).toContain('context7');
@@ -239,22 +232,6 @@ describe('getRequiredMcpServers', () => {
   it('should include memory when enabled', () => {
     const servers = getRequiredMcpServers('coder', { memoryEnabled: true });
     expect(servers).toContain('memory');
-  });
-
-  it('should add linear when optional and enabled', () => {
-    const servers = getRequiredMcpServers('planner', {
-      linearEnabled: true,
-      memoryEnabled: true,
-    });
-    expect(servers).toContain('linear');
-  });
-
-  it('should not add linear when not enabled', () => {
-    const servers = getRequiredMcpServers('planner', {
-      linearEnabled: false,
-      memoryEnabled: true,
-    });
-    expect(servers).not.toContain('linear');
   });
 
   it('should resolve browser to electron for electron projects', () => {
