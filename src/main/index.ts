@@ -64,7 +64,8 @@ import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
 import { isProfileAuthenticated, getPlanFromConfigDir } from './claude-profile/profile-utils';
-import { isMacOS, isWindows } from './platform';
+import { isLinux, isMacOS, isWindows } from './platform';
+import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
 import { AppTray, isWindowCloseAllowed } from './app-tray';
 import type { AppSettings, AuthFailureInfo } from '../shared/types';
@@ -484,11 +485,14 @@ function createWindow(): void {
   });
 }
 
-// Set app name before ready (for dock tooltip on macOS in dev mode)
-app.setName('Auto Claude');
+// Set app name before ready (for dock tooltip on macOS in dev mode). Development builds get their
+// own name, which also gives their window its own class, so taskbars don't group them with (and
+// show the icon of) the installed app. userData was resolved above, so both still share it.
+const APP_NAME = is.dev ? 'Auto Claude Dev' : 'Auto Claude';
+app.setName(APP_NAME);
 if (isMacOS()) {
   // Force the name to appear in dock on macOS
-  app.name = 'Auto Claude';
+  app.name = APP_NAME;
 }
 
 // Fix Windows GPU cache permission errors (0x5 Access Denied)
@@ -501,7 +505,13 @@ if (isWindows()) {
 // Initialize the application
 app.whenReady().then(() => {
   // Set app user model id for Windows
-  electronApp.setAppUserModelId('com.autoclaude.app');
+  electronApp.setAppUserModelId(is.dev ? 'com.autoclaude.app.dev' : 'com.autoclaude.app');
+
+  // Linux shells take the dock/taskbar icon from a desktop entry matching the window class; give the
+  // development build ("Auto Claude Dev") its own one, or it shows a generic icon
+  if (is.dev && isLinux()) {
+    void ensureDevDesktopEntry(APP_NAME, resolve(getIconPath()), resolve(__dirname, '../..'));
+  }
 
   // Clear cache on Windows to prevent permission errors from stale cache
   if (isWindows()) {
@@ -649,6 +659,7 @@ app.whenReady().then(() => {
   try {
     appTray = new AppTray({
       iconsDir: is.dev ? join(__dirname, '../../resources/tray') : join(process.resourcesPath, 'tray'),
+      devBuild: is.dev,
       onShowApp: showMainWindow,
       onQuit: () => app.quit(),
       getStatus: () => {

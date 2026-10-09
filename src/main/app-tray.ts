@@ -35,6 +35,8 @@ export interface TrayStatus {
 export interface AppTrayOptions {
   /** Directory holding tray-icon.png / trayTemplate.png (and their @2x variants) */
   iconsDir: string;
+  /** Use the development build's hammer icons (tray-icon-dev.png / trayTemplate-dev.png) */
+  devBuild?: boolean;
   onShowApp: () => void;
   onQuit: () => void;
   getStatus: () => TrayStatus;
@@ -80,9 +82,11 @@ export class AppTray {
 
   constructor(options: AppTrayOptions) {
     this.options = options;
-    // macOS menu bar wants a black template image (it recolors it); other platforms get white
+    // macOS menu bar wants a black template image (it recolors it); other platforms get white.
+    // Development builds show a hammer so they can't be mistaken for the installed app
+    const suffix = options.devBuild ? '-dev' : '';
     const image = nativeImage.createFromPath(
-      join(options.iconsDir, isMacOS() ? 'trayTemplate.png' : 'tray-icon.png'),
+      join(options.iconsDir, isMacOS() ? `trayTemplate${suffix}.png` : `tray-icon${suffix}.png`),
     );
     if (isMacOS()) image.setTemplateImage(true);
 
