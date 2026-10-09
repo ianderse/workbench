@@ -83,6 +83,8 @@ jobs:
       - name: Package macOS (Intel)
         run: |
           VERSION="${{ needs.create-tag.outputs.version }}"
+          # Without a certificate secret CSC_LINK is empty, which electron-builder reads as a path: build unsigned
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
           npm run package:mac -- --x64 --config.extraMetadata.version="$VERSION"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -128,6 +130,8 @@ jobs:
       - name: Package macOS (Apple Silicon)
         run: |
           VERSION="${{ needs.create-tag.outputs.version }}"
+          # Without a certificate secret CSC_LINK is empty, which electron-builder reads as a path: build unsigned
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
           npm run package:mac -- --arm64 --config.extraMetadata.version="$VERSION"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
