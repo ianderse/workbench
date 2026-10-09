@@ -230,8 +230,13 @@ affect each other); `getRequiredMcpServers()` gives every MCP-using agent all en
 Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
 .auto-claude/memory` (Settings > Project > Memory index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
 `index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Memory page) is on,
-`AgentManager.resolveGraphifyContext()` passes query instructions to the worker, which appends them to the system
-prompt. Project memory settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
+`AgentManager.resolveGraphifyContext()` passes the graph to the worker: agents that search code (they have Grep) get
+the `CodebaseGraph` tool (`tools/builtin/codebase-graph.ts`: query, explain, path, affected, hubs) and a prompt
+section about it; the Claude page (Insights) gets the same tool, or, when it runs through Claude Code, Bash limited to
+graphify's search commands. Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
+`~/.claude` and each Claude profile's config dir; "Claude Code command" row on Settings > Updates), and agent windows
+get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/memory`. Project memory
+settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
 
 ### Electron MCP (agent QA of the app)
 
