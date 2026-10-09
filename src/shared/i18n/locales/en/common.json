@@ -84,7 +84,8 @@
     "optional": "Optional",
     "required": "Required",
     "dismiss": "Dismiss",
-    "important": "Important"
+    "important": "Important",
+    "developmentBuild": "DEVELOPMENT BUILD"
   },
   "selection": {
     "deleteSelected": "Delete Selected",

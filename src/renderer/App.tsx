@@ -43,6 +43,7 @@ import { useGlobalTerminalListeners } from './hooks/useGlobalTerminalListeners';
 import { useTerminalProfileChange } from './hooks/useTerminalProfileChange';
 import { sanitizeColorTheme } from '../shared/constants';
 import { TITLE_BAR_STRIP_HEIGHT } from './lib/title-bar';
+import { DevBuildBar } from './components/DevBuildBar';
 import type { Task, Project } from '../shared/types';
 import { AddProjectModal, pickAndAddExistingProject, type AddProjectModalStep } from './components/AddProjectModal';
 import { ViewStateProvider } from './contexts/ViewStateContext';
@@ -679,7 +680,10 @@ export function App() {
     <ViewStateProvider>
       <TooltipProvider>
         <ProactiveSwapListener />
-      <div className="flex h-screen bg-background">
+      <div className="flex h-screen flex-col bg-background">
+        {/* Red "DEVELOPMENT BUILD" bar (npm run dev only) */}
+        <DevBuildBar />
+      <div className="flex min-h-0 flex-1">
         {/* Sidebar */}
         <Sidebar
           onSettingsClick={() => setIsSettingsDialogOpen(true)}
@@ -740,6 +744,7 @@ export function App() {
             )}
           </main>
         </div>
+      </div>
 
         {/* Task detail modal */}
         <TaskDetailModal
