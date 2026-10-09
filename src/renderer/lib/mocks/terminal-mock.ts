@@ -98,7 +98,6 @@ export const terminalMock = {
   onTerminalExit: () => () => {},
   onTerminalTitleChange: () => () => {},
   onTerminalWorktreeConfigChange: () => () => {},
-  onTerminalClaudeSession: () => () => {},
   onTerminalRateLimit: () => () => {},
   onTerminalOAuthToken: () => () => {},
   onTerminalAuthCreated: () => () => {},

@@ -10,6 +10,7 @@ import { terminalNameGenerator } from '../terminal-name-generator';
 import { readSettingsFileAsync } from '../settings-utils';
 import { debugLog, } from '../../shared/utils/debug-logger';
 import { migrateSession } from '../claude-profile/session-utils';
+import { findMostRecentClaudeSession } from '../terminal/session-handler';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
 import { isValidConfigDir } from '../utils/config-path-validator';
 
@@ -252,7 +253,6 @@ export function registerTerminalHandlers(
           // Build terminal refresh info for frontend
           const terminalsNeedingRefresh: Array<{
             id: string;
-            sessionId?: string;
             sessionMigrated?: boolean;
             isCLIMode?: boolean;
             dangerouslySkipPermissions?: boolean;
@@ -263,16 +263,20 @@ export function registerTerminalHandlers(
             debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Processing terminal:', {
               id: terminal.id,
               isCLIMode: terminal.isCLIMode,
-              claudeSessionId: terminal.claudeSessionId,
               cwd: terminal.cwd
             });
 
             let sessionMigrated = false;
 
-            // If terminal has an active Claude session, migrate it to new profile
-            if (terminal.claudeSessionId && sourceConfigDir && targetConfigDir) {
-              debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Migrating session:', {
-                sessionId: terminal.claudeSessionId,
+            // If Claude is running, copy the project's latest session (the one `claude --continue`
+            // picks up) to the new profile, so the recreated terminal continues it there
+            const projectDir = terminal.projectPath || terminal.cwd;
+            const latestSessionId = terminal.isCLIMode && sourceConfigDir
+              ? findMostRecentClaudeSession(projectDir, sourceConfigDir)
+              : null;
+            if (latestSessionId && sourceConfigDir && targetConfigDir) {
+              debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Migrating latest session:', {
+                sessionId: latestSessionId,
                 from: sourceConfigDir,
                 to: targetConfigDir
               });
@@ -280,24 +284,17 @@ export function registerTerminalHandlers(
               const migrationResult = await migrateSession(
                 sourceConfigDir,
                 targetConfigDir,
-                terminal.cwd,
-                terminal.claudeSessionId
+                projectDir,
+                latestSessionId
               );
 
               sessionMigrated = migrationResult.success;
               debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Session migration result:', migrationResult);
             }
 
-            // Store YOLO mode flag server-side for migrated sessions
-            // (consumed by resumeClaudeAsync when the new terminal resumes)
-            if (sessionMigrated && terminal.claudeSessionId && terminal.dangerouslySkipPermissions) {
-              terminalManager.storeMigratedSessionFlag(terminal.claudeSessionId, terminal.dangerouslySkipPermissions);
-            }
-
             // All terminals need refresh (PTY env vars can't be updated)
             terminalsNeedingRefresh.push({
               id: terminal.id,
-              sessionId: terminal.claudeSessionId,
               sessionMigrated,
               isCLIMode: terminal.isCLIMode,
               dangerouslySkipPermissions: terminal.dangerouslySkipPermissions
@@ -612,9 +609,9 @@ export function registerTerminalHandlers(
 
   ipcMain.on(
     IPC_CHANNELS.TERMINAL_RESUME_CLAUDE,
-    (_, id: string, sessionId?: string, options?: { migratedSession?: boolean }) => {
+    (_, id: string, options?: { dangerouslySkipPermissions?: boolean }) => {
       // Use async version to avoid blocking main process during CLI detection
-      terminalManager.resumeClaudeAsync(id, sessionId, options).catch((error) => {
+      terminalManager.resumeClaudeAsync(id, options).catch((error) => {
         console.warn('[terminal-handlers] Failed to resume Claude:', error);
       });
     }

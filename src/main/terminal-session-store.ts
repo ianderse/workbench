@@ -13,7 +13,6 @@ export interface TerminalSession {
   cwd: string;
   projectPath: string;  // Which project this terminal belongs to
   isCLIMode: boolean;
-  claudeSessionId?: string;  // Claude session ID for resume functionality
   outputBuffer: string;  // Last 100KB of output for replay
   createdAt: string;  // ISO timestamp
   lastActiveAt: string;  // ISO timestamp
@@ -716,23 +715,6 @@ export class TerminalSessionStore {
       }
       // Note: We don't save immediately here to avoid excessive disk writes
       // Call saveAllPending() periodically or on app quit
-    }
-  }
-
-  /**
-   * Update Claude session ID for a terminal
-   */
-  updateClaudeSessionId(projectPath: string, terminalId: string, claudeSessionId: string): void {
-    const todaySessions = this.getTodaysSessions();
-    const sessions = todaySessions[projectPath];
-    if (!sessions) return;
-
-    const session = sessions.find(s => s.id === terminalId);
-    if (session) {
-      session.claudeSessionId = claudeSessionId;
-      session.isCLIMode = true;
-      this.save();
-      console.warn('[TerminalSessionStore] Saved Claude session ID:', claudeSessionId, 'for terminal:', terminalId);
     }
   }
 

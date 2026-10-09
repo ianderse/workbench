@@ -16,7 +16,6 @@ function runEvents(
         snapshot: terminalMachine.resolveState({
           value: initialState,
           context: {
-            claudeSessionId: undefined,
             profileId: undefined,
             swapTargetProfileId: undefined,
             swapPhase: undefined,
@@ -51,7 +50,6 @@ describe('terminalMachine', () => {
       const actor = createActor(terminalMachine);
       actor.start();
       const { context } = actor.getSnapshot();
-      expect(context.claudeSessionId).toBeUndefined();
       expect(context.profileId).toBeUndefined();
       expect(context.swapTargetProfileId).toBeUndefined();
       expect(context.swapPhase).toBeUndefined();
@@ -79,31 +77,28 @@ describe('terminalMachine', () => {
     it('should transition from shell_ready directly to claude_active on CLAUDE_ACTIVE', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-direct' },
+        { type: 'CLAUDE_ACTIVE' },
       ]);
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('session-direct');
     });
 
     it('should transition from claude_starting to claude_active', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
       ]);
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('session-1');
     });
 
     it('should transition from claude_active to shell_ready on CLAUDE_EXITED', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
         { type: 'CLAUDE_EXITED' },
       ]);
       expect(snapshot.value).toBe('shell_ready');
-      expect(snapshot.context.claudeSessionId).toBeUndefined();
       expect(snapshot.context.isBusy).toBe(false);
     });
 
@@ -111,18 +106,17 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
         { type: 'SHELL_EXITED', exitCode: 0 },
       ]);
       expect(snapshot.value).toBe('exited');
-      expect(snapshot.context.claudeSessionId).toBeUndefined();
     });
 
     it('should complete full lifecycle: idle → shell_ready → claude_active → exited', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
         { type: 'SHELL_EXITED' },
       ]);
       expect(snapshot.value).toBe('exited');
@@ -133,7 +127,7 @@ describe('terminalMachine', () => {
     const toClaudeActive: TerminalEvent[] = [
       { type: 'SHELL_READY' },
       { type: 'CLAUDE_START', profileId: 'profile-1' },
-      { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+      { type: 'CLAUDE_ACTIVE' },
     ];
 
     it('should transition to swapping on SWAP_INITIATED with active session', () => {
@@ -150,18 +144,17 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         ...toClaudeActive,
         { type: 'SWAP_INITIATED', targetProfileId: 'profile-2' },
-        { type: 'SWAP_SESSION_CAPTURED', claudeSessionId: 'captured-session' },
+        { type: 'SWAP_SESSION_CAPTURED' },
       ]);
       expect(snapshot.value).toBe('swapping');
       expect(snapshot.context.swapPhase).toBe('migrating');
-      expect(snapshot.context.claudeSessionId).toBe('captured-session');
     });
 
     it('should progress to recreating phase', () => {
       const snapshot = runEvents([
         ...toClaudeActive,
         { type: 'SWAP_INITIATED', targetProfileId: 'profile-2' },
-        { type: 'SWAP_SESSION_CAPTURED', claudeSessionId: 'captured-session' },
+        { type: 'SWAP_SESSION_CAPTURED' },
         { type: 'SWAP_MIGRATED' },
       ]);
       expect(snapshot.context.swapPhase).toBe('recreating');
@@ -171,7 +164,7 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         ...toClaudeActive,
         { type: 'SWAP_INITIATED', targetProfileId: 'profile-2' },
-        { type: 'SWAP_SESSION_CAPTURED', claudeSessionId: 'captured-session' },
+        { type: 'SWAP_SESSION_CAPTURED' },
         { type: 'SWAP_MIGRATED' },
         { type: 'SWAP_TERMINAL_RECREATED' },
       ]);
@@ -182,17 +175,15 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         ...toClaudeActive,
         { type: 'SWAP_INITIATED', targetProfileId: 'profile-2' },
-        { type: 'SWAP_SESSION_CAPTURED', claudeSessionId: 'captured-session' },
+        { type: 'SWAP_SESSION_CAPTURED' },
         { type: 'SWAP_MIGRATED' },
         { type: 'SWAP_TERMINAL_RECREATED' },
         {
           type: 'SWAP_RESUME_COMPLETE',
-          claudeSessionId: 'new-session',
           profileId: 'profile-2',
         },
       ]);
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('new-session');
       expect(snapshot.context.profileId).toBe('profile-2');
       expect(snapshot.context.swapTargetProfileId).toBeUndefined();
       expect(snapshot.context.swapPhase).toBeUndefined();
@@ -205,7 +196,7 @@ describe('terminalMachine', () => {
     const toSwapping: TerminalEvent[] = [
       { type: 'SHELL_READY' },
       { type: 'CLAUDE_START', profileId: 'profile-1' },
-      { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+      { type: 'CLAUDE_ACTIVE' },
       { type: 'SWAP_INITIATED', targetProfileId: 'profile-2' },
     ];
 
@@ -228,7 +219,6 @@ describe('terminalMachine', () => {
       expect(snapshot.value).toBe('exited');
       expect(snapshot.context.swapTargetProfileId).toBeUndefined();
       expect(snapshot.context.swapPhase).toBeUndefined();
-      expect(snapshot.context.claudeSessionId).toBeUndefined();
     });
   });
 
@@ -236,52 +226,47 @@ describe('terminalMachine', () => {
     it('should transition from shell_ready to pending_resume on RESUME_REQUESTED', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
-        { type: 'RESUME_REQUESTED', claudeSessionId: 'session-1' },
+        { type: 'RESUME_REQUESTED' },
       ]);
       expect(snapshot.value).toBe('pending_resume');
-      expect(snapshot.context.claudeSessionId).toBe('session-1');
     });
 
     it('should transition from claude_active to pending_resume on RESUME_REQUESTED', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
-        { type: 'RESUME_REQUESTED', claudeSessionId: 'session-2' },
+        { type: 'CLAUDE_ACTIVE' },
+        { type: 'RESUME_REQUESTED' },
       ]);
       expect(snapshot.value).toBe('pending_resume');
-      expect(snapshot.context.claudeSessionId).toBe('session-2');
     });
 
     it('should transition to claude_active on RESUME_COMPLETE', () => {
       const snapshot = runEvents(
-        [{ type: 'RESUME_COMPLETE', claudeSessionId: 'resumed-session' }],
+        [{ type: 'RESUME_COMPLETE' }],
         'pending_resume',
-        { claudeSessionId: 'old-session', profileId: 'profile-1' }
+        { profileId: 'profile-1' }
       );
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('resumed-session');
     });
 
     it('should transition to shell_ready on RESUME_FAILED', () => {
       const snapshot = runEvents(
         [{ type: 'RESUME_FAILED', error: 'Resume failed' }],
         'pending_resume',
-        { claudeSessionId: 'old-session', profileId: 'profile-1' }
+        { profileId: 'profile-1' }
       );
       expect(snapshot.value).toBe('shell_ready');
       expect(snapshot.context.error).toBe('Resume failed');
-      expect(snapshot.context.claudeSessionId).toBeUndefined();
     });
 
     it('should transition to claude_active on CLAUDE_ACTIVE (race condition)', () => {
       const snapshot = runEvents(
-        [{ type: 'CLAUDE_ACTIVE', claudeSessionId: 'race-session' }],
+        [{ type: 'CLAUDE_ACTIVE' }],
         'pending_resume',
-        { claudeSessionId: 'old-session', profileId: 'profile-1' }
+        { profileId: 'profile-1' }
       );
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('race-session');
     });
 
     it('should transition to exited on SHELL_EXITED from pending_resume', () => {
@@ -296,10 +281,9 @@ describe('terminalMachine', () => {
       const snapshot = runEvents(
         [{ type: 'RESET' }],
         'pending_resume',
-        { claudeSessionId: 'session-1', profileId: 'profile-1' }
+        { profileId: 'profile-1' }
       );
       expect(snapshot.value).toBe('idle');
-      expect(snapshot.context.claudeSessionId).toBeUndefined();
       expect(snapshot.context.profileId).toBeUndefined();
     });
   });
@@ -329,7 +313,7 @@ describe('terminalMachine', () => {
 
     it('should not allow CLAUDE_ACTIVE from idle', () => {
       const snapshot = runEvents([
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
       ]);
       expect(snapshot.value).toBe('idle');
     });
@@ -347,23 +331,10 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
-        { type: 'RESUME_COMPLETE', claudeSessionId: 'session-2' },
-      ]);
-      expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('session-1');
-    });
-  });
-
-  describe('CLAUDE_ACTIVE self-transition in claude_active', () => {
-    it('should update claudeSessionId via self-transition', () => {
-      const snapshot = runEvents([
-        { type: 'SHELL_READY' },
         { type: 'CLAUDE_ACTIVE' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'late-session' },
+        { type: 'RESUME_COMPLETE' },
       ]);
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('late-session');
     });
   });
 
@@ -376,20 +347,11 @@ describe('terminalMachine', () => {
       expect(snapshot.context.profileId).toBe('my-profile');
     });
 
-    it('should set claudeSessionId on CLAUDE_ACTIVE', () => {
-      const snapshot = runEvents([
-        { type: 'SHELL_READY' },
-        { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-abc' },
-      ]);
-      expect(snapshot.context.claudeSessionId).toBe('session-abc');
-    });
-
     it('should set isBusy on CLAUDE_BUSY', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
         { type: 'CLAUDE_BUSY', isBusy: true },
       ]);
       expect(snapshot.context.isBusy).toBe(true);
@@ -399,7 +361,7 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
         { type: 'CLAUDE_BUSY', isBusy: true },
         { type: 'CLAUDE_BUSY', isBusy: false },
       ]);
@@ -429,10 +391,9 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
         { type: 'CLAUDE_EXITED' },
       ]);
-      expect(snapshot.context.claudeSessionId).toBeUndefined();
       expect(snapshot.context.isBusy).toBe(false);
     });
 
@@ -440,12 +401,11 @@ describe('terminalMachine', () => {
       const snapshot = runEvents([
         { type: 'SHELL_READY' },
         { type: 'CLAUDE_START', profileId: 'profile-1' },
-        { type: 'CLAUDE_ACTIVE', claudeSessionId: 'session-1' },
+        { type: 'CLAUDE_ACTIVE' },
         { type: 'CLAUDE_EXITED', error: 'crash while active' },
       ]);
       expect(snapshot.value).toBe('shell_ready');
       expect(snapshot.context.error).toBe('crash while active');
-      expect(snapshot.context.claudeSessionId).toBeUndefined();
     });
 
     it('should clear error on SHELL_READY from exited', () => {
@@ -460,20 +420,10 @@ describe('terminalMachine', () => {
   });
 
   describe('guard conditions', () => {
-    it('should not allow SWAP_INITIATED without active session', () => {
+    it('should allow SWAP_INITIATED while Claude is active', () => {
       const snapshot = runEvents(
         [{ type: 'SWAP_INITIATED', targetProfileId: 'profile-2' }],
-        'claude_active',
-        { claudeSessionId: undefined }
-      );
-      expect(snapshot.value).toBe('claude_active');
-    });
-
-    it('should allow SWAP_INITIATED with active session', () => {
-      const snapshot = runEvents(
-        [{ type: 'SWAP_INITIATED', targetProfileId: 'profile-2' }],
-        'claude_active',
-        { claudeSessionId: 'session-1' }
+        'claude_active'
       );
       expect(snapshot.value).toBe('swapping');
     });
@@ -496,7 +446,6 @@ describe('terminalMachine', () => {
           [{ type: 'RESET' }],
           state,
           {
-            claudeSessionId: 'session-1',
             profileId: 'profile-1',
             isBusy: true,
             error: 'err',
@@ -505,7 +454,6 @@ describe('terminalMachine', () => {
           }
         );
         expect(snapshot.value).toBe('idle');
-        expect(snapshot.context.claudeSessionId).toBeUndefined();
         expect(snapshot.context.profileId).toBeUndefined();
         expect(snapshot.context.isBusy).toBe(false);
         expect(snapshot.context.error).toBeUndefined();
@@ -521,7 +469,6 @@ describe('terminalMachine', () => {
         snapshot: terminalMachine.resolveState({
           value: 'claude_active',
           context: {
-            claudeSessionId: 'restored-session',
             profileId: 'restored-profile',
             swapTargetProfileId: undefined,
             swapPhase: undefined,
@@ -533,7 +480,6 @@ describe('terminalMachine', () => {
       actor.start();
       const snapshot = actor.getSnapshot();
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('restored-session');
       expect(snapshot.context.profileId).toBe('restored-profile');
       expect(snapshot.context.isBusy).toBe(true);
       actor.stop();
@@ -544,13 +490,11 @@ describe('terminalMachine', () => {
         [
           {
             type: 'SWAP_RESUME_COMPLETE',
-            claudeSessionId: 'new-session',
             profileId: 'profile-2',
           },
         ],
         'swapping',
         {
-          claudeSessionId: 'old-session',
           profileId: 'profile-1',
           swapTargetProfileId: 'profile-2',
           swapPhase: 'resuming',
@@ -558,17 +502,15 @@ describe('terminalMachine', () => {
       );
       expect(snapshot.value).toBe('claude_active');
       expect(snapshot.context.profileId).toBe('profile-2');
-      expect(snapshot.context.claudeSessionId).toBe('new-session');
     });
 
     it('should restore pending_resume and complete resume', () => {
       const snapshot = runEvents(
-        [{ type: 'RESUME_COMPLETE', claudeSessionId: 'resumed-session' }],
+        [{ type: 'RESUME_COMPLETE' }],
         'pending_resume',
-        { claudeSessionId: 'stale-session', profileId: 'profile-1' }
+        { profileId: 'profile-1' }
       );
       expect(snapshot.value).toBe('claude_active');
-      expect(snapshot.context.claudeSessionId).toBe('resumed-session');
     });
 
     it('should restore exited state and restart', () => {

@@ -14,7 +14,6 @@ export interface TerminalProcess {
   isCLIMode: boolean;
   projectPath?: string;
   cwd: string;
-  claudeSessionId?: string;
   claudeProfileId?: string;
   outputBuffer: string;
   title: string;
@@ -85,7 +84,6 @@ export interface TerminalProfileChangeInfo {
   id: string;
   cwd: string;
   projectPath?: string;
-  claudeSessionId?: string;
   claudeProfileId?: string;
   isCLIMode: boolean;
   dangerouslySkipPermissions?: boolean;

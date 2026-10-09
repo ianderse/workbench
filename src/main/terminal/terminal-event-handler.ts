@@ -13,7 +13,6 @@ import { safeSendToRenderer } from '../ipc-handlers/utils';
  * Event handler callbacks
  */
 export interface EventHandlerCallbacks {
-  onClaudeSessionId: (terminal: TerminalProcess, sessionId: string) => void;
   onRateLimit: (terminal: TerminalProcess, data: string) => void;
   onOAuthToken: (terminal: TerminalProcess, data: string) => void;
   onOnboardingComplete: (terminal: TerminalProcess, data: string) => void;
@@ -32,14 +31,6 @@ export function handleTerminalData(
   data: string,
   callbacks: EventHandlerCallbacks
 ): void {
-  // Try to extract Claude session ID
-  if (terminal.isCLIMode && !terminal.claudeSessionId) {
-    const sessionId = OutputParser.extractClaudeSessionId(data);
-    if (sessionId) {
-      callbacks.onClaudeSessionId(terminal, sessionId);
-    }
-  }
-
   // Check for rate limit messages
   if (terminal.isCLIMode) {
     callbacks.onRateLimit(terminal, data);
@@ -91,9 +82,6 @@ export function createEventCallbacks(
   switchProfileCallback: (terminalId: string, profileId: string) => Promise<void>
 ): EventHandlerCallbacks {
   return {
-    onClaudeSessionId: (terminal, sessionId) => {
-      ClaudeIntegration.handleClaudeSessionId(terminal, sessionId, getWindow);
-    },
     onRateLimit: (terminal, data) => {
       ClaudeIntegration.handleRateLimit(
         terminal,

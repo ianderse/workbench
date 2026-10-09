@@ -375,39 +375,28 @@ export function shouldAutoRenameTerminal(currentTitle: string): boolean {
 /**
  * Callback type for session capture
  */
-type SessionCaptureCallback = (terminalId: string, projectPath: string, startTime: number) => void;
 
 /**
  * Finalize terminal state after invoking Claude.
  *
- * Updates terminal title, sends IPC notification to renderer, persists session,
- * and calls the session capture callback. This consolidates the post-invocation
- * logic used by both sync and async invoke methods.
+ * Updates terminal title, sends IPC notification to renderer and persists the session.
+ * This consolidates the post-invocation logic used by both sync and async invoke methods.
  *
  * @param terminal - The terminal process to update
  * @param activeProfile - The profile being used (or undefined for default)
- * @param projectPath - The project path (for session capture)
- * @param startTime - Timestamp when invocation started
  * @param getWindow - Function to get the BrowserWindow
- * @param onSessionCapture - Callback for session capture
  *
  * @example
  * finalizeClaudeInvoke(
  *   terminal,
  *   { name: 'Work', isDefault: false },
- *   '/path/to/project',
- *   Date.now(),
- *   () => mainWindow,
- *   (id, path, time) => console.log('Session captured')
+ *   () => mainWindow
  * );
  */
 export function finalizeClaudeInvoke(
   terminal: TerminalProcess,
   activeProfile: ProfileInfo | undefined,
-  projectPath: string | undefined,
-  startTime: number,
-  getWindow: WindowGetter,
-  onSessionCapture: SessionCaptureCallback
+  getWindow: WindowGetter
 ): void {
   // Only auto-rename if terminal has default name (first Claude invocation)
   // This preserves user-customized names and prevents renaming on every invocation
@@ -424,11 +413,6 @@ export function finalizeClaudeInvoke(
   // Persist session if project path is available
   if (terminal.projectPath) {
     SessionHandler.persistSession(terminal);
-  }
-
-  // Call session capture callback if project path provided
-  if (projectPath) {
-    onSessionCapture(terminal.id, projectPath, startTime);
   }
 }
 
@@ -732,24 +716,6 @@ export function handleOnboardingComplete(
 }
 
 /**
- * Handle Claude session ID capture
- */
-export function handleClaudeSessionId(
-  terminal: TerminalProcess,
-  sessionId: string,
-  getWindow: WindowGetter
-): void {
-  terminal.claudeSessionId = sessionId;
-  console.warn('[ClaudeIntegration] Captured Claude session ID:', sessionId);
-
-  if (terminal.projectPath) {
-    SessionHandler.updateClaudeSessionId(terminal.projectPath, terminal.id, sessionId);
-  }
-
-  safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_CLAUDE_SESSION, terminal.id, sessionId);
-}
-
-/**
  * Handle Claude exit detection (user closed Claude, returned to shell)
  *
  * This is called when we detect that Claude has exited and the terminal
@@ -769,7 +735,6 @@ export function handleClaudeExit(
 
   // Reset Claude mode state
   terminal.isCLIMode = false;
-  terminal.claudeSessionId = undefined;
 
   // Persist the session state change
   if (terminal.projectPath) {
@@ -844,7 +809,6 @@ interface ExecuteProfileCommandOptions {
   projectPath: string | undefined;
   startTime: number;
   getWindow: WindowGetter;
-  onSessionCapture: SessionCaptureCallback;
   logPrefix: string;
 }
 
@@ -861,7 +825,6 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
     projectPath,
     startTime,
     getWindow,
-    onSessionCapture,
     logPrefix,
   } = options;
 
@@ -886,7 +849,7 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
     debugLog(`${logPrefix} Executing command (configDir method, history-safe)`);
     PtyManager.writeToPty(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
-    finalizeClaudeInvoke(terminal, activeProfile, projectPath, startTime, getWindow, onSessionCapture);
+    finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (configDir) ==========`);
     return true;
   }
@@ -916,7 +879,7 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
     debugLog(`${logPrefix} Executing command (temp file method, history-safe)`);
     PtyManager.writeToPty(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
-    finalizeClaudeInvoke(terminal, activeProfile, projectPath, startTime, getWindow, onSessionCapture);
+    finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (temp file) ==========`);
     return true;
   }
@@ -942,7 +905,6 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
     projectPath,
     startTime,
     getWindow,
-    onSessionCapture,
     logPrefix,
   } = options;
 
@@ -967,7 +929,7 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
     debugLog(`${logPrefix} Executing command (configDir method, history-safe)`);
     PtyManager.writeToPty(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
-    finalizeClaudeInvoke(terminal, activeProfile, projectPath, startTime, getWindow, onSessionCapture);
+    finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (configDir) ==========`);
     return true;
   }
@@ -997,7 +959,7 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
     debugLog(`${logPrefix} Executing command (temp file method, history-safe)`);
     PtyManager.writeToPty(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
-    finalizeClaudeInvoke(terminal, activeProfile, projectPath, startTime, getWindow, onSessionCapture);
+    finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (temp file) ==========`);
     return true;
   }
@@ -1014,7 +976,6 @@ export function invokeClaude(
   cwd: string | undefined,
   profileId: string | undefined,
   getWindow: WindowGetter,
-  onSessionCapture: (terminalId: string, projectPath: string, startTime: number) => void,
   dangerouslySkipPermissions?: boolean
 ): void {
   debugLog('[ClaudeIntegration:invokeClaude] ========== INVOKE CLAUDE START ==========');
@@ -1034,8 +995,6 @@ export function invokeClaude(
     terminal.isCLIMode = true;
     // Store YOLO mode setting so it persists across profile switches
     terminal.dangerouslySkipPermissions = dangerouslySkipPermissions;
-    SessionHandler.releaseSessionId(terminal.id);
-    terminal.claudeSessionId = undefined;
 
     const startTime = Date.now();
     const projectPath = cwd || terminal.projectPath || terminal.cwd;
@@ -1082,8 +1041,7 @@ export function invokeClaude(
       projectPath,
       startTime,
       getWindow,
-      onSessionCapture,
-      logPrefix: '[ClaudeIntegration:invokeClaude]',
+        logPrefix: '[ClaudeIntegration:invokeClaude]',
     });
 
     if (executed) {
@@ -1103,12 +1061,11 @@ export function invokeClaude(
       profileManager.markProfileUsed(activeProfile.id);
     }
 
-    finalizeClaudeInvoke(terminal, activeProfile, projectPath, startTime, getWindow, onSessionCapture);
+    finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog('[ClaudeIntegration:invokeClaude] ========== INVOKE CLAUDE COMPLETE (default) ==========');
   } catch (error) {
     // Reset terminal state on error to prevent inconsistent state
     terminal.isCLIMode = wasClaudeMode;
-    terminal.claudeSessionId = undefined;
     terminal.claudeProfileId = previousProfileId;
     debugError('[ClaudeIntegration:invokeClaude] Invocation failed:', error);
     debugError('[ClaudeIntegration:invokeClaude] Error details:', {
@@ -1123,19 +1080,13 @@ export function invokeClaude(
 }
 
 /**
- * Resume Claude session in the current directory
+ * Resume Claude in the terminal's project
  *
- * Uses `claude --continue` which resumes the most recent conversation in the
- * current directory. This is simpler and more reliable than tracking session IDs,
- * since Auto Claude already restores terminals to their correct cwd/projectPath.
- *
- * Note: The sessionId parameter is kept for backwards compatibility but is ignored.
- * Claude Code's --resume flag expects user-named sessions (set via /rename), not
- * internal session file IDs.
+ * Changes to the project directory and runs `claude --continue`, which picks up the latest
+ * Claude session there.
  */
 export function resumeClaude(
   terminal: TerminalProcess,
-  _sessionId: string | undefined,
   getWindow: WindowGetter
 ): void {
   // Track terminal state for cleanup on error
@@ -1143,7 +1094,6 @@ export function resumeClaude(
 
   try {
     terminal.isCLIMode = true;
-    SessionHandler.releaseSessionId(terminal.id);
 
     const { command: claudeCmd, env: claudeEnv } = getClaudeCliInvocation();
     const escapedClaudeCmd = escapeShellCommand(claudeCmd);
@@ -1151,23 +1101,12 @@ export function resumeClaude(
       ? ''
       : buildPathPrefix(claudeEnv.PATH || '');
 
-    // Always use --continue which resumes the most recent session in the current directory.
-    // This is more reliable than --resume with session IDs since Auto Claude already restores
-    // terminals to their correct cwd/projectPath.
-    //
-    // Note: We clear claudeSessionId because --continue doesn't track specific sessions,
-    // and we don't want stale IDs persisting through SessionHandler.persistSession().
-    terminal.claudeSessionId = undefined;
-
-    // Deprecation warning for callers still passing sessionId
-    if (_sessionId) {
-      console.warn('[ClaudeIntegration:resumeClaude] sessionId parameter is deprecated and ignored; using claude --continue instead');
-    }
-
     // Preserve YOLO mode flag from terminal's stored state
     const extraFlags = terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : '';
 
-    const command = `${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
+    // Go to the project directory, then pick up its latest Claude session
+    const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);
+    const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
     PtyManager.writeToPty(terminal, `${command}\r`);
@@ -1186,7 +1125,6 @@ export function resumeClaude(
   } catch (error) {
     // Reset terminal state on error to prevent inconsistent state
     terminal.isCLIMode = wasClaudeMode;
-    // Note: Don't restore claudeSessionId since --continue doesn't use session IDs
     debugError('[ClaudeIntegration:resumeClaude] Resume failed:', error);
     throw error; // Re-throw to allow caller to handle
   }
@@ -1208,7 +1146,6 @@ export async function invokeCLIAsync(
   cwd: string | undefined,
   profileId: string | undefined,
   getWindow: WindowGetter,
-  onSessionCapture: (terminalId: string, projectPath: string, startTime: number) => void,
   dangerouslySkipPermissions?: boolean
 ): Promise<void> {
   // Track terminal state for cleanup on error
@@ -1230,8 +1167,6 @@ export async function invokeCLIAsync(
     terminal.isCLIMode = true;
     // Store YOLO mode setting so it persists across profile switches
     terminal.dangerouslySkipPermissions = dangerouslySkipPermissions;
-    SessionHandler.releaseSessionId(terminal.id);
-    terminal.claudeSessionId = undefined;
 
     const projectPath = cwd || terminal.projectPath || terminal.cwd;
 
@@ -1307,8 +1242,7 @@ export async function invokeCLIAsync(
       projectPath,
       startTime,
       getWindow,
-      onSessionCapture,
-      logPrefix: '[ClaudeIntegration:invokeCLIAsync]',
+        logPrefix: '[ClaudeIntegration:invokeCLIAsync]',
     });
 
     if (executed) {
@@ -1328,12 +1262,11 @@ export async function invokeCLIAsync(
       profileManager.markProfileUsed(activeProfile.id);
     }
 
-    finalizeClaudeInvoke(terminal, activeProfile, projectPath, startTime, getWindow, onSessionCapture);
+    finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog('[ClaudeIntegration:invokeCLIAsync] ========== INVOKE CLAUDE COMPLETE (default) ==========');
   } catch (error) {
     // Reset terminal state on error to prevent inconsistent state
     terminal.isCLIMode = wasClaudeMode;
-    terminal.claudeSessionId = undefined;
     terminal.claudeProfileId = previousProfileId;
     const elapsed = Date.now() - startTime;
     debugError('[ClaudeIntegration:invokeCLIAsync] Invocation failed:', error);
@@ -1354,19 +1287,17 @@ export async function invokeCLIAsync(
  *
  * Safe to call from Electron main process without blocking the event loop.
  * Uses async CLI detection which doesn't block on subprocess calls.
+ * Changes to the project directory and runs `claude --continue` (its latest Claude session).
  */
 export async function resumeClaudeAsync(
   terminal: TerminalProcess,
-  sessionId: string | undefined,
-  getWindow: WindowGetter,
-  options?: { migratedSession?: boolean }
+  getWindow: WindowGetter
 ): Promise<void> {
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
 
   try {
     terminal.isCLIMode = true;
-    SessionHandler.releaseSessionId(terminal.id);
 
     // Async CLI invocation - non-blocking
     // Add timeout protection for CLI detection (10s timeout)
@@ -1386,27 +1317,12 @@ export async function resumeClaudeAsync(
       ? ''
       : buildPathPrefix(claudeEnv.PATH || '');
 
-    // Always use --continue which resumes the most recent session in the current directory.
-    // This is more reliable than --resume with session IDs since Auto Claude already restores
-    // terminals to their correct cwd/projectPath.
-    //
-    // Note: We clear claudeSessionId because --continue doesn't track specific sessions,
-    // and we don't want stale IDs persisting through SessionHandler.persistSessionAsync().
-    terminal.claudeSessionId = undefined;
-
-    // Deprecation warning for callers still passing sessionId (skip for migrated sessions)
-    if (sessionId && !options?.migratedSession) {
-      console.warn('[ClaudeIntegration:resumeClaudeAsync] sessionId parameter is deprecated and ignored; using claude --continue instead');
-    }
-
-    if (options?.migratedSession) {
-      debugLog('[ClaudeIntegration:resumeClaudeAsync] Post-swap resume for terminal:', terminal.id);
-    }
-
     // Preserve YOLO mode flag from terminal's stored state
     const extraFlags = terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : '';
 
-    const command = `${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
+    // Go to the project directory, then pick up its latest Claude session
+    const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);
+    const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
     PtyManager.writeToPty(terminal, `${command}\r`);
@@ -1425,7 +1341,6 @@ export async function resumeClaudeAsync(
   } catch (error) {
     // Reset terminal state on error to prevent inconsistent state
     terminal.isCLIMode = wasClaudeMode;
-    // Note: Don't restore claudeSessionId since --continue doesn't use session IDs
     debugError('[ClaudeIntegration:resumeClaudeAsync] Resume failed:', error);
     throw error; // Re-throw to allow caller to handle
   }
@@ -1548,7 +1463,6 @@ export async function switchClaudeProfile(
   debugLog('[ClaudeIntegration:switchClaudeProfile] Terminal state:', {
     isCLIMode: terminal.isCLIMode,
     currentProfileId: terminal.claudeProfileId,
-    claudeSessionId: terminal.claudeSessionId,
     projectPath: terminal.projectPath,
     cwd: terminal.cwd
   });

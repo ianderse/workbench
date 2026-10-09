@@ -4,16 +4,6 @@
  */
 
 /**
- * Regex patterns to capture Claude session ID from output
- */
-const CLAUDE_SESSION_PATTERNS = [
-  /Session(?:\s+ID)?:\s*([a-zA-Z0-9_-]+)/i,
-  /session[_-]?id["\s:=]+([a-zA-Z0-9_-]+)/i,
-  /Resuming session:\s*([a-zA-Z0-9_-]+)/i,
-  /conversation[_-]?id["\s:=]+([a-zA-Z0-9_-]+)/i,
-];
-
-/**
  * Regex pattern to detect Claude Code rate limit messages
  * Matches: "Limit reached · resets Dec 17 at 6am (Europe/Oslo)"
  */
@@ -52,19 +42,6 @@ const EMAIL_PATTERNS = [
  * Matches: "Login successful" or "Logged in as X"
  */
 const LOGIN_SUCCESS_PATTERN = /(?:Login successful|Successfully logged in|Logged in as\s+\S+@\S+)/i;
-
-/**
- * Extract Claude session ID from output
- */
-export function extractClaudeSessionId(data: string): string | null {
-  for (const pattern of CLAUDE_SESSION_PATTERNS) {
-    const match = data.match(pattern);
-    if (match?.[1]) {
-      return match[1];
-    }
-  }
-  return null;
-}
 
 /**
  * Extract rate limit reset time from output

@@ -196,7 +196,7 @@ export interface ElectronAPI {
   getTerminalSessions: (projectPath: string) => Promise<IPCResult<TerminalSession[]>>;
   restoreTerminalSession: (session: TerminalSession, cols?: number, rows?: number) => Promise<IPCResult<TerminalRestoreResult>>;
   clearTerminalSessions: (projectPath: string) => Promise<IPCResult>;
-  resumeClaudeInTerminal: (id: string, sessionId?: string, options?: { migratedSession?: boolean }) => void;
+  resumeClaudeInTerminal: (id: string, options?: { dangerouslySkipPermissions?: boolean }) => void;
   activateDeferredClaudeResume: (id: string) => void;
   getTerminalSessionDates: (projectPath?: string) => Promise<IPCResult<SessionDateInfo[]>>;
   getTerminalSessionsForDate: (date: string, projectPath: string) => Promise<IPCResult<TerminalSession[]>>;
@@ -220,7 +220,6 @@ export interface ElectronAPI {
   onTerminalTitleChange: (callback: (id: string, title: string) => void) => () => void;
   /** Listen for worktree config changes (synced from main process during restoration) */
   onTerminalWorktreeConfigChange: (callback: (id: string, config: TerminalWorktreeConfig | undefined) => void) => () => void;
-  onTerminalClaudeSession: (callback: (id: string, sessionId: string) => void) => () => void;
   onTerminalRateLimit: (callback: (info: RateLimitInfo) => void) => () => void;
   /** Listen for OAuth authentication completion (token is auto-saved to profile, never exposed to frontend) */
   onTerminalOAuthToken: (callback: (info: {
@@ -242,7 +241,7 @@ export interface ElectronAPI {
   /** Listen for Claude exit (user closed Claude within terminal, returned to shell) */
   onTerminalClaudeExit: (callback: (id: string) => void) => () => void;
   /** Listen for pending Claude resume notifications (for deferred resume on tab activation) */
-  onTerminalPendingResume: (callback: (id: string, sessionId?: string) => void) => () => void;
+  onTerminalPendingResume: (callback: (id: string) => void) => () => void;
   /** Listen for profile change events - terminals need to be recreated with new profile env vars */
   onTerminalProfileChanged: (callback: (event: TerminalProfileChangedEvent) => void) => () => void;
   /** Listen for OAuth code input requests (manual OAuth flow) */

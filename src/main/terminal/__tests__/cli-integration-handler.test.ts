@@ -25,7 +25,6 @@ const mockGetClaudeCliInvocationAsync = vi.fn();
 const mockGetClaudeProfileManager = vi.fn();
 const mockInitializeClaudeProfileManager = vi.fn();
 const mockPersistSession = vi.fn();
-const mockReleaseSessionId = vi.fn();
 
 const createMockDisposable = (): pty.IDisposable => ({ dispose: vi.fn() });
 
@@ -50,7 +49,6 @@ const createMockTerminal = (overrides: Partial<TerminalProcess> = {}): TerminalP
   pty: createMockPty(),
   outputBuffer: '',
   isCLIMode: false,
-  claudeSessionId: undefined,
   claudeProfileId: undefined,
   title: 'Terminal 1',  // Use default terminal name pattern to match production behavior
   cwd: '/tmp/project',
@@ -81,7 +79,6 @@ vi.mock('fs', async (importOriginal) => {
 
 vi.mock('../session-handler', () => ({
   persistSession: mockPersistSession,
-  releaseSessionId: mockReleaseSessionId,
 }));
 
 // Mock PtyManager.writeToPty - the implementation now uses this instead of terminal.pty.write
@@ -239,7 +236,6 @@ describe('cli-integration-handler', () => {
     mockGetClaudeCliInvocation.mockClear();
     mockGetClaudeProfileManager.mockClear();
     mockPersistSession.mockClear();
-    mockReleaseSessionId.mockClear();
     mockWriteToPty.mockClear();
     vi.mocked(writeFileSync).mockClear();
   });
@@ -265,13 +261,12 @@ describe('cli-integration-handler', () => {
       const terminal = createMockTerminal();
 
       const { invokeClaude } = await import('../cli-integration-handler');
-      invokeClaude(terminal, '/tmp/project', undefined, () => null, vi.fn());
+      invokeClaude(terminal, '/tmp/project', undefined, () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       expect(written).toContain(buildCdCommand('/tmp/project'));
       expectPathPrefix(written, platform, '/opt/claude/bin:/usr/bin', "/opt/claude bin/claude's");
       expect(written).toContain(getQuotedCommand(platform, "/opt/claude bin/claude's"));
-      expect(mockReleaseSessionId).toHaveBeenCalledWith('term-1');
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
       expect(profileManager.getActiveProfile).toHaveBeenCalled();
       expect(profileManager.markProfileUsed).toHaveBeenCalledWith('default');
@@ -301,7 +296,7 @@ describe('cli-integration-handler', () => {
       const terminal = createMockTerminal({ id: 'term-3' });
 
       const { invokeClaude } = await import('../cli-integration-handler');
-      invokeClaude(terminal, '/tmp/project', 'prof-1', () => null, vi.fn());
+      invokeClaude(terminal, '/tmp/project', 'prof-1', () => null);
 
       const tokenPath = vi.mocked(writeFileSync).mock.calls[0]?.[0] as string;
       const tokenContents = vi.mocked(writeFileSync).mock.calls[0]?.[1] as string;
@@ -353,7 +348,7 @@ describe('cli-integration-handler', () => {
       const terminal = createMockTerminal({ id: 'term-both' });
 
       const { invokeClaude } = await import('../cli-integration-handler');
-      invokeClaude(terminal, '/tmp/project', 'prof-both', () => null, vi.fn());
+      invokeClaude(terminal, '/tmp/project', 'prof-both', () => null);
 
       // Should NOT write a temp file - configDir is used instead
       expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
@@ -390,7 +385,7 @@ describe('cli-integration-handler', () => {
       const terminal = createMockTerminal({ id: 'term-6' });
 
       const { invokeClaude } = await import('../cli-integration-handler');
-      invokeClaude(terminal, '/tmp/project', 'missing', () => null, vi.fn());
+      invokeClaude(terminal, '/tmp/project', 'missing', () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       expect(written).toContain(getQuotedCommand(platform, command));
@@ -421,7 +416,7 @@ describe('cli-integration-handler', () => {
       const terminal = createMockTerminal({ id: 'term-4' });
 
       const { invokeClaude } = await import('../cli-integration-handler');
-      invokeClaude(terminal, '/tmp/project', 'prof-2', () => null, vi.fn());
+      invokeClaude(terminal, '/tmp/project', 'prof-2', () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearCommand(platform);
@@ -460,7 +455,7 @@ describe('cli-integration-handler', () => {
       const terminal = createMockTerminal({ id: 'term-5' });
 
       const { invokeClaude } = await import('../cli-integration-handler');
-      invokeClaude(terminal, '/tmp/project', 'prof-3', () => null, vi.fn());
+      invokeClaude(terminal, '/tmp/project', 'prof-3', () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       expect(written).toContain(getQuotedCommand(platform, command));
@@ -470,7 +465,7 @@ describe('cli-integration-handler', () => {
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
     });
 
-    it('uses --continue regardless of sessionId (sessionId is deprecated)', async () => {
+    it('changes to the project directory and continues its latest session', async () => {
       mockGetClaudeCliInvocation.mockReturnValue({
         command: '/opt/claude/bin/claude',
         env: { PATH: '/opt/claude/bin:/usr/bin' },
@@ -484,15 +479,14 @@ describe('cli-integration-handler', () => {
 
       const { resumeClaude } = await import('../cli-integration-handler');
 
-      // Even when sessionId is passed, it should be ignored and --continue used
-      resumeClaude(terminal, 'abc123', () => null);
+      resumeClaude(terminal, () => null);
 
       const resumeCall = mockWriteToPty.mock.calls[0][1] as string;
       expectPathPrefix(resumeCall, platform, '/opt/claude/bin:/usr/bin', '/opt/claude/bin/claude');
       expect(resumeCall).toContain(getQuotedCommand(platform, '/opt/claude/bin/claude') + ' --continue');
       expect(resumeCall).not.toContain('--resume');
-      // sessionId is cleared because --continue doesn't track specific sessions
-      expect(terminal.claudeSessionId).toBeUndefined();
+      expect(resumeCall).toContain('/tmp/project');
+      expect(resumeCall.indexOf('/tmp/project')).toBeLessThan(resumeCall.indexOf(' --continue'));
       expect(terminal.isCLIMode).toBe(true);
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
 
@@ -500,11 +494,10 @@ describe('cli-integration-handler', () => {
       mockPersistSession.mockClear();
       terminal.projectPath = undefined;
       terminal.isCLIMode = false;
-      resumeClaude(terminal, undefined, () => null);
+      resumeClaude(terminal, () => null);
       const continueCall = mockWriteToPty.mock.calls[0][1] as string;
       expect(continueCall).toContain(getQuotedCommand(platform, '/opt/claude/bin/claude') + ' --continue');
       expect(terminal.isCLIMode).toBe(true);
-      expect(terminal.claudeSessionId).toBeUndefined();
       expect(mockPersistSession).not.toHaveBeenCalled();
     });
   });
@@ -524,8 +517,7 @@ describe('cli-integration-handler', () => {
     const terminal = createMockTerminal({ id: 'term-err' });
 
     const { invokeClaude } = await import('../cli-integration-handler');
-    expect(() => invokeClaude(terminal, '/tmp/project', undefined, () => null, vi.fn())).toThrow('boom');
-    expect(mockReleaseSessionId).toHaveBeenCalledWith('term-err');
+    expect(() => invokeClaude(terminal, '/tmp/project', undefined, () => null)).toThrow('boom');
     expect(mockWriteToPty).not.toHaveBeenCalled();
   });
 
@@ -541,7 +533,7 @@ describe('cli-integration-handler', () => {
     });
 
     const { resumeClaude } = await import('../cli-integration-handler');
-    expect(() => resumeClaude(terminal, 'abc123', () => null)).toThrow('boom');
+    expect(() => resumeClaude(terminal, () => null)).toThrow('boom');
     expect(mockWriteToPty).not.toHaveBeenCalled();
   });
 
@@ -569,7 +561,7 @@ describe('cli-integration-handler', () => {
     const terminal = createMockTerminal({ id: 'term-err-3' });
 
     const { invokeClaude } = await import('../cli-integration-handler');
-    expect(() => invokeClaude(terminal, '/tmp/project', 'prof-err', () => null, vi.fn())).toThrow('disk full');
+    expect(() => invokeClaude(terminal, '/tmp/project', 'prof-err', () => null)).toThrow('disk full');
     expect(mockWriteToPty).not.toHaveBeenCalled();
   });
 
@@ -589,7 +581,7 @@ describe('cli-integration-handler', () => {
     const terminal = createMockTerminal();
 
     const { invokeClaude } = await import('../cli-integration-handler');
-    invokeClaude(terminal, '/tmp/project', undefined, () => null, vi.fn(), true);
+    invokeClaude(terminal, '/tmp/project', undefined, () => null, true);
 
     const written = mockWriteToPty.mock.calls[0][1] as string;
     expect(written).toContain('--dangerously-skip-permissions');
@@ -612,7 +604,7 @@ describe('cli-integration-handler', () => {
     const terminal = createMockTerminal();
 
     const { invokeClaude } = await import('../cli-integration-handler');
-    invokeClaude(terminal, '/tmp/project', undefined, () => null, vi.fn(), false);
+    invokeClaude(terminal, '/tmp/project', undefined, () => null, false);
 
     const written = mockWriteToPty.mock.calls[0][1] as string;
     expect(written).not.toContain('--dangerously-skip-permissions');
@@ -637,12 +629,11 @@ describe('cli-integration-handler', () => {
     });
 
     const { invokeClaude } = await import('../cli-integration-handler');
-    expect(() => invokeClaude(terminal, '/tmp/project', 'new-profile', () => null, vi.fn())).toThrow('CLI error');
+    expect(() => invokeClaude(terminal, '/tmp/project', 'new-profile', () => null)).toThrow('CLI error');
 
     // Terminal state should be rolled back
     expect(terminal.isCLIMode).toBe(false);
     expect(terminal.claudeProfileId).toBe('old-profile');
-    expect(terminal.claudeSessionId).toBeUndefined();
   });
 });
 
@@ -654,7 +645,6 @@ describe('invokeCLIAsync', () => {
     mockGetClaudeCliInvocationAsync.mockClear();
     mockInitializeClaudeProfileManager.mockClear();
     mockPersistSession.mockClear();
-    mockReleaseSessionId.mockClear();
     mockWriteToPty.mockClear();
     vi.mocked(writeFileSync).mockClear();
   });
@@ -680,12 +670,11 @@ describe('invokeCLIAsync', () => {
       const terminal = createMockTerminal();
 
       const { invokeCLIAsync } = await import('../cli-integration-handler');
-      await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null, vi.fn());
+      await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       expect(written).toContain(buildCdCommand('/tmp/project'));
       expectPathPrefix(written, platform, '/opt/claude/bin:/usr/bin', '/opt/claude/bin/claude');
-      expect(mockReleaseSessionId).toHaveBeenCalledWith('term-1');
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
       expect(profileManager.markProfileUsed).toHaveBeenCalledWith('default');
     });
@@ -713,7 +702,7 @@ describe('invokeCLIAsync', () => {
       const terminal = createMockTerminal();
 
       const { invokeCLIAsync } = await import('../cli-integration-handler');
-      await invokeCLIAsync(terminal, '/tmp/project', 'prof-config', () => null, vi.fn());
+      await invokeCLIAsync(terminal, '/tmp/project', 'prof-config', () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearCommand(platform);
@@ -745,7 +734,7 @@ describe('invokeCLIAsync', () => {
 
       const { invokeCLIAsync } = await import('../cli-integration-handler');
 
-      await expect(invokeCLIAsync(terminal, '/tmp/project', undefined, () => null, vi.fn()))
+      await expect(invokeCLIAsync(terminal, '/tmp/project', undefined, () => null))
         .rejects.toThrow('CLI invocation timeout after 10s');
 
       // Terminal state should be rolled back
@@ -768,13 +757,12 @@ describe('invokeCLIAsync', () => {
       });
 
       const { invokeCLIAsync } = await import('../cli-integration-handler');
-      await expect(invokeCLIAsync(terminal, '/tmp/project', 'new-profile', () => null, vi.fn()))
+      await expect(invokeCLIAsync(terminal, '/tmp/project', 'new-profile', () => null))
         .rejects.toThrow('Async CLI error');
 
       // Terminal state should be rolled back
       expect(terminal.isCLIMode).toBe(false);
       expect(terminal.claudeProfileId).toBe('old-profile');
-      expect(terminal.claudeSessionId).toBeUndefined();
     });
 
     it('should include YOLO mode flag when dangerouslySkipPermissions is true', async () => {
@@ -793,42 +781,13 @@ describe('invokeCLIAsync', () => {
       const terminal = createMockTerminal();
 
       const { invokeCLIAsync } = await import('../cli-integration-handler');
-      await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null, vi.fn(), true);
+      await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null, true);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       expect(written).toContain('--dangerously-skip-permissions');
       expect(terminal.dangerouslySkipPermissions).toBe(true);
     });
 
-    it('should call onSessionCapture callback with correct parameters', async () => {
-      mockGetClaudeCliInvocationAsync.mockResolvedValue({
-        command: '/opt/claude/bin/claude',
-        env: { PATH: '/opt/claude/bin:/usr/bin' },
-      });
-      const profileManager = {
-        getActiveProfile: vi.fn(() => ({ id: 'default', name: 'Default', isDefault: true })),
-        getProfile: vi.fn(),
-        getProfileToken: vi.fn(() => null),
-        markProfileUsed: vi.fn(),
-      };
-      mockInitializeClaudeProfileManager.mockResolvedValue(profileManager);
-
-      const terminal = createMockTerminal();
-      const mockOnSessionCapture = vi.fn();
-      const startTime = Date.now();
-
-      const { invokeCLIAsync } = await import('../cli-integration-handler');
-      await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null, mockOnSessionCapture);
-
-      expect(mockOnSessionCapture).toHaveBeenCalledWith(
-        terminal.id,
-        '/tmp/project',
-        expect.any(Number)
-      );
-
-      const capturedTime = mockOnSessionCapture.mock.calls[0][2];
-      expect(capturedTime).toBeGreaterThanOrEqual(startTime);
-    });
   });
 });
 
@@ -949,10 +908,7 @@ describe('cli-integration-handler - Helper Functions', () => {
       finalizeClaudeInvoke(
         terminal,
         { name: 'Default', isDefault: true },
-        '/tmp/project',
-        Date.now(),
-        () => mockWindow as any,
-        vi.fn()
+        () => mockWindow as any
       );
 
       expect(terminal.title).toBe('Claude');
@@ -970,10 +926,7 @@ describe('cli-integration-handler - Helper Functions', () => {
       finalizeClaudeInvoke(
         terminal,
         { name: 'Work Profile', isDefault: false },
-        '/tmp/project',
-        Date.now(),
-        () => mockWindow as any,
-        vi.fn()
+        () => mockWindow as any
       );
 
       expect(terminal.title).toBe('Claude (Work Profile)');
@@ -992,10 +945,7 @@ describe('cli-integration-handler - Helper Functions', () => {
       finalizeClaudeInvoke(
         terminal,
         undefined,
-        '/tmp/project',
-        Date.now(),
-        () => mockWindow as any,
-        vi.fn()
+        () => mockWindow as any
       );
 
       expect(mockSend).toHaveBeenCalledWith(
@@ -1018,10 +968,7 @@ describe('cli-integration-handler - Helper Functions', () => {
       finalizeClaudeInvoke(
         terminal,
         { name: 'Work Profile', isDefault: false },
-        '/tmp/project',
-        Date.now(),
-        () => mockWindow as any,
-        vi.fn()
+        () => mockWindow as any
       );
 
       // Title should remain unchanged
@@ -1043,10 +990,7 @@ describe('cli-integration-handler - Helper Functions', () => {
       finalizeClaudeInvoke(
         terminal,
         undefined,
-        '/tmp/project',
-        Date.now(),
-        () => mockWindow as any,
-        vi.fn()
+        () => mockWindow as any
       );
 
       // Title should remain unchanged
@@ -1062,31 +1006,10 @@ describe('cli-integration-handler - Helper Functions', () => {
       finalizeClaudeInvoke(
         terminal,
         undefined,
-        '/tmp/project',
-        Date.now(),
-        () => null,
-        vi.fn()
+        () => null
       );
 
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
-    });
-
-    it('should call onSessionCapture when projectPath is provided', async () => {
-      const { finalizeClaudeInvoke } = await import('../cli-integration-handler');
-      const terminal = createMockTerminal();
-      const mockOnSessionCapture = vi.fn();
-      const startTime = Date.now();
-
-      finalizeClaudeInvoke(
-        terminal,
-        undefined,
-        '/tmp/project',
-        startTime,
-        () => null,
-        mockOnSessionCapture
-      );
-
-      expect(mockOnSessionCapture).toHaveBeenCalledWith(terminal.id, '/tmp/project', startTime);
     });
 
     it('should not crash when getWindow returns null', async () => {
@@ -1097,10 +1020,7 @@ describe('cli-integration-handler - Helper Functions', () => {
         finalizeClaudeInvoke(
           terminal,
           undefined,
-          '/tmp/project',
-          Date.now(),
-          () => null,
-          vi.fn()
+          () => null
         );
       }).not.toThrow();
     });

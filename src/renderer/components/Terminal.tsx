@@ -569,6 +569,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
           // Clear the pending flag and trigger the actual resume
           useTerminalStore.getState().setPendingClaudeResume(id, false);
           window.electronAPI.activateDeferredClaudeResume(id);
+          // The terminal now runs `claude --continue` in the project: show it in Claude mode
+          useTerminalStore.getState().setCLIMode(id, true);
         }
       }, 100); // Small delay to let React finish batched updates
 
