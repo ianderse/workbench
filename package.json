@@ -146,6 +146,7 @@
     "productName": "Auto Claude",
     "npmRebuild": false,
     "artifactName": "${productName}-${version}-${platform}-${arch}.${ext}",
+    "detectUpdateChannel": false,
     "publish": [
       {
         "provider": "github",
