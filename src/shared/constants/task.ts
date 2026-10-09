@@ -96,10 +96,10 @@ export const EXECUTION_PHASE_LABELS: Record<string, string> = {
   idle: 'Idle',
   planning: 'Planning',
   coding: 'Coding',
-  rate_limit_paused: 'Rate Limited',
-  auth_failure_paused: 'Auth Required',
-  qa_review: 'AI Review',
-  qa_fixing: 'Fixing Issues',
+  rate_limit_paused: 'Rate limited',
+  auth_failure_paused: 'Auth required',
+  qa_review: 'AI review',
+  qa_fixing: 'Fixing issues',
   complete: 'Complete',
   failed: 'Failed'
 };

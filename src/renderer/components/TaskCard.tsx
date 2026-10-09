@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Play, Square, Clock, Zap, Loader2, AlertTriangle, RotateCcw, Archive, GitPullRequest, MoreVertical, PauseCircle } from 'lucide-react';
+import { Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
-import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import {
   DropdownMenu,
@@ -14,9 +13,9 @@ import {
 } from './ui/dropdown-menu';
 import { cn, formatRelativeTime, sanitizeMarkdownForDisplay } from '../lib/utils';
 import { PhaseProgressIndicator } from './PhaseProgressIndicator';
+import { StatusIndicator } from './settings/common/StatusIndicator';
 import {
   EXECUTION_PHASE_LABELS,
-  EXECUTION_PHASE_BADGE_COLORS,
   TASK_STATUS_COLUMNS,
   TASK_STATUS_LABELS,
   JSON_ERROR_PREFIX,
@@ -32,6 +31,9 @@ import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
 // This is a last-resort safety net: if XState somehow fails to transition the task
 // out of in_progress after the process dies, flag it as stuck after 60 seconds.
 const STUCK_CHECK_INTERVAL_MS = 60_000;
+
+// Icon-only buttons, like the settings dialog's (muted icon, nav hover background)
+const ICON_BUTTON_CLASS = 'h-8 w-8 rounded-lg p-0 text-muted-foreground hover:bg-nav-hover hover:text-foreground';
 
 interface TaskCardProps {
   task: Task;
@@ -247,21 +249,6 @@ export const TaskCard = memo(function TaskCard({
     }
   };
 
-  const getStatusBadgeVariant = (status: string) => {
-    switch (status) {
-      case 'in_progress':
-        return 'info';
-      case 'ai_review':
-        return 'warning';
-      case 'human_review':
-        return 'purple';
-      case 'done':
-        return 'success';
-      default:
-        return 'secondary';
-    }
-  };
-
   const getStatusLabel = (status: string) => {
     switch (status) {
       case 'in_progress':
@@ -303,12 +290,34 @@ export const TaskCard = memo(function TaskCard({
 
   const isArchived = !!task.metadata?.archivedAt;
 
+  // The card's status line, most important first
+  const statusParts: { key: string; label: string; loading?: boolean; attention?: boolean; title?: string }[] = [];
+  if (isStuck) {
+    statusParts.push({ key: 'stuck', label: t('labels.needsRecovery'), attention: true });
+  } else if (isIncomplete) {
+    statusParts.push({ key: 'incomplete', label: t('labels.needsResume'), attention: true });
+  } else if (hasActiveExecution && executionPhase) {
+    statusParts.push({ key: 'phase', label: EXECUTION_PHASE_LABELS[executionPhase], loading: isRunning });
+  } else if (task.status !== 'done') {
+    statusParts.push({ key: 'status', label: getStatusLabel(task.status) });
+  }
+  if (reviewReasonInfo && !isStuck && !isIncomplete) {
+    statusParts.push({ key: 'review', label: reviewReasonInfo.label, attention: reviewReasonInfo.variant === 'destructive' });
+  }
+  if (isOnHold && holdResumeLabel) {
+    statusParts.push({
+      key: 'hold',
+      label: t('labels.onHoldUntil', { time: holdResumeLabel }),
+      title: task.rateLimitHold?.message || undefined,
+    });
+  }
+  if (isArchived) statusParts.push({ key: 'archived', label: t('status.archived') });
+  if (task.metadata?.fastMode) statusParts.push({ key: 'fast', label: t('metadata.fastMode') });
+
   return (
     <Card
       className={cn(
         'card-surface task-card-enhanced cursor-pointer',
-        isRunning && !isStuck && 'ring-2 ring-primary border-primary task-running-pulse',
-        isStuck && 'ring-2 ring-warning border-warning task-stuck-pulse',
         isArchived && 'opacity-60 hover:opacity-80'
       )}
       onClick={onClick}
@@ -318,7 +327,7 @@ export const TaskCard = memo(function TaskCard({
           <div>
             {/* Title - full width, no wrapper */}
             <h3
-              className="font-semibold text-sm text-foreground line-clamp-2 leading-snug"
+              className="font-medium text-sm text-foreground line-clamp-2 leading-snug"
               title={displayTitle}
             >
               {displayTitle}
@@ -326,96 +335,25 @@ export const TaskCard = memo(function TaskCard({
 
         {/* Description - sanitized to handle markdown content (memoized) */}
         {sanitizedDescription && (
-          <p className="mt-3 text-xs text-muted-foreground line-clamp-2">
+          <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2">
             {sanitizedDescription}
           </p>
         )}
 
-        {/* Metadata badges */}
-        {(task.metadata || isStuck || isIncomplete || hasActiveExecution || reviewReasonInfo || isOnHold) && (
-          <div className="mt-3 flex flex-wrap gap-1.5 empty:hidden">
-            {/* Rate-limit hold indicator - task resumes automatically at reset time */}
-            {isOnHold && holdResumeLabel && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0.5 flex items-center gap-1 bg-orange-500/10 text-orange-400 border-orange-500/30"
-                title={task.rateLimitHold?.message || undefined}
-              >
-                <PauseCircle className="h-2.5 w-2.5" />
-                {t('labels.onHoldUntil', { time: holdResumeLabel })}
-              </Badge>
-            )}
-            {/* Stuck indicator - highest priority */}
-            {isStuck && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0.5 flex items-center gap-1 bg-warning/10 text-warning border-warning/30 badge-priority-urgent"
-              >
-                <AlertTriangle className="h-2.5 w-2.5" />
-                {t('labels.stuck')}
-              </Badge>
-            )}
-            {/* Incomplete indicator - task in human_review but no subtasks completed */}
-            {isIncomplete && !isStuck && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0.5 flex items-center gap-1 bg-orange-500/10 text-orange-400 border-orange-500/30"
-              >
-                <AlertTriangle className="h-2.5 w-2.5" />
-                {t('labels.incomplete')}
-              </Badge>
-            )}
-            {/* Archived indicator - task has been released */}
-            {task.metadata?.archivedAt && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0.5 flex items-center gap-1 bg-muted text-muted-foreground border-border"
-              >
-                <Archive className="h-2.5 w-2.5" />
-                {t('status.archived')}
-              </Badge>
-            )}
-            {/* Execution phase badge - shown when actively running */}
-            {hasActiveExecution && executionPhase && !isStuck && !isIncomplete && (
-              <Badge
-                variant="outline"
-                className={cn(
-                  'text-[10px] px-1.5 py-0.5 flex items-center gap-1',
-                  EXECUTION_PHASE_BADGE_COLORS[executionPhase]
-                )}
-              >
-                <Loader2 className="h-2.5 w-2.5 animate-spin" />
-                {EXECUTION_PHASE_LABELS[executionPhase]}
-              </Badge>
-            )}
-            {/* Status badge - hidden while the execution phase badge shows, and for done tasks */}
-            {!hasActiveExecution && task.status !== 'done' && (
-              <Badge
-                variant={isStuck ? 'warning' : isIncomplete ? 'warning' : getStatusBadgeVariant(task.status)}
-                className="text-[10px] px-1.5 py-0.5"
-              >
-                {isStuck ? t('labels.needsRecovery') : isIncomplete ? t('labels.needsResume') : getStatusLabel(task.status)}
-              </Badge>
-            )}
-            {/* Review reason badge - explains why task needs human review */}
-            {reviewReasonInfo && !isStuck && !isIncomplete && (
-              <Badge
-                variant={reviewReasonInfo.variant}
-                className="text-[10px] px-1.5 py-0.5"
-              >
-                {reviewReasonInfo.label}
-              </Badge>
-            )}
-            {/* Fast Mode badge */}
-            {task.metadata?.fastMode && (
-              <Badge
-                variant="outline"
-                className="text-[10px] px-1.5 py-0.5 flex items-center gap-1 bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/30"
-              >
-                <Zap className="h-2.5 w-2.5" />
-                {t('metadata.fastMode')}
-              </Badge>
-            )}
+        {/* Status line: muted text like the settings dialog, with a spinner while an agent runs */}
+        {statusParts.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-(--nav-label-color)">
+            {statusParts.map((part, index) => (
+              <span key={part.key} className="inline-flex min-w-0 items-center gap-1.5" title={part.title}>
+                {index > 0 && <span aria-hidden="true">·</span>}
+                <StatusIndicator
+                  state={part.loading ? 'loading' : 'neutral'}
+                  tone={part.attention ? 'foreground' : 'muted'}
+                >
+                  {part.label}
+                </StatusIndicator>
+              </span>
+            ))}
           </div>
         )}
 
@@ -433,97 +371,74 @@ export const TaskCard = memo(function TaskCard({
 
         {/* Footer */}
         <div className="mt-3 flex items-center justify-between">
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Clock className="h-3 w-3" />
-            <span>{relativeTime}</span>
-          </div>
+          <span className="text-sm text-(--nav-label-color)">{relativeTime}</span>
 
           <div className="flex items-center gap-1.5">
-            {/* Action buttons */}
+            {/* Action buttons: icon buttons like the settings dialog's (label in the tooltip) */}
             {isStuck ? (
               <Button
-                variant="warning"
+                variant="ghost"
                 size="sm"
-                className="h-7 px-2.5"
+                className={ICON_BUTTON_CLASS}
                 onClick={handleRecover}
                 disabled={isRecovering}
+                title={isRecovering ? t('labels.recovering') : t('actions.recover')}
+                aria-label={isRecovering ? t('labels.recovering') : t('actions.recover')}
               >
-                {isRecovering ? (
-                  <>
-                    <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-                    {t('labels.recovering')}
-                  </>
-                ) : (
-                  <>
-                    <RotateCcw className="mr-1.5 h-3 w-3" />
-                    {t('actions.recover')}
-                  </>
-                )}
+                {isRecovering
+                  ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+                  : <RotateCcw className="h-4 w-4" strokeWidth={1.75} />}
               </Button>
             ) : isIncomplete ? (
               <Button
-                variant="default"
+                variant="ghost"
                 size="sm"
-                className="h-7 px-2.5"
+                className={ICON_BUTTON_CLASS}
                 onClick={handleStartStop}
+                title={t('actions.resume')}
+                aria-label={t('actions.resume')}
               >
-                <Play className="mr-1.5 h-3 w-3" />
-                {t('actions.resume')}
+                <Play className="h-4 w-4" strokeWidth={1.75} />
               </Button>
-            ) : task.status === 'done' && task.metadata?.prUrl ? (
+            ) : task.status === 'done' ? (
               <div className="flex gap-1">
                 {task.metadata?.prUrl && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 cursor-pointer"
+                    className={ICON_BUTTON_CLASS}
                     onClick={handleViewPR}
                     title={t('tooltips.viewPR')}
+                    aria-label={t('tooltips.viewPR')}
                   >
-                    <GitPullRequest className="h-3 w-3" />
+                    <GitPullRequest className="h-4 w-4" strokeWidth={1.75} />
                   </Button>
                 )}
-                {!task.metadata?.archivedAt && (
+                {!isArchived && (
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 px-2 cursor-pointer"
+                    className={ICON_BUTTON_CLASS}
                     onClick={handleArchive}
                     title={t('tooltips.archiveTask')}
+                    aria-label={t('tooltips.archiveTask')}
                   >
-                    <Archive className="h-3 w-3" />
+                    <Archive className="h-4 w-4" strokeWidth={1.75} />
                   </Button>
                 )}
               </div>
-            ) : task.status === 'done' && !task.metadata?.archivedAt ? (
+            ) : (task.status === 'backlog' || task.status === 'in_progress') && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2.5 hover:bg-muted-foreground/10"
-                onClick={handleArchive}
-                title={t('tooltips.archiveTask')}
-              >
-                <Archive className="mr-1.5 h-3 w-3" />
-                {t('actions.archive')}
-              </Button>
-            ) : (task.status === 'backlog' || task.status === 'in_progress') && (
-              <Button
-                variant={isRunning ? 'destructive' : 'default'}
-                size="sm"
-                className="h-7 px-2.5"
+                className={ICON_BUTTON_CLASS}
                 onClick={handleStartStop}
+                title={isRunning ? t('actions.stop') : t('actions.start')}
+                aria-label={isRunning ? t('actions.stop') : t('actions.start')}
               >
-                {isRunning ? (
-                  <>
-                    <Square className="mr-1.5 h-3 w-3" />
-                    {t('actions.stop')}
-                  </>
-                ) : (
-                  <>
-                    <Play className="mr-1.5 h-3 w-3" />
-                    {t('actions.start')}
-                  </>
-                )}
+                {isRunning
+                  ? <Square className="h-4 w-4" strokeWidth={1.75} />
+                  : <Play className="h-4 w-4" strokeWidth={1.75} />}
               </Button>
             )}
 
@@ -534,11 +449,11 @@ export const TaskCard = memo(function TaskCard({
                   <Button
                     variant="ghost"
                     size="sm"
-                    className="h-7 w-7 p-0"
+                    className={ICON_BUTTON_CLASS}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t('actions.taskActions')}
                   >
-                    <MoreVertical className="h-4 w-4" />
+                    <MoreVertical className="h-4 w-4" strokeWidth={1.75} />
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
