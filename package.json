@@ -145,7 +145,7 @@
     "appId": "com.autoclaude.app",
     "productName": "Auto Claude",
     "npmRebuild": false,
-    "artifactName": "${productName}-${version}-${platform}-${arch}.${ext}",
+    "artifactName": "Auto-Claude-${version}-${platform}-${arch}.${ext}",
     "detectUpdateChannel": false,
     "publish": [
       {
