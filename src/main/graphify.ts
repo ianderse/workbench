@@ -282,6 +282,26 @@ async function build(projectPath: string): Promise<GraphifyIndexInfo> {
   return info;
 }
 
+const refreshesQueued = new Set<string>();
+
+/**
+ * Rebuild the project's memory graph after a task completed, so the next sessions see its changes.
+ * A build already running may have started before the task's changes landed, so one more build
+ * runs after it (several tasks completing meanwhile share that one). Null when Graphify isn't
+ * installed or the refresh was folded into one already queued.
+ */
+export async function refreshGraphifyIndex(projectPath: string): Promise<GraphifyIndexInfo | null> {
+  if (!(await detectGraphify())) return null;
+  const running = buildsInProgress.get(projectPath);
+  if (running) {
+    if (refreshesQueued.has(projectPath)) return null;
+    refreshesQueued.add(projectPath);
+    await running.catch(() => undefined);
+    refreshesQueued.delete(projectPath);
+  }
+  return buildGraphifyIndex(projectPath);
+}
+
 /** Build (or rebuild) the project's memory graph; a build already running for it is reused */
 export function buildGraphifyIndex(projectPath: string): Promise<GraphifyIndexInfo> {
   const running = buildsInProgress.get(projectPath);

@@ -23,6 +23,9 @@ import { taskStateManager } from "../task-state-manager";
 import { readSettingsFile } from "../settings-utils";
 import { parseRateLimitHold } from "../../shared/utils/rate-limit-hold";
 import { applyRateLimitHold } from "./task/rate-limit-hold";
+import { refreshGraphifyIndex } from "../graphify";
+import { projectStore } from "../project-store";
+import { appLog } from "../app-logger";
 
 // Timeout for fallback safety net to check if task is still stuck after process exit
 const STUCK_TASK_FALLBACK_TIMEOUT_MS = 500;
@@ -67,6 +70,21 @@ export function registerAgenteventsHandlers(
   getMainWindow: () => BrowserWindow | null
 ): void {
   taskStateManager.configure(getMainWindow);
+
+  // Learning between sessions: rebuild the project's memory graph when a task completes, so the
+  // agents of the next tasks search code that includes its changes
+  taskStateManager.setTaskCompletedListener((taskId, taskProject) => {
+    const project = projectStore.getProject(taskProject.id) ?? taskProject;
+    if (!project.settings?.useGraphify) return;
+    appLog.info(`[Graphify] Task ${taskId} completed, refreshing the memory graph of ${project.path}`);
+    void refreshGraphifyIndex(project.path)
+      .then((info) => {
+        if (!info) return;
+        appLog.info(`[Graphify] Memory graph refreshed: ${info.nodes} nodes, ${info.edges} edges`);
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.GRAPHIFY_INDEX_UPDATED, project.id, info);
+      })
+      .catch((error) => appLog.warn('[Graphify] Refreshing the memory graph after a task failed:', error));
+  });
 
   // ============================================
   // Agent Manager Events → Renderer

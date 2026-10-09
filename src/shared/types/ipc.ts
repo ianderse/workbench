@@ -552,6 +552,7 @@ export interface ElectronAPI {
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyGraph | null>>;
+  onGraphifyIndexUpdated: (callback: (projectId: string, info: import('./cli').GraphifyIndexInfo) => void) => () => void;
 
   // Debug operations
   getDebugInfo: () => Promise<{

@@ -12,21 +12,25 @@ interface MemoryGraphState {
 }
 
 /** Which projects have a memory graph, for the sidebar's Memory item and the graph view */
-export const useMemoryGraphStore = create<MemoryGraphState>((set) => ({
-  available: {},
-  revision: {},
-  refresh: async (projectId) => {
-    try {
-      const result = await window.electronAPI.hasGraphifyGraph(projectId);
-      const has = result.success && result.data === true;
-      set((state) => ({ available: { ...state.available, [projectId]: has } }));
-    } catch {
-      set((state) => ({ available: { ...state.available, [projectId]: false } }));
-    }
-  },
-  markRebuilt: (projectId) =>
-    set((state) => ({
-      available: { ...state.available, [projectId]: true },
-      revision: { ...state.revision, [projectId]: (state.revision[projectId] ?? 0) + 1 },
-    })),
-}));
+export const useMemoryGraphStore = create<MemoryGraphState>((set, get) => {
+  // Graphs rebuilt in the background (after a task completed) show up and reload like a manual build
+  window.electronAPI?.onGraphifyIndexUpdated?.((projectId) => get().markRebuilt(projectId));
+  return {
+    available: {},
+    revision: {},
+    refresh: async (projectId) => {
+      try {
+        const result = await window.electronAPI.hasGraphifyGraph(projectId);
+        const has = result.success && result.data === true;
+        set((state) => ({ available: { ...state.available, [projectId]: has } }));
+      } catch {
+        set((state) => ({ available: { ...state.available, [projectId]: false } }));
+      }
+    },
+    markRebuilt: (projectId) =>
+      set((state) => ({
+        available: { ...state.available, [projectId]: true },
+        revision: { ...state.revision, [projectId]: (state.revision[projectId] ?? 0) + 1 },
+      })),
+  };
+});

@@ -6,7 +6,7 @@
 import { IPC_CHANNELS } from '../../../shared/constants';
 import type { IPCResult } from '../../../shared/types';
 import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../../../shared/types/cli';
-import { invokeIpc } from './ipc-utils';
+import { createIpcListener, invokeIpc, type IpcListenerCleanup } from './ipc-utils';
 
 export interface GraphifyAPI {
   /** Installed and latest Graphify versions (forceRefresh re-detects the CLI) */
@@ -23,6 +23,8 @@ export interface GraphifyAPI {
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   /** The project's memory graph for the graph view */
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<GraphifyGraph | null>>;
+  /** A project's memory graph was rebuilt in the background (after a task completed) */
+  onGraphifyIndexUpdated: (callback: (projectId: string, info: GraphifyIndexInfo) => void) => IpcListenerCleanup;
 }
 
 export const createGraphifyAPI = (): GraphifyAPI => ({
@@ -33,4 +35,6 @@ export const createGraphifyAPI = (): GraphifyAPI => ({
   buildGraphifyIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_BUILD_INDEX, projectId),
   hasGraphifyGraph: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_HAS_GRAPH, projectId),
   getGraphifyGraph: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_GET_GRAPH, projectId),
+  onGraphifyIndexUpdated: (callback: (projectId: string, info: GraphifyIndexInfo) => void) =>
+    createIpcListener(IPC_CHANNELS.GRAPHIFY_INDEX_UPDATED, callback),
 });

@@ -33,6 +33,15 @@ export function MemoryIndexRows({ projectId, useGraphify }: { projectId: string;
     return () => { cancelled = true; };
   }, [projectId]);
 
+  // Rebuilt in the background after a task completed
+  useEffect(
+    () =>
+      window.electronAPI.onGraphifyIndexUpdated((updatedProjectId, info) => {
+        if (updatedProjectId === projectId) setIndex(info);
+      }),
+    [projectId]
+  );
+
   const onBuild = async () => {
     setIsBuilding(true);
     setError(null);
