@@ -98,12 +98,6 @@ export function TaskSubtasks({ task }: TaskSubtasksProps) {
                   <div className="shrink-0">
                     {getSubtaskStatusIcon(subtask.status)}
                   </div>
-                  {/* Untitled subtasks show "Subtask #N" instead of the number badge */}
-                  {subtask.title && (
-                    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full shrink-0 bg-muted text-muted-foreground">
-                      #{index + 1}
-                    </span>
-                  )}
                   <span className="text-sm font-medium text-foreground flex-1 min-w-0 line-clamp-2">
                     {subtask.title || t('tasks:subtasks.untitled', { number: index + 1 })}
                   </span>
