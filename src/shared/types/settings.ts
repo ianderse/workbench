@@ -354,8 +354,6 @@ export interface AppSettings {
   customCLIPath?: string;
   // YOLO mode: invoke Claude with --dangerously-skip-permissions flag
   dangerouslySkipPermissions?: boolean;
-  // Track which version warnings have been shown (e.g., ["2.7.5"])
-  seenVersionWarnings?: string[];
   // Version the user has permanently skipped for update notifications
   skippedUpdateVersion?: string;
   // Timestamp (ms) after which update notifications should resume (snooze)

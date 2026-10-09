@@ -23,10 +23,7 @@ import { TerminalGrid } from './components/TerminalGrid';
 import { Insights } from './components/Insights';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsPage } from './components/ProjectsPage';
-import { RateLimitModal } from './components/RateLimitModal';
-import { SDKRateLimitModal } from './components/SDKRateLimitModal';
 import { AuthFailureModal } from './components/AuthFailureModal';
-import { VersionWarningModal } from './components/VersionWarningModal';
 import { OnboardingWizard } from './components/onboarding';
 import { AppUpdateNotification } from './components/AppUpdateNotification';
 import { ProactiveSwapListener } from './components/ProactiveSwapListener';
@@ -49,8 +46,6 @@ import { AddProjectModal, pickAndAddExistingProject, type AddProjectModalStep } 
 import { ViewStateProvider } from './contexts/ViewStateContext';
 import { INTERFACE_FONT_STACKS } from './lib/font-options';
 
-// Version constant for version-specific warnings (e.g., reauthentication notices)
-const VERSION_WARNING_275 = '2.7.5';
 
 export function App() {
   // Load IPC listeners for real-time updates
@@ -107,7 +102,6 @@ export function App() {
     }
   }, [projects.length, activeView]);
   const [isOnboardingWizardOpen, setIsOnboardingWizardOpen] = useState(false);
-  const [isVersionWarningModalOpen, setIsVersionWarningModalOpen] = useState(false);
   const [isRefreshingTasks, setIsRefreshingTasks] = useState(false);
 
   // Initialize dialog state
@@ -221,39 +215,6 @@ export function App() {
       setIsOnboardingWizardOpen(true);
     }
   }, [settingsHaveLoaded, settings.onboardingCompleted, profiles, claudeProfiles]);
-
-  // Version 2.7.5 warning - show once to notify users about reauthentication requirement
-  useEffect(() => {
-    const checkVersionWarning = async () => {
-      if (!settingsHaveLoaded) return;
-
-      try {
-        const version = await window.electronAPI.getAppVersion();
-        const seenWarnings = settings.seenVersionWarnings || [];
-
-        // Show warning for 2.7.5 if not already seen
-        if (version === VERSION_WARNING_275 && !seenWarnings.includes(VERSION_WARNING_275)) {
-          setIsVersionWarningModalOpen(true);
-        }
-      } catch (error) {
-        console.error('Failed to check version warning:', error);
-      }
-    };
-
-    checkVersionWarning();
-  }, [settingsHaveLoaded, settings.seenVersionWarnings]);
-
-  // Handle version warning dismissal
-  const handleVersionWarningClose = () => {
-    setIsVersionWarningModalOpen(false);
-    // Persist that user has seen this warning (to disk, not just in-memory)
-    const seenWarnings = settings.seenVersionWarnings || [];
-    if (!seenWarnings.includes(VERSION_WARNING_275)) {
-      saveSettings({
-        seenVersionWarnings: [...seenWarnings, VERSION_WARNING_275]
-      });
-    }
-  };
 
   const { t, i18n } = useTranslation('dialogs');
 
@@ -880,28 +841,11 @@ export function App() {
           </DialogContent>
         </Dialog>
 
-        {/* Rate Limit Modal - shows when Claude Code hits usage limits (terminal) */}
-        <RateLimitModal />
-
-        {/* SDK Rate Limit Modal - shows when SDK/CLI operations hit limits (tasks, etc.) */}
-        <SDKRateLimitModal />
-
         {/* Auth Failure Modal - shows when Claude CLI encounters 401/auth errors */}
         <AuthFailureModal onOpenSettings={() => {
           setSettingsInitialSection('accounts');
           setIsSettingsDialogOpen(true);
         }} />
-
-        {/* Version Warning Modal - one-time notice for 2.7.5 re-authentication */}
-        <VersionWarningModal
-          isOpen={isVersionWarningModalOpen}
-          onClose={handleVersionWarningClose}
-          onOpenSettings={() => {
-            handleVersionWarningClose();
-            setSettingsInitialSection('accounts');
-            setIsSettingsDialogOpen(true);
-          }}
-        />
 
         {/* Onboarding Wizard - shows on first launch when onboardingCompleted is false */}
         <OnboardingWizard

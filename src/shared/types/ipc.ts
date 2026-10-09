@@ -55,8 +55,6 @@ import type {
   TerminalRestoreResult,
   SessionDateInfo,
   SessionDateRestoreResult,
-  RateLimitInfo,
-  SDKRateLimitInfo,
   AuthFailureInfo,
   RetryWithProfileRequest,
   CreateTerminalWorktreeRequest,
@@ -220,7 +218,6 @@ export interface ElectronAPI {
   onTerminalTitleChange: (callback: (id: string, title: string) => void) => () => void;
   /** Listen for worktree config changes (synced from main process during restoration) */
   onTerminalWorktreeConfigChange: (callback: (id: string, config: TerminalWorktreeConfig | undefined) => void) => () => void;
-  onTerminalRateLimit: (callback: (info: RateLimitInfo) => void) => () => void;
   /** Listen for OAuth authentication completion (token is auto-saved to profile, never exposed to frontend) */
   onTerminalOAuthToken: (callback: (info: {
     terminalId: string;
@@ -286,7 +283,6 @@ export interface ElectronAPI {
   /** Get the best available profile (for manual switching) */
   getBestAvailableProfile: (excludeProfileId?: string) => Promise<IPCResult<ClaudeProfile | null>>;
   /** Listen for SDK/CLI rate limit events (non-terminal) */
-  onSDKRateLimit: (callback: (info: SDKRateLimitInfo) => void) => () => void;
   /** Listen for auth failure events (401 errors requiring re-authentication) */
   onAuthFailure: (callback: (info: AuthFailureInfo) => void) => () => void;
   /** Retry a rate-limited operation with a different profile */

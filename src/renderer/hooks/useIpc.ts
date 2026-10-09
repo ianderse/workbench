@@ -1,11 +1,10 @@
 import { useEffect } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 import { useTaskStore } from '../stores/task-store';
-import { useRateLimitStore } from '../stores/rate-limit-store';
 import { useAuthFailureStore } from '../stores/auth-failure-store';
 import { useProjectStore } from '../stores/project-store';
 import { setupInsightsListeners } from '../stores/insights-store';
-import type { ImplementationPlan, TaskStatus, ExecutionProgress, RateLimitInfo, SDKRateLimitInfo, AuthFailureInfo } from '../../shared/types';
+import type { ImplementationPlan, TaskStatus, ExecutionProgress, AuthFailureInfo } from '../../shared/types';
 
 /** Maximum log entries to buffer in the batch queue between flushes (OOM prevention) */
 const MAX_BATCH_QUEUE_LOGS = 100;
@@ -242,34 +241,6 @@ export function useIpcListeners(): void {
       }
     );
 
-    // Terminal rate limit listener
-    const showRateLimitModal = useRateLimitStore.getState().showRateLimitModal;
-    const cleanupRateLimit = window.electronAPI.onTerminalRateLimit(
-      (info: RateLimitInfo) => {
-        // Convert detectedAt string to Date if needed
-        showRateLimitModal({
-          ...info,
-          detectedAt: typeof info.detectedAt === 'string'
-            ? new Date(info.detectedAt)
-            : info.detectedAt
-        });
-      }
-    );
-
-    // SDK rate limit listener (for tasks and other agent operations)
-    const showSDKRateLimitModal = useRateLimitStore.getState().showSDKRateLimitModal;
-    const cleanupSDKRateLimit = window.electronAPI.onSDKRateLimit(
-      (info: SDKRateLimitInfo) => {
-        // Convert detectedAt string to Date if needed
-        showSDKRateLimitModal({
-          ...info,
-          detectedAt: typeof info.detectedAt === 'string'
-            ? new Date(info.detectedAt)
-            : info.detectedAt
-        });
-      }
-    );
-
     // Auth failure listener (401 errors requiring re-authentication)
     const showAuthFailureModal = useAuthFailureStore.getState().showAuthFailureModal;
     const cleanupAuthFailure = window.electronAPI.onAuthFailure(
@@ -301,8 +272,6 @@ export function useIpcListeners(): void {
       cleanupStatus();
       cleanupRateLimitHold();
       cleanupExecutionProgress();
-      cleanupRateLimit();
-      cleanupSDKRateLimit();
       cleanupAuthFailure();
       cleanupInsights();
     };

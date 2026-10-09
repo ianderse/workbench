@@ -9,7 +9,6 @@ ipcRenderer.setMaxListeners(100);
 import type {
   IPCResult,
   TerminalCreateOptions,
-  RateLimitInfo,
   ClaudeProfile,
   ClaudeProfileSettings,
   ClaudeUsageSnapshot,
@@ -77,7 +76,6 @@ export interface TerminalAPI {
   onTerminalExit: (callback: (id: string, exitCode: number) => void) => () => void;
   onTerminalTitleChange: (callback: (id: string, title: string) => void) => () => void;
   onTerminalWorktreeConfigChange: (callback: (id: string, config: TerminalWorktreeConfig | undefined) => void) => () => void;
-  onTerminalRateLimit: (callback: (info: RateLimitInfo) => void) => () => void;
   onTerminalOAuthToken: (
     callback: (info: { terminalId: string; profileId?: string; email?: string; success: boolean; message?: string; detectedAt: string }) => void
   ) => () => void;
@@ -112,7 +110,6 @@ export interface TerminalAPI {
   setAccountPriorityOrder: (order: string[]) => Promise<IPCResult>;
   fetchClaudeUsage: (terminalId: string) => Promise<IPCResult>;
   getBestAvailableProfile: (excludeProfileId?: string) => Promise<IPCResult<import('../../shared/types').ClaudeProfile | null>>;
-  onSDKRateLimit: (callback: (info: import('../../shared/types').SDKRateLimitInfo) => void) => () => void;
   onAuthFailure: (callback: (info: import('../../shared/types').AuthFailureInfo) => void) => () => void;
   retryWithProfile: (request: import('../../shared/types').RetryWithProfileRequest) => Promise<IPCResult>;
 
@@ -271,21 +268,6 @@ export const createTerminalAPI = (): TerminalAPI => ({
     ipcRenderer.on(IPC_CHANNELS.TERMINAL_WORKTREE_CONFIG_CHANGE, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_WORKTREE_CONFIG_CHANGE, handler);
-    };
-  },
-
-  onTerminalRateLimit: (
-    callback: (info: RateLimitInfo) => void
-  ): (() => void) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      info: RateLimitInfo
-    ): void => {
-      callback(info);
-    };
-    ipcRenderer.on(IPC_CHANNELS.TERMINAL_RATE_LIMIT, handler);
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_RATE_LIMIT, handler);
     };
   },
 
@@ -464,21 +446,6 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   getBestAvailableProfile: (excludeProfileId?: string): Promise<IPCResult<import('../../shared/types').ClaudeProfile | null>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_GET_BEST_PROFILE, excludeProfileId),
-
-  onSDKRateLimit: (
-    callback: (info: import('../../shared/types').SDKRateLimitInfo) => void
-  ): (() => void) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      info: import('../../shared/types').SDKRateLimitInfo
-    ): void => {
-      callback(info);
-    };
-    ipcRenderer.on(IPC_CHANNELS.CLAUDE_SDK_RATE_LIMIT, handler);
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.CLAUDE_SDK_RATE_LIMIT, handler);
-    };
-  },
 
   onAuthFailure: (
     callback: (info: import('../../shared/types').AuthFailureInfo) => void

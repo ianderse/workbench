@@ -32,9 +32,7 @@ import { useSettingsStore, saveSettings } from '../stores/settings-store';
 import { loadProjectEnvConfig, clearProjectEnvConfig } from '../stores/project-env-store';
 import { AddProjectModal } from './AddProjectModal';
 import { GitSetupModal } from './GitSetupModal';
-import { RateLimitIndicator } from './RateLimitIndicator';
 
-import { UpdateBanner } from './UpdateBanner';
 import { UsageIndicator } from './UsageIndicator';
 import type { Project, GitStatus } from '../../shared/types';
 
@@ -331,12 +329,6 @@ export function Sidebar({
             </nav>
           </div>
         </ScrollArea>
-
-        {/* Rate Limit Indicator - shows when Claude is rate limited */}
-        <RateLimitIndicator />
-
-        {/* Update Banner - shows when app update is available */}
-        <UpdateBanner />
 
         {/* Footer: settings with account + usage status beside it */}
         <div className={cn(
