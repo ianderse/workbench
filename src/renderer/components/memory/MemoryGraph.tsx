@@ -26,6 +26,12 @@ const LABEL_CELL = { w: 24, h: 16 };
 const CAMERA_DISTANCE = 3;
 /** How fast a released spin slows down (ms for it to drop to about a third) */
 const SPIN_DECAY_MS = 300;
+/** Untouched for this long, the view zooms back to fit the graph and starts turning slowly */
+const IDLE_RESET_MS = 5000;
+/** Idle turning speed (radians per ms: a full turn in about 40 seconds) */
+const AUTO_ROTATE_SPEED = 0.00016;
+/** How long the zoom takes to ease back to the fitted view */
+const ZOOM_RESET_MS = 1000;
 
 /** Theme colors from the page's CSS, re-read when the appearance changes */
 function readColors() {
@@ -58,6 +64,7 @@ function LoadingDots() {
  * the force layout runs in a Web Worker (in 3D, with d3-force-3d) and PixiJS draws the graph with
  * WebGL. Drag the background to turn the graph like a globe (it keeps spinning when flicked), wheel
  * to zoom, Shift+drag to pan, drag nodes to move them and hover to highlight a node's neighbours.
+ * Left alone, the graph turns slowly, and 5 seconds after the last touch the view resets to it.
  */
 export function MemoryGraph({ projectId }: { projectId: string }) {
   const { t } = useTranslation('navigation');
@@ -340,7 +347,10 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         .filter((event: MouseEvent) =>
           !dragged && (event.type === 'wheel' || (event.type === 'mousedown' && event.shiftKey && !hovered)))
         .on('zoom', (event) => {
-          if (event.sourceEvent) userMoved = true;
+          if (event.sourceEvent) {
+            userMoved = true;
+            markInteraction();
+          }
           transform = event.transform;
           world.position.set(transform.x, transform.y);
           world.scale.set(transform.k);
@@ -350,21 +360,28 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       canvasSelection.call(zoomBehavior).on('dblclick.zoom', null);
 
       // Center the graph and zoom so it fills the page
-      const fitToView = () => {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        for (let i = 0; i < nodes.length; i++) {
-          const x = projectedX[i], y = projectedY[i], r = nodes[i].radius * perspective[i];
-          minX = Math.min(minX, x - r); maxX = Math.max(maxX, x + r);
-          minY = Math.min(minY, y - r); maxY = Math.max(maxY, y + r);
-        }
-        const k = Math.min(pixi.screen.width / Math.max(maxX - minX, 1), pixi.screen.height / Math.max(maxY - minY, 1), 2) * 0.97;
-        const cx = (minX + maxX) / 2;
-        const cy = (minY + maxY) / 2;
-        canvasSelection.call(
-          zoomBehavior!.transform,
-          zoomIdentity.translate(pixi.screen.width / 2 - cx * k, pixi.screen.height / 2 - cy * k).scale(k)
-        );
+      // Zoom so the sphere around the graph's center that holds every node fits the page, centered:
+      // it fits whichever way the graph is turned, so turning never changes the zoom
+      const fitTransform = () => {
+        const camera = graphRadius * CAMERA_DISTANCE;
+        // Projected radius of that sphere under the perspective, plus room for the largest node
+        const extent = (graphRadius * camera) / Math.sqrt(camera * camera - graphRadius * graphRadius) + 16;
+        const k = Math.min((Math.min(pixi.screen.width, pixi.screen.height) / 2 / extent) * 0.97, 2);
+        return zoomIdentity.translate(pixi.screen.width / 2, pixi.screen.height / 2).scale(k);
       };
+      const fitToView = () => canvasSelection.call(zoomBehavior!.transform, fitTransform());
+
+      // Idle animation: the graph turns slowly until it is touched, and 5 seconds after the last
+      // touch the zoom eases back to the fitted view and the turning starts again
+      let autoRotating = true;
+      let lastInteraction = performance.now();
+      let zoomReset: { from: ZoomTransform; to: ZoomTransform; start: number } | null = null;
+      function markInteraction() {
+        lastInteraction = performance.now();
+        autoRotating = false;
+        zoomReset = null;
+      }
+      canvas.addEventListener('pointerdown', markInteraction);
 
       worker.onmessage = (event: MessageEvent<LayoutMessage>) => {
         positions = event.data.positions;
@@ -373,10 +390,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
           graphRadius = Math.max(graphRadius, Math.hypot(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
         }
         // Keep the graph in view while it spreads out, until the user zooms or pans
-        if (!userMoved) {
-          project();
-          fitToView();
-        }
+        if (!userMoved && !zoomReset) fitToView();
         if (!world.visible) {
           world.visible = true;
           setLaidOut(true);
@@ -390,13 +404,8 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       let lastPointer = { x: 0, y: 0, time: 0 };
       let velocity = { x: 0, y: 0 };
       let spin: { x: number; y: number } | null = null;
-      const rotateBy = (dx: number, dy: number) => {
-        const length = Math.hypot(dx, dy);
-        if (length === 0) return;
-        // Turn around the on-screen axis perpendicular to the drag (Rodrigues' formula)
-        const angle = length / (transform.k * graphRadius);
-        const ux = -dy / length;
-        const uy = dx / length;
+      // Turn by an angle around an on-screen axis (ux, uy, 0) of unit length (Rodrigues' formula)
+      const turnBy = (ux: number, uy: number, angle: number) => {
         const cos = Math.cos(angle);
         const sin = Math.sin(angle);
         const t = 1 - cos;
@@ -413,6 +422,12 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         }
         rotation = next;
         dirty = true;
+      };
+      // Turn around the on-screen axis perpendicular to a drag, the surface following the pointer
+      const rotateBy = (dx: number, dy: number) => {
+        const length = Math.hypot(dx, dy);
+        if (length === 0) return;
+        turnBy(-dy / length, dx / length, length / (transform.k * graphRadius));
       };
       const cursorStyles = pixi.renderer.events.cursorStyles;
       cursorStyles.default = 'grab';
@@ -453,6 +468,27 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
 
       // Draw at most once per frame, only when something changed
       pixi.ticker.add((ticker) => {
+        const now = performance.now();
+        if (hovered || rotating || dragged || spin) lastInteraction = now;
+        if (!autoRotating && now - lastInteraction > IDLE_RESET_MS) {
+          autoRotating = true;
+          userMoved = false;
+          zoomReset = { from: transform, to: fitTransform(), start: now };
+        }
+        if (zoomReset) {
+          const t = Math.min((now - zoomReset.start) / ZOOM_RESET_MS, 1);
+          const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+          const { from, to } = zoomReset;
+          canvasSelection.call(
+            zoomBehavior!.transform,
+            zoomIdentity
+              .translate(from.x + (to.x - from.x) * eased, from.y + (to.y - from.y) * eased)
+              .scale(from.k + (to.k - from.k) * eased)
+          );
+          if (t === 1) zoomReset = null;
+        }
+        // Pause while a node is hovered, so it stays under the pointer
+        if (autoRotating && !hovered) turnBy(0, 1, AUTO_ROTATE_SPEED * ticker.deltaMS);
         if (spin) {
           rotateBy(spin.x * ticker.deltaMS, spin.y * ticker.deltaMS);
           const decay = Math.exp(-ticker.deltaMS / SPIN_DECAY_MS);
