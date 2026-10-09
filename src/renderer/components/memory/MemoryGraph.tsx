@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Loader2 } from 'lucide-react';
 // The app's Content Security Policy forbids eval; this makes PixiJS build its shaders without it
 import 'pixi.js/unsafe-eval';
 import { Application, Circle, Color, Container, Graphics, Text } from 'pixi.js';
 import { select } from 'd3-selection';
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from 'd3-zoom';
-import { Loader2 } from 'lucide-react';
 import { useMemoryGraphStore } from '../../stores/memory-graph-store';
 import type { GraphifyGraph, GraphifyGraphNode } from '../../../shared/types/cli';
 import type { LayoutMessage, LayoutRequest } from './graph-layout.worker';
@@ -36,6 +36,16 @@ function readColors() {
   };
 }
 
+/** "." -> ".." -> "..." in a fixed width, so the text before it doesn't move */
+function LoadingDots() {
+  const [count, setCount] = useState(1);
+  useEffect(() => {
+    const timer = setInterval(() => setCount((current) => (current % 3) + 1), 400);
+    return () => clearInterval(timer);
+  }, []);
+  return <span className="inline-block w-[3ch] text-left">{'.'.repeat(count)}</span>;
+}
+
 /**
  * Obsidian-style graph view of the project's memory graph (Graphify's graph.json). Like Obsidian,
  * the d3-force layout runs in a Web Worker and PixiJS draws the graph with WebGL. Wheel or drag the
@@ -47,6 +57,8 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
   const revision = useMemoryGraphStore((state) => state.revision[projectId] ?? 0);
   const [graph, setGraph] = useState<GraphifyGraph | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
+  // False until the first layout of the loaded graph is drawn
+  const [laidOut, setLaidOut] = useState(false);
 
   // Load the graph (again after a rebuild)
   useEffect(() => {
@@ -73,6 +85,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
     const container = containerRef.current;
     if (!container || !graph || status !== 'ready') return;
 
+    setLaidOut(false);
     let disposed = false;
     let app: Application | null = null;
     let zoomBehavior: ZoomBehavior<HTMLCanvasElement, unknown> | null = null;
@@ -303,7 +316,10 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         positions = event.data.positions;
         // Keep the graph in view while it spreads out, until the user zooms or pans
         if (!userMoved) fitToView();
-        world.visible = true;
+        if (!world.visible) {
+          world.visible = true;
+          setLaidOut(true);
+        }
         dirty = true;
       };
       send({ type: 'init', radii: nodes.map((node) => node.radius), links: linkPairs });
@@ -361,10 +377,20 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
   return (
     <div className="relative flex h-full flex-col">
       <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
-        {status !== 'ready' && (
-          <div className="absolute inset-0 flex items-center justify-center gap-2 text-sm text-(--nav-label-color)">
-            {status === 'loading' && <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />}
-            {status === 'loading' && t('memoryGraph.loading')}
+        {(status !== 'ready' || !laidOut) && (
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-(--nav-label-color)">
+            {(status === 'loading' || status === 'ready') && <Loader2 className="h-5 w-5 animate-spin" strokeWidth={1.75} />}
+            {/* The left padding balances the dots, so the words stay centered under the icon */}
+            {status === 'loading' && <span className="pl-[3ch]">{t('memoryGraph.loading')}<LoadingDots /></span>}
+            {status === 'ready' && graph && (
+              <span className="pl-[3ch]">
+                {t('memoryGraph.layingOut', {
+                  nodes: graph.nodes.length.toLocaleString(),
+                  links: graph.links.length.toLocaleString(),
+                })}
+                <LoadingDots />
+              </span>
+            )}
             {status === 'empty' && t('memoryGraph.empty')}
             {status === 'error' && t('memoryGraph.loadFailed')}
           </div>

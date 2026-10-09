@@ -91,7 +91,8 @@
     "viewChangelogAriaLabel": "View Graphify changelog (opens in new window)"
   },
   "memoryGraph": {
-    "loading": "Loading the memory graph...",
+    "loading": "Loading the memory graph",
+    "layingOut": "{{nodes}} nodes and {{links}} links are loading",
     "empty": "The memory graph is empty",
     "loadFailed": "Couldn't load the memory graph"
   }
