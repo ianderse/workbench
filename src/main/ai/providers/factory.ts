@@ -22,6 +22,7 @@ import type { LanguageModel } from 'ai';
 
 import { MODEL_PROVIDER_MAP } from '../config/types';
 import { createOAuthProviderFetch } from './oauth-fetch';
+import { withClaudeCodeIdentity } from './claude-code-identity';
 import { type ProviderConfig, SupportedProvider } from './types';
 
 // =============================================================================
@@ -51,7 +52,8 @@ function createProviderInstance(config: ProviderConfig) {
 
   switch (provider) {
     case SupportedProvider.Anthropic: {
-      // OAuth tokens use authToken (Authorization: Bearer) + required beta header
+      // OAuth tokens use authToken (Authorization: Bearer) + required beta header, and the system
+      // prompt must start with the Claude Code identity (otherwise the API answers 429)
       // API keys use apiKey (x-api-key header)
       if (isOAuthToken(apiKey)) {
         return createAnthropic({
@@ -61,6 +63,7 @@ function createProviderInstance(config: ProviderConfig) {
             ...headers,
             'anthropic-beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14',
           },
+          fetch: withClaudeCodeIdentity(),
         });
       }
       return createAnthropic({
