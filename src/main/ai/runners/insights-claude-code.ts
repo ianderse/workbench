@@ -6,20 +6,22 @@
  * those accounts the Insights chat runs each turn through the locally installed Claude Code
  * CLI in headless mode (`claude -p`) instead of calling the Messages API directly.
  *
- * The CLI runs read-only: only the Read/Glob/Grep tools are available, anything else is
- * denied without prompting (`--permission-mode dontAsk`), MCP servers are not loaded and no
- * session is persisted. Credentials come from the account's own CLAUDE_CONFIG_DIR, so the CLI
+ * The CLI runs read-only: only the Read/Glob/Grep tools are available (plus Bash limited to
+ * graphify's read-only searches when the project's memory graph is on), anything else is denied
+ * without prompting (`--permission-mode dontAsk`), MCP servers are not loaded and no session is
+ * persisted. Credentials come from the account's own CLAUDE_CONFIG_DIR, so the CLI
  * handles token refresh itself.
  */
 
 import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { getClaudeCliInvocationAsync } from '../../cli-utils';
 import { getToolInfo } from '../../cli-tool-manager';
 import { getSpawnCommand, getSpawnOptions } from '../../env-utils';
 import { getProfileEnv } from '../../rate-limit-detector';
+import { getPathDelimiter } from '../../platform';
 import { buildDefaultQueueConfig, resolveAuthFromQueue } from '../auth/resolver';
 import { resolveModelId } from '../config/phase-config';
 import { INSIGHTS_ERROR_CODES, formatInsightsError } from '../../../shared/constants/insights';
@@ -40,6 +42,18 @@ import {
 
 /** Tools the Insights agent may use through Claude Code (read-only codebase exploration) */
 export const CLAUDE_CODE_READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'] as const;
+
+/**
+ * Bash commands allowed for searching the project's memory graph (graphify's read-only searches,
+ * the Claude Code equivalent of the CodebaseGraph tool); every other Bash command is denied
+ */
+export const CLAUDE_CODE_GRAPHIFY_COMMANDS = [
+  'Bash(graphify query:*)',
+  'Bash(graphify explain:*)',
+  'Bash(graphify path:*)',
+  'Bash(graphify affected:*)',
+  'Bash(graphify god-nodes:*)',
+] as const;
 
 /** How Insights reaches the model for the current account */
 export type InsightsBackend =
@@ -100,7 +114,13 @@ export function buildClaudeCodeContent(prompt: string, attachments?: ImageAttach
 }
 
 /** CLI arguments for a read-only, non-persistent headless turn */
-export function buildClaudeCodeArgs(modelId: string, thinkingLevel: string, systemPromptFile: string): string[] {
+export function buildClaudeCodeArgs(
+  modelId: string,
+  thinkingLevel: string,
+  systemPromptFile: string,
+  withGraphify = false
+): string[] {
+  const tools = withGraphify ? [...CLAUDE_CODE_READ_ONLY_TOOLS, 'Bash'] : [...CLAUDE_CODE_READ_ONLY_TOOLS];
   return [
     '-p',
     '--input-format', 'stream-json',
@@ -109,7 +129,8 @@ export function buildClaudeCodeArgs(modelId: string, thinkingLevel: string, syst
     '--include-partial-messages',
     '--model', modelId,
     '--effort', thinkingLevel,
-    '--tools', CLAUDE_CODE_READ_ONLY_TOOLS.join(','),
+    '--tools', tools.join(','),
+    ...(withGraphify ? ['--allowedTools', ...CLAUDE_CODE_GRAPHIFY_COMMANDS] : []),
     '--permission-mode', 'dontAsk',
     '--strict-mcp-config',
     '--no-session-persistence',
@@ -212,7 +233,7 @@ export async function runInsightsViaClaudeCode(
   backend: Extract<InsightsBackend, { kind: 'claude-code' }>,
   onStream?: InsightsStreamCallback,
 ): Promise<InsightsResult> {
-  const { projectDir, message, history = [], thinkingLevel = 'medium', abortSignal, attachments } = config;
+  const { projectDir, message, history = [], thinkingLevel = 'medium', abortSignal, attachments, graphify } = config;
 
   try {
     const cliInfo = getToolInfo('claude');
@@ -223,11 +244,17 @@ export async function runInsightsViaClaudeCode(
     const { command, env: baseEnv } = await getClaudeCliInvocationAsync();
     const env: Record<string, string> = { ...baseEnv, ...backend.profileEnv };
     for (const name of API_KEY_ENV_VARS) delete env[name];
+    if (graphify) {
+      // graphify commands find the project's graph (GRAPHIFY_OUT) and run without a full path
+      env.GRAPHIFY_OUT = dirname(graphify.graph);
+      env.PATH = [dirname(graphify.cli), env.PATH].filter(Boolean).join(getPathDelimiter());
+    }
 
     // System prompt goes through a file: no argument length or shell quoting limits
     const tempDir = mkdtempSync(join(tmpdir(), 'auto-claude-insights-'));
     const systemPromptFile = join(tempDir, 'system-prompt.md');
-    writeFileSync(systemPromptFile, buildSystemPrompt(projectDir), 'utf-8');
+    const systemPrompt = graphify ? `${buildSystemPrompt(projectDir)}\n\n${graphify.commandPrompt}` : buildSystemPrompt(projectDir);
+    writeFileSync(systemPromptFile, systemPrompt, 'utf-8');
 
     const input = JSON.stringify({
       type: 'user',
@@ -244,7 +271,7 @@ export async function runInsightsViaClaudeCode(
     try {
       await new Promise<void>((resolve, reject) => {
         const spawnOptions = getSpawnOptions(command, { cwd: projectDir, env, windowsHide: true, stdio: 'pipe' });
-        const args = quoteForShell(buildClaudeCodeArgs(backend.modelId, thinkingLevel, systemPromptFile), spawnOptions.shell);
+        const args = quoteForShell(buildClaudeCodeArgs(backend.modelId, thinkingLevel, systemPromptFile, !!graphify), spawnOptions.shell);
         const child = spawn(getSpawnCommand(command), args, spawnOptions);
 
         let stdoutBuffer = '';

@@ -11,6 +11,8 @@ import type { TaskCategory, TaskComplexity, TaskMetadata } from '../../shared/ty
 import { InsightsConfig } from './config';
 import { detectRateLimit, createSDKRateLimitInfo } from '../rate-limit-detector';
 import { runInsights } from '../ai/runners/insights-claude-code';
+import { getGraphifyPromptContext } from '../graphify';
+import { projectStore } from '../project-store';
 import type { ModelShorthand } from '../ai/config/types';
 
 /**
@@ -96,6 +98,10 @@ export class InsightsExecutor extends EventEmitter {
       }));
 
     try {
+      // The project's memory graph, searchable from the chat when its "Use Graphify" setting is on
+      const graphify = projectStore.getProject(projectId)?.settings?.useGraphify
+        ? (await getGraphifyPromptContext(projectPath)) ?? undefined
+        : undefined;
       const result = await runInsights(
         {
           projectDir: projectPath,
@@ -105,6 +111,7 @@ export class InsightsExecutor extends EventEmitter {
           thinkingLevel,
           abortSignal: controller.signal,
           attachments: images,
+          graphify,
         },
         (event) => {
           switch (event.type) {
