@@ -34,7 +34,6 @@
     "test:integration": "vitest run src/__tests__/integration/",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:e2e": "npx playwright test --config=e2e/playwright.config.ts",
     "typecheck": "tsc --noEmit --incremental"
   },
   "dependencies": {

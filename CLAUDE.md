@@ -105,7 +105,6 @@ npm run dev:mcp        # Development mode with remote debugging on port 9222 (El
 npm start              # Production build + run
 npm run typecheck      # TypeScript type check (strict)
 npm test               # Unit + integration tests (Vitest)
-npm run test:e2e       # End-to-end tests (Playwright)
 ```
 
 ### Packaging
@@ -158,7 +157,6 @@ auto-claude/
 │   └── shared/              # Shared types, i18n, constants, utils
 ├── prompts/                 # Agent system prompts (.md)
 ├── resources/               # App and tray icons, macOS entitlements
-├── e2e/                     # Playwright end-to-end tests
 └── .github/                 # Workflows and scripts (postinstall, prebuilds, deb check, bump-version)
 ```
 
@@ -244,7 +242,7 @@ drive the running app over the Chrome DevTools Protocol with `get_electron_windo
 ## Frontend
 
 **Stack:** Electron 40, React 19, TypeScript (strict), Vercel AI SDK v6, Zustand 5, Tailwind CSS v4, Radix UI,
-xterm.js 6, electron-vite 5 (Vite 7), Vitest 4 + React Testing Library + jsdom, Playwright, Motion.
+xterm.js 6, electron-vite 5 (Vite 7), Vitest 4 + React Testing Library + jsdom, Motion.
 
 **Path aliases:** `@/*` → `src/renderer/*`, `@shared/*` → `src/shared/*`, `@preload/*` → `src/preload/*`.
 
