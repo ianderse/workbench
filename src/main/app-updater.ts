@@ -27,6 +27,7 @@ import type { BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
 import type { AppUpdateCheckResult, AppUpdateInfo } from '../shared/types';
 import { compareVersions } from './updater/version-manager';
+import { getUpdaterGitHubToken } from './updater/github-token';
 import { isMacOS } from './platform';
 import { readSettingsFile, writeSettingsFile } from './settings-utils';
 
@@ -258,6 +259,12 @@ let intentionalDowngrade = false;
  */
 export function initializeAppUpdater(window: BrowserWindow, betaUpdates = false): void {
   mainWindow = window;
+
+  // The release repository is private: read releases with the build's GitHub token
+  const token = getUpdaterGitHubToken();
+  if (token) {
+    autoUpdater.setFeedURL({ provider: 'github', owner: GITHUB_OWNER, repo: GITHUB_REPO, private: true, token });
+  }
 
   // Set update channel based on user preference
   const channel = betaUpdates ? 'beta' : 'latest';
@@ -581,6 +588,10 @@ async function fetchLatestStableRelease(): Promise<AppUpdateInfo | null> {
 
     request.setHeader('Accept', 'application/vnd.github.v3+json');
     request.setHeader('User-Agent', `Auto-Claude/${getCurrentVersion()}`);
+    const token = getUpdaterGitHubToken();
+    if (token) {
+      request.setHeader('Authorization', `token ${token}`);
+    }
 
     let data = '';
 

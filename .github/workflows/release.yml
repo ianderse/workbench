@@ -29,6 +29,8 @@ jobs:
 
       - name: Build application
         run: npm run build
+        env:
+          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
 
       - name: Package macOS (Intel)
         run: npm run package:mac -- --x64
@@ -69,6 +71,8 @@ jobs:
 
       - name: Build application
         run: npm run build
+        env:
+          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
 
       - name: Package macOS (Apple Silicon)
         run: npm run package:mac -- --arm64
@@ -111,6 +115,8 @@ jobs:
 
       - name: Build application
         run: npm run build
+        env:
+          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
 
       - name: Package Windows
         run: npm run package:win
@@ -249,6 +255,8 @@ jobs:
 
       - name: Build application
         run: npm run build
+        env:
+          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
 
       - name: Package Linux
         run: npm run package:linux

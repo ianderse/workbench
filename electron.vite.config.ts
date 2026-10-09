@@ -1,6 +1,7 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { createCipheriv, randomBytes } from 'crypto';
 import { config as dotenvConfig } from 'dotenv';
 
 // Load .env file for build-time constants (embedded API keys)
@@ -18,7 +19,26 @@ dotenvConfig({ path: resolve(__dirname, '.env') });
 /** Embedded API keys — search works out of the box, no user config needed. */
 const embeddedKeys = {
   '__SERPER_API_KEY__': JSON.stringify(process.env.SERPER_API_KEY || ''),
+  '__UPDATER_GH_TOKEN__': JSON.stringify(encryptToken(process.env.UPDATER_GH_TOKEN)),
 };
+
+/**
+ * GitHub token for update checks against the private release repository, encrypted with a
+ * per-build key so the plain value is not in the bundle (see src/main/updater/github-token.ts)
+ */
+function encryptToken(token: string | undefined) {
+  if (!token) return null;
+  const key = randomBytes(32);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  const data = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
+  return {
+    data: data.toString('base64'),
+    key: key.toString('base64'),
+    iv: iv.toString('base64'),
+    tag: cipher.getAuthTag().toString('base64'),
+  };
+}
 
 export default defineConfig({
   main: {
