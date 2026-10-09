@@ -5,7 +5,7 @@
 
 import { IPC_CHANNELS } from '../../../shared/constants';
 import type { IPCResult } from '../../../shared/types';
-import type { GraphifyIndexInfo, GraphifyVersionInfo } from '../../../shared/types/cli';
+import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../../../shared/types/cli';
 import { invokeIpc } from './ipc-utils';
 
 export interface GraphifyAPI {
@@ -17,6 +17,10 @@ export interface GraphifyAPI {
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo | null>>;
   /** Build (or rebuild) the project's memory graph in .auto-claude/memory */
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo>>;
+  /** Whether the project has a memory graph (.auto-claude/memory) */
+  hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
+  /** The project's memory graph for the graph view */
+  getGraphifyGraph: (projectId: string) => Promise<IPCResult<GraphifyGraph | null>>;
 }
 
 export const createGraphifyAPI = (): GraphifyAPI => ({
@@ -24,4 +28,6 @@ export const createGraphifyAPI = (): GraphifyAPI => ({
   installGraphify: () => invokeIpc(IPC_CHANNELS.GRAPHIFY_INSTALL),
   getGraphifyIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_GET_INDEX, projectId),
   buildGraphifyIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_BUILD_INDEX, projectId),
+  hasGraphifyGraph: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_HAS_GRAPH, projectId),
+  getGraphifyGraph: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_GET_GRAPH, projectId),
 });

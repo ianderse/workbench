@@ -5,7 +5,8 @@ import {
   RefreshCw,
   PanelLeft
 } from 'lucide-react';
-import { AgentsIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
+import { AgentsIcon, InsightsIcon, KanbanIcon, MemoryIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
+import { useMemoryGraphStore } from '../stores/memory-graph-store';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import {
@@ -36,7 +37,7 @@ import { GitSetupModal } from './GitSetupModal';
 import { UsageIndicator } from './UsageIndicator';
 import type { Project, GitStatus } from '../../shared/types';
 
-export type SidebarView = 'projects' | 'kanban' | 'terminals' | 'insights';
+export type SidebarView = 'projects' | 'kanban' | 'terminals' | 'insights' | 'memory';
 
 interface SidebarProps {
   onSettingsClick: () => void;
@@ -56,6 +57,8 @@ const navItems: NavItem[] = [
   { id: 'kanban', labelKey: 'navigation:items.kanban', icon: KanbanIcon },
   { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentsIcon },
   { id: 'insights', labelKey: 'navigation:items.insights', icon: InsightsIcon },
+  // Only shown when the project has a memory graph (.auto-claude/memory)
+  { id: 'memory', labelKey: 'navigation:items.memory', icon: MemoryIcon },
 ];
 
 
@@ -72,6 +75,13 @@ export function Sidebar({
   const storeSelectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const selectedProjectId = activeProjectId ?? storeSelectedProjectId;
   const settings = useSettingsStore((state) => state.settings);
+  const hasMemoryGraph = useMemoryGraphStore((state) => !!selectedProjectId && state.available[selectedProjectId] === true);
+  const refreshMemoryGraph = useMemoryGraphStore((state) => state.refresh);
+
+  // Whether the selected project has a memory graph (a quick file check), for the Memory item
+  useEffect(() => {
+    if (selectedProjectId) void refreshMemoryGraph(selectedProjectId);
+  }, [selectedProjectId, refreshMemoryGraph]);
 
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
   const [showInitDialog, setShowInitDialog] = useState(false);
@@ -325,7 +335,7 @@ export function Sidebar({
               </h3>
             )}
             <nav className="flex flex-col gap-px">
-              {navItems.map(renderNavItem)}
+              {navItems.filter((item) => item.id !== 'memory' || hasMemoryGraph).map(renderNavItem)}
             </nav>
           </div>
         </ScrollArea>

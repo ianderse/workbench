@@ -6,7 +6,7 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { IPCResult } from '../../shared/types';
-import type { GraphifyIndexInfo, GraphifyVersionInfo } from '../../shared/types/cli';
+import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../../shared/types/cli';
 import { projectStore } from '../project-store';
 import { appLog } from '../app-logger';
 import {
@@ -14,6 +14,8 @@ import {
   checkGraphifyVersion,
   detectGraphify,
   getGraphifyInstallCommand,
+  hasGraphifyGraph,
+  readGraphifyGraph,
   readGraphifyIndex,
 } from '../graphify';
 import { openTerminalWithCommand } from './claude-code-handlers';
@@ -51,6 +53,29 @@ export function registerGraphifyHandlers(): void {
       const project = projectStore.getProject(projectId);
       if (!project) return { success: false, error: 'Project not found' };
       return { success: true, data: await readGraphifyIndex(project.path) };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GRAPHIFY_HAS_GRAPH,
+    async (_event, projectId: string): Promise<IPCResult<boolean>> => {
+      const project = projectStore.getProject(projectId);
+      if (!project) return { success: false, error: 'Project not found' };
+      return { success: true, data: await hasGraphifyGraph(project.path) };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GRAPHIFY_GET_GRAPH,
+    async (_event, projectId: string): Promise<IPCResult<GraphifyGraph | null>> => {
+      const project = projectStore.getProject(projectId);
+      if (!project) return { success: false, error: 'Project not found' };
+      try {
+        return { success: true, data: await readGraphifyGraph(project.path) };
+      } catch (error) {
+        appLog.error('[Graphify] Reading the memory graph failed:', error);
+        return { success: false, error: errorMessage(error) };
+      }
     }
   );
 

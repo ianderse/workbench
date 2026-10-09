@@ -549,6 +549,8 @@ export interface ElectronAPI {
   installGraphify: () => Promise<IPCResult<{ command: string }>>;
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo | null>>;
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
+  hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
+  getGraphifyGraph: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyGraph | null>>;
 
   // Debug operations
   getDebugInfo: () => Promise<{

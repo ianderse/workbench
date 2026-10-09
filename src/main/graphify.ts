@@ -15,7 +15,7 @@ import semver from 'semver';
 import { findExecutableAsync, getAugmentedEnvAsync } from './env-utils';
 import { isWindows, requiresShell } from './platform';
 import { appLog } from './app-logger';
-import type { GraphifyIndexInfo, GraphifyVersionInfo } from '../shared/types/cli';
+import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../shared/types/cli';
 
 const execFileAsync = promisify(execFile);
 
@@ -105,6 +105,43 @@ export async function getGraphifyInstallCommand(isUpdate: boolean): Promise<stri
   }
   const python = isWindows() ? 'py' : 'python3';
   return `${python} -m pip install --user --upgrade ${GRAPHIFY_PACKAGE}`;
+}
+
+/** Whether the project has a memory graph (.auto-claude/memory/graphify-out/graph.json) */
+export async function hasGraphifyGraph(projectPath: string): Promise<boolean> {
+  try {
+    await fs.access(getGraphifyGraphPath(projectPath));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The project's memory graph, trimmed to what the graph view draws, or null when it has none */
+export async function readGraphifyGraph(projectPath: string): Promise<GraphifyGraph | null> {
+  let raw: string;
+  try {
+    raw = await fs.readFile(getGraphifyGraphPath(projectPath), 'utf-8');
+  } catch {
+    return null;
+  }
+  const data = JSON.parse(raw) as {
+    nodes?: Array<{ id: string; label?: string; community?: number; source_file?: string; source_location?: string }>;
+    links?: Array<{ source: string; target: string; relation?: string }>;
+    edges?: Array<{ source: string; target: string; relation?: string }>;
+  };
+  const nodes = (data.nodes ?? []).map((node) => ({
+    id: String(node.id),
+    label: node.label ?? String(node.id),
+    community: node.community,
+    sourceFile: node.source_file,
+    sourceLocation: node.source_location,
+  }));
+  const ids = new Set(nodes.map((node) => node.id));
+  const links = (data.links ?? data.edges ?? [])
+    .map((link) => ({ source: String(link.source), target: String(link.target), relation: link.relation }))
+    .filter((link) => ids.has(link.source) && ids.has(link.target) && link.source !== link.target);
+  return { nodes, links };
 }
 
 /** The project's memory graph, or null when it has not been built */

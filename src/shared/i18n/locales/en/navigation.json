@@ -10,7 +10,8 @@
     "kanban": "Kanban",
     "terminals": "Agents",
     "insights": "Claude",
-    "projects": "Projects"
+    "projects": "Projects",
+    "memory": "Graph"
   },
   "actions": {
     "settings": "Settings",
@@ -88,5 +89,10 @@
     "installFailed": "Failed to open a terminal for the installation",
     "viewChangelog": "View changelog",
     "viewChangelogAriaLabel": "View Graphify changelog (opens in new window)"
+  },
+  "memoryGraph": {
+    "loading": "Loading the memory graph...",
+    "empty": "The memory graph is empty",
+    "loadFailed": "Couldn't load the memory graph"
   }
 }

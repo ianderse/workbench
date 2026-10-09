@@ -101,3 +101,26 @@ export interface GraphifyIndexInfo {
   /** Graphify version that built it */
   version: string | null;
 }
+
+/** A node of a project's memory graph (Graphify's graph.json, trimmed for display) */
+export interface GraphifyGraphNode {
+  id: string;
+  label: string;
+  /** Cluster the node belongs to */
+  community?: number;
+  sourceFile?: string;
+  sourceLocation?: string;
+}
+
+/** An edge of a project's memory graph */
+export interface GraphifyGraphLink {
+  source: string;
+  target: string;
+  /** e.g. calls, imports, contains */
+  relation?: string;
+}
+
+export interface GraphifyGraph {
+  nodes: GraphifyGraphNode[];
+  links: GraphifyGraphLink[];
+}

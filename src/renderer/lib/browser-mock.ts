@@ -202,6 +202,8 @@ const browserMockAPI: ElectronAPI = {
   installGraphify: async () => ({ success: true, data: { command: 'uv tool install graphifyy' } }),
   getGraphifyIndex: async () => ({ success: true, data: null }),
   buildGraphifyIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
+  hasGraphifyGraph: async () => ({ success: true, data: false }),
+  getGraphifyGraph: async () => ({ success: true, data: null }),
 
   checkClaudeCodeVersion: async () => ({
     success: true,

@@ -6,6 +6,7 @@ import { cn } from '../../lib/utils';
 import { SettingsRow } from '../settings/SettingsRow';
 import { StatusIndicator } from '../settings/common/StatusIndicator';
 import { useGraphifyVersion } from '../../hooks/useGraphifyVersion';
+import { useMemoryGraphStore } from '../../stores/memory-graph-store';
 import type { GraphifyIndexInfo } from '../../../shared/types/cli';
 
 /**
@@ -39,6 +40,8 @@ export function MemoryIndexRows({ projectId, useGraphify }: { projectId: string;
       const result = await window.electronAPI.buildGraphifyIndex(projectId);
       if (result.success && result.data) {
         setIndex(result.data);
+        // Show the sidebar's Memory item and reload an open graph view
+        useMemoryGraphStore.getState().markRebuilt(projectId);
       } else {
         setError(result.error ?? '');
       }

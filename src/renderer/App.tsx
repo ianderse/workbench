@@ -14,6 +14,8 @@ import {
   DialogTitle
 } from './components/ui/dialog';
 import { Sidebar, type SidebarView } from './components/Sidebar';
+import { MemoryGraph } from './components/memory/MemoryGraph';
+import { useMemoryGraphStore } from './stores/memory-graph-store';
 import { KanbanBoard } from './components/KanbanBoard';
 import { TaskDetailModal } from './components/task-detail/TaskDetailModal';
 import { TaskCreationWizard } from './components/TaskCreationWizard';
@@ -101,6 +103,17 @@ export function App() {
       setActiveView('kanban');
     }
   }, [projects.length, activeView]);
+
+  // The Memory view needs the project's memory graph: leave it when the project has none
+  const memoryProjectId = useProjectStore((state) => state.activeProjectId ?? state.selectedProjectId);
+  const memoryGraphAvailable = useMemoryGraphStore((state) =>
+    memoryProjectId ? state.available[memoryProjectId] : undefined
+  );
+  useEffect(() => {
+    if (activeView === 'memory' && memoryGraphAvailable === false) {
+      setActiveView('kanban');
+    }
+  }, [activeView, memoryGraphAvailable]);
   const [isOnboardingWizardOpen, setIsOnboardingWizardOpen] = useState(false);
   const [isRefreshingTasks, setIsRefreshingTasks] = useState(false);
 
@@ -691,6 +704,9 @@ export function App() {
                 </div>
                 {activeView === 'insights' && (activeProjectId || selectedProjectId) && (
                   <Insights projectId={activeProjectId || selectedProjectId!} />
+                )}
+                {activeView === 'memory' && (activeProjectId || selectedProjectId) && (
+                  <MemoryGraph projectId={activeProjectId || selectedProjectId!} />
                 )}
               </>
             ) : (

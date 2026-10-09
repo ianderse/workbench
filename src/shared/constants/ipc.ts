@@ -286,6 +286,8 @@ export const IPC_CHANNELS = {
   GRAPHIFY_INSTALL: 'graphify:install',
   GRAPHIFY_GET_INDEX: 'graphify:getIndex',
   GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
+  GRAPHIFY_HAS_GRAPH: 'graphify:hasGraph',
+  GRAPHIFY_GET_GRAPH: 'graphify:getGraph',
 
   // MCP Server health checks
   MCP_CHECK_HEALTH: 'mcp:checkHealth',           // Quick connectivity check
