@@ -151,6 +151,11 @@ vi.mock('../../main/services/profile', () => ({
   getAPIProfileEnv: vi.fn().mockResolvedValue({}),
 }));
 
+// Graphify loads the app logger (electron-log), which needs a real Electron install
+vi.mock('../../main/graphify', () => ({
+  getGraphifyPromptContext: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock('../../main/env-utils', () => ({
   getAugmentedEnv: vi.fn(() => ({})),
 }));
