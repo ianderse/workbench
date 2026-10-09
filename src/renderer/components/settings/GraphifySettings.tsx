@@ -4,6 +4,7 @@ import { AlertTriangle, Download, Loader2, RefreshCw, Wrench } from 'lucide-reac
 import { ExternalLink } from '../ui/external-link';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
+import { formatTime } from '../../../shared/utils/format-date-time';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
 import { useGraphifyVersion } from '../../hooks/useGraphifyVersion';
@@ -96,7 +97,7 @@ export function GraphifySettings() {
             label={t('navigation:graphify.version')}
             description={[
               info.latest ? `${t('navigation:graphify.latest')} ${info.latest}` : null,
-              lastChecked ? `${t('navigation:graphify.lastChecked')} ${lastChecked.toLocaleTimeString()}` : null,
+              lastChecked ? `${t('navigation:graphify.lastChecked')} ${formatTime(lastChecked)}` : null,
             ]
               .filter(Boolean)
               .join(' · ')}

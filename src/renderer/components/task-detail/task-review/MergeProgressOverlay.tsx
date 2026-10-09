@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronRight, FileCode, AlertTriangle, Loader2, Clock } from 'lucide-react';
 import { Progress } from '../../ui/progress';
 import { cn } from '../../../lib/utils';
+import { formatTime } from '../../../../shared/utils/format-date-time';
 import type { MergeProgress, MergeLogEntry, MergeLogEntryType } from '../../../../shared/types';
 
 interface MergeProgressOverlayProps {
@@ -200,7 +201,7 @@ export function MergeProgressOverlay({ mergeProgress, logEntries }: MergeProgres
                 {logEntries.map((entry, idx) => (
                   <div key={idx} className="flex gap-2 text-xs font-mono">
                     <span className="text-muted-foreground shrink-0">
-                      {new Date(entry.timestamp).toLocaleTimeString()}
+                      {formatTime(entry.timestamp)}
                     </span>
                     <span className={cn(LOG_TYPE_COLORS[entry.type])}>
                       {entry.message}

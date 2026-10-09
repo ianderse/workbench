@@ -19,6 +19,7 @@ import { app } from 'electron';
 import { existsSync, readdirSync, statSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import os from 'os';
+import { formatDateTime, formatTime } from '../shared/utils/format-date-time';
 
 // Configure electron-log (wrapped in try-catch for re-import scenarios in tests)
 try {
@@ -29,7 +30,8 @@ try {
 
 // File transport configuration
 log.transports.file.maxSize = 10 * 1024 * 1024; // 10MB max file size
-log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}';
+// Local time like the UI ("10/10/2026, 1:35:21 AM"); the text keeps electron-log's own formatting
+log.transports.file.format = ({ data, level, message }) => [`[${formatDateTime(message.date)}] [${level}]`, ...data];
 log.transports.file.fileName = 'main.log';
 
 // Note: We use electron-log's default archiveLogFn which properly rotates logs
@@ -37,7 +39,7 @@ log.transports.file.fileName = 'main.log';
 
 // Console transport - always show warnings and errors, debug only in dev mode
 log.transports.console.level = process.env.NODE_ENV === 'development' ? 'debug' : 'warn';
-log.transports.console.format = '[{h}:{i}:{s}] [{level}] {text}';
+log.transports.console.format = ({ data, level, message }) => [`[${formatTime(message.date)}] [${level}]`, ...data];
 // Guard console transport writes so broken stdio streams do not crash the app.
 {
   const originalConsoleWriteFn = log.transports.console.writeFn as (...args: unknown[]) => void;

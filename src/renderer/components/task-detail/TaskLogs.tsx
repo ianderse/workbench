@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next';
 import { Badge } from '../ui/badge';
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/collapsible';
 import { cn } from '../../lib/utils';
+import { formatDateTime } from '../../../shared/utils/format-date-time';
 import { useSettingsStore } from '../../stores/settings-store';
 import type { Task, TaskLogs, TaskLogPhase, TaskPhaseLog, TaskLogEntry } from '../../../shared/types';
 
@@ -199,16 +200,6 @@ function LogEntry({ entry }: LogEntryProps) {
     }
   };
 
-  const formatTime = (timestamp: string) => {
-    try {
-      const date = new Date(timestamp);
-      // Use system locale for date and time formatting
-      return date.toLocaleString();
-    } catch {
-      return '';
-    }
-  };
-
   const SubphaseBadge = () => {
     if (!entry.subphase) return null;
     return (
@@ -333,7 +324,7 @@ function LogEntry({ entry }: LogEntryProps) {
     <div className="flex flex-col">
       <div className="flex items-start gap-2 text-xs text-muted-foreground py-0.5">
         <span className="text-[10px] text-muted-foreground/60 tabular-nums shrink-0">
-          {formatTime(entry.timestamp)}
+          {formatDateTime(entry.timestamp)}
         </span>
         <span className="break-words whitespace-pre-wrap flex-1">{entry.content}</span>
         <SubphaseBadge />

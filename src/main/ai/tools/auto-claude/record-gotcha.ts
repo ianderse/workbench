@@ -14,6 +14,7 @@ import { z } from 'zod/v3';
 
 import { Tool } from '../define';
 import { DEFAULT_EXECUTION_OPTIONS, ToolPermission } from '../types';
+import { formatDateTime } from '../../../../shared/utils/format-date-time';
 
 // ---------------------------------------------------------------------------
 // Input Schema
@@ -48,8 +49,7 @@ export const recordGotchaTool = Tool.define({
       fs.mkdirSync(memoryDir, { recursive: true });
 
       const gotchasFile = path.join(memoryDir, 'gotchas.md');
-      const now = new Date();
-      const timestamp = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')} ${String(now.getUTCHours()).padStart(2, '0')}:${String(now.getUTCMinutes()).padStart(2, '0')}`;
+      const timestamp = formatDateTime(new Date());
 
       // Determine whether file is new or empty without a separate existsSync check
       let isNew: boolean;

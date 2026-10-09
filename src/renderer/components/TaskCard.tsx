@@ -25,6 +25,7 @@ import { stopTask, checkTaskRunning, recoverStuckTask, isIncompleteHumanReview, 
 import { useToast } from '../hooks/use-toast';
 import type { Task, ReviewReason, TaskStatus } from '../../shared/types';
 import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
+import { formatTime } from '../../shared/utils/format-date-time';
 
 // Catastrophic stuck detection interval (ms).
 // XState handles all normal process-exit transitions via PROCESS_EXITED events.
@@ -118,10 +119,10 @@ export const TaskCard = memo(function TaskCard({
     const resetDate = new Date(resetAt);
     if (Number.isNaN(resetDate.getTime())) return null;
     const isToday = resetDate.toDateString() === new Date().toDateString();
-    return resetDate.toLocaleString(i18n.language, isToday
-      ? { hour: 'numeric', minute: '2-digit' }
-      : { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  }, [task.rateLimitHold?.resetAt, i18n.language]);
+    return isToday
+      ? formatTime(resetDate)
+      : `${resetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${formatTime(resetDate)}`;
+  }, [task.rateLimitHold?.resetAt]);
 
   // Memoize expensive computations to avoid running on every render
   // Truncate description for card display - full description shown in modal

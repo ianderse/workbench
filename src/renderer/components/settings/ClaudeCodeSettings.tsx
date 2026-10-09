@@ -26,6 +26,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { cn } from "../../lib/utils";
+import { formatTime } from "../../../shared/utils/format-date-time";
 import { readRefreshCache, writeRefreshCache } from "../../lib/refresh-cache";
 import { SettingsSection } from "./SettingsSection";
 import { SettingsRow, SettingsRows } from "./SettingsRow";
@@ -319,7 +320,7 @@ export function ClaudeCodeSettings() {
                   versionInfo.latest && versionInfo.latest !== "unknown"
                     ? `${t("navigation:claudeCode.latest")} ${versionInfo.latest}`
                     : null,
-                  lastChecked ? `${t("navigation:claudeCode.lastChecked")} ${lastChecked.toLocaleTimeString()}` : null,
+                  lastChecked ? `${t("navigation:claudeCode.lastChecked")} ${formatTime(lastChecked)}` : null,
                   versionsError ? t("navigation:claudeCode.failedToLoadVersions") : null,
                 ]
                   .filter(Boolean)

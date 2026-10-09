@@ -21,6 +21,7 @@ import { getClaudeProfileManager } from './claude-profile-manager';
 import { expandHomePath } from './claude-profile/profile-utils';
 import { getGraphifyGraphPath, getGraphifyMemoryDir, hasGraphifyGraph } from './graphify-paths';
 import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../shared/types/cli';
+import { formatDateTime } from '../shared/utils/format-date-time';
 
 const execFileAsync = promisify(execFile);
 
@@ -338,7 +339,7 @@ export async function getGraphifyPromptContext(projectPath: string): Promise<Gra
   const intro = `A knowledge graph of this project's code (${index.nodes} nodes, ${index.edges} edges) is available`;
   const outro = [
     '',
-    `For an overview of the main modules, read \`${report}\`. The graph was built ${index.builtAt}; code changed`,
+    `For an overview of the main modules, read \`${report}\`. The graph was built ${formatDateTime(index.builtAt)}; code changed`,
     'since then is not in it, so confirm details in the files it points to.',
   ];
   const prompt = [

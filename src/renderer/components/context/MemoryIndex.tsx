@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
+import { formatDateTime } from '../../../shared/utils/format-date-time';
 import { SettingsRow } from '../settings/SettingsRow';
 import { StatusIndicator } from '../settings/common/StatusIndicator';
 import { useGraphifyVersion } from '../../hooks/useGraphifyVersion';
@@ -69,7 +70,7 @@ export function MemoryIndexRows({ projectId, useGraphify }: { projectId: string;
         ? t('projectPages.context.memoryIndexDescription', {
             nodes: index.nodes.toLocaleString(),
             edges: index.edges.toLocaleString(),
-            time: new Date(index.builtAt).toLocaleString(),
+            time: formatDateTime(index.builtAt),
           })
         : t('projectPages.context.noMemoryIndex');
 
