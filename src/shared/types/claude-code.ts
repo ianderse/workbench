@@ -1,0 +1,180 @@
+/**
+ * Claude Code task execution types
+ *
+ * Every task is delegated to the Claude Code CLI (`claude -p`) running in the task's git
+ * worktree. A short triage run picks the model, effort and whether to plan first; then
+ * Claude Code plans (optional), implements and validates in one resumable session.
+ */
+
+/** Model aliases accepted by `claude --model` */
+export type ClaudeModelAlias = 'haiku' | 'sonnet' | 'opus' | 'fable';
+
+/** Effort levels accepted by `claude --effort` */
+export type ClaudeEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+export const CLAUDE_MODEL_ALIASES: readonly ClaudeModelAlias[] = ['haiku', 'sonnet', 'opus', 'fable'] as const;
+export const CLAUDE_EFFORTS: readonly ClaudeEffort[] = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+
+/** How a task's model and effort are chosen */
+export type TriageMode = 'auto' | 'fixed';
+
+/** Whether a task is planned (Claude Code plan mode) before it is implemented */
+export type PlanningPolicy = 'auto' | 'always' | 'never';
+
+/** App-wide defaults for running tasks with Claude Code (Settings > Claude Code) */
+export interface ClaudeCodeTaskSettings {
+  /** auto: a triage run assesses each task; fixed: always use fixedModel/fixedEffort */
+  triage: TriageMode;
+  /** Model used when triage is fixed, or when triage fails */
+  fixedModel: ClaudeModelAlias;
+  /** Effort used when triage is fixed, or when triage fails */
+  fixedEffort: ClaudeEffort;
+  /** Model used for the triage run itself */
+  triageModel: ClaudeModelAlias;
+  /** auto: follow triage; always / never: override it */
+  planning: PlanningPolicy;
+  /** Run checks and a fresh-context review of the diff after implementing */
+  validation: boolean;
+  /** Let triage pick Fable for the hardest tasks (Fable may bill to usage credits) */
+  allowFable: boolean;
+  /** Stop a task once its estimated spend reaches this amount (`--max-budget-usd`); unset = no cap */
+  maxBudgetUsd?: number;
+  /** Fallback model chain when the chosen model is overloaded (`--fallback-model`) */
+  fallbackModel?: string;
+  /** Extra instructions appended to every task's system prompt */
+  extraInstructions?: string;
+}
+
+export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
+  triage: 'auto',
+  fixedModel: 'sonnet',
+  fixedEffort: 'medium',
+  triageModel: 'sonnet',
+  planning: 'auto',
+  validation: true,
+  allowFable: false,
+};
+
+/** Size of a task as judged by triage */
+export type TaskScope = 'trivial' | 'small' | 'medium' | 'large';
+
+/** Triage decision for a task */
+export interface TaskTriage {
+  model: ClaudeModelAlias;
+  effort: ClaudeEffort;
+  needsPlan: boolean;
+  scope: TaskScope;
+  /** Short task title (sentence case, no trailing period) */
+  title: string;
+  /** One or two sentences on why this model, effort and plan decision fit */
+  reasoning: string;
+  /** Commands or checks that can verify the change (tests, typecheck, build, ...) */
+  verification: string[];
+  /** auto: decided by the triage run; fixed: from settings; fallback: triage failed */
+  source: 'auto' | 'fixed' | 'fallback';
+}
+
+/** Steps of a task run */
+export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise';
+
+export interface ClaudeRunPhase {
+  name: ClaudeRunPhaseName;
+  model?: string;
+  effort?: ClaudeEffort;
+  permissionMode?: string;
+  sessionId?: string;
+  startedAt: string;
+  endedAt?: string;
+  costUsd?: number;
+  durationMs?: number;
+  numTurns?: number;
+  isError?: boolean;
+  error?: string;
+}
+
+/** What Claude Code loaded for the session (from the stream's `system/init` event) */
+export interface ClaudeRunInit {
+  claudeCodeVersion?: string;
+  model?: string;
+  permissionMode?: string;
+  cwd?: string;
+  tools: string[];
+  agents: string[];
+  skills: string[];
+  slashCommands: string[];
+  mcpServers: { name: string; status: string }[];
+  plugins: string[];
+}
+
+/** A subagent or background task Claude Code started during the run */
+export interface ClaudeRunSubagent {
+  id: string;
+  description: string;
+  type?: string;
+  status: 'running' | 'completed' | 'failed' | 'stopped';
+  startedAt: string;
+  endedAt?: string;
+}
+
+export interface ValidationCheck {
+  name: string;
+  command?: string;
+  passed: boolean;
+  details?: string;
+}
+
+export interface ValidationFinding {
+  severity: 'critical' | 'major' | 'minor';
+  description: string;
+  fixed: boolean;
+}
+
+/** Structured result of the validation step */
+export interface ValidationReport {
+  status: 'passed' | 'failed' | 'partial';
+  summary: string;
+  checks: ValidationCheck[];
+  findings: ValidationFinding[];
+}
+
+/** Persisted run state of a task (`<specDir>/claude_run.json`) */
+export interface ClaudeRunInfo {
+  version: 1;
+  /** Claude Code session that holds the task's conversation (resumable) */
+  sessionId?: string;
+  triage?: TaskTriage;
+  /** Approved plan (Markdown), when the task was planned */
+  plan?: string;
+  phases: ClaudeRunPhase[];
+  init?: ClaudeRunInit;
+  validation?: ValidationReport;
+  /** Final summary Claude wrote for the user */
+  summary?: string;
+  subagents: ClaudeRunSubagent[];
+  totalCostUsd: number;
+  /** Absolute path of the worktree the session runs in */
+  worktreePath?: string;
+  updatedAt: string;
+}
+
+/** A Claude Code customization found on disk (Settings > Claude Code inventory) */
+export interface ClaudeCodeInventoryItem {
+  name: string;
+  description?: string;
+  scope: 'user' | 'project' | 'plugin' | 'managed';
+  path: string;
+}
+
+/** What Claude Code will load when it runs in a project */
+export interface ClaudeCodeInventory {
+  agents: ClaudeCodeInventoryItem[];
+  skills: ClaudeCodeInventoryItem[];
+  commands: ClaudeCodeInventoryItem[];
+  /** Hook events configured in settings files, e.g. "PreToolUse (Bash)" */
+  hooks: ClaudeCodeInventoryItem[];
+  mcpServers: ClaudeCodeInventoryItem[];
+  /** CLAUDE.md memory files */
+  memoryFiles: ClaudeCodeInventoryItem[];
+  /** Settings files that exist */
+  settingsFiles: ClaudeCodeInventoryItem[];
+}
