@@ -132,15 +132,17 @@ export function summarizeLogPhase(
 }
 
 /**
- * Why a task's Claude Code session cannot be opened in an agent window, or null when it can:
- * there is no session yet, or the task is running (another process is writing to the session)
+ * Why a task's Claude Code session cannot be opened in an agent window, or null when it can
+ * (there is no session yet). A running task's session opens read-only: the window follows it
+ * and resumes it once the task stops.
  */
-export function getTaskSessionBlocker(
-  task: Pick<Task, 'status' | 'claudeRun'>
-): 'noSession' | 'running' | null {
-  if (!task.claudeRun?.sessionId) return 'noSession';
-  if (task.status === 'in_progress') return 'running';
-  return null;
+export function getTaskSessionBlocker(task: Pick<Task, 'claudeRun'>): 'noSession' | null {
+  return task.claudeRun?.sessionId ? null : 'noSession';
+}
+
+/** Whether a task's run is writing to its session (implementing or validating) */
+export function isTaskSessionActive(task: Pick<Task, 'status'>): boolean {
+  return task.status === 'in_progress' || task.status === 'ai_review';
 }
 
 /** Git branch of a task's worktree (`<project>/.auto-claude/worktrees/tasks/<specId>`) */

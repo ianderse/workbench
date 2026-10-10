@@ -273,6 +273,11 @@ export class ClaudeTaskRun {
   }
 
   /** Stop the run; the outcome resolves with status 'stopped' */
+  /** Current session, profile and config dir of the run (they change on a profile swap) */
+  get session(): { sessionId?: string; profileId?: string; configDir?: string } {
+    return { sessionId: this.info.sessionId, profileId: this.info.profileId, configDir: this.info.configDir };
+  }
+
   stop(): void {
     this.stopped = true;
     this.abortController.abort();

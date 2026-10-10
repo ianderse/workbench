@@ -18,6 +18,9 @@ import * as SessionHandler from './session-handler';
 import * as TerminalLifecycle from './terminal-lifecycle';
 import * as TerminalEventHandler from './terminal-event-handler';
 import * as ClaudeIntegration from './cli-integration-handler';
+import { SessionFollower, type FollowedRun } from './session-follower';
+import { safeSendToRenderer } from '../ipc-handlers/utils';
+import { IPC_CHANNELS } from '../../shared/constants';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 
 export class TerminalManager {
@@ -92,6 +95,7 @@ export class TerminalManager {
    * Destroy a terminal process
    */
   async destroy(id: string): Promise<TerminalOperationResult> {
+    this.stopFollowing(id);
     return TerminalLifecycle.destroyTerminal(
       id,
       this.terminals,
@@ -105,6 +109,7 @@ export class TerminalManager {
    * Kill all terminal processes
    */
   async killAll(): Promise<void> {
+    for (const id of this.terminals.keys()) this.stopFollowing(id);
     this.saveTimer = await TerminalLifecycle.destroyAllTerminals(
       this.terminals,
       this.saveTimer
@@ -117,6 +122,11 @@ export class TerminalManager {
   write(id: string, data: string): void {
     debugLog('[TerminalManager:write] Writing to terminal:', id, 'data length:', data.length);
     const terminal = this.terminals.get(id);
+    if (terminal?.follower) {
+      // Following a running task's session: the follower handles the keys (Enter, Ctrl+C)
+      terminal.follower.handleInput(data);
+      return;
+    }
     if (terminal) {
       debugLog('[TerminalManager:write] Terminal found, calling writeToPty...');
       PtyManager.writeToPty(terminal, data);
@@ -178,6 +188,53 @@ export class TerminalManager {
       dangerouslySkipPermissions,
       { resumeSessionId: options.sessionId, configDir: options.configDir }
     );
+  }
+
+  /**
+   * Follow a running task's Claude Code session in a terminal (read-only). Once the task stops,
+   * Enter resumes the session there like resumeTaskSessionAsync.
+   */
+  followTaskSession(
+    id: string,
+    options: { sessionId: string; cwd: string; profileId?: string; configDir?: string },
+    run: FollowedRun,
+    dangerouslySkipPermissions?: boolean
+  ): void {
+    const terminal = this.terminals.get(id);
+    if (!terminal) return;
+    this.stopFollowing(id);
+    // Output goes to this terminal only while it is still the one with this id (a recreated
+    // window reuses the id)
+    const write = (data: string) => {
+      if (this.terminals.get(id) !== terminal) return;
+      terminal.outputBuffer = (terminal.outputBuffer + data).slice(-100000);
+      safeSendToRenderer(this.getWindow, IPC_CHANNELS.TERMINAL_OUTPUT, id, data);
+    };
+    const follower = new SessionFollower({
+      ...options,
+      run,
+      write,
+      onContinue: (session) => {
+        terminal.follower = undefined;
+        this.resumeTaskSessionAsync(id, { ...session, cwd: options.cwd }, dangerouslySkipPermissions).catch((error) => {
+          debugError('[TerminalManager] Failed to resume the followed session:', error);
+        });
+      },
+      onRelease: () => {
+        terminal.follower = undefined;
+        terminal.isCLIMode = false;
+        // A fresh prompt (the shell's output was held back while following)
+        PtyManager.writeToPty(terminal, '\r');
+      },
+    });
+    terminal.follower = follower;
+    follower.start();
+  }
+
+  private stopFollowing(id: string): void {
+    const terminal = this.terminals.get(id);
+    terminal?.follower?.stop();
+    if (terminal) terminal.follower = undefined;
   }
 
   /**

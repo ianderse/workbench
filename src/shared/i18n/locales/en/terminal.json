@@ -71,8 +71,7 @@
     "searchPlaceholder": "Search tasks...",
     "noResults": "No matching tasks",
     "resumeSession": "Resume session",
-    "running": "Running",
-    "runningHint": "This task is running. Its session can be opened once the run stops"
+    "followSession": "Follow session"
   },
   "header": {
     "agent": "Agent",

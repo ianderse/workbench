@@ -223,6 +223,8 @@ export function setupPtyHandlers(
     // can still flush output while it dies; it must not reach the replacement terminal
     // that reuses its id
     if (terminals.get(id) !== terminal) return;
+    // Following a running task's session: the window shows the session, not the idle shell
+    if (terminal.follower) return;
 
     // Append to output buffer (limit to 100KB)
     terminal.outputBuffer = (terminal.outputBuffer + data).slice(-100000);

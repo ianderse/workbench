@@ -218,6 +218,11 @@ export class AgentManager extends EventEmitter {
     return this.runs.has(taskId);
   }
 
+  /** Session of a running task's Claude Code run (undefined until the run started) */
+  getRunSession(taskId: string): { sessionId?: string; profileId?: string; configDir?: string } | undefined {
+    return this.runs.get(taskId)?.run?.session;
+  }
+
   /** All running task IDs */
   getRunningTasks(): string[] {
     return Array.from(this.runs.keys());

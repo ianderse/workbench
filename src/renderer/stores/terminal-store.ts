@@ -646,6 +646,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         associatedTaskId: request.taskId,
         worktreeConfig: buildTaskWorktreeConfig(request, terminal.id),
         pendingTaskSession: {
+          taskId: request.taskId,
           sessionId: request.sessionId,
           profileId: request.profileId,
           configDir: request.configDir

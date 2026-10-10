@@ -29,6 +29,11 @@ export interface TerminalProcess {
   shellType?: WindowsShellType;
   /** Whether PTY has emitted exit; used to avoid writes/resizes on dead PTYs */
   hasExited?: boolean;
+  /**
+   * Set while the window follows a running task's session (read-only): the follower gets the
+   * keys and the shell's output is held back
+   */
+  follower?: { handleInput(data: string): void; stop(): void };
 }
 
 /**

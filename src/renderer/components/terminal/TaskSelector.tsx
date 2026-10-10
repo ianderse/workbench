@@ -5,7 +5,7 @@ import type { Task } from '../../../shared/types';
 import { TaskListIcon } from '../icons/app-icons';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { cn } from '../../lib/utils';
-import { getTaskSessionBlocker } from '../../../shared/utils/claude-run';
+import { isTaskSessionActive } from '../../../shared/utils/claude-run';
 import { PHASE_CONFIG } from './types';
 
 interface TaskSelectorProps {
@@ -70,11 +70,7 @@ export function TaskSelector({
     }
   }, [focusedIndex]);
 
-  // A task whose session is being written by its run cannot be picked
-  const isTaskRunning = (task: Task) => !!task.claudeRun?.sessionId && getTaskSessionBlocker(task) === 'running';
-
   const selectTask = (task: Task) => {
-    if (isTaskRunning(task)) return;
     setIsOpen(false);
     onTaskSelect(task.id);
   };
@@ -201,7 +197,8 @@ export function TaskSelector({
               </div>
             ) : (
               filteredTasks.map((task, index) => {
-                const running = isTaskRunning(task);
+                // A running task's session is followed read-only until the task stops
+                const running = isTaskSessionActive(task);
                 const hasSession = !!task.claudeRun?.sessionId;
                 return (
                 <div
@@ -214,23 +211,21 @@ export function TaskSelector({
                   role="option"
                   tabIndex={-1}
                   aria-selected={focusedIndex === index}
-                  aria-disabled={running || undefined}
                   className={cn(
-                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground',
-                    running ? 'cursor-default opacity-60' : 'cursor-pointer',
-                    focusedIndex === index && !running ? 'bg-nav-hover' : !running && 'hover:bg-nav-hover'
+                    'flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground',
+                    focusedIndex === index ? 'bg-nav-hover' : 'hover:bg-nav-hover'
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
                     selectTask(task);
                   }}
                   onMouseEnter={() => setFocusedIndex(index)}
-                  title={running ? t('taskSelector.runningHint') : task.title}
+                  title={task.title}
                 >
                   <span className="min-w-0 flex-1 truncate">{task.title}</span>
                   {hasSession && (
                     <span className="shrink-0 text-xs text-(--nav-label-color)">
-                      {running ? t('taskSelector.running') : t('taskSelector.resumeSession')}
+                      {running ? t('taskSelector.followSession') : t('taskSelector.resumeSession')}
                     </span>
                   )}
                 </div>

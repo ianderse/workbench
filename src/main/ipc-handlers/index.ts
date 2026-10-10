@@ -54,7 +54,7 @@ export function setupIpcHandlers(
   registerTaskHandlers(agentManager, getMainWindow);
 
   // Terminal and Claude profile handlers
-  registerTerminalHandlers(terminalManager, getMainWindow);
+  registerTerminalHandlers(terminalManager, getMainWindow, agentManager);
 
   // Terminal worktree handlers (isolated development in worktrees)
   registerTerminalWorktreeIpcHandlers();

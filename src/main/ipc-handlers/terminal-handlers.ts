@@ -5,6 +5,7 @@ import type { IPCResult, TerminalCreateOptions, TerminalTaskSessionOptions, Clau
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { TerminalManager } from '../terminal-manager';
+import type { AgentManager } from '../agent/agent-manager';
 import { projectStore } from '../project-store';
 import { terminalNameGenerator } from '../terminal-name-generator';
 import { readSettingsFileAsync } from '../settings-utils';
@@ -20,7 +21,8 @@ import { isValidConfigDir } from '../utils/config-path-validator';
  */
 export function registerTerminalHandlers(
   terminalManager: TerminalManager,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  agentManager?: Pick<AgentManager, 'isRunning' | 'getRunSession'>
 ): void {
 
   // ============================================
@@ -82,7 +84,8 @@ export function registerTerminalHandlers(
   );
 
   // Resume a task's Claude Code session in an agent window (`claude --resume <id>` in the task's
-  // worktree, on the profile the session ran on)
+  // worktree, on the profile the session ran on). While the task runs, its run is writing to the
+  // session, so the window follows it read-only and resumes once the task stops.
   ipcMain.on(
     IPC_CHANNELS.TERMINAL_RESUME_TASK_SESSION,
     (_, id: string, options: TerminalTaskSessionOptions) => {
@@ -90,6 +93,19 @@ export function registerTerminalHandlers(
         if (!options?.sessionId || !options.cwd) return;
         const settings = await readSettingsFileAsync();
         const dangerouslySkipPermissions = settings?.dangerouslySkipPermissions === true;
+        const taskId = options.taskId;
+        if (taskId && agentManager?.isRunning(taskId)) {
+          terminalManager.followTaskSession(
+            id,
+            options,
+            {
+              isRunning: () => agentManager.isRunning(taskId),
+              getSession: () => agentManager.getRunSession(taskId),
+            },
+            dangerouslySkipPermissions
+          );
+          return;
+        }
         await terminalManager.resumeTaskSessionAsync(id, options, dangerouslySkipPermissions);
       })().catch((error) => {
         console.warn('[terminal-handlers] Failed to resume the task session:', error);

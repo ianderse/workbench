@@ -12,6 +12,8 @@ export interface TerminalTaskSessionOptions {
   profileId?: string;
   /** Claude config dir that holds the session transcript */
   configDir?: string;
+  /** Task the session belongs to: while it runs, the window follows the session read-only */
+  taskId?: string;
 }
 
 import type { IPCResult } from './common';

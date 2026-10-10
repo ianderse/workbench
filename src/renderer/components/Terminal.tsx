@@ -695,7 +695,12 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       setAssociatedTask(id, taskId);
       void applyWorktreeConfig(buildTaskWorktreeConfig(request, id), {
         title: selectedTask.title,
-        session: { sessionId: request.sessionId, profileId: request.profileId, configDir: request.configDir }
+        session: {
+          taskId: request.taskId,
+          sessionId: request.sessionId,
+          profileId: request.profileId,
+          configDir: request.configDir
+        }
       });
       return;
     }

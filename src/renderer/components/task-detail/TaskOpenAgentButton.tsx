@@ -8,9 +8,10 @@ import { getTaskSessionRequest, useTerminalStore } from '../../stores/terminal-s
 import type { Task } from '../../../shared/types';
 
 /**
- * "Open agent" button in the task dialog: resumes the task's Claude Code session in a
- * new agent window of its project (Agents page). Hidden until the task has a session; disabled while
- * the task runs or when the project has no room for another window (the tooltip says why).
+ * "Open agent" button in the task dialog: opens the task's Claude Code session in a new agent
+ * window of its project (Agents page). While the task runs, the window follows the session
+ * read-only and resumes it once the task stops. Hidden until the task has a session; disabled
+ * when the project has no room for another window (the tooltip says why).
  */
 export function TaskOpenAgentButton({ task }: { task: Task }) {
   const { t } = useTranslation(['tasks']);
@@ -20,14 +21,11 @@ export function TaskOpenAgentButton({ task }: { task: Task }) {
   const blocker = getTaskSessionBlocker(task);
   // Nothing to open until Claude Code has started a session for the task
   if (blocker === 'noSession') return null;
-  const reason =
-    blocker === 'running'
-        ? t('tasks:claudeRun.session.running')
-        : !projectPath
-          ? t('tasks:claudeRun.session.noProject')
-          : !canAddWindow
-            ? t('tasks:claudeRun.session.noRoom')
-            : null;
+  const reason = !projectPath
+    ? t('tasks:claudeRun.session.noProject')
+    : !canAddWindow
+      ? t('tasks:claudeRun.session.noRoom')
+      : null;
   const label = t('tasks:claudeRun.session.openAgent');
 
   const handleOpen = () => {

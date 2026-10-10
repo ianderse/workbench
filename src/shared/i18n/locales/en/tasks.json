@@ -355,7 +355,6 @@
     },
     "session": {
       "openAgent": "Open agent",
-      "running": "Available once the task stops running",
       "noProject": "The task's project is not open",
       "noRoom": "All agent windows of this project are in use. Close one to open this session"
     }
