@@ -82,14 +82,14 @@ jobs:
           if npx -y semver "$PACKAGE_VERSION" -r ">$LATEST_VERSION" > /dev/null 2>&1; then
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "new_version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
-            echo "✅ New release needed: v$PACKAGE_VERSION"
+            echo "New release needed: v$PACKAGE_VERSION"
           elif [ "$FORCE" = "true" ]; then
             echo "should_release=true" >> $GITHUB_OUTPUT
             echo "new_version=$PACKAGE_VERSION" >> $GITHUB_OUTPUT
-            echo "⚠️ Force release enabled: v$PACKAGE_VERSION"
+            echo "Force release enabled: v$PACKAGE_VERSION"
           else
             echo "should_release=false" >> $GITHUB_OUTPUT
-            echo "⏭️ No release needed (package version not newer than latest tag)"
+            echo "No release needed (package version not newer than latest tag)"
           fi
 
       # CRITICAL: Validate CHANGELOG.md has entry for this version BEFORE creating tag
@@ -100,7 +100,7 @@ jobs:
           VERSION="${{ steps.check.outputs.new_version }}"
           CHANGELOG_FILE="CHANGELOG.md"
 
-          echo "🔍 Validating CHANGELOG.md for version $VERSION..."
+          echo "Validating CHANGELOG.md for version $VERSION..."
 
           if [ ! -f "$CHANGELOG_FILE" ]; then
             echo "::error::CHANGELOG.md not found! Please create CHANGELOG.md with release notes."
@@ -145,17 +145,17 @@ jobs:
             echo "::error::"
             echo "::error::    ## $VERSION - Your Release Title"
             echo "::error::"
-            echo "::error::    ### ✨ New Features"
+            echo "::error::    ### New Features"
             echo "::error::    - Feature description"
             echo "::error::"
-            echo "::error::    ### 🐛 Bug Fixes"
+            echo "::error::    ### Bug Fixes"
             echo "::error::    - Fix description"
             echo "::error::"
             echo "::error::═══════════════════════════════════════════════════════════════════════"
             echo ""
 
             # Also add to job summary for visibility
-            echo "## ❌ Release Blocked: Missing Changelog" >> $GITHUB_STEP_SUMMARY
+            echo "## Release Blocked: Missing Changelog" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Version **$VERSION** was not found in CHANGELOG.md." >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -168,17 +168,17 @@ jobs:
             echo "\`\`\`markdown" >> $GITHUB_STEP_SUMMARY
             echo "## $VERSION - Release Title" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### ✨ New Features" >> $GITHUB_STEP_SUMMARY
+            echo "### New Features" >> $GITHUB_STEP_SUMMARY
             echo "- Feature description" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "### 🐛 Bug Fixes" >> $GITHUB_STEP_SUMMARY
+            echo "### Bug Fixes" >> $GITHUB_STEP_SUMMARY
             echo "- Fix description" >> $GITHUB_STEP_SUMMARY
             echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
 
             exit 1
           fi
 
-          echo "✅ Found changelog entry for version $VERSION"
+          echo "Found changelog entry for version $VERSION"
           echo ""
           echo "--- Extracted Release Notes ---"
           echo "$CHANGELOG_CONTENT"
@@ -219,17 +219,17 @@ jobs:
           git tag -a "$TAG" -m "Release $TAG"
           git push origin "$TAG"
 
-          echo "✅ Tag $TAG created and pushed"
-          echo "🚀 This will trigger the release workflow"
+          echo "Tag $TAG created and pushed"
+          echo "This will trigger the release workflow"
 
       - name: Summary
         run: |
           if [ "${{ steps.check.outputs.should_release }}" = "true" ] && [ "${{ steps.changelog.outputs.changelog_valid }}" = "true" ]; then
-            echo "## 🚀 Release Triggered" >> $GITHUB_STEP_SUMMARY
+            echo "## Release Triggered" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Version:** v${{ steps.check.outputs.new_version }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "✅ Changelog validated and extracted from CHANGELOG.md" >> $GITHUB_STEP_SUMMARY
+            echo "Changelog validated and extracted from CHANGELOG.md" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "The release workflow has been triggered and will:" >> $GITHUB_STEP_SUMMARY
             echo "1. Build binaries for all platforms" >> $GITHUB_STEP_SUMMARY
@@ -237,7 +237,7 @@ jobs:
             echo "3. Create GitHub release" >> $GITHUB_STEP_SUMMARY
             echo "4. Update README with new version" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ steps.check.outputs.should_release }}" = "false" ]; then
-            echo "## ⏭️ No Release Needed" >> $GITHUB_STEP_SUMMARY
+            echo "## No Release Needed" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "**Package version:** ${{ steps.package.outputs.version }}" >> $GITHUB_STEP_SUMMARY
             echo "**Latest tag:** v${{ steps.latest_tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY

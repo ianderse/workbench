@@ -27,19 +27,19 @@ function log(message, color = colors.reset) {
 }
 
 function logSuccess(message) {
-  log(`✓ ${message}`, colors.green);
+  log(message, colors.green);
 }
 
 function logError(message) {
-  log(`✗ ${message}`, colors.red);
+  log(`Error: ${message}`, colors.red);
 }
 
 function logWarning(message) {
-  log(`⚠ ${message}`, colors.yellow);
+  log(`Warning: ${message}`, colors.yellow);
 }
 
 function logInfo(message) {
-  log(`ℹ ${message}`, colors.cyan);
+  log(message, colors.cyan);
 }
 
 /**

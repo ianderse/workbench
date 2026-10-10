@@ -65,10 +65,10 @@ export async function verifyTerminalSubscription(): Promise<boolean> {
       return false;
     }
 
-    console.log('✅ Terminal font settings subscription verified');
+    console.log('Terminal font settings subscription verified');
     return true;
   } catch (error) {
-    console.error('❌ Terminal font settings subscription verification failed:', error);
+    console.error('Terminal font settings subscription verification failed:', error);
     return false;
   } finally {
     // Always reset to original, even if an error occurred
