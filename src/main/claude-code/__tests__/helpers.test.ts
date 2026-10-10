@@ -4,8 +4,8 @@ import { tmpdir } from 'os';
 import path from 'path';
 import { buildMcpConfig } from '../mcp-config';
 import { resolveClaudeCodeTaskSettings } from '../settings';
-import { getClaudeCodeInventory } from '../inventory';
 import { applyPlanningPolicy, fixedTriage } from '../triage';
+import { isClaudeRunFinished } from '../task-runner';
 import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-code';
 
 describe('buildMcpConfig', () => {
@@ -44,28 +44,19 @@ describe('planning policy', () => {
   });
 });
 
-describe('getClaudeCodeInventory', () => {
-  let root: string;
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+describe('isClaudeRunFinished', () => {
+  const run = (phases: Array<Record<string, unknown>>) => ({ version: 1 as const, phases, subagents: [], totalCostUsd: 0, updatedAt: '' }) as never;
+  const done = { startedAt: 'a', endedAt: 'b' };
 
-  it('lists agents, skills, hooks, MCP servers and memory files', async () => {
-    root = mkdtempSync(path.join(tmpdir(), 'inv-'));
-    const project = path.join(root, 'project');
-    const userDir = path.join(root, 'user');
-    mkdirSync(path.join(project, '.claude', 'agents'), { recursive: true });
-    mkdirSync(path.join(project, '.claude', 'skills', 'deploy'), { recursive: true });
-    mkdirSync(userDir, { recursive: true });
-    writeFileSync(path.join(project, '.claude', 'agents', 'reviewer.md'), '---\nname: reviewer\ndescription: Reviews code\n---\nBody');
-    writeFileSync(path.join(project, '.claude', 'skills', 'deploy', 'SKILL.md'), '---\ndescription: Deploy it\n---\n');
-    writeFileSync(path.join(project, '.claude', 'settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'check.sh' }] }] } }));
-    writeFileSync(path.join(project, '.mcp.json'), JSON.stringify({ mcpServers: { db: { command: 'db-server' } } }));
-    writeFileSync(path.join(project, 'CLAUDE.md'), '# Rules');
+  it('is finished after a successful validation, or implementation when validation is off', () => {
+    expect(isClaudeRunFinished(run([{ name: 'implement', ...done }, { name: 'validate', ...done }]), true)).toBe(true);
+    expect(isClaudeRunFinished(run([{ name: 'implement', ...done }]), true)).toBe(false);
+    expect(isClaudeRunFinished(run([{ name: 'implement', ...done }]), false)).toBe(true);
+  });
 
-    const inventory = await getClaudeCodeInventory(project, userDir);
-    expect(inventory.agents).toEqual([expect.objectContaining({ name: 'reviewer', description: 'Reviews code', scope: 'project' })]);
-    expect(inventory.skills).toEqual([expect.objectContaining({ name: 'deploy', description: 'Deploy it' })]);
-    expect(inventory.hooks[0].name).toBe('PreToolUse (Bash)');
-    expect(inventory.mcpServers).toEqual([expect.objectContaining({ name: 'db', description: 'db-server' })]);
-    expect(inventory.memoryFiles.map((m) => m.name)).toEqual(['CLAUDE.md']);
+  it('is not finished when the last step failed or is still running', () => {
+    expect(isClaudeRunFinished(run([{ name: 'validate', ...done, isError: true }]), true)).toBe(false);
+    expect(isClaudeRunFinished(run([{ name: 'validate', startedAt: 'a' }]), true)).toBe(false);
+    expect(isClaudeRunFinished(null, true)).toBe(false);
   });
 });

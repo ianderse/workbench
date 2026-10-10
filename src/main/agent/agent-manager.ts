@@ -13,6 +13,7 @@ import {
   type TaskRunOutcome,
 } from '../claude-code/task-runner';
 import { resolveClaudeCodeTaskSettings } from '../claude-code/settings';
+import { isClaudeRunFinished, loadClaudeRunInfo, resetClaudeRunInfo } from '../claude-code/task-runner';
 import { detectClaudeLimitMessage } from '../claude-code/limit';
 import { createOrGetWorktree } from '../worktree';
 import { readSettingsFile } from '../settings-utils';
@@ -335,6 +336,13 @@ export class AgentManager extends EventEmitter {
       mimeType: mimeTypeFor(imagePath),
     }));
 
+    const taskSettings = resolveClaudeCodeTaskSettings(settings.claudeCodeTasks);
+    // Starting a task whose last run went all the way through begins a new run (fresh triage
+    // and session) in the same worktree, instead of finishing again immediately
+    if (mode === 'start' && isClaudeRunFinished(loadClaudeRunInfo(specDir), taskSettings.validation)) {
+      resetClaudeRunInfo(specDir);
+    }
+
     const config: TaskRunConfig = {
       taskId,
       projectId: project.id,
@@ -349,7 +357,7 @@ export class AgentManager extends EventEmitter {
       attachments,
       connectorIds: Array.isArray(task.metadata?.mcpConnectors) ? task.metadata.mcpConnectors : undefined,
       connectorSettings: settings.mcpConnectors,
-      settings: resolveClaudeCodeTaskSettings(settings.claudeCodeTasks),
+      settings: taskSettings,
       mode,
       ...(mode === 'revise' ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
       profileId: options.profileId,

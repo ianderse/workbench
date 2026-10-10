@@ -22,6 +22,7 @@ export {
   CLAUDE_RUN_FILE,
   loadClaudeRunInfo,
   resetClaudeRunInfo,
+  isClaudeRunFinished,
 } from './task-runner';
 export type {
   TaskAttachment,

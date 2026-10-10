@@ -28,6 +28,9 @@ vi.mock('../claude-code/task-runner', () => ({
       return this.done;
     }
   },
+  loadClaudeRunInfo: vi.fn(() => null),
+  resetClaudeRunInfo: vi.fn(),
+  isClaudeRunFinished: vi.fn(() => false),
 }));
 
 vi.mock('../worktree', () => ({

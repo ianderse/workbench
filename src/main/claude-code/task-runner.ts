@@ -22,7 +22,8 @@
 
 import { randomUUID } from 'crypto';
 import { execFile } from 'child_process';
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import os from 'os';
 import path from 'path';
 import { promisify } from 'util';
 import { resolveClaudeEnv } from './env';
@@ -301,6 +302,10 @@ export class ClaudeTaskRun {
     const settings = this.config.settings;
 
     if (this.config.mode === 'revise') {
+      // Each change request runs the same workflow: assess it (model and effort for the
+      // change), apply it in the task's session, then validate
+      const triaged = await this.runTriage(true);
+      if (triaged) return triaged;
       const revised = await this.runSessionPhase('revise');
       if (revised) return revised;
       if (settings.validation) {
@@ -343,22 +348,25 @@ export class ClaudeTaskRun {
   // Steps
   // ---------------------------------------------------------------------------
 
-  private async runTriage(): Promise<TaskRunOutcome | null> {
+  private async runTriage(revision = false): Promise<TaskRunOutcome | null> {
     const { settings } = this.config;
-    this.emitProgress('planning', 0.05, 'Assessing the task');
-    this.log.startPhase('planning', 'Assessing the task');
+    const label = revision ? 'Assessing the requested changes' : 'Assessing the task';
+    this.emitProgress('planning', 0.05, label);
+    this.log.startPhase('planning', label);
     const phase = this.beginPhase('triage', { model: settings.triageModel, effort: 'low' });
 
     let triage: TaskTriage;
     let triageCost: number | undefined;
     if (settings.triage === 'fixed') {
-      triage = fixedTriage(settings, this.config.title, 'fixed', 'Fixed model and effort from Settings > Claude Code');
+      triage = fixedTriage(settings, this.config.title, 'fixed', 'Fixed model and effort from Settings > Agents');
     } else {
       try {
         ({ triage, costUsd: triageCost } = await triageTask({
-          description: this.config.description,
+          description: revision
+            ? `${this.config.description}\n\nThis task was already implemented. Assess only the follow-up change the reviewer requested:\n${this.config.feedback ?? ''}`
+            : this.config.description,
           cwd: this.config.worktreePath,
-          attachmentNames: this.config.attachments.map((a) => a.filename),
+          attachmentNames: (revision ? this.config.feedbackAttachments ?? [] : this.config.attachments).map((a) => a.filename),
           settings,
           abortSignal: this.abortController.signal,
           profileId: this.config.profileId,
@@ -373,6 +381,10 @@ export class ClaudeTaskRun {
       }
     }
     triage = applyPlanningPolicy(triage, settings);
+    if (revision) {
+      // A change request is applied directly in the session (no separate plan) and keeps the title
+      triage = { ...triage, needsPlan: false, title: this.info.triage?.title || this.config.title };
+    }
     this.info.triage = triage;
     this.endPhase(phase, triageCost !== undefined ? { costUsd: triageCost } : {});
     this.updateTotalCost();
@@ -452,7 +464,7 @@ export class ClaudeTaskRun {
     if (!result || result.is_error || result.subtype !== 'success') {
       const error = outcome.error
         || result?.errors?.join('; ')
-        || (result?.subtype === 'error_max_budget_usd' ? 'The task reached its budget limit (Settings > Claude Code)' : '')
+        || (result?.subtype === 'error_max_budget_usd' ? 'The task reached its budget limit (Settings > Agents)' : '')
         || result?.result
         || 'Claude Code stopped with an error';
       this.endPhase(phase, { isError: true, error }, result);
@@ -576,8 +588,10 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
   }): Promise<PhaseResult> {
     if (this.stopped) return { stopped: true };
     const { settings } = this.config;
-    const { command, env } = await resolveClaudeEnv({
-      profileId: this.config.profileId,
+    // Stay on the profile that holds the session transcript, unless the caller switched profiles
+    // (rate-limit swap); then the transcript is copied to the new profile below
+    const { command, env, profileId } = await resolveClaudeEnv({
+      profileId: this.config.profileId ?? (params.resume ? this.info.profileId : undefined),
       extraEnv: {
         ...(this.config.extraEnv ?? {}),
         // Make the task list available on every model, so Claude can track multi-step work
@@ -586,6 +600,15 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       },
     });
 
+    const configDir = env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+    if (params.resume && this.info.configDir && this.info.configDir !== configDir) {
+      copySessionTranscript(params.sessionId, this.info.configDir, configDir);
+    }
+    if (this.info.profileId !== profileId || this.info.configDir !== configDir) {
+      this.info.profileId = profileId;
+      this.info.configDir = configDir;
+      this.saveInfo();
+    }
     const specDirRelative = path.join('.auto-claude', 'specs', this.config.specId);
     const args = [
       '-p',
@@ -958,6 +981,26 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
 // Persistence helpers
 // =============================================================================
 
+/**
+ * Copy a session transcript (`<configDir>/projects/<project>/<sessionId>.jsonl`) to another
+ * Claude config dir, so the session can be resumed on a different profile
+ */
+function copySessionTranscript(sessionId: string, fromConfigDir: string, toConfigDir: string): void {
+  try {
+    const projectsDir = path.join(fromConfigDir, 'projects');
+    for (const project of readdirSync(projectsDir)) {
+      const source = path.join(projectsDir, project, `${sessionId}.jsonl`);
+      if (!existsSync(source)) continue;
+      const targetDir = path.join(toConfigDir, 'projects', project);
+      mkdirSync(targetDir, { recursive: true });
+      copyFileSync(source, path.join(targetDir, `${sessionId}.jsonl`));
+      return;
+    }
+  } catch (error) {
+    console.warn('[ClaudeTaskRun] Could not copy the session transcript to the new profile:', error);
+  }
+}
+
 function writeFileSafe(file: string, content: string): void {
   const tmp = `${file}.tmp`;
   try {
@@ -981,6 +1024,17 @@ export function loadClaudeRunInfo(specDir: string): ClaudeRunInfo | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Whether a run went all the way through: its last step is a finished validation, or a finished
+ * implementation/revision when validation is off. Starting such a task again begins a new run.
+ */
+export function isClaudeRunFinished(info: ClaudeRunInfo | null, validation: boolean): boolean {
+  const last = info?.phases.at(-1);
+  if (!last?.endedAt || last.isError) return false;
+  if (last.name === 'validate') return true;
+  return !validation && (last.name === 'implement' || last.name === 'revise');
 }
 
 /** Forget a task's run state so the next start triages and runs from scratch */

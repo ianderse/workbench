@@ -142,6 +142,13 @@ export interface ClaudeRunInfo {
   version: 1;
   /** Claude Code session that holds the task's conversation (resumable) */
   sessionId?: string;
+  /**
+   * Claude profile the session ran on. Its transcript lives in that profile's config dir, so
+   * resuming the session (e.g. from an agent window) must use the same profile.
+   */
+  profileId?: string;
+  /** Claude config dir of that profile (where the session transcript is stored) */
+  configDir?: string;
   triage?: TaskTriage;
   /** Approved plan (Markdown), when the task was planned */
   plan?: string;

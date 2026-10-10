@@ -230,6 +230,43 @@ describe('ClaudeTaskRun', () => {
     const reviseInput = (spawned[2].input as Array<{ text?: string }>)[0].text;
     expect(reviseInput).toContain('Rename it');
     expect(spawned[2].args).toContain('--resume');
+    // The change request is assessed first (triage), then applied with the model triage picked
+    expect(triageMock).toHaveBeenCalledTimes(2);
+    expect(triageMock.mock.calls[1][0].description).toContain('Rename it');
+    expect(loadClaudeRunInfo(specDir)!.phases.slice(-3).map((p) => p.name)).toEqual(['triage', 'revise', 'validate']);
+  });
+
+  it('resumes on the profile that holds the session and copies the transcript when the profile changes', async () => {
+    const { resolveClaudeEnv } = await import('../env');
+    const envMock = vi.mocked(resolveClaudeEnv);
+    const dirA = path.join(worktree, 'config-a');
+    const dirB = path.join(worktree, 'config-b');
+    envMock.mockImplementation(async (options) => ({
+      command: 'claude',
+      env: { ...(options?.extraEnv ?? {}), CLAUDE_CONFIG_DIR: options?.profileId === 'b' ? dirB : dirA },
+      profileId: options?.profileId ?? 'a',
+    }));
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push({ messages: [result('s9', { is_error: true, subtype: 'error_during_execution', errors: ['crash'] })] });
+    await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+    expect(loadClaudeRunInfo(specDir)).toMatchObject({ profileId: 'a', configDir: dirA });
+
+    // Without a forced profile the resume stays on profile a
+    scripts.push({ messages: [result('s9', { is_error: true, subtype: 'error_during_execution', errors: ['crash'] })] });
+    await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+    expect(envMock.mock.calls.at(-1)?.[0]?.profileId).toBe('a');
+
+    // A rate-limit swap to profile b copies the transcript into b's config dir first
+    const { mkdirSync, writeFileSync } = await import('fs');
+    mkdirSync(path.join(dirA, 'projects', 'proj'), { recursive: true });
+    writeFileSync(path.join(dirA, 'projects', 'proj', 's9.jsonl'), '{}');
+    scripts.push({ messages: [result('s9')] });
+    const outcome = await makeRun({ profileId: 'b', settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+    expect(outcome.status).toBe('completed');
+    expect(existsSync(path.join(dirB, 'projects', 'proj', 's9.jsonl'))).toBe(true);
+    expect(loadClaudeRunInfo(specDir)).toMatchObject({ profileId: 'b', configDir: dirB });
+    envMock.mockReset();
+    envMock.mockImplementation(async (options) => ({ command: 'claude', env: { ...(options?.extraEnv ?? {}) } }));
   });
 
   it("mirrors Claude Code's task list as subtasks", async () => {
