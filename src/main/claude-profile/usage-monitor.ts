@@ -20,10 +20,6 @@ import { getCredentialsFromKeychain, clearKeychainCache } from './credential-uti
 import { reactiveTokenRefresh, ensureValidToken } from './token-refresh';
 import { isProfileRateLimited } from './rate-limit-manager';
 import { getOperationRegistry } from './operation-registry';
-import { ensureValidCodexToken } from '../ai/auth/codex-oauth';
-import { fetchCodexUsage, normalizeCodexResponse } from './codex-usage-fetcher';
-import { readSettingsFileAsync, writeSettingsFile } from '../settings-utils';
-import type { ProviderAccount } from '../../shared/types/provider-account';
 
 // Re-export for backward compatibility
 export type { ApiProvider };
@@ -50,7 +46,6 @@ const ALLOWED_USAGE_API_DOMAINS = new Set([
   'api.anthropic.com',
   'api.z.ai',
   'open.bigmodel.cn',
-  'chatgpt.com',
 ]);
 
 /**
@@ -66,10 +61,6 @@ const PROVIDER_USAGE_ENDPOINTS: readonly ProviderUsageEndpoint[] = [
   {
     provider: 'anthropic',
     usagePath: '/api/oauth/usage'
-  },
-  {
-    provider: 'openai',
-    usagePath: '/backend-api/wham/usage'
   },
   {
     provider: 'zai',
@@ -437,11 +428,6 @@ export class UsageMonitor extends EventEmitter {
         needsReauthentication: this.needsReauthProfiles.has(profile.id)
       }));
 
-      // Include Codex (OpenAI OAuth) accounts from providerAccounts
-      await this.appendCodexAccounts(allProfiles);
-      // Include Z.AI provider accounts from providerAccounts
-      await this.appendZAIAccounts(allProfiles);
-
       // Return minimal data with auth status - don't return null!
       return {
         activeProfile: {
@@ -524,24 +510,6 @@ export class UsageMonitor extends EventEmitter {
       // Collect usage updates for batch save (avoids race condition with concurrent saves)
       const usageUpdates: Array<{ profileId: string; sessionPercent: number; weeklyPercent: number }> = [];
 
-      // Build provider lookup map for staggered fetching
-      // OAuth profiles (with configDir) are always 'anthropic'; API profiles use their stored provider
-      const providerAccountsMap = new Map<string, string>(); // profileId -> provider
-      try {
-        const appSettings = await readSettingsFileAsync();
-        if (appSettings) {
-          const accounts = (appSettings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-          for (const account of accounts) {
-            providerAccountsMap.set(account.id, account.provider);
-            if (account.claudeProfileId) {
-              providerAccountsMap.set(account.claudeProfileId, account.provider);
-            }
-          }
-        }
-      } catch {
-        // Use default 'anthropic' for all profiles if settings can't be read
-      }
-
       // DEDUPLICATION: Group profiles by configDir to avoid fetching the same underlying
       // account multiple times. Multiple ClaudeProfileManager entries can point to the same
       // configDir (same OAuth credentials = same API endpoint = same usage data).
@@ -579,14 +547,8 @@ export class UsageMonitor extends EventEmitter {
         });
       }
 
-      // Group deduplicated items by provider for staggered fetching
-      const providerGroups = new Map<string, FetchItem[]>();
-      for (const item of deduplicatedFetchItems) {
-        const provider = providerAccountsMap.get(item.profile.id) ?? 'anthropic';
-        const group = providerGroups.get(provider) ?? [];
-        group.push(item);
-        providerGroups.set(provider, group);
-      }
+      // All Claude profiles share one provider (Anthropic): fetch them as one staggered group
+      const providerGroups = new Map<string, FetchItem[]>([['anthropic', deduplicatedFetchItems]]);
 
       // 15-second stagger between consecutive same-provider fetches
       const STAGGER_DELAY_MS = 15_000;
@@ -746,11 +708,6 @@ export class UsageMonitor extends EventEmitter {
         allProfiles.push(result);
       }
     }
-
-    // Include Codex (OpenAI OAuth) accounts from providerAccounts
-    await this.appendCodexAccounts(allProfiles);
-    // Include Z.AI provider accounts from providerAccounts
-    await this.appendZAIAccounts(allProfiles);
 
     // Sort by availability score (highest first = most available)
     allProfiles.sort((a, b) => b.availabilityScore - a.availabilityScore);
@@ -974,187 +931,6 @@ export class UsageMonitor extends EventEmitter {
   }
 
   /**
-   * Append Codex (OpenAI OAuth) provider accounts to the allProfiles list.
-   * These accounts live in providerAccounts (settings.json), not in ClaudeProfileManager,
-   * so they must be added separately.
-   */
-  private async appendCodexAccounts(allProfiles: ProfileUsageSummary[]): Promise<void> {
-    try {
-      const appSettings = await readSettingsFileAsync();
-      if (!appSettings) return;
-
-      const providerAccounts = (appSettings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-
-      for (const account of providerAccounts) {
-        if (account.provider !== 'openai' || account.authType !== 'oauth') continue;
-        // Skip if already present
-        if (allProfiles.some(p => p.profileId === account.id)) continue;
-
-        // If this account matches currentUsage, use that data
-        if (this.currentUsage && this.currentUsage.profileId === account.id) {
-          const s = this.currentUsage;
-          allProfiles.push({
-            profileId: s.profileId,
-            profileName: s.profileName || account.name,
-            profileEmail: s.profileEmail,
-            sessionPercent: s.sessionPercent,
-            weeklyPercent: s.weeklyPercent,
-            sessionResetTimestamp: s.sessionResetTimestamp,
-            weeklyResetTimestamp: s.weeklyResetTimestamp,
-            isAuthenticated: true,
-            isRateLimited: s.sessionPercent >= 95 || s.weeklyPercent >= 95,
-            rateLimitType: s.limitType,
-            availabilityScore: this.calculateAvailabilityScore(s.sessionPercent, s.weeklyPercent, false, undefined, true),
-            isActive: true,
-            lastFetchedAt: s.fetchedAt instanceof Date ? s.fetchedAt.toISOString() : undefined,
-            needsReauthentication: s.needsReauthentication,
-          });
-          continue;
-        }
-
-        // Inactive Codex account — try to fetch its usage
-        try {
-          const token = await ensureValidCodexToken();
-          if (token) {
-            const { getCodexAccountId } = await import('./codex-usage-fetcher');
-            const codexAccountId = getCodexAccountId(token);
-            const rawData = await fetchCodexUsage(token, codexAccountId);
-            if (rawData) {
-              const n = normalizeCodexResponse(rawData, account.id, account.name);
-              allProfiles.push({
-                profileId: account.id,
-                profileName: account.name,
-                profileEmail: n.profileEmail,
-                sessionPercent: n.sessionPercent,
-                weeklyPercent: n.weeklyPercent,
-                sessionResetTimestamp: n.sessionResetTimestamp,
-                weeklyResetTimestamp: n.weeklyResetTimestamp,
-                isAuthenticated: true,
-                isRateLimited: n.sessionPercent >= 95 || n.weeklyPercent >= 95,
-                rateLimitType: n.limitType,
-                availabilityScore: this.calculateAvailabilityScore(n.sessionPercent, n.weeklyPercent, false, undefined, true),
-                isActive: false,
-                lastFetchedAt: new Date().toISOString(),
-                needsReauthentication: false,
-              });
-              continue;
-            }
-          }
-        } catch {
-          // Fetch failed — add minimal entry below
-        }
-
-        // No data available — add minimal entry so the account appears in the list
-        allProfiles.push({
-          profileId: account.id,
-          profileName: account.name,
-          sessionPercent: 0,
-          weeklyPercent: 0,
-          isAuthenticated: true,
-          isRateLimited: false,
-          availabilityScore: 100,
-          isActive: false,
-        });
-      }
-    } catch (error) {
-      this.debugLog('[UsageMonitor] Failed to append Codex accounts:', error);
-    }
-  }
-
-  /**
-   * Append Z.AI provider accounts to the allProfiles list.
-   * Z.AI accounts use API keys and have a quota/limit monitoring API.
-   */
-  private async appendZAIAccounts(allProfiles: ProfileUsageSummary[]): Promise<void> {
-    try {
-      const appSettings = await readSettingsFileAsync();
-      if (!appSettings) return;
-
-      const providerAccounts = (appSettings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-
-      for (const account of providerAccounts) {
-        if (account.provider !== 'zai' || !account.apiKey) continue;
-        // Skip if already present
-        if (allProfiles.some(p => p.profileId === account.id)) continue;
-
-        // If this account matches currentUsage, use that data
-        if (this.currentUsage && this.currentUsage.profileId === account.id) {
-          const s = this.currentUsage;
-          allProfiles.push({
-            profileId: s.profileId,
-            profileName: s.profileName || account.name,
-            profileEmail: s.profileEmail,
-            sessionPercent: s.sessionPercent,
-            weeklyPercent: s.weeklyPercent,
-            sessionResetTimestamp: s.sessionResetTimestamp,
-            weeklyResetTimestamp: s.weeklyResetTimestamp,
-            isAuthenticated: true,
-            isRateLimited: s.sessionPercent >= 95 || s.weeklyPercent >= 95,
-            rateLimitType: s.limitType,
-            availabilityScore: this.calculateAvailabilityScore(s.sessionPercent, s.weeklyPercent, false, undefined, true),
-            isActive: true,
-            lastFetchedAt: s.fetchedAt instanceof Date ? s.fetchedAt.toISOString() : undefined,
-            needsReauthentication: false,
-          });
-          continue;
-        }
-
-        // Inactive Z.AI account — try to fetch its usage
-        try {
-          // CodeQL: file data in outbound request - validate API key is a non-empty string before use
-          const safeApiKey = typeof account.apiKey === 'string' && account.apiKey.length > 0 ? account.apiKey : '';
-          const response = await fetch('https://api.z.ai/api/monitor/usage/quota/limit', {
-            headers: {
-              'Authorization': safeApiKey,
-            },
-          });
-          if (response.ok) {
-            const json = await response.json();
-            // Z.AI wraps response in a data field
-            const rawData = json.data ?? json;
-            const normalized = this.normalizeZAIResponse(rawData, account.id, account.name);
-            if (normalized) {
-              allProfiles.push({
-                profileId: account.id,
-                profileName: account.name,
-                profileEmail: normalized.profileEmail,
-                sessionPercent: normalized.sessionPercent,
-                weeklyPercent: normalized.weeklyPercent,
-                sessionResetTimestamp: normalized.sessionResetTimestamp,
-                weeklyResetTimestamp: normalized.weeklyResetTimestamp,
-                isAuthenticated: true,
-                isRateLimited: normalized.sessionPercent >= 95 || normalized.weeklyPercent >= 95,
-                rateLimitType: normalized.limitType,
-                availabilityScore: this.calculateAvailabilityScore(normalized.sessionPercent, normalized.weeklyPercent, false, undefined, true),
-                isActive: false,
-                lastFetchedAt: new Date().toISOString(),
-                needsReauthentication: false,
-              });
-              continue;
-            }
-          }
-        } catch {
-          // Fetch failed — add minimal entry below
-        }
-
-        // No data available — add minimal entry so the account appears in the list
-        allProfiles.push({
-          profileId: account.id,
-          profileName: account.name,
-          sessionPercent: 0,
-          weeklyPercent: 0,
-          isAuthenticated: true,
-          isRateLimited: false,
-          availabilityScore: 100,
-          isActive: false,
-        });
-      }
-    } catch (error) {
-      this.debugLog('[UsageMonitor] Failed to append Z.AI accounts:', error);
-    }
-  }
-
-  /**
    * Get credential for usage monitoring (OAuth token or API key)
    * Detects profile type and returns appropriate credential
    *
@@ -1185,31 +961,6 @@ export class UsageMonitor extends EventEmitter {
     } catch (error) {
       // API profile loading failed, fall through to OAuth
       this.traceLog('[UsageMonitor:TRACE] Failed to load API profiles, falling back to OAuth:', error);
-    }
-
-    // Check for Codex OAuth token (OpenAI)
-    try {
-      const settings = await readSettingsFileAsync();
-      if (settings) {
-        const providerAccounts = (settings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-        const queue = (settings.globalPriorityOrder as string[] | undefined) ?? [];
-        for (const accountId of queue) {
-          const account = providerAccounts.find(a => a.id === accountId);
-          if (account?.provider === 'openai' && account.authType === 'oauth') {
-            const codexToken = await ensureValidCodexToken();
-            if (codexToken) {
-              this.traceLog('[UsageMonitor:TRACE] Using Codex OAuth token', {
-                tokenFingerprint: getCredentialFingerprint(codexToken)
-              });
-              return codexToken;
-            }
-            this.traceLog('[UsageMonitor:TRACE] Codex OAuth token not available');
-            break;
-          }
-        }
-      }
-    } catch (error) {
-      this.traceLog('[UsageMonitor:TRACE] Failed to get Codex token, falling back to Claude OAuth:', error);
     }
 
     // Fall back to Claude OAuth profile - use ensureValidToken for proactive refresh
@@ -1475,281 +1226,13 @@ export class UsageMonitor extends EventEmitter {
   }
 
   /**
-   * Determine which profile is active by reading globalPriorityOrder from settings.
-   * The first account in the priority order is considered the active one — this
-   * matches the UI's account-selection logic so usage monitoring always tracks the
-   * same account the user sees as "active".
+   * Determine which profile is active:
+   *   1. The active API profile (custom Anthropic-compatible endpoint), when one is set
+   *   2. ClaudeProfileManager.getActiveProfile() (Claude subscription sign-in)
    *
-   * Supported account types (in order of detection within the priority list):
-   *   - Anthropic OAuth  (provider: 'anthropic', authType: 'oauth')
-   *   - Anthropic API key (provider: 'anthropic', authType: 'api-key')
-   *   - OpenAI/Codex OAuth (provider: 'openai', authType: 'oauth')
-   *   - Z.AI API key (provider: 'zai')
-   *   - Other providers: returns null (no usage monitoring supported)
-   *
-   * @returns Active profile info (including resolved credential) or null if undetermined
+   * @returns Active profile info (including resolved credential) or null
    */
   private async determineActiveProfile(): Promise<ActiveProfileResult | null> {
-    // Step 1: Read settings to get providerAccounts and globalPriorityOrder
-    let settings: Record<string, unknown> | undefined;
-    try {
-      settings = await readSettingsFileAsync();
-    } catch (error) {
-      this.traceLog('[UsageMonitor:TRACE] Failed to read settings file:', error);
-    }
-
-    if (!settings) {
-      this.traceLog('[UsageMonitor:TRACE] No settings available, falling back to legacy profile detection');
-      return this.determineActiveProfileLegacy();
-    }
-
-    const providerAccounts = (settings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-    const globalPriorityOrder = (settings.globalPriorityOrder as string[] | undefined) ?? [];
-
-    if (globalPriorityOrder.length === 0) {
-      this.traceLog('[UsageMonitor:TRACE] No globalPriorityOrder in settings, falling back to legacy profile detection');
-      return this.determineActiveProfileLegacy();
-    }
-
-    // Step 2: Find the first ProviderAccount in the priority order
-    let account: ProviderAccount | undefined;
-    for (const accountId of globalPriorityOrder) {
-      const found = providerAccounts.find(a => a.id === accountId);
-      if (found) {
-        account = found;
-        break;
-      }
-    }
-
-    if (!account) {
-      this.traceLog('[UsageMonitor:TRACE] No ProviderAccount found in globalPriorityOrder, falling back to legacy profile detection');
-      return this.determineActiveProfileLegacy();
-    }
-
-    this.traceLog('[UsageMonitor:TRACE] Resolved active account from globalPriorityOrder:', {
-      accountId: account.id,
-      accountName: account.name,
-      provider: account.provider,
-      authType: account.authType
-    });
-
-    // Step 3: Resolve credential and baseUrl based on account type
-    if (account.provider === 'anthropic' && account.authType === 'oauth') {
-      // Anthropic OAuth — resolve via ClaudeProfileManager + keychain
-      const claudeProfileId = account.claudeProfileId;
-      if (!claudeProfileId) {
-        this.traceLog('[UsageMonitor:TRACE] Anthropic OAuth account missing claudeProfileId:', account.id);
-        return null;
-      }
-
-      const profileManager = getClaudeProfileManager();
-      const claudeProfile = profileManager.getProfile(claudeProfileId);
-      if (!claudeProfile || !claudeProfile.configDir) {
-        this.traceLog('[UsageMonitor:TRACE] ClaudeProfile not found or missing configDir for id:', claudeProfileId);
-        return null;
-      }
-
-      const configDir = claudeProfile.configDir.startsWith('~')
-        ? claudeProfile.configDir.replace(/^~/, homedir())
-        : claudeProfile.configDir;
-
-      // Get a fresh OAuth token (proactively refresh if near expiry)
-      let credential: string | undefined;
-      try {
-        const tokenResult = await ensureValidToken(configDir);
-
-        if (tokenResult.wasRefreshed) {
-          this.debugLog('[UsageMonitor] Proactively refreshed OAuth token for active account: ' + account.name, {
-            tokenFingerprint: getCredentialFingerprint(tokenResult.token)
-          });
-          if (tokenResult.persistenceFailed) {
-            console.warn('[UsageMonitor] Token refreshed but persistence failed for account: ' + account.name +
-              ' - user should re-authenticate to avoid auth errors on next restart');
-            this.needsReauthProfiles.add(account.id);
-          } else {
-            this.needsReauthProfiles.delete(account.id);
-          }
-        }
-
-        if (tokenResult.token) {
-          credential = tokenResult.token;
-          // Valid token obtained — clear any stale needs-reauth flag
-          if (!tokenResult.persistenceFailed) {
-            this.needsReauthProfiles.delete(account.id);
-          }
-        } else if (tokenResult.error) {
-          this.traceLog('[UsageMonitor:TRACE] Token validation failed for active account:', tokenResult.error);
-          if (tokenResult.errorCode === 'invalid_grant') {
-            this.needsReauthProfiles.add(account.id);
-          }
-          if (tokenResult.errorCode === 'missing_credentials') {
-            this.needsReauthProfiles.add(account.id);
-          }
-        }
-      } catch (error) {
-        this.traceLog('[UsageMonitor:TRACE] ensureValidToken failed for active account:', error);
-      }
-
-      // Fallback: direct keychain read
-      if (!credential) {
-        const keychainCreds = getCredentialsFromKeychain(configDir);
-        credential = keychainCreds.token ?? undefined;
-        if (credential) {
-          // Got a valid token from keychain fallback — clear stale needs-reauth flag
-          this.needsReauthProfiles.delete(account.id);
-        } else {
-          this.traceLog('[UsageMonitor:TRACE] No token in keychain for Anthropic OAuth account: ' + account.name);
-          this.needsReauthProfiles.add(account.id);
-        }
-      }
-
-      // Discover email from keychain if not persisted on the account
-      let email: string | undefined = account.email;
-      if (!email) {
-        const keychainCreds = getCredentialsFromKeychain(configDir);
-        email = keychainCreds.email ?? undefined;
-
-        // Persist discovered email back to settings asynchronously (non-blocking)
-        if (email) {
-          const discoveredEmail = email;
-          const accountId = account.id;
-          readSettingsFileAsync().then(currentSettings => {
-            if (!currentSettings) return;
-            const accounts = (currentSettings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-            const target = accounts.find(a => a.id === accountId);
-            if (target && !target.email) {
-              target.email = discoveredEmail;
-              try {
-                writeSettingsFile(currentSettings);
-              } catch {
-                // Non-critical — email will be discovered again next poll
-              }
-            }
-          }).catch(() => {});
-        }
-      }
-
-      this.traceLog('[UsageMonitor:TRACE] Active auth type: Anthropic OAuth (via globalPriorityOrder)', {
-        profileId: account.id,
-        profileName: account.name,
-        profileEmail: email
-      });
-
-      return {
-        profileId: account.id,
-        profileName: account.name,
-        profileEmail: email,
-        isAPIProfile: false,
-        baseUrl: 'https://api.anthropic.com',
-        credential
-      };
-    }
-
-    if (account.provider === 'anthropic' && account.authType === 'api-key') {
-      // Anthropic API key account
-      const credential = account.apiKey;
-      if (!credential) {
-        this.traceLog('[UsageMonitor:TRACE] Anthropic API key account missing apiKey:', account.id);
-        return null;
-      }
-
-      // Try to get baseUrl from the legacy profiles file if there's a matching API profile
-      let baseUrl = account.baseUrl ?? 'https://api.anthropic.com';
-      try {
-        const profilesFile = await loadProfilesFile();
-        const matchingProfile = profilesFile.profiles.find(p => p.apiKey === credential);
-        if (matchingProfile?.baseUrl) {
-          baseUrl = matchingProfile.baseUrl;
-        }
-      } catch {
-        // Use account.baseUrl or default
-      }
-
-      this.traceLog('[UsageMonitor:TRACE] Active auth type: Anthropic API key (via globalPriorityOrder)', {
-        profileId: account.id,
-        profileName: account.name,
-        baseUrl
-      });
-
-      return {
-        profileId: account.id,
-        profileName: account.name,
-        profileEmail: account.email,
-        isAPIProfile: true,
-        baseUrl,
-        credential
-      };
-    }
-
-    if (account.provider === 'openai' && account.authType === 'oauth') {
-      // OpenAI/Codex OAuth account
-      let credential: string | undefined;
-      try {
-        const codexToken = await ensureValidCodexToken();
-        credential = codexToken ?? undefined;
-      } catch (error) {
-        this.traceLog('[UsageMonitor:TRACE] Failed to get Codex OAuth token:', error);
-      }
-
-      this.traceLog('[UsageMonitor:TRACE] Active auth type: Codex OAuth (via globalPriorityOrder)', {
-        profileId: account.id,
-        profileName: account.name,
-        hasCredential: !!credential
-      });
-
-      return {
-        profileId: account.id,
-        profileName: account.name,
-        profileEmail: account.email,
-        isAPIProfile: false,
-        baseUrl: 'https://chatgpt.com',
-        credential
-      };
-    }
-
-    if (account.provider === 'zai') {
-      // Z.AI API key account
-      const credential = account.apiKey;
-      if (!credential) {
-        this.traceLog('[UsageMonitor:TRACE] Z.AI account missing apiKey:', account.id);
-        return null;
-      }
-
-      const baseUrl = account.baseUrl ?? 'https://api.z.ai';
-
-      this.traceLog('[UsageMonitor:TRACE] Active auth type: Z.AI API key (via globalPriorityOrder)', {
-        profileId: account.id,
-        profileName: account.name,
-        baseUrl
-      });
-
-      return {
-        profileId: account.id,
-        profileName: account.name,
-        profileEmail: account.email,
-        isAPIProfile: true,
-        baseUrl,
-        credential
-      };
-    }
-
-    // Other providers (google, amazon-bedrock, etc.) — no usage monitoring support
-    this.traceLog('[UsageMonitor:TRACE] Provider not supported for usage monitoring:', {
-      provider: account.provider,
-      accountId: account.id
-    });
-    return null;
-  }
-
-  /**
-   * Legacy fallback for determineActiveProfile when settings/globalPriorityOrder
-   * are not available. Uses the old hardcoded priority:
-   *   1. API profiles file (loadProfilesFile)
-   *   2. ClaudeProfileManager.getActiveProfile()
-   *
-   * @returns Active profile info or null
-   */
-  private async determineActiveProfileLegacy(): Promise<ActiveProfileResult | null> {
     // First, check if an API profile is active
     try {
       const profilesFile = await loadProfilesFile();
@@ -1758,7 +1241,7 @@ export class UsageMonitor extends EventEmitter {
           (p) => p.id === profilesFile.activeProfileId
         );
         if (activeAPIProfile?.apiKey) {
-          this.traceLog('[UsageMonitor:TRACE] [Legacy] Active auth type: API Profile', {
+          this.traceLog('[UsageMonitor:TRACE] Active auth type: API Profile', {
             profileId: activeAPIProfile.id,
             profileName: activeAPIProfile.name,
             baseUrl: activeAPIProfile.baseUrl
@@ -1773,7 +1256,7 @@ export class UsageMonitor extends EventEmitter {
         }
       }
     } catch (error) {
-      this.traceLog('[UsageMonitor:TRACE] [Legacy] Failed to load API profiles:', error);
+      this.traceLog('[UsageMonitor:TRACE] Failed to load API profiles:', error);
     }
 
     // Fall back to Claude OAuth profile
@@ -1781,7 +1264,7 @@ export class UsageMonitor extends EventEmitter {
     const activeOAuthProfile = profileManager.getActiveProfile();
 
     if (!activeOAuthProfile) {
-      this.debugLog('[UsageMonitor] [Legacy] No active profile found');
+      this.debugLog('[UsageMonitor] No active profile found');
       return null;
     }
 
@@ -1797,13 +1280,16 @@ export class UsageMonitor extends EventEmitter {
       const tokenResult = await ensureValidToken(activeOAuthProfile.configDir);
       if (tokenResult.token) {
         credential = tokenResult.token;
+        if (!tokenResult.persistenceFailed) this.needsReauthProfiles.delete(activeOAuthProfile.id);
+      } else if (tokenResult.errorCode === 'invalid_grant' || tokenResult.errorCode === 'missing_credentials') {
+        this.needsReauthProfiles.add(activeOAuthProfile.id);
       }
     } catch {
       const keychainCreds = getCredentialsFromKeychain(activeOAuthProfile.configDir);
       credential = keychainCreds.token ?? undefined;
     }
 
-    this.traceLog('[UsageMonitor:TRACE] [Legacy] Active auth type: OAuth Profile', {
+    this.traceLog('[UsageMonitor:TRACE] Active auth type: OAuth Profile', {
       profileId: activeOAuthProfile.id,
       profileName: activeOAuthProfile.name,
       profileEmail
@@ -2087,7 +1573,7 @@ export class UsageMonitor extends EventEmitter {
         baseUrl = activeProfile.baseUrl;
         provider = detectProvider(baseUrl);
       } else if (activeProfile && !activeProfile.isAPIProfile) {
-        // OAuth profile — detect provider from baseUrl (supports Anthropic + Codex)
+        // OAuth profile — detect provider from baseUrl
         baseUrl = activeProfile.baseUrl;
         provider = detectProvider(baseUrl);
       } else {
@@ -2173,17 +1659,6 @@ export class UsageMonitor extends EventEmitter {
         // OAuth authentication requires the beta header
         headers['anthropic-beta'] = 'claude-code-20250219,oauth-2025-04-20';
         headers['anthropic-version'] = '2023-06-01';
-      } else if (provider === 'openai') {
-        // Codex usage endpoint may need account ID for team accounts
-        try {
-          const { getCodexAccountId } = await import('./codex-usage-fetcher');
-          const accountId = getCodexAccountId(credential);
-          if (accountId) {
-            headers['ChatGPT-Account-Id'] = accountId;
-          }
-        } catch {
-          // Non-critical — personal accounts work without the header
-        }
       }
 
       const response = await fetch(usageEndpoint, {
@@ -2312,9 +1787,6 @@ export class UsageMonitor extends EventEmitter {
       switch (provider) {
         case 'anthropic':
           normalizedUsage = this.normalizeAnthropicResponse(rawData, profileId, profileName, profileEmail);
-          break;
-        case 'openai':
-          normalizedUsage = normalizeCodexResponse(rawData, profileId, profileName, profileEmail);
           break;
         case 'zai':
           normalizedUsage = this.normalizeZAIResponse(responseData, profileId, profileName, profileEmail);

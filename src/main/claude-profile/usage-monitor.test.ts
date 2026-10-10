@@ -72,18 +72,6 @@ vi.mock('../settings-utils', () => ({
   getSettingsPath: vi.fn(() => '/tmp/test-settings.json'),
 }));
 
-// Mock codex-oauth to prevent real OAuth token reads
-vi.mock('../ai/auth/codex-oauth', () => ({
-  ensureValidCodexToken: vi.fn(async () => null),
-}));
-
-// Mock codex-usage-fetcher
-vi.mock('./codex-usage-fetcher', () => ({
-  fetchCodexUsage: vi.fn(async () => null),
-  normalizeCodexResponse: vi.fn(() => null),
-  getCodexAccountId: vi.fn(() => undefined),
-}));
-
 // Mock global fetch
 global.fetch = vi.fn(() =>
   Promise.resolve({

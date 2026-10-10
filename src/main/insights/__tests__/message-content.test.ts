@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildAttachmentParts, MAX_INLINE_TEXT_CHARS } from '../insights-attachments';
-import type { ImageAttachment } from '../../../../shared/types';
+import { buildAttachmentBlocks as buildAttachmentParts, MAX_INLINE_TEXT_CHARS } from '../message-content';
+import type { ImageAttachment } from '../../../shared/types';
 
 const b64 = (value: string | Buffer) => Buffer.from(value).toString('base64');
 
@@ -8,7 +8,7 @@ function attachment(overrides: Partial<ImageAttachment>): ImageAttachment {
   return { id: 'id', filename: 'file', mimeType: 'application/octet-stream', size: 1, data: b64('x'), ...overrides };
 }
 
-describe('buildAttachmentParts', () => {
+describe('buildAttachmentBlocks', () => {
   it('returns no parts when there are no attachments', () => {
     expect(buildAttachmentParts(undefined)).toEqual([]);
     expect(buildAttachmentParts([])).toEqual([]);
@@ -16,12 +16,12 @@ describe('buildAttachmentParts', () => {
 
   it('maps supported images to image parts', () => {
     const [part] = buildAttachmentParts([attachment({ mimeType: 'image/png', data: 'AAAA' })]);
-    expect(part).toEqual({ type: 'image', image: 'AAAA', mediaType: 'image/png' });
+    expect(part).toEqual({ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } });
   });
 
-  it('maps PDFs to file parts', () => {
+  it('maps PDFs to document blocks', () => {
     const [part] = buildAttachmentParts([attachment({ mimeType: 'application/pdf', filename: 'spec.pdf', data: 'AAAA' })]);
-    expect(part).toEqual({ type: 'file', data: 'AAAA', mediaType: 'application/pdf', filename: 'spec.pdf' });
+    expect(part).toEqual({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'AAAA' }, title: 'spec.pdf' });
   });
 
   it('inlines text files with their name', () => {
@@ -48,7 +48,7 @@ describe('buildAttachmentParts', () => {
       attachment({ mimeType: 'application/octet-stream', filename: 'blob.bin', size: 3, data: b64(Buffer.from([0, 1, 2])) })
     ]);
     expect((part as { text: string }).text).toBe(
-      '[Attached binary file "blob.bin" (application/octet-stream, 3 bytes) — its contents cannot be read]'
+      '[Attached binary file "blob.bin" (application/octet-stream, 3 bytes): its contents cannot be read]'
     );
   });
 

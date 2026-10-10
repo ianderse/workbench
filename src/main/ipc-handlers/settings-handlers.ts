@@ -20,254 +20,21 @@ import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-upd
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { resetMemoryService } from './context/memory-service-factory';
 import { configureTools, getToolPath, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache } from '../cli-tool-manager';
-import type { ProviderAccount, ProviderKeyCheckResult } from '../../shared/types/provider-account';
-import { checkProviderKey } from '../services/provider-key-check';
-import type { APIProfile } from '../../shared/types/profile';
-import type { ClaudeProfile } from '../../shared/types/agent';
-import { loadProfilesFile } from '../utils/profile-manager';
-import { loadProfileStore } from '../claude-profile/profile-storage';
 
 const settingsPath = getSettingsPath();
 
-async function migrateToProviderAccounts(settings: AppSettings): Promise<{ changed: boolean; settings: AppSettings }> {
-  if (settings._migratedProviderAccounts) {
-    return { changed: false, settings };
-  }
+/** Settings from the removed multi-provider account system */
+const LEGACY_PROVIDER_SETTING_KEYS = [
+  'providerAccounts',
+  'globalPriorityOrder',
+  'crossProviderPriorityOrder',
+  'modelOverrides',
+  'providerAgentConfig',
+  'customMixedPhaseConfig',
+  '_migratedProviderAccounts',
+  '_migratedToPerProviderConfig',
+] as const;
 
-  const accounts: ProviderAccount[] = settings.providerAccounts ? [...settings.providerAccounts] : [];
-  const now = Date.now();
-
-  const genId = () => `pa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  // Migrate globalAnthropicApiKey
-  if (settings.globalAnthropicApiKey && !accounts.some(a => a.provider === 'anthropic' && a.authType === 'api-key')) {
-    accounts.push({
-      id: genId(),
-      provider: 'anthropic',
-      name: 'Anthropic API Key',
-      authType: 'api-key',
-      apiKey: settings.globalAnthropicApiKey,
-      billingModel: 'pay-per-use' as const,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  // Migrate globalOpenAIApiKey
-  if (settings.globalOpenAIApiKey && !accounts.some(a => a.provider === 'openai')) {
-    accounts.push({
-      id: genId(),
-      provider: 'openai',
-      name: 'OpenAI API Key',
-      authType: 'api-key',
-      apiKey: settings.globalOpenAIApiKey,
-      billingModel: 'pay-per-use' as const,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  // Migrate globalGoogleApiKey
-  if (settings.globalGoogleApiKey && !accounts.some(a => a.provider === 'google')) {
-    accounts.push({
-      id: genId(),
-      provider: 'google',
-      name: 'Google API Key',
-      authType: 'api-key',
-      apiKey: settings.globalGoogleApiKey,
-      billingModel: 'pay-per-use' as const,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  // Migrate globalGroqApiKey
-  if (settings.globalGroqApiKey && !accounts.some(a => a.provider === 'groq')) {
-    accounts.push({
-      id: genId(),
-      provider: 'groq',
-      name: 'Groq API Key',
-      authType: 'api-key',
-      apiKey: settings.globalGroqApiKey,
-      billingModel: 'pay-per-use' as const,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  // Migrate globalMistralApiKey
-  if (settings.globalMistralApiKey && !accounts.some(a => a.provider === 'mistral')) {
-    accounts.push({
-      id: genId(),
-      provider: 'mistral',
-      name: 'Mistral API Key',
-      authType: 'api-key',
-      apiKey: settings.globalMistralApiKey,
-      billingModel: 'pay-per-use' as const,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  // Migrate globalXAIApiKey
-  if (settings.globalXAIApiKey && !accounts.some(a => a.provider === 'xai')) {
-    accounts.push({
-      id: genId(),
-      provider: 'xai',
-      name: 'xAI API Key',
-      authType: 'api-key',
-      apiKey: settings.globalXAIApiKey,
-      billingModel: 'pay-per-use' as const,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  // Migrate globalAzureApiKey
-  if (settings.globalAzureApiKey && !accounts.some(a => a.provider === 'azure')) {
-    accounts.push({
-      id: genId(),
-      provider: 'azure',
-      name: 'Azure API Key',
-      authType: 'api-key',
-      apiKey: settings.globalAzureApiKey,
-      baseUrl: settings.globalAzureBaseUrl,
-      billingModel: 'pay-per-use' as const,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  // Migrate APIProfile[] (custom Anthropic-compatible endpoints stored in profiles.json)
-  try {
-    const profilesFile = await loadProfilesFile();
-    for (const apiProfile of profilesFile.profiles as APIProfile[]) {
-      // Skip if already migrated (match by baseUrl + name to avoid duplicates)
-      if (accounts.some(a => a.provider === 'openai-compatible' && a.baseUrl === apiProfile.baseUrl && a.name === apiProfile.name)) {
-        continue;
-      }
-      accounts.push({
-        id: genId(),
-        provider: 'openai-compatible',
-        name: apiProfile.name,
-        authType: 'api-key',
-        apiKey: apiProfile.apiKey,
-        baseUrl: apiProfile.baseUrl,
-        billingModel: 'pay-per-use' as const,
-        createdAt: apiProfile.createdAt ?? now,
-        updatedAt: apiProfile.updatedAt ?? now,
-      });
-    }
-  } catch {
-    // profiles.json may not exist for new users — skip silently
-  }
-
-  // Migrate ClaudeProfile[] (OAuth accounts stored in claude-profiles.json)
-  try {
-    const claudeStorePath = path.join(app.getPath('userData'), 'config', 'claude-profiles.json');
-    const claudeStore = loadProfileStore(claudeStorePath);
-    if (claudeStore) {
-      for (const claudeProfile of claudeStore.profiles as ClaudeProfile[]) {
-        // Skip if already linked (match by claudeProfileId)
-        if (accounts.some(a => a.claudeProfileId === claudeProfile.id)) {
-          continue;
-        }
-        accounts.push({
-          id: genId(),
-          provider: 'anthropic',
-          name: claudeProfile.name,
-          authType: 'oauth',
-          apiKey: claudeProfile.oauthToken,
-          email: claudeProfile.email,
-          billingModel: 'subscription' as const,
-          createdAt: claudeProfile.createdAt instanceof Date ? claudeProfile.createdAt.getTime() : now,
-          updatedAt: now,
-          claudeProfileId: claudeProfile.id,
-        });
-      }
-    }
-  } catch {
-    // claude-profiles.json may not exist — skip silently
-  }
-
-  // Build globalPriorityOrder from migrated accounts
-  const globalPriorityOrder = accounts.map(a => a.id);
-
-  return {
-    changed: true,
-    settings: {
-      ...settings,
-      providerAccounts: accounts,
-      globalPriorityOrder,
-      _migratedProviderAccounts: true,
-    },
-  };
-}
-
-/**
- * Auto-detect the auto-claude prompts path relative to the app location.
- * Works across platforms (macOS, Windows, Linux) in both dev and production modes.
- * Prompts live in prompts/ (dev) or extraResources/prompts (prod).
- */
-const detectAutoBuildSourcePath = (): string | null => {
-  const possiblePaths: string[] = [];
-
-  // Development mode paths
-  if (is.dev) {
-    // In dev, __dirname is typically out/main
-    possiblePaths.push(
-      path.resolve(__dirname, '..', '..', 'prompts'), // From out/main -> prompts
-      path.resolve(process.cwd(), 'prompts')          // From cwd (repo root)
-    );
-  } else {
-    // Production mode paths (packaged app)
-    // Prompts are bundled as extraResources/prompts
-    // On all platforms, it should be at process.resourcesPath/prompts
-    possiblePaths.push(
-      path.resolve(process.resourcesPath, 'prompts')             // Primary: extraResources/prompts
-    );
-    // Fallback paths for different app structures
-    const appPath = app.getAppPath();
-    possiblePaths.push(
-      path.resolve(appPath, '..', 'prompts'),                    // Sibling to asar
-      path.resolve(appPath, '..', '..', 'Resources', 'prompts') // macOS bundle structure
-    );
-  }
-
-  // Add process.cwd() as last resort on all platforms
-  possiblePaths.push(path.resolve(process.cwd(), 'prompts'));
-
-  // Enable debug logging with DEBUG=1
-  const debug = process.env.DEBUG === '1' || process.env.DEBUG === 'true';
-
-  if (debug) {
-    console.warn('[detectAutoBuildSourcePath] Platform:', process.platform);
-    console.warn('[detectAutoBuildSourcePath] Is dev:', is.dev);
-    console.warn('[detectAutoBuildSourcePath] __dirname:', __dirname);
-    console.warn('[detectAutoBuildSourcePath] app.getAppPath():', app.getAppPath());
-    console.warn('[detectAutoBuildSourcePath] process.cwd():', process.cwd());
-    console.warn('[detectAutoBuildSourcePath] Checking paths:', possiblePaths);
-  }
-
-  for (const p of possiblePaths) {
-    // Use planner.md as marker - this is the file needed for task planning
-    const markerPath = path.join(p, 'planner.md');
-    const exists = existsSync(p) && existsSync(markerPath);
-
-    if (debug) {
-      console.warn(`[detectAutoBuildSourcePath] Checking ${p}: ${exists ? '✓ FOUND' : '✗ not found'}`);
-    }
-
-    if (exists) {
-      console.warn(`[detectAutoBuildSourcePath] Auto-detected prompts path: ${p}`);
-      return p;
-    }
-  }
-
-  console.warn('[detectAutoBuildSourcePath] Could not auto-detect Auto Claude prompts path. Please configure manually in settings.');
-  console.warn('[detectAutoBuildSourcePath] Set DEBUG=1 environment variable for detailed path checking.');
-  return null;
-};
 
 /**
  * Register all settings-related IPC handlers
@@ -288,95 +55,20 @@ export function registerSettingsHandlers(
       const settings: AppSettings = { ...DEFAULT_APP_SETTINGS, ...savedSettings };
       let needsSave = false;
 
-      // Migration: Set agent profile to 'auto' for users who haven't made a selection (one-time)
-      // This ensures new users get the optimized 'auto' profile as the default
-      // while preserving existing user preferences
-      if (!settings._migratedAgentProfileToAuto) {
-        // Only set 'auto' if user hasn't made a selection yet
-        if (!settings.selectedAgentProfile) {
-          settings.selectedAgentProfile = 'auto';
+      // Migration: Drop multi-provider account settings (all AI work runs through Claude Code now).
+      // providerAccounts held copies of API keys and OAuth tokens, so don't leave them on disk.
+      const rawSettings = settings as unknown as Record<string, unknown>;
+      for (const key of LEGACY_PROVIDER_SETTING_KEYS) {
+        if (key in rawSettings) {
+          delete rawSettings[key];
+          needsSave = true;
         }
-        settings._migratedAgentProfileToAuto = true;
-        needsSave = true;
-      }
-
-      // Migration: Sync defaultModel with selectedAgentProfile (#414)
-      // Fixes bug where defaultModel was stuck at 'opus' regardless of profile selection
-      if (!settings._migratedDefaultModelSync) {
-        if (settings.selectedAgentProfile) {
-          const profile = DEFAULT_AGENT_PROFILES.find(p => p.id === settings.selectedAgentProfile);
-          if (profile) {
-            settings.defaultModel = profile.model;
-          }
-        }
-        settings._migratedDefaultModelSync = true;
-        needsSave = true;
-      }
-
-      // Migration: Replace legacy thinking levels with valid equivalents
-      // The 'ultrathink' value was removed but may persist in stored customPhaseThinking
-      if (!settings._migratedUltrathinkToHigh) {
-        if (settings.customPhaseThinking) {
-          let changed = false;
-          for (const phase of Object.keys(settings.customPhaseThinking) as Array<keyof typeof settings.customPhaseThinking>) {
-            if (!(VALID_THINKING_LEVELS as readonly string[]).includes(settings.customPhaseThinking[phase])) {
-              const mapped = sanitizeThinkingLevel(settings.customPhaseThinking[phase]);
-              settings.customPhaseThinking[phase] = mapped as import('../../shared/types/settings').ThinkingLevel;
-              changed = true;
-            }
-          }
-          if (changed) {
-            console.warn('[SETTINGS_GET] Migrated invalid thinking levels in customPhaseThinking');
-          }
-        }
-        if (settings.featureThinking) {
-          let changed = false;
-          for (const feature of Object.keys(settings.featureThinking) as Array<keyof typeof settings.featureThinking>) {
-            if (!(VALID_THINKING_LEVELS as readonly string[]).includes(settings.featureThinking[feature])) {
-              const mapped = sanitizeThinkingLevel(settings.featureThinking[feature]);
-              settings.featureThinking[feature] = mapped as import('../../shared/types/settings').ThinkingLevel;
-              changed = true;
-            }
-          }
-          if (changed) {
-            console.warn('[SETTINGS_GET] Migrated invalid thinking levels in featureThinking');
-          }
-        }
-        settings._migratedUltrathinkToHigh = true;
-        needsSave = true;
-      }
-
-      // Migration: Copy global agent config to per-provider config
-      if (!settings._migratedToPerProviderConfig) {
-        const connected = new Set((settings.providerAccounts ?? []).map((a: ProviderAccount) => a.provider));
-        if (connected.size > 0) {
-          const perProvider: typeof settings.providerAgentConfig = {};
-          for (const provider of connected) {
-            perProvider[provider] = {
-              selectedAgentProfile: settings.selectedAgentProfile,
-              customPhaseModels: settings.customPhaseModels,
-              customPhaseThinking: settings.customPhaseThinking,
-              featureModels: settings.featureModels,
-              featureThinking: settings.featureThinking,
-            };
-          }
-          settings.providerAgentConfig = perProvider;
-        }
-        settings._migratedToPerProviderConfig = true;
-        needsSave = true;
       }
 
       // Migration: Reset color themes that no longer exist (removed in earlier releases) to 'default'
       const sanitizedColorTheme = sanitizeColorTheme(settings.colorTheme);
       if (settings.colorTheme !== undefined && settings.colorTheme !== sanitizedColorTheme) {
         settings.colorTheme = sanitizedColorTheme;
-        needsSave = true;
-      }
-
-      // Migration: Convert legacy global API keys, APIProfiles, and ClaudeProfiles to ProviderAccount entries
-      const providerAccountsMigration = await migrateToProviderAccounts(settings);
-      if (providerAccountsMigration.changed) {
-        Object.assign(settings, providerAccountsMigration.settings);
         needsSave = true;
       }
 
@@ -392,14 +84,6 @@ export function registerSettingsHandlers(
           );
           delete settings[field];
           needsSave = true;
-        }
-      }
-
-      // If no manual autoBuildPath is set, try to auto-detect
-      if (!settings.autoBuildPath) {
-        const detectedPath = detectAutoBuildSourcePath();
-        if (detectedPath) {
-          settings.autoBuildPath = detectedPath;
         }
       }
 
@@ -439,33 +123,15 @@ export function registerSettingsHandlers(
         const savedSettings = readSettingsFile();
         const currentSettings = { ...DEFAULT_APP_SETTINGS, ...savedSettings };
 
-        // Strip providerAccounts and globalPriorityOrder — these are managed
-        // exclusively by their dedicated IPC handlers (PROVIDER_ACCOUNTS_*)
-        // to prevent the general settings save from clobbering them.
-        // Likewise skippedUpdateVersion/updateRemindAfter are owned by the app updater.
+        // skippedUpdateVersion/updateRemindAfter are owned by the app updater
         const {
-          providerAccounts: _pa,
-          globalPriorityOrder: _gpo,
           skippedUpdateVersion: _skipped,
           updateRemindAfter: _remindAfter,
           ...safeSettings
         } = settings;
         const newSettings = { ...currentSettings, ...safeSettings };
 
-        // Sync defaultModel when agent profile changes (#414)
-        if (settings.selectedAgentProfile) {
-          const profile = DEFAULT_AGENT_PROFILES.find(p => p.id === settings.selectedAgentProfile);
-          if (profile) {
-            newSettings.defaultModel = profile.model;
-          }
-        }
-
         writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2), 'utf-8');
-
-        // Apply Python path if changed
-        if (settings.pythonPath || settings.autoBuildPath) {
-          agentManager.configure(settings.pythonPath, settings.autoBuildPath);
-        }
 
         // Configure CLI tools if any paths changed
         if (
@@ -490,16 +156,18 @@ export function registerSettingsHandlers(
         }
 
         // Reset memory service singleton when memory-related settings change
-        if (
-          settings.memoryEmbeddingProvider !== undefined ||
-          settings.memoryEnabled !== undefined ||
-          settings.globalOpenAIApiKey !== undefined ||
-          settings.globalGoogleApiKey !== undefined ||
-          settings.memoryVoyageApiKey !== undefined ||
-          settings.memoryAzureApiKey !== undefined ||
-          settings.ollamaBaseUrl !== undefined ||
-          settings.memoryOllamaEmbeddingModel !== undefined
-        ) {
+        // (embedding API keys and the Ollama URL are read by the memory service factory)
+        const memoryKeys = [
+          'memoryEmbeddingProvider',
+          'memoryEnabled',
+          'globalOpenAIApiKey',
+          'globalGoogleApiKey',
+          'memoryVoyageApiKey',
+          'memoryAzureApiKey',
+          'ollamaBaseUrl',
+          'memoryOllamaEmbeddingModel',
+        ];
+        if (memoryKeys.some((key) => (settings as Record<string, unknown>)[key] !== undefined)) {
           resetMemoryService();
         }
 
@@ -899,248 +567,6 @@ export function registerSettingsHandlers(
           success: false,
           error: error instanceof Error ? error.message : 'Failed to set spell check languages'
         };
-      }
-    }
-  );
-
-  // ============================================
-  // Provider Account CRUD Handlers
-  // ============================================
-
-  const genAccountId = () => `pa_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-
-  /** Read providerAccounts array from settings.json */
-  function readProviderAccounts(): ProviderAccount[] {
-    const settings = readSettingsFile();
-    if (!settings) return [];
-    return (settings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-  }
-
-  /** Write providerAccounts array back to settings.json (merges with existing settings) */
-  function writeProviderAccounts(accounts: ProviderAccount[]): void {
-    const settings = readSettingsFile() ?? {};
-    settings.providerAccounts = accounts;
-    const settingsPath = getSettingsPath();
-    writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-  }
-
-  // GET all provider accounts
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_GET,
-    async (): Promise<IPCResult<{ accounts: ProviderAccount[] }>> => {
-      try {
-        const accounts = readProviderAccounts();
-        return { success: true, data: { accounts } };
-      } catch (error) {
-        console.error('[PROVIDER_ACCOUNTS_GET] Error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to get provider accounts' };
-      }
-    }
-  );
-
-  // SAVE (create) a new provider account
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_SAVE,
-    async (_event, account: Omit<ProviderAccount, 'id' | 'createdAt' | 'updatedAt'>): Promise<IPCResult<ProviderAccount>> => {
-      try {
-        const settings = readSettingsFile() ?? {};
-        const accounts: ProviderAccount[] = (settings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-
-        // Prevent duplicate: same email + provider already registered
-        if (account.email) {
-          const duplicate = accounts.find(
-            (a) => a.provider === account.provider && a.email?.toLowerCase() === account.email!.toLowerCase()
-          );
-          if (duplicate) {
-            return {
-              success: false,
-              error: `DUPLICATE_EMAIL:${duplicate.name}`,
-            };
-          }
-        }
-
-        const now = Date.now();
-        const newAccount: ProviderAccount = {
-          ...account,
-          id: genAccountId(),
-          createdAt: now,
-          updatedAt: now,
-        };
-        accounts.push(newAccount);
-        settings.providerAccounts = accounts;
-
-        // Add to globalPriorityOrder — prepend so new account becomes active
-        const queue: string[] = (settings.globalPriorityOrder as string[] | undefined) ?? [];
-        queue.unshift(newAccount.id);
-        settings.globalPriorityOrder = queue;
-
-        const settingsPath = getSettingsPath();
-        writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-        console.warn('[PROVIDER_ACCOUNTS_SAVE] Created account:', newAccount.id, newAccount.name, newAccount.provider, '| Queue position: #1 of', queue.length);
-        return { success: true, data: newAccount };
-      } catch (error) {
-        console.error('[PROVIDER_ACCOUNTS_SAVE] Error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to save provider account' };
-      }
-    }
-  );
-
-  // UPDATE an existing provider account
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_UPDATE,
-    async (_event, id: string, updates: Partial<ProviderAccount>): Promise<IPCResult<ProviderAccount>> => {
-      try {
-        const accounts = readProviderAccounts();
-        const index = accounts.findIndex(a => a.id === id);
-        if (index === -1) {
-          return { success: false, error: `Account not found: ${id}` };
-        }
-        const updated: ProviderAccount = {
-          ...accounts[index],
-          ...updates,
-          id, // prevent id override
-          updatedAt: Date.now(),
-        };
-        accounts[index] = updated;
-        writeProviderAccounts(accounts);
-        console.warn('[PROVIDER_ACCOUNTS_UPDATE] Updated account:', id);
-        return { success: true, data: updated };
-      } catch (error) {
-        console.error('[PROVIDER_ACCOUNTS_UPDATE] Error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to update provider account' };
-      }
-    }
-  );
-
-  // DELETE a provider account
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_DELETE,
-    async (_event, id: string): Promise<IPCResult> => {
-      try {
-        const settings = readSettingsFile() ?? {};
-        const accounts: ProviderAccount[] = (settings.providerAccounts as ProviderAccount[] | undefined) ?? [];
-        const filtered = accounts.filter(a => a.id !== id);
-        if (filtered.length === accounts.length) {
-          return { success: false, error: `Account not found: ${id}` };
-        }
-        settings.providerAccounts = filtered;
-
-        // Remove from globalPriorityOrder
-        const queue: string[] = (settings.globalPriorityOrder as string[] | undefined) ?? [];
-        settings.globalPriorityOrder = queue.filter(qid => qid !== id);
-
-        // Remove from crossProviderPriorityOrder
-        const cpQueue: string[] = (settings.crossProviderPriorityOrder as string[] | undefined) ?? [];
-        if (cpQueue.length > 0) {
-          settings.crossProviderPriorityOrder = cpQueue.filter(qid => qid !== id);
-        }
-
-        const settingsPath = getSettingsPath();
-        writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-        console.warn('[PROVIDER_ACCOUNTS_DELETE] Deleted account:', id);
-        return { success: true };
-      } catch (error) {
-        console.error('[PROVIDER_ACCOUNTS_DELETE] Error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to delete provider account' };
-      }
-    }
-  );
-
-  // SET QUEUE ORDER for provider accounts (global priority queue)
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_SET_QUEUE_ORDER,
-    async (_event, order: string[]): Promise<IPCResult> => {
-      try {
-        const settings = readSettingsFile() ?? {};
-        settings.globalPriorityOrder = order;
-        const currentSettingsPath = getSettingsPath();
-        writeFileSync(currentSettingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-
-        // Sync to claude-profiles.json so usage-monitor (which reads from profileManager) stays in sync
-        try {
-          const { getClaudeProfileManager } = await import('../claude-profile-manager');
-          const manager = getClaudeProfileManager();
-          manager.setAccountPriorityOrder(order);
-        } catch {
-          // Non-fatal: usage-monitor may use stale order until next app restart
-        }
-
-        console.warn('[PROVIDER_ACCOUNTS_SET_QUEUE_ORDER] Queue order updated:', order.length, 'accounts');
-        return { success: true };
-      } catch (error) {
-        console.error('[PROVIDER_ACCOUNTS_SET_QUEUE_ORDER] Error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to set queue order' };
-      }
-    }
-  );
-
-  // SET CROSS-PROVIDER QUEUE ORDER (separate priority for cross-provider mode)
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_SET_CROSS_PROVIDER_QUEUE_ORDER,
-    async (_event, order: string[]): Promise<IPCResult> => {
-      try {
-        const settings = readSettingsFile() ?? {};
-        settings.crossProviderPriorityOrder = order;
-        const currentSettingsPath = getSettingsPath();
-        writeFileSync(currentSettingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-        return { success: true };
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to set cross-provider queue order' };
-      }
-    }
-  );
-
-  // SAVE MODEL OVERRIDES (cross-provider model equivalence user overrides)
-  ipcMain.handle(
-    IPC_CHANNELS.MODEL_OVERRIDES_SAVE,
-    async (_event, overrides: Record<string, unknown>): Promise<IPCResult> => {
-      try {
-        const settings = readSettingsFile() ?? {};
-        settings.modelOverrides = overrides;
-        const currentSettingsPath = getSettingsPath();
-        writeFileSync(currentSettingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-        console.warn('[MODEL_OVERRIDES_SAVE] Model overrides saved');
-        return { success: true };
-      } catch (error) {
-        console.error('[MODEL_OVERRIDES_SAVE] Error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to save model overrides' };
-      }
-    }
-  );
-
-  // TEST CONNECTION for a provider account
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_TEST_CONNECTION,
-    async (_event, provider: string, config: { apiKey?: string; baseUrl?: string; region?: string }): Promise<IPCResult<ProviderKeyCheckResult>> => {
-      return { success: true, data: await checkProviderKey(provider, config) };
-    }
-  );
-
-  // CHECK ENV credentials (detect which providers have env vars set)
-  ipcMain.handle(
-    IPC_CHANNELS.PROVIDER_ACCOUNTS_CHECK_ENV,
-    async (): Promise<IPCResult<Record<string, boolean>>> => {
-      try {
-        const envMap: Record<string, boolean> = {};
-        const envVarMapping: Record<string, string> = {
-          ANTHROPIC_API_KEY: 'anthropic',
-          OPENAI_API_KEY: 'openai',
-          GOOGLE_GENERATIVE_AI_API_KEY: 'google',
-          MISTRAL_API_KEY: 'mistral',
-          GROQ_API_KEY: 'groq',
-          XAI_API_KEY: 'xai',
-          AWS_ACCESS_KEY_ID: 'amazon-bedrock',
-          AZURE_OPENAI_API_KEY: 'azure',
-        };
-        for (const [envVar, provider] of Object.entries(envVarMapping)) {
-          if (process.env[envVar]) {
-            envMap[provider] = true;
-          }
-        }
-        return { success: true, data: envMap };
-      } catch (error) {
-        console.error('[PROVIDER_ACCOUNTS_CHECK_ENV] Error:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to check env credentials' };
       }
     }
   );

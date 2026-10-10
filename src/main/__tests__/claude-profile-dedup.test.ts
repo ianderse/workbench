@@ -108,18 +108,4 @@ describe('ClaudeProfileManager profile deduplication', () => {
 
     expect(internals.data.profiles.map(p => p.id)).toEqual(['keep']);
   });
-
-  it('remaps provider accounts that pointed at a removed duplicate', () => {
-    settingsRef.value = {
-      providerAccounts: [{ id: 'acc-1', claudeProfileId: 'dup' }, { id: 'acc-2', claudeProfileId: 'other' }],
-    };
-    internals.data.profiles = [profile('keep', '/profiles/work'), profile('dup', '/profiles/work')];
-
-    internals.deduplicateProfiles();
-
-    expect(settingsRef.value.providerAccounts).toEqual([
-      { id: 'acc-1', claudeProfileId: 'keep' },
-      { id: 'acc-2', claudeProfileId: 'other' },
-    ]);
-  });
 });

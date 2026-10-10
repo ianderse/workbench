@@ -2,35 +2,37 @@
  * PR Creator Runner
  * =================
  *
- * Creates GitHub Pull Requests with AI-generated descriptions using Vercel AI SDK.
- * See src/main/ai/runners/github/pr-creator.ts for the TypeScript implementation.
+ * Creates GitHub Pull Requests with a title and description written by Claude Code.
  *
  * Steps:
- * 1. Push the worktree branch to origin via git
- * 2. Gather diff/commit context from the branch
- * 3. Generate a semantic PR description via generateText
- * 4. Create the PR via `gh pr create`
- * 5. Return the PR URL and metadata
+ * 1. Push the worktree branch to origin
+ * 2. Gather context: task title/description, the Claude Code run summary, plan and validation
+ *    (`claude_run.json`), and the branch's commit log and diff summary
+ * 3. Ask Claude Code (read-only tools, cwd = worktree) for a PR title and body
+ * 4. Create the PR with `gh pr create`
  *
- * Uses `createSimpleClient()` with no tools (single-turn text generation).
+ * All git/gh calls are async so the main process never blocks.
  */
 
-import { generateText } from 'ai';
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 
-import { createSimpleClient } from '../../client/factory';
-import type { ModelShorthand, ThinkingLevel } from '../../config/types';
+import { loadClaudeRunInfo } from '../../../claude-code/task-runner';
+import { runClaudeText, READ_ONLY_TOOLS } from '../../../claude-code/run-text';
+import type { ClaudeEffort } from '../../../../shared/types/claude-code';
+
+const execFileAsync = promisify(execFile);
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const SYSTEM_PROMPT = `You are a senior software engineer writing a GitHub Pull Request description.
-Write a clear, professional PR description that explains WHAT was changed, WHY it was changed, and HOW to test it.
+const SYSTEM_PROMPT = `You are a senior software engineer writing a GitHub Pull Request.
+Write a clear, professional PR title and description that explains WHAT was changed, WHY it was changed, and HOW to test it.
 
-Format your response in Markdown with these sections:
+The title is one line (under 72 characters), imperative mood, no trailing period.
+
+The body is Markdown with these sections:
 ## Summary
 (1-3 bullet points describing the main changes)
 
@@ -40,8 +42,22 @@ Format your response in Markdown with these sections:
 ## Testing
 (How to verify the changes work correctly)
 
-Keep the description concise but informative. Focus on the business value and technical impact.
-Do not include any preamble — output only the Markdown body.`;
+Keep the description concise but informative. You may read files in the repository to understand
+the changes, but do not modify anything. Do not include any preamble.`;
+
+const PR_TEXT_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string', description: 'PR title, one line' },
+    body: { type: 'string', description: 'PR description in Markdown' },
+  },
+  required: ['title', 'body'],
+  additionalProperties: false,
+} as const;
+
+/** Upper bound for the PR text generation run */
+const PR_TEXT_TIMEOUT_MS = 3 * 60 * 1000;
+const MAX_TITLE_LENGTH = 200;
 
 // =============================================================================
 // Types
@@ -55,22 +71,27 @@ export interface CreatePRConfig {
   worktreePath: string;
   /** Spec ID (e.g., "001-add-feature") */
   specId: string;
+  /** Task spec directory in the main project (holds claude_run.json) */
+  specDir?: string;
+  /** Task title and description (context for the PR text) */
+  taskTitle?: string;
+  taskDescription?: string;
   /** Branch name to push and create PR from */
   branchName: string;
   /** Base branch to merge into (e.g., "main", "develop") */
   baseBranch: string;
-  /** PR title */
-  title: string;
+  /** PR title chosen by the user; generated when omitted */
+  title?: string;
   /** Whether to create as a draft PR */
   draft?: boolean;
   /** Path to the gh CLI executable */
   ghPath: string;
   /** Path to the git CLI executable */
   gitPath: string;
-  /** Model shorthand (defaults to 'haiku') */
-  modelShorthand?: ModelShorthand;
-  /** Thinking level (defaults to 'low') */
-  thinkingLevel?: ThinkingLevel;
+  /** Claude model alias (defaults to 'sonnet') */
+  model?: string;
+  /** Reasoning effort (defaults to 'low') */
+  effort?: ClaudeEffort;
 }
 
 /** Result of PR creation */
@@ -81,105 +102,91 @@ export interface CreatePRResult {
   error?: string;
 }
 
+interface PRText {
+  title: string;
+  body: string;
+}
+
 // =============================================================================
-// Context Gathering
+// Helpers
 // =============================================================================
 
-/**
- * Gather diff and commit log context for the PR.
- * Mirrors Python's _gather_pr_context().
- */
-function gatherPRContext(
+async function run(command: string, args: string[], cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync(command, args, { cwd, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+  return stdout;
+}
+
+/** First git command that succeeds, or an empty string */
+async function firstOutput(gitPath: string, cwd: string, attempts: string[][], limit: number): Promise<string> {
+  for (const args of attempts) {
+    try {
+      return (await run(gitPath, args, cwd)).slice(0, limit);
+    } catch {
+      // Try the next form
+    }
+  }
+  return '';
+}
+
+/** Gather diff and commit log context for the PR */
+async function gatherPRContext(
   worktreePath: string,
   gitPath: string,
   baseBranch: string,
-): { diffSummary: string; commitLog: string } {
-  let diffSummary = '';
-  let commitLog = '';
-
-  try {
-    diffSummary = execFileSync(
-      gitPath,
-      ['diff', '--stat', `origin/${baseBranch}...HEAD`],
-      { cwd: worktreePath, encoding: 'utf-8' },
-    ).slice(0, 3000);
-  } catch {
-    try {
-      // Fallback without "origin/" prefix
-      diffSummary = execFileSync(
-        gitPath,
-        ['diff', '--stat', `${baseBranch}...HEAD`],
-        { cwd: worktreePath, encoding: 'utf-8' },
-      ).slice(0, 3000);
-    } catch {
-      // Not fatal — proceed without diff
-    }
-  }
-
-  try {
-    commitLog = execFileSync(
-      gitPath,
-      ['log', '--oneline', `origin/${baseBranch}..HEAD`],
-      { cwd: worktreePath, encoding: 'utf-8' },
-    ).slice(0, 2000);
-  } catch {
-    try {
-      commitLog = execFileSync(
-        gitPath,
-        ['log', '--oneline', `${baseBranch}..HEAD`],
-        { cwd: worktreePath, encoding: 'utf-8' },
-      ).slice(0, 2000);
-    } catch {
-      // Not fatal — proceed without commit log
-    }
-  }
-
+): Promise<{ diffSummary: string; commitLog: string }> {
+  const base = baseBranch.startsWith('origin/') ? baseBranch.slice('origin/'.length) : baseBranch;
+  const [diffSummary, commitLog] = await Promise.all([
+    firstOutput(gitPath, worktreePath, [
+      ['diff', '--stat', `origin/${base}...HEAD`],
+      ['diff', '--stat', `${base}...HEAD`],
+    ], 4000),
+    firstOutput(gitPath, worktreePath, [
+      ['log', '--oneline', `origin/${base}..HEAD`],
+      ['log', '--oneline', `${base}..HEAD`],
+    ], 3000),
+  ]);
   return { diffSummary, commitLog };
 }
 
-/**
- * Extract a brief summary from the spec file for fallback PR body.
- */
-function extractSpecSummary(projectDir: string, specId: string): string {
-  const specFile = join(projectDir, '.auto-claude', 'specs', specId, 'spec.md');
-  if (!existsSync(specFile)) {
-    return `Implements ${specId}`;
-  }
+/** Task context from the task itself and its Claude Code run */
+function describeTask(config: CreatePRConfig): string {
+  const parts: string[] = [];
+  if (config.taskTitle) parts.push(`Task title: ${config.taskTitle}`);
+  if (config.taskDescription) parts.push(`Task description:\n${config.taskDescription.slice(0, 4000)}`);
 
-  try {
-    const content = readFileSync(specFile, 'utf-8');
-    // Extract first ~500 chars after the title
-    const withoutTitle = content.replace(/^#+[^\n]+\n/, '').trim();
-    return withoutTitle.slice(0, 500) || `Implements ${specId}`;
-  } catch {
-    return `Implements ${specId}`;
+  const info = config.specDir ? loadClaudeRunInfo(config.specDir) : null;
+  if (info?.summary) parts.push(`Summary written after implementation:\n${info.summary.slice(0, 4000)}`);
+  if (info?.plan) parts.push(`Implementation plan:\n${info.plan.slice(0, 4000)}`);
+  if (info?.validation) {
+    const v = info.validation;
+    const checks = v.checks.map((c) => `- ${c.name}`).join('\n');
+    parts.push(`Validation (${v.status}): ${v.summary}${checks ? `\nChecks:\n${checks}` : ''}`);
   }
+  return parts.join('\n\n');
 }
 
-// =============================================================================
-// AI PR Body Generation
-// =============================================================================
+/** Fallback PR text when Claude Code is unavailable */
+function fallbackPRText(config: CreatePRConfig, commitLog: string): PRText {
+  const info = config.specDir ? loadClaudeRunInfo(config.specDir) : null;
+  const summary = info?.summary || config.taskDescription || `Implements ${config.specId}`;
+  const body = commitLog.trim()
+    ? `## Summary\n\n${summary.slice(0, 2000)}\n\n## Commits\n\n${commitLog.trim()}`
+    : `## Summary\n\n${summary.slice(0, 2000)}`;
+  return { title: config.taskTitle || `auto-claude: ${config.specId}`, body };
+}
 
-/**
- * Generate a PR description using AI.
- * Mirrors Python's _try_ai_pr_body().
- */
-async function generatePRBody(
-  specId: string,
-  title: string,
-  baseBranch: string,
-  branchName: string,
+/** Ask Claude Code for the PR title and body */
+async function generatePRText(
+  config: CreatePRConfig,
   diffSummary: string,
   commitLog: string,
-  modelShorthand: ModelShorthand,
-  thinkingLevel: ThinkingLevel,
-): Promise<string | null> {
-  const prompt = `Create a GitHub Pull Request description for the following change:
+): Promise<PRText | null> {
+  const prompt = `Write the title and description for a GitHub Pull Request.
 
-Task: ${title}
-Spec ID: ${specId}
-Branch: ${branchName}
-Base branch: ${baseBranch}
+${describeTask(config)}
+
+Branch: ${config.branchName}
+Base branch: ${config.baseBranch}
 
 Commit log:
 ${commitLog || '(no commits listed)'}
@@ -187,87 +194,64 @@ ${commitLog || '(no commits listed)'}
 Diff summary:
 ${diffSummary || '(no diff available)'}
 
-Write a professional PR description. Output ONLY the Markdown body — no preamble.`;
+You can inspect the changes with \`git diff ${config.baseBranch}...HEAD\` or by reading files.`;
 
   try {
-    const client = await createSimpleClient({
-      systemPrompt: SYSTEM_PROMPT,
-      modelShorthand,
-      thinkingLevel,
-    });
-
-    const result = await generateText({
-      model: client.model,
-      system: client.systemPrompt,
+    const result = await runClaudeText({
       prompt,
+      systemPrompt: SYSTEM_PROMPT,
+      model: config.model ?? 'sonnet',
+      effort: config.effort ?? 'low',
+      cwd: config.worktreePath,
+      tools: [...READ_ONLY_TOOLS, 'Bash'],
+      allowedTools: ['Bash(git diff *)', 'Bash(git log *)', 'Bash(git show *)'],
+      jsonSchema: PR_TEXT_SCHEMA,
+      maxTurns: 15,
+      timeoutMs: PR_TEXT_TIMEOUT_MS,
     });
-
-    return result.text.trim() || null;
+    const structured = result.structured as Partial<PRText> | undefined;
+    const title = typeof structured?.title === 'string' ? structured.title.split('\n')[0].trim() : '';
+    const body = typeof structured?.body === 'string' ? structured.body.trim() : result.text.trim();
+    if (!body) return null;
+    return { title: title.slice(0, MAX_TITLE_LENGTH), body };
   } catch {
     return null;
   }
 }
 
-// =============================================================================
-// Push Branch
-// =============================================================================
-
-/**
- * Push the worktree branch to origin.
- * Returns an error string on failure, or undefined on success.
- */
-function pushBranch(
-  worktreePath: string,
-  gitPath: string,
-  branchName: string,
-): string | undefined {
+/** Push the worktree branch to origin; returns an error string on failure */
+async function pushBranch(worktreePath: string, gitPath: string, branchName: string): Promise<string | undefined> {
   try {
-    execFileSync(
-      gitPath,
-      ['push', '--set-upstream', 'origin', branchName],
-      { cwd: worktreePath, encoding: 'utf-8', stdio: 'pipe' },
-    );
+    await run(gitPath, ['push', '--set-upstream', 'origin', branchName], worktreePath);
     return undefined;
   } catch (err: unknown) {
-    const stderr = err instanceof Error && 'stderr' in err
-      ? String((err as NodeJS.ErrnoException & { stderr?: string }).stderr)
-      : String(err);
-    return stderr || 'Push failed';
+    const stderr = (err as { stderr?: string }).stderr;
+    return stderr ? String(stderr) : err instanceof Error ? err.message : String(err);
   }
 }
 
-// =============================================================================
-// Get Existing PR URL
-// =============================================================================
-
-/**
- * Try to retrieve the URL of an existing PR for the branch.
- */
-function getExistingPRUrl(
+/** URL of an existing PR for the branch */
+async function getExistingPRUrl(
   projectDir: string,
   ghPath: string,
   branchName: string,
   baseBranch: string,
-): string | undefined {
+): Promise<string | undefined> {
   try {
-    const output = execFileSync(
-      ghPath,
-      ['pr', 'view', branchName, '--json', 'url', '--jq', '.url'],
-      { cwd: projectDir, encoding: 'utf-8', stdio: 'pipe' },
-    ).trim();
-    return output.startsWith('http') ? output : undefined;
+    const output = (await run(ghPath, ['pr', 'view', branchName, '--json', 'url', '--jq', '.url'], projectDir)).trim();
+    if (output.startsWith('http')) return output;
   } catch {
-    // Try alternative: list open PRs for this head
-    try {
-      const listOutput = execFileSync(
-        ghPath,
-        ['pr', 'list', '--head', branchName, '--base', baseBranch, '--json', 'url', '--jq', '.[0].url'],
-        { cwd: projectDir, encoding: 'utf-8', stdio: 'pipe' },
-      ).trim();
-      return listOutput.startsWith('http') ? listOutput : undefined;
-    } catch {
-      return undefined;
-    }
+    // Fall through to listing
+  }
+  try {
+    const listOutput = (await run(
+      ghPath,
+      ['pr', 'list', '--head', branchName, '--base', baseBranch, '--json', 'url', '--jq', '.[0].url'],
+      projectDir,
+    )).trim();
+    return listOutput.startsWith('http') ? listOutput : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -275,83 +259,34 @@ function getExistingPRUrl(
 // Main PR Creator
 // =============================================================================
 
-/**
- * Push a worktree branch and create a GitHub PR with an AI-generated description.
- *
- * @param config - PR creation configuration
- * @returns Result with PR URL or error details
- */
+/** Push a worktree branch and create a GitHub PR with a Claude-written title and description */
 export async function createPR(config: CreatePRConfig): Promise<CreatePRResult> {
-  const {
-    projectDir,
-    worktreePath,
-    specId,
-    branchName,
-    baseBranch,
-    title,
-    draft = false,
-    ghPath,
-    gitPath,
-    modelShorthand = 'haiku',
-    thinkingLevel = 'low',
-  } = config;
+  const { projectDir, worktreePath, branchName, baseBranch, draft = false, ghPath, gitPath } = config;
 
   // Step 1: Push the branch to origin
-  const pushError = pushBranch(worktreePath, gitPath, branchName);
+  const pushError = await pushBranch(worktreePath, gitPath, branchName);
   if (pushError) {
-    // If it looks like the branch is already up-to-date, don't bail
-    const isUpToDate = pushError.includes('Everything up-to-date') ||
-                       pushError.includes('up to date');
+    const isUpToDate = pushError.includes('Everything up-to-date') || pushError.includes('up to date');
     if (!isUpToDate) {
       return { success: false, error: `Failed to push branch: ${pushError}` };
     }
   }
 
-  // Step 2: Gather context for AI description
-  const { diffSummary, commitLog } = gatherPRContext(worktreePath, gitPath, baseBranch);
+  // Step 2-3: Gather context and generate the PR text
+  const { diffSummary, commitLog } = await gatherPRContext(worktreePath, gitPath, baseBranch);
+  const generated = await generatePRText(config, diffSummary, commitLog);
+  const fallback = fallbackPRText(config, commitLog);
+  const title = config.title?.trim() || generated?.title || fallback.title;
+  const body = generated?.body || fallback.body;
 
-  // Step 3: Generate AI PR body (falls back to spec summary on failure)
-  const aiBody = await generatePRBody(
-    specId,
-    title,
-    baseBranch,
-    branchName,
-    diffSummary,
-    commitLog,
-    modelShorthand,
-    thinkingLevel,
-  );
+  // Step 4: Create the PR
+  const effectiveBase = baseBranch.startsWith('origin/') ? baseBranch.slice('origin/'.length) : baseBranch;
+  const ghArgs = ['pr', 'create', '--base', effectiveBase, '--head', branchName, '--title', title, '--body', body];
+  if (draft) ghArgs.push('--draft');
 
-  const prBody = aiBody || extractSpecSummary(projectDir, specId);
-
-  // Step 4: Strip remote prefix from base branch if present
-  const effectiveBase = baseBranch.startsWith('origin/')
-    ? baseBranch.slice('origin/'.length)
-    : baseBranch;
-
-  // Step 5: Build gh pr create command
-  const ghArgs = [
-    'pr', 'create',
-    '--base', effectiveBase,
-    '--head', branchName,
-    '--title', title,
-    '--body', prBody,
-  ];
-
-  if (draft) {
-    ghArgs.push('--draft');
-  }
-
-  // Step 6: Execute gh pr create with retry on network errors
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const output = execFileSync(ghPath, ghArgs, {
-        cwd: projectDir,
-        encoding: 'utf-8',
-        stdio: 'pipe',
-      }).trim();
-
-      // Extract PR URL from output
+      const output = (await run(ghPath, ghArgs, projectDir)).trim();
       let prUrl: string | undefined;
       if (output.startsWith('http')) {
         prUrl = output;
@@ -359,32 +294,25 @@ export async function createPR(config: CreatePRConfig): Promise<CreatePRResult> 
         const match = output.match(/https:\/\/[^\s]+\/pull\/\d+/);
         prUrl = match ? match[0] : undefined;
       }
-
       return { success: true, prUrl, alreadyExists: false };
     } catch (err: unknown) {
       const spawnErr = err as NodeJS.ErrnoException & { stderr?: string; stdout?: string };
       const stderr = String(spawnErr.stderr ?? '');
       const stdout = String(spawnErr.stdout ?? '');
 
-      // Check "already exists" — not a failure
       if (stderr.toLowerCase().includes('already exists') || stdout.toLowerCase().includes('already exists')) {
-        const existingUrl = getExistingPRUrl(projectDir, ghPath, branchName, effectiveBase);
+        const existingUrl = await getExistingPRUrl(projectDir, ghPath, branchName, effectiveBase);
         return { success: true, prUrl: existingUrl, alreadyExists: true };
       }
 
-      // Check if retryable (network / 5xx errors)
       const isNetworkError = /timeout|connection|network|ECONNRESET|ECONNREFUSED/i.test(stderr);
       const isServerError = /5\d\d|server error|internal error/i.test(stderr);
-
       if ((isNetworkError || isServerError) && attempt < 2) {
-        // Exponential backoff before retry
         await new Promise((resolve) => setTimeout(resolve, (attempt + 1) * 2000));
         continue;
       }
 
-      // Non-retryable error — return failure
-      const errorMessage = stderr || stdout || String(spawnErr.message) || 'Failed to create PR';
-      return { success: false, error: errorMessage };
+      return { success: false, error: stderr || stdout || String(spawnErr.message) || 'Failed to create PR' };
     }
   }
 

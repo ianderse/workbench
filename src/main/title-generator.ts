@@ -1,7 +1,5 @@
 import { EventEmitter } from 'events';
-import { streamText } from 'ai';
-import { createSimpleClient } from './ai/client/factory';
-import { getActiveProviderFeatureSettings } from './ipc-handlers/feature-settings-helper';
+import { runClaudeText } from './claude-code/run-text';
 
 /**
  * Debug logging - only logs when DEBUG=true or in development mode
@@ -18,9 +16,8 @@ const SYSTEM_PROMPT =
   'You generate short, concise task titles (3-7 words). Output ONLY the title, nothing else. No quotes, no explanation, no preamble.';
 
 /**
- * Service for generating task titles from descriptions using the Vercel AI SDK.
+ * Service for generating task titles from descriptions using a one-shot Claude Code run (haiku).
  *
- * Replaces the previous Python subprocess implementation.
  * Emits "sdk-rate-limit" events on 429 errors (same interface as before).
  */
 export class TitleGenerator extends EventEmitter {
@@ -48,35 +45,14 @@ export class TitleGenerator extends EventEmitter {
     debug('Generating title for description:', description.substring(0, 100) + '...');
 
     try {
-      // Read the user's configured naming model for their active provider.
-      // This ensures we use the correct model for the active provider
-      // (e.g., Codex models for OpenAI Codex OAuth, Gemini for Google, etc.)
-      const namingSettings = getActiveProviderFeatureSettings('naming');
-      debug('Using naming settings:', namingSettings.model, namingSettings.thinkingLevel);
-
-      const client = await createSimpleClient({
-        systemPrompt: SYSTEM_PROMPT,
-        modelShorthand: namingSettings.model,
-        thinkingLevel: namingSettings.thinkingLevel as 'low' | 'medium' | 'high' | 'xhigh',
-      });
-
-      // Handle Codex models the same way as runner.ts:
-      // Codex requires instructions field (not system messages in input) and store=false
-      const isCodex = client.resolvedModelId?.includes('codex') ?? false;
-
-      const result = streamText({
-        model: client.model,
-        system: isCodex ? undefined : client.systemPrompt,
+      const result = await runClaudeText({
         prompt,
-        providerOptions: isCodex ? {
-          openai: {
-            ...(client.systemPrompt ? { instructions: client.systemPrompt } : {}),
-            store: false,
-          },
-        } : undefined,
+        systemPrompt: SYSTEM_PROMPT,
+        model: 'haiku',
+        timeoutMs: 60_000,
       });
 
-      const raw = (await result.text).trim();
+      const raw = result.text.trim();
       if (!raw) {
         debug('AI returned empty response');
         return null;

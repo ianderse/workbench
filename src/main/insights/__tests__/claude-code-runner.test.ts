@@ -37,8 +37,8 @@ process.stdin.on('end', () => {
 
 let cliFound = true;
 
-vi.mock('node:child_process', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:child_process')>();
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
   return {
     ...actual,
     // Run the fake CLI with the current Node binary (works on every platform)
@@ -46,43 +46,29 @@ vi.mock('node:child_process', async (importOriginal) => {
       actual.spawn(process.execPath, [fakeCli, ...args], { ...options, shell: false }),
   };
 });
-vi.mock('../../../cli-tool-manager', () => ({
+vi.mock('../../cli-tool-manager', () => ({
   getToolInfo: () => (cliFound ? { found: true, path: '/usr/bin/claude' } : { found: false, message: 'Claude CLI not found' }),
 }));
-vi.mock('../../../cli-utils', () => ({
-  getClaudeCliInvocationAsync: async () => ({
+vi.mock('../../claude-code/env', () => ({
+  resolveClaudeEnv: async () => ({
     command: '/usr/bin/claude',
-    env: { ...process.env, ANTHROPIC_API_KEY: 'sk-ant-api03-should-be-removed' },
+    env: { ...process.env, ANTHROPIC_API_KEY: undefined, GRAPHIFY_OUT: undefined, CLAUDE_CONFIG_DIR: '/profiles/main' },
+    profileId: 'main',
   }),
 }));
-vi.mock('../../../env-utils', () => ({
+vi.mock('../../env-utils', () => ({
   getSpawnCommand: (command: string) => command,
   getSpawnOptions: (_command: string, options: Record<string, unknown>) => ({ ...options, shell: false }),
 }));
-const mockGetProfileEnv = vi.fn();
-vi.mock('../../../rate-limit-detector', () => ({
-  getProfileEnv: (...args: unknown[]) => mockGetProfileEnv(...args),
-}));
-const mockBuildDefaultQueueConfig = vi.fn();
-const mockResolveAuthFromQueue = vi.fn();
-vi.mock('../../auth/resolver', () => ({
-  buildDefaultQueueConfig: (...args: unknown[]) => mockBuildDefaultQueueConfig(...args),
-  resolveAuthFromQueue: (...args: unknown[]) => mockResolveAuthFromQueue(...args),
-}));
-vi.mock('../../tools/build-registry', () => ({
-  buildToolRegistry: () => ({ getToolsForAgent: () => ({}) }),
-}));
 
 import {
-  resolveInsightsBackend,
-  runInsightsViaClaudeCode,
-  CLAUDE_CODE_READ_ONLY_TOOLS,
-  CLAUDE_CODE_GRAPHIFY_COMMANDS,
-} from '../insights-claude-code';
-import type { InsightsStreamEvent } from '../insights';
-import { INSIGHTS_ERROR_CODES, parseInsightsError } from '../../../../shared/constants/insights';
-
-const backend = { kind: 'claude-code' as const, modelId: 'claude-sonnet-4-6', profileEnv: { CLAUDE_CONFIG_DIR: '/profiles/main' } };
+  runInsights,
+  INSIGHTS_READ_ONLY_TOOLS,
+  INSIGHTS_GRAPHIFY_COMMANDS,
+  toClaudeModel,
+  type InsightsStreamEvent,
+} from '../claude-code-runner';
+import { INSIGHTS_ERROR_CODES, parseInsightsError } from '../../../shared/constants/insights';
 
 const delta = (index: number, d: Record<string, unknown>) => ({ type: 'stream_event', event: { type: 'content_block_delta', index, delta: d } });
 const blockStart = (index: number, block: Record<string, unknown>) => ({ type: 'stream_event', event: { type: 'content_block_start', index, content_block: block } });
@@ -115,9 +101,8 @@ const record = () => JSON.parse(readFileSync(recordFile, 'utf8'));
 
 async function run(overrides: Record<string, unknown> = {}) {
   const events: InsightsStreamEvent[] = [];
-  const promise = runInsightsViaClaudeCode(
-    { projectDir: workDir, message: 'How does auth work?', thinkingLevel: 'high', ...overrides },
-    backend,
+  const promise = runInsights(
+    { projectDir: workDir, message: 'How does auth work?', model: 'claude-sonnet-4-6', thinkingLevel: 'high', ...overrides },
     (e) => events.push(e),
   );
   return { promise, events };
@@ -130,7 +115,7 @@ beforeEach(() => {
 
 afterAll(() => rmSync(workDir, { recursive: true, force: true }));
 
-describe('runInsightsViaClaudeCode', () => {
+describe('runInsights', () => {
   it('streams text and tool activity and returns the answer', async () => {
     setRun(conversation);
     const { promise, events } = await run();
@@ -147,13 +132,13 @@ describe('runInsightsViaClaudeCode', () => {
     ]);
   });
 
-  it('runs the CLI read-only, headless and with the account credentials', async () => {
+  it('runs the CLI read-only, headless and with the profile credentials', async () => {
     setRun(conversation);
     await (await run()).promise;
     const { args, configDir, apiKey, systemPrompt } = record();
 
     expect(args).toEqual(expect.arrayContaining(['-p', '--input-format', 'stream-json', '--output-format', 'stream-json']));
-    expect(args[args.indexOf('--tools') + 1]).toBe(CLAUDE_CODE_READ_ONLY_TOOLS.join(','));
+    expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
     expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-4-6');
     expect(args[args.indexOf('--effort') + 1]).toBe('high');
@@ -176,9 +161,9 @@ describe('runInsightsViaClaudeCode', () => {
     })).promise;
     const { args, systemPrompt, graphifyOut } = record();
 
-    expect(args[args.indexOf('--tools') + 1]).toBe([...CLAUDE_CODE_READ_ONLY_TOOLS, 'Bash'].join(','));
-    const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--allowedTools') + 1 + CLAUDE_CODE_GRAPHIFY_COMMANDS.length);
-    expect(allowed).toEqual([...CLAUDE_CODE_GRAPHIFY_COMMANDS]);
+    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, 'Bash'].join(','));
+    const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--allowedTools') + 1 + INSIGHTS_GRAPHIFY_COMMANDS.length);
+    expect(allowed).toEqual([...INSIGHTS_GRAPHIFY_COMMANDS]);
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
     expect(systemPrompt).toContain('graphify commands section');
     expect(systemPrompt).not.toContain('CodebaseGraph tool section');
@@ -251,33 +236,12 @@ describe('runInsightsViaClaudeCode', () => {
   });
 });
 
-describe('resolveInsightsBackend', () => {
-  const queue = [{ id: 'acc-1', provider: 'anthropic', claudeProfileId: 'profile-1' }];
-
-  it('uses Claude Code for an Anthropic subscription (OAuth) account', async () => {
-    mockBuildDefaultQueueConfig.mockReturnValue({ queue, requestedModel: 'claude-sonnet-4-6' });
-    mockResolveAuthFromQueue.mockResolvedValue({ accountId: 'acc-1', resolvedProvider: 'anthropic', source: 'profile-oauth', resolvedModelId: 'claude-sonnet-4-6' });
-    mockGetProfileEnv.mockReturnValue({ CLAUDE_CONFIG_DIR: '/profiles/one' });
-
-    expect(await resolveInsightsBackend('sonnet')).toEqual({
-      kind: 'claude-code',
-      modelId: 'claude-sonnet-4-6',
-      profileEnv: { CLAUDE_CONFIG_DIR: '/profiles/one' },
-    });
-    expect(mockGetProfileEnv).toHaveBeenCalledWith('profile-1');
-  });
-
-  it('keeps the AI SDK for API keys and other providers', async () => {
-    mockBuildDefaultQueueConfig.mockReturnValue({ queue, requestedModel: 'claude-sonnet-4-6' });
-    mockResolveAuthFromQueue.mockResolvedValue({ accountId: 'acc-1', resolvedProvider: 'anthropic', source: 'profile-api-key', resolvedModelId: 'claude-sonnet-4-6' });
-    expect(await resolveInsightsBackend('sonnet')).toEqual({ kind: 'ai-sdk' });
-
-    mockResolveAuthFromQueue.mockResolvedValue({ accountId: 'acc-2', resolvedProvider: 'openai', source: 'codex-oauth', resolvedModelId: 'gpt-5' });
-    expect(await resolveInsightsBackend('sonnet')).toEqual({ kind: 'ai-sdk' });
-  });
-
-  it('falls back to the AI SDK when no accounts are configured', async () => {
-    mockBuildDefaultQueueConfig.mockReturnValue(undefined);
-    expect(await resolveInsightsBackend('sonnet')).toEqual({ kind: 'ai-sdk' });
+describe('toClaudeModel', () => {
+  it('keeps aliases and full Claude IDs, maps legacy IDs to their family, defaults to sonnet', () => {
+    expect(toClaudeModel('opus')).toBe('opus');
+    expect(toClaudeModel('claude-sonnet-4-6')).toBe('claude-sonnet-4-6');
+    expect(toClaudeModel('us.anthropic.haiku-x')).toBe('haiku');
+    expect(toClaudeModel('gpt-5')).toBe('sonnet');
+    expect(toClaudeModel(undefined)).toBe('sonnet');
   });
 });

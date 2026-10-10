@@ -27,7 +27,6 @@ import { registerGraphifyHandlers } from './graphify-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
-import { registerCodexAuthHandlers } from './codex-auth-handlers';
 import { notificationService } from '../notification-service';
 import { setAgentManagerRef } from './utils';
 
@@ -100,9 +99,6 @@ export function setupIpcHandlers(
   // API Profile handlers (custom Anthropic-compatible endpoints)
   registerProfileHandlers();
 
-  // Codex OAuth authentication handlers
-  registerCodexAuthHandlers();
-
   console.warn('[IPC] All handler modules registered successfully');
 }
 
@@ -124,6 +120,5 @@ export {
   registerClaudeCodeHandlers,
   registerGraphifyHandlers,
   registerMcpHandlers,
-  registerProfileHandlers,
-  registerCodexAuthHandlers
+  registerProfileHandlers
 };

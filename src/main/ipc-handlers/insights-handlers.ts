@@ -19,19 +19,11 @@ import type {
 import { projectStore } from "../project-store";
 import { insightsService } from "../insights-service";
 import { safeSendToRenderer } from "./utils";
-import { getActiveProviderFeatureSettings } from "./feature-settings-helper";
 import type { ThinkingLevel } from "../../shared/types/settings";
 
-/**
- * Read insights feature settings using per-provider resolution
- */
+/** Default model for Insights turns (Claude Code model alias) */
 function getInsightsFeatureSettings(): InsightsModelConfig {
-  const { model, thinkingLevel } = getActiveProviderFeatureSettings('insights');
-  return {
-    profileId: "balanced",
-    model,
-    thinkingLevel: thinkingLevel as ThinkingLevel,
-  };
+  return { profileId: "balanced", model: "sonnet", thinkingLevel: "medium" as ThinkingLevel };
 }
 
 /**

@@ -59,7 +59,6 @@ import { initializeAppUpdater, stopPeriodicUpdates } from './app-updater';
 import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, ADD_TO_DICTIONARY_LABELS } from '../shared/constants';
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
-import { registerSettingsAccessor } from './ai/auth/resolver';
 import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
@@ -109,14 +108,6 @@ const DEFAULT_SCREEN_HEIGHT: number = 1080;
 
 // Setup error logging early (captures uncaught exceptions)
 setupErrorLogging();
-
-// Wire up settings accessor for the AI auth resolver.
-// This lets resolveAuth() / buildDefaultQueueConfig() read provider accounts
-// and priority order from app settings without a circular dependency on the settings store.
-registerSettingsAccessor((key: string) => {
-  const settings = readSettingsFile();
-  return settings?.[key] as string | undefined;
-});
 
 /**
  * Load app settings synchronously (for use during startup).

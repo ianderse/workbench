@@ -18,7 +18,6 @@
  */
 
 import type { ClaudeProfile, ClaudeAutoSwitchSettings, APIProfile } from '../../shared/types';
-import type { ProviderAccount } from '../../shared/types/provider-account';
 import type { UnifiedAccount } from '../../shared/types/unified-account';
 import {
   claudeProfileToUnified,
@@ -508,53 +507,6 @@ export function shouldProactivelySwitch(
   }
 
   return { shouldSwitch: false };
-}
-
-// ============================================
-// Provider Account Scoring (v4 - Global Queue)
-// ============================================
-
-/**
- * Score a ProviderAccount for availability in the global priority queue.
- *
- * - Pay-per-use accounts (API keys) are always available unless error-flagged
- * - Subscription accounts (OAuth) check rate limits and usage thresholds
- */
-export function scoreProviderAccount(
-  account: ProviderAccount,
-  settings: ClaudeAutoSwitchSettings
-): { available: boolean; score: number; reason?: string } {
-  // Pay-per-use: always available
-  if (account.billingModel === 'pay-per-use') {
-    return { available: true, score: 100 };
-  }
-
-  // Subscription: check rate limits
-  if (account.rateLimitEvents && account.rateLimitEvents.length > 0) {
-    const now = Date.now();
-    const activeRateLimit = account.rateLimitEvents.find(e => {
-      if (!e.resetAt) return false;
-      const resetTime = typeof e.resetAt === 'number' ? e.resetAt : new Date(e.resetAt).getTime();
-      return resetTime > now;
-    });
-    if (activeRateLimit) {
-      return { available: false, score: -200, reason: 'rate limited' };
-    }
-  }
-
-  // Subscription: check usage thresholds
-  if (account.usage) {
-    if (account.usage.weeklyUsagePercent >= settings.weeklyThreshold) {
-      return { available: false, score: -100, reason: 'weekly threshold exceeded' };
-    }
-    if (account.usage.sessionUsagePercent >= settings.sessionThreshold) {
-      return { available: false, score: -50, reason: 'session threshold exceeded' };
-    }
-    return { available: true, score: 100 - (account.usage.weeklyUsagePercent ?? 0) * 0.3 };
-  }
-
-  // No usage data — assume available
-  return { available: true, score: 100 };
 }
 
 /**

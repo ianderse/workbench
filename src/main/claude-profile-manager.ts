@@ -58,7 +58,6 @@ import {
 } from './claude-profile/profile-utils';
 import { debugLog } from '../shared/utils/debug-logger';
 import { isWindows } from './platform';
-import { readSettingsFile, writeSettingsFile } from './settings-utils';
 
 /** Normalize a profile configDir for comparison (~ expansion, resolution, Windows case). */
 function normalizeConfigDir(configDir: string): string {
@@ -219,34 +218,9 @@ export class ClaudeProfileManager {
         .filter(id => (seen.has(id) ? false : (seen.add(id), true)));
     }
 
-    this.remapProviderAccountProfiles(idRemap);
 
     debugLog(`[ClaudeProfileManager] Deduplicated profiles: removed ${idRemap.size} duplicates, ${kept.length} remaining`);
     this.save();
-  }
-
-  /**
-   * Point provider accounts (settings.json) that referenced a removed duplicate profile
-   * at the profile that was kept.
-   */
-  private remapProviderAccountProfiles(idRemap: Map<string, string>): void {
-    try {
-      const settings = readSettingsFile();
-      const accounts = settings?.providerAccounts;
-      if (!settings || !Array.isArray(accounts)) return;
-
-      let changed = false;
-      for (const account of accounts as Array<{ claudeProfileId?: string }>) {
-        const mapped = account.claudeProfileId ? idRemap.get(account.claudeProfileId) : undefined;
-        if (mapped) {
-          account.claudeProfileId = mapped;
-          changed = true;
-        }
-      }
-      if (changed) writeSettingsFile(settings);
-    } catch (error) {
-      console.warn('[ClaudeProfileManager] Failed to remap provider accounts after dedup:', error);
-    }
   }
 
   /**

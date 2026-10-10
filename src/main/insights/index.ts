@@ -6,7 +6,7 @@
  * - paths: Path resolution utilities
  * - session-storage: Filesystem persistence layer
  * - session-manager: Session lifecycle management
- * - insights-executor: Python process execution
+ * - insights-executor: runs chat turns through Claude Code (claude-code-runner)
  */
 
 export { InsightsConfig } from './config';

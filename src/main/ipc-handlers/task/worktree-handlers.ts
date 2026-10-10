@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow, shell, app } from 'electron';
-import { IPC_CHANNELS, AUTO_BUILD_PATHS, DEFAULT_APP_SETTINGS, DEFAULT_FEATURE_MODELS, DEFAULT_FEATURE_THINKING, MODEL_ID_MAP, THINKING_BUDGET_MAP, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, WorktreeStatus, WorktreeDiff, WorktreeDiffFile, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, SupportedIDE, SupportedTerminal, SupportedCLI, AppSettings } from '../../../shared/types';
+import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir } from '../../../shared/constants';
+import type { IPCResult, WorktreeStatus, WorktreeDiff, WorktreeDiffFile, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, SupportedIDE, SupportedTerminal, SupportedCLI } from '../../../shared/types';
 import path from 'path';
 import { minimatch } from 'minimatch';
 import { existsSync, readdirSync, statSync, readFileSync, promises as fsPromises } from 'fs';
@@ -11,7 +11,7 @@ import { projectStore } from '../../project-store';
 import { MergeOrchestrator } from '../../ai/merge/orchestrator';
 import { createMergeResolverFn } from '../../ai/runners/merge-resolver';
 import { createPR } from '../../ai/runners/github/pr-creator';
-import type { ModelShorthand } from '../../ai/config/types';
+import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
 import { getToolPath } from '../../cli-tool-manager';
 import { promisify } from 'util';
@@ -92,45 +92,6 @@ const PRINTABLE_CHARS_REGEX = /^[\x20-\x7E\u00A0-\uFFFF]*$/;
 
 // Timeout for PR creation operations (2 minutes for network operations)
 const PR_CREATION_TIMEOUT_MS = 120000;
-
-/**
- * Read utility feature settings (for commit message, merge resolver) from settings file
- */
-function getUtilitySettings(): { model: string; modelId: string; thinkingLevel: string; thinkingBudget: number | null } {
-  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-
-  try {
-    if (existsSync(settingsPath)) {
-      const content = readFileSync(settingsPath, 'utf-8');
-      const settings: AppSettings = { ...DEFAULT_APP_SETTINGS, ...JSON.parse(content) };
-
-      // Get utility-specific settings
-      const featureModels = settings.featureModels || DEFAULT_FEATURE_MODELS;
-      const featureThinking = settings.featureThinking || DEFAULT_FEATURE_THINKING;
-
-      const model = featureModels.utility || DEFAULT_FEATURE_MODELS.utility;
-      const thinkingLevel = featureThinking.utility || DEFAULT_FEATURE_THINKING.utility;
-
-      return {
-        model,
-        modelId: MODEL_ID_MAP[model] || MODEL_ID_MAP.haiku,
-        thinkingLevel,
-        thinkingBudget: thinkingLevel in THINKING_BUDGET_MAP ? THINKING_BUDGET_MAP[thinkingLevel] : THINKING_BUDGET_MAP.low
-      };
-    }
-  } catch (error) {
-    // Log parse errors to help diagnose corrupted settings
-    console.warn('[getUtilitySettings] Failed to parse settings.json:', error);
-  }
-
-  // Return defaults if settings file doesn't exist or fails to parse
-  return {
-    model: DEFAULT_FEATURE_MODELS.utility,
-    modelId: MODEL_ID_MAP[DEFAULT_FEATURE_MODELS.utility],
-    thinkingLevel: DEFAULT_FEATURE_THINKING.utility,
-    thinkingBudget: THINKING_BUDGET_MAP[DEFAULT_FEATURE_THINKING.utility]
-  };
-}
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -2005,10 +1966,6 @@ export function registerWorktreeHandlers(
         debug('Using base branch:', effectiveBaseBranch,
           `(source: ${taskBaseBranch ? 'task metadata' : projectMainBranch ? 'project settings' : 'default'})`);
 
-        // Get utility settings for merge resolver model selection
-        const utilitySettings = getUtilitySettings();
-        debug('Utility settings for merge:', utilitySettings);
-
         // Emit initial progress event so renderer shows the merge has started
         const mainWindow = getMainWindow();
         const emitProgress = (stage: string, percent: number, message: string, details: Record<string, unknown> = {}) => {
@@ -2025,9 +1982,8 @@ export function registerWorktreeHandlers(
 
         emitProgress('analyzing', 0, 'Starting merge engine');
 
-        // Build the AI resolver function using the merge-resolver runner
-        const modelShorthand = (utilitySettings.model as ModelShorthand) || 'haiku';
-        const aiResolverFn = createMergeResolverFn(modelShorthand, 'low');
+        // AI conflict resolution runs through Claude Code
+        const aiResolverFn = createMergeResolverFn('sonnet', 'low');
 
         // Create the merge orchestrator
         const storageDir = path.join(project.path, project.autoBuildPath || '.auto-claude');
@@ -2247,8 +2203,11 @@ export function registerWorktreeHandlers(
 
                   const { generateCommitMessage } = await import('../../ai/runners/commit-message');
                   suggestedCommitMessage = await generateCommitMessage({
-                    projectDir: project.path,
                     specName: task.specId,
+                    specDir,
+                    taskTitle: task.title,
+                    taskDescription: task.metadata?.userDescription || task.description,
+                    githubIssue: task.metadata?.githubIssueNumber,
                     diffSummary,
                     filesChanged: filesChangedList,
                   });
@@ -2562,6 +2521,9 @@ export function registerWorktreeHandlers(
         if (cleanupResult.warnings.length > 0) {
           console.warn('[TASK_WORKTREE_DISCARD] Cleanup warnings:', cleanupResult.warnings);
         }
+
+        // The Claude Code session ran in the discarded worktree: start over next time
+        resetTaskRunState(project, task);
 
 
         // Only send status change to backlog if not skipped
@@ -2958,7 +2920,7 @@ export function registerWorktreeHandlers(
         const taskBaseBranch = getTaskBaseBranch(specDir);
         const baseBranch = options?.targetBranch || taskBaseBranch || 'main';
         const branchName = `auto-claude/${task.specId}`;
-        const prTitle = options?.title || `auto-claude: ${task.specId}`;
+        const prTitle = options?.title?.trim() || undefined;
 
         if (taskBaseBranch) {
           debug('Using stored base branch:', taskBaseBranch);
@@ -2975,6 +2937,9 @@ export function registerWorktreeHandlers(
           projectDir: project.path,
           worktreePath,
           specId: task.specId,
+          specDir,
+          taskTitle: task.title,
+          taskDescription: task.metadata?.userDescription || task.description,
           branchName,
           baseBranch,
           title: prTitle,
