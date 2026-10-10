@@ -39,7 +39,6 @@ export const MAX_TERMINALS_LIMIT = 24;
 export const DEFAULT_APP_SETTINGS = {
   theme: 'dark' as const,
   colorTheme: 'default' as const,
-  defaultModel: 'opus',
   pythonPath: undefined as string | undefined,
   gitPath: undefined as string | undefined,
   githubCLIPath: undefined as string | undefined,
@@ -47,17 +46,14 @@ export const DEFAULT_APP_SETTINGS = {
   autoBuildPath: undefined as string | undefined,
   autoUpdateAutoBuild: true,
   maxTerminals: DEFAULT_MAX_TERMINALS,
-  onboardingCompleted: false,
   notifications: {
     onTaskComplete: true,
     onTaskFailed: true,
     onReviewNeeded: true,
     sound: false
   },
-  // Global API keys (used as defaults for all projects)
+  // API key for OpenAI memory embeddings (used as the default for all projects)
   globalOpenAIApiKey: undefined as string | undefined,
-  // Selected agent profile - defaults to 'auto' for per-phase optimized model selection
-  selectedAgentProfile: 'auto',
   // Interface font (bundled Anthropic Sans)
   interfaceFont: 'anthropic-sans' as const,
   // Log order setting for task detail view (default chronological - oldest first)

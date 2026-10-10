@@ -109,77 +109,6 @@ const browserMockAPI: ElectronAPI = {
     }
   }),
 
-  // Provider Account management (unified multi-provider credentials)
-  getProviderAccounts: async () => ({
-    success: true,
-    data: { accounts: [] }
-  }),
-
-  saveProviderAccount: async (account) => ({
-    success: true,
-    data: {
-      id: `mock-account-${Date.now()}`,
-      ...account,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    }
-  }),
-
-  updateProviderAccount: async (_id, updates) => ({
-    success: true,
-    data: {
-      id: _id,
-      provider: 'anthropic' as const,
-      name: 'Mock Account',
-      authType: 'api-key' as const,
-      billingModel: 'pay-per-use' as const,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      ...updates
-    }
-  }),
-
-  deleteProviderAccount: async (_id: string) => ({
-    success: true
-  }),
-
-  setProviderAccountQueueOrder: async (_order: string[]) => ({
-    success: true
-  }),
-
-  setCrossProviderQueueOrder: async (_order: string[]) => ({
-    success: true
-  }),
-
-  saveModelOverrides: async (_overrides: Record<string, unknown>) => ({
-    success: true
-  }),
-
-  testProviderConnection: async (_provider: string, _config) => ({
-    success: true,
-    data: { status: 'valid' as const }
-  }),
-
-  checkEnvCredentials: async () => ({
-    success: true,
-    data: {}
-  }),
-
-  // Codex OAuth authentication (mock)
-  codexAuthLogin: async () => ({
-    success: false,
-    error: 'Codex OAuth not available in browser mock'
-  }),
-
-  codexAuthStatus: async () => ({
-    success: true,
-    data: { isAuthenticated: false }
-  }),
-
-  codexAuthLogout: async () => ({
-    success: true
-  }),
-
   // Queue Routing API (rate limit recovery)
   queue: {
     getRunningTasksByProfile: async () => ({ success: true, data: { byProfile: {}, totalRunning: 0 } }),
@@ -206,6 +135,11 @@ const browserMockAPI: ElectronAPI = {
   hasGraphifyGraph: async () => ({ success: true, data: false }),
   getGraphifyGraph: async () => ({ success: true, data: null }),
   onGraphifyIndexUpdated: () => () => {},
+
+  getClaudeCodeInventory: async () => ({
+    success: true,
+    data: { agents: [], skills: [], commands: [], hooks: [], mcpServers: [], memoryFiles: [], settingsFiles: [] }
+  }),
 
   checkClaudeCodeVersion: async () => ({
     success: true,

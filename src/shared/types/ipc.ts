@@ -521,6 +521,7 @@ export interface ElectronAPI {
 
   // Claude Code CLI operations
   checkClaudeCodeVersion: (forceRefresh?: boolean) => Promise<IPCResult<import('./cli').ClaudeCodeVersionInfo>>;
+  getClaudeCodeInventory: (projectPath: string) => Promise<IPCResult<import('./claude-code').ClaudeCodeInventory>>;
   installClaudeCode: () => Promise<IPCResult<{ command: string }>>;
   getClaudeCodeVersions: () => Promise<IPCResult<import('./cli').ClaudeCodeVersionList>>;
   installClaudeCodeVersion: (version: string) => Promise<IPCResult<{ command: string; version: string }>>;

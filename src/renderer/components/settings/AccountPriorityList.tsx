@@ -1,13 +1,8 @@
 /**
- * AccountPriorityList - Unified drag-and-drop priority list with usage visualization
+ * AccountPriorityList - drag-and-drop order of the Claude accounts with their usage
  *
- * Displays ALL accounts in a single, unified priority list. Position determines
- * fallback order - the system uses accounts from top to bottom.
- *
- * Supports all user scenarios:
- * - OAuth accounts as primary with API fallback
- * - API endpoints as primary with OAuth fallback
- * - Any mix of providers in any order
+ * Position determines the switching order: when the account in use hits a limit, tasks move
+ * to the next available account from top to bottom.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -39,7 +34,6 @@ import {
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
-import { PROVIDER_REGISTRY } from '@shared/constants/providers';
 
 /**
  * Usage threshold constants for color coding (matching UsageIndicator)
@@ -47,10 +41,6 @@ import { PROVIDER_REGISTRY } from '@shared/constants/providers';
 const THRESHOLD_CRITICAL = 95;  // Red: At or near limit
 const THRESHOLD_WARNING = 91;   // Orange: Very high usage
 const THRESHOLD_ELEVATED = 71;  // Yellow: Moderate usage
-
-const getProviderDisplayName = (provider?: string): string => {
-  return PROVIDER_REGISTRY.find((entry) => entry.id === provider)?.name ?? provider ?? 'Unknown';
-};
 
 /**
  * Get status label key based on usage
@@ -118,11 +108,6 @@ function SortableAccountItem({ account, index, onSetActive }: SortableAccountIte
   const statusKey = getStatusKey(account.sessionPercent, account.weeklyPercent, account.isRateLimited);
   const isStatusCritical = statusKey === 'nearLimit' || statusKey === 'rateLimited';
 
-  const metaParts = [
-    getProviderDisplayName(account.provider),
-    account.type === 'oauth' ? t('accounts.priority.typeOAuth') : t('accounts.priority.typeAPI'),
-  ];
-
   return (
     <div
       ref={setNodeRef}
@@ -153,7 +138,6 @@ function SortableAccountItem({ account, index, onSetActive }: SortableAccountIte
       <div className="flex min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
           <span className="truncate text-sm text-foreground">{account.displayName}</span>
-          <span className="text-sm text-(--nav-label-color)">{metaParts.join(' · ')}</span>
         </div>
         <span className="block truncate text-sm text-(--nav-label-color)">{account.identifier}</span>
 

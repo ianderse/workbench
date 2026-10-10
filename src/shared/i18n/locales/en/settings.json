@@ -25,9 +25,9 @@
       "title": "Developer",
       "description": "IDE and terminal preferences"
     },
-    "agent": {
-      "title": "Agents",
-      "description": "Default model and framework"
+    "claude-code": {
+      "title": "Claude Code",
+      "description": "How tasks run in Claude Code"
     },
     "paths": {
       "title": "Paths",
@@ -59,9 +59,9 @@
     }
   },
   "apiProfiles": {
-    "title": "API Profiles",
-    "description": "Configure custom Anthropic-compatible API endpoints",
-    "addButton": "Add Profile",
+    "title": "API profiles",
+    "description": "Anthropic-compatible endpoints (base URL and API key) Claude Code can use instead of a Claude account",
+    "addButton": "Add API profile",
     "presets": {
       "anthropic": "Anthropic",
       "openrouter": "OpenRouter",
@@ -120,22 +120,22 @@
     },
     "empty": {
       "title": "No API profiles configured",
-      "description": "Create a profile to configure custom API endpoints for your builds.",
+      "description": "Use an Anthropic-compatible endpoint (base URL and API key) instead of a Claude account",
       "action": "Create First Profile"
     },
     "switchToOauth": {
-      "label": "Switch to OAuth",
+      "label": "Use Claude accounts",
       "loading": "Switching..."
     },
-    "activeBadge": "Active",
+    "activeBadge": "In use",
     "customModels": "Custom models: {{models}}",
     "setActive": {
-      "label": "Set Active",
-      "loading": "Setting..."
+      "label": "Use",
+      "loading": "Switching..."
     },
     "tooltips": {
       "edit": "Edit profile",
-      "deleteActive": "Switch to OAuth before deleting",
+      "deleteActive": "Switch back to Claude accounts before deleting",
       "deleteInactive": "Delete profile"
     },
     "deleteAriaLabel": "Delete profile {{name}}",
@@ -172,18 +172,15 @@
       "cancel": "Cancel",
       "delete": "Delete",
       "deleting": "Deleting..."
-    }
+    },
+    "add": "Add"
   },
   "modelSelect": {
     "placeholder": "Select a model or type manually",
     "placeholderManual": "Enter model name (e.g., claude-sonnet-4-6)",
     "searchPlaceholder": "Search models...",
     "noResults": "No models match your search",
-    "discoveryNotAvailable": "Model discovery not available. Enter model name manually.",
-    "ollamaLoading": "Loading Ollama models...",
-    "ollamaNoModels": "No Ollama models installed",
-    "ollamaNoModelsHint": "Install models in Agent Settings → Ollama tab",
-    "apiKeyOnly": "API key"
+    "discoveryNotAvailable": "Model discovery not available. Enter model name manually."
   },
   "logOrder": {
     "label": "Log order",
@@ -203,10 +200,6 @@
     "limits": "Limits",
     "maxTerminals": "Maximum windows",
     "maxTerminalsDescription": "How many agent windows each project can have open at once ({{min}}–{{max}})",
-    "featureModelSettings": "Feature models",
-    "featureModelSettingsDescription": "Model and thinking level for Insights, MR review, and utility agents",
-    "model": "Model",
-    "thinkingLevel": "Thinking level",
     "paths": "Paths",
     "pathsDescription": "Configure executable and framework paths",
     "pythonPath": "Python path",
@@ -235,11 +228,6 @@
     "sourceBundled": "Bundled",
     "sourceFallback": "Fallback",
     "notDetected": "Not detected",
-    "autoClaudePath": "Auto Claude path",
-    "autoClaudePathDescription": "Relative path to auto-claude directory in projects",
-    "autoClaudePathPlaceholder": "auto-claude (default)",
-    "autoNameTerminals": "Automatically name terminals",
-    "autoNameTerminalsDescription": "Use AI to generate descriptive names for terminal tabs based on their activity",
     "detecting": "Detecting..."
   },
   "theme": {
@@ -372,137 +360,12 @@
       "maxParallelTasks": "Maximum parallel tasks",
       "maxParallelTasksDescription": "Tasks beyond this limit wait in the Queue before moving to In Progress ({{min}}–{{max}})"
     },
-    "claude": {
-      "title": "Claude Auth",
-      "description": "Claude authentication"
-    },
     "memory": {
       "title": "Memory",
       "description": "Persistent memory for agents",
       "integrationTitle": "Memory",
       "integrationDescription": "Configure persistent cross-session memory for agents",
       "syncDescription": "Configure persistent memory"
-    }
-  },
-  "agentProfile": {
-    "label": "Agent profile",
-    "title": "Agent profile",
-    "profileRow": "Profile",
-    "sectionDescription": "Select a preset configuration for model and thinking level",
-    "profilesInfo": "Agent profiles provide preset configurations for Claude model and thinking level. When you create a new task, these settings will be used as defaults. You can always override them in the task creation wizard.",
-    "custom": "Custom",
-    "customConfiguration": "Custom configuration",
-    "customDescription": "Choose model & thinking level",
-    "phaseConfiguration": "Phase configuration",
-    "phaseConfigurationDescription": "Customize model and thinking level for each phase",
-    "model": "Model",
-    "thinking": "Thinking",
-    "thinkingLevel": "Thinking level",
-    "selectModel": "Select model",
-    "selectThinkingLevel": "Select thinking level",
-    "perPhaseOptimization": "(per-phase optimization)",
-    "resetToDefaults": "Reset to defaults",
-    "resetToProfileDefaults": "Reset to {{profile}} defaults",
-    "customized": "Customized",
-    "customizedDescription": "Phase settings differ from the {{profile}} profile defaults",
-    "ollamaNotConfigured": "Select models below",
-    "phaseConfigNote": "These settings will be used as defaults when creating new tasks with this profile. You can override them per-task in the task creation wizard",
-    "adaptiveThinking": {
-      "badge": "Adaptive",
-      "tooltip": "Opus uses adaptive thinking: it dynamically decides how much to think within the budget cap set by the thinking level."
-    },
-    "reasoning": {
-      "adaptive": "Adaptive",
-      "budget": "Budget",
-      "reasoning": "Reasoning",
-      "thinking": "Thinking",
-      "noThinking": "(No thinking)",
-      "hint": {
-        "adaptive_effort": "Adaptive thinking",
-        "thinking_tokens": "Thinking budget",
-        "reasoning_effort": "Reasoning effort",
-        "thinking_toggle": "Thinking on/off"
-      },
-      "toggle": {
-        "off": "Off",
-        "on": "On"
-      },
-      "badgeTooltip": {
-        "adaptive_effort": "Dynamically decides how much to think within the budget cap",
-        "thinking_tokens": "Budget-based thinking with configurable token allocation",
-        "reasoning_effort": "Reasoning effort levels (low/medium/high)",
-        "thinking_toggle": "Thinking on/off toggle",
-        "none": "No extended thinking supported"
-      }
-    },
-    "phases": {
-      "spec": {
-        "label": "Spec creation",
-        "description": "Discovery, requirements, context gathering"
-      },
-      "planning": {
-        "label": "Planning",
-        "description": "Implementation planning and architecture"
-      },
-      "coding": {
-        "label": "Coding",
-        "description": "Actual code implementation"
-      },
-      "qa": {
-        "label": "QA review",
-        "description": "Quality assurance and validation"
-      }
-    },
-    "providerOverrides": {
-      "title": "Provider Model Mapping",
-      "description": "Customize which model each provider uses for each shorthand",
-      "defaultMapping": "Default",
-      "yourOverride": "Your Override",
-      "shorthand": "Shorthand",
-      "useDefault": "Use Default",
-      "resetAll": "Reset All",
-      "noConnectedProviders": "No providers connected. Add accounts in the Accounts settings to configure model mappings.",
-      "equivalentNote": "When a non-Anthropic provider is active, these mappings determine which model is used for each phase."
-    },
-    "providerTabs": {
-      "label": "Provider",
-      "moreProviders": "More",
-      "noProviders": "No providers connected. Add accounts in the Accounts settings to configure provider-specific agent settings.",
-      "configureFor": "The profile and models below apply to {{provider}}",
-      "crossProvider": "Cross-provider",
-      "crossProviderDisabledTooltip": "Connect two or more provider accounts to enable cross-provider capabilities",
-      "needsSetup": "Setup required"
-    },
-    "crossProviderTab": {
-      "title": "Cross-provider configuration",
-      "description": "Assign a different provider and model to each pipeline phase for maximum flexibility",
-      "activateInfo": "Tasks created while this configuration is active will use the cross-provider setup",
-      "featureModelsTitle": "Feature models",
-      "featureModelsDescription": "Configure models for non-pipeline features (Insights, MR review, etc.)"
-    },
-    "customProfile": {
-      "name": "Custom (Cross-Provider)",
-      "description": "Mix different providers and models for each phase",
-      "phaseAssignment": "Assign a provider and model for each phase"
-    },
-    "ollamaModels": {
-      "title": "Ollama models",
-      "description": "Manage locally installed models for AI agent tasks",
-      "installed": "Installed models",
-      "installedCount": "{{count}} model(s)",
-      "noModels": "No LLM models installed",
-      "recommended": "Recommended for coding",
-      "recommendedDescription": "Popular models optimized for code generation and reasoning",
-      "download": "Download",
-      "downloading": "Downloading...",
-      "refresh": "Refresh",
-      "loading": "Loading models...",
-      "ollamaNotAvailable": "Connect Ollama in Account Settings to manage models",
-      "badgeRecommended": "Recommended",
-      "badgeFast": "Fast",
-      "badgeQuality": "Quality",
-      "installedLabel": "Installed",
-      "startingDownload": "Starting download..."
     }
   },
   "workspace": {
@@ -516,139 +379,12 @@
       "other": "Other"
     }
   },
-  "integrations": {
-    "title": "Integrations",
-    "description": "Manage Claude accounts and API keys",
-    "claudeAccounts": "Claude Accounts",
-    "claudeAccountsDescription": "Add multiple Claude subscriptions to automatically switch between them when you hit rate limits.",
-    "claudeAccountsWarning": "When authenticating, ensure you're logged into the correct Claude account in your browser. Each profile should use a different subscription.",
-    "noAccountsYet": "No accounts configured yet",
-    "default": "Default",
-    "active": "Active",
-    "authenticated": "Authenticated",
-    "needsAuth": "Needs Auth",
-    "authenticate": "Authenticate",
-    "authenticating": "Authenticating...",
-    "setActive": "Set Active",
-    "manualTokenEntry": "Manual Token Entry",
-    "runSetupToken": "Run claude and type /login to authenticate",
-    "tokenPlaceholder": "sk-ant-oat01-...",
-    "emailPlaceholder": "Email (optional, for display)",
-    "saveToken": "Save Token",
-    "accountNamePlaceholder": "Account name (e.g., Work, Personal)",
-    "autoSwitching": "Automatic Account Switching",
-    "autoSwitchingDescription": "Automatically switch between Claude accounts to avoid interruptions. Configure proactive monitoring to switch before hitting limits.",
-    "enableAutoSwitching": "Enable automatic switching",
-    "masterSwitch": "Master switch for all auto-swap features",
-    "proactiveMonitoring": "Proactive Monitoring",
-    "proactiveDescription": "Check usage regularly and swap before hitting limits",
-    "checkUsageEvery": "Check usage every",
-    "seconds15": "15 seconds",
-    "seconds30": "30 seconds (recommended)",
-    "minute1": "1 minute",
-    "disabled": "Disabled",
-    "sessionThreshold": "Session usage threshold",
-    "sessionThresholdDescription": "Switch when session usage reaches this level (recommended: 95%)",
-    "weeklyThreshold": "Weekly usage threshold",
-    "weeklyThresholdDescription": "Switch when weekly usage reaches this level (recommended: 99%)",
-    "reactiveRecovery": "Reactive Recovery",
-    "reactiveDescription": "Auto-swap when unexpected rate limit is hit",
-    "autoSwitchOnAuthFailure": "Auto-switch on auth failure",
-    "autoSwitchOnAuthFailureDescription": "Automatically switch to another authenticated account when authentication fails",
-    "apiKeys": "API Keys",
-    "apiKeysInfo": "Keys set here are used as defaults. Individual projects can override these in their settings.",
-    "openaiKey": "OpenAI API Key",
-    "openaiKeyDescription": "Required for OpenAI memory embeddings",
-    "toast": {
-      "authSuccess": "Profile Authenticated",
-      "authSuccessWithEmail": "Connected as {{email}}",
-      "authSuccessGeneric": "Authentication complete. You can now use this profile.",
-      "authStartFailed": "Authentication Failed",
-      "addProfileFailed": "Failed to Add Profile",
-      "loadProfilesFailed": "Failed to Load Profiles",
-      "deleteProfileFailed": "Failed to Delete Profile",
-      "renameProfileFailed": "Failed to Rename Profile",
-      "setActiveProfileFailed": "Failed to Set Active Profile",
-      "profileCreatedAuthFailed": "Profile Created - Authentication Needed",
-      "profileCreatedAuthFailedDescription": "Profile was added but authentication could not start. Click the login button to authenticate.",
-      "tokenSaved": "Token Saved",
-      "tokenSavedDescription": "Your token has been saved successfully.",
-      "tokenSaveFailed": "Failed to Save Token",
-      "settingsUpdateFailed": "Failed to Update Settings",
-      "tryAgain": "Please try again.",
-      "terminalCreationFailed": "Failed to create authentication terminal",
-      "terminalCreationFailedDescription": "Unable to start the authentication process. {{error}}",
-      "maxTerminalsReached": "Maximum terminals reached",
-      "maxTerminalsReachedDescription": "Please close some terminals and try again. You can have up to 12 terminals open.",
-      "terminalError": "Terminal Error",
-      "terminalErrorDescription": "Failed to create terminal: {{error}}",
-      "authProcessFailed": "Authentication process failed to start",
-      "authProcessFailedDescription": "The authentication terminal could not be created. Please try again or check the logs for more details."
-    },
-    "alerts": {
-      "profileCreatedAuthFailed": "Profile created but failed to prepare authentication: {{error}}",
-      "authPrepareFailed": "Failed to prepare authentication: {{error}}",
-      "authStartFailedMessage": "Failed to start authentication. Please try again."
-    }
-  },
   "accounts": {
     "title": "Accounts",
     "description": "Manage Claude accounts and API endpoints",
-    "tabs": {
-      "claudeCode": "Claude Code",
-      "customEndpoints": "Custom Endpoints"
-    },
-    "claudeCode": {
-      "description": "Add multiple Claude subscriptions to automatically switch between them when you hit rate limits.",
-      "noAccountsYet": "No accounts configured yet",
-      "default": "Default",
-      "active": "Active",
-      "authenticated": "Authenticated",
-      "needsAuth": "Needs Auth",
-      "authenticate": "Authenticate",
-      "authenticating": "Authenticating...",
-      "setActive": "Set Active",
-      "manualTokenEntry": "Manual Token Entry",
-      "runSetupToken": "Run claude and type /login to authenticate",
-      "tokenPlaceholder": "sk-ant-oat01-...",
-      "emailPlaceholder": "Email (optional, for display)",
-      "saveToken": "Save Token",
-      "accountNamePlaceholder": "Account name (e.g., Work, Personal)"
-    },
-    "customEndpoints": {
-      "description": "Configure custom Anthropic-compatible API endpoints",
-      "addButton": "Add Profile",
-      "activeBadge": "Active",
-      "customModels": "Custom models: {{models}}",
-      "setActive": {
-        "label": "Set Active",
-        "loading": "Setting..."
-      },
-      "switchToOauth": {
-        "label": "Use Claude Code",
-        "loading": "Switching..."
-      },
-      "tooltips": {
-        "edit": "Edit profile",
-        "deleteActive": "Cannot delete active profile",
-        "deleteInactive": "Delete profile"
-      },
-      "empty": {
-        "title": "No Custom Endpoints",
-        "description": "Configure custom Anthropic-compatible API endpoints to use alternative providers.",
-        "action": "Add Profile"
-      },
-      "dialog": {
-        "deleteTitle": "Delete Profile",
-        "deleteDescription": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
-        "cancel": "Cancel",
-        "delete": "Delete",
-        "deleting": "Deleting..."
-      }
-    },
     "autoSwitching": {
       "title": "Automatic account switching",
-      "description": "Automatically switch between accounts to avoid interruptions. Configure proactive monitoring to switch before hitting limits",
+      "description": "Switch to another Claude account before or when the one in use hits a limit",
       "enableAutoSwitching": "Enable automatic switching",
       "masterSwitch": "Master switch for all auto-swap features",
       "proactiveMonitoring": "Proactive monitoring",
@@ -664,14 +400,8 @@
     },
     "priority": {
       "title": "Account priority order",
-      "modeLabel": "Priority mode",
       "dragHandle": "Drag to reorder",
-      "description": "Drag to reorder. System will switch to the next available account in order",
-      "tabs": {
-        "default": "Default",
-        "crossProvider": "Cross-provider"
-      },
-      "crossProviderDescription": "This priority order is used when cross-provider mode is active. When multiple accounts share a provider, the system selects the best available one based on this order",
+      "description": "Drag to reorder. Tasks switch to the next available account in this order",
       "setActive": "Set active",
       "setActiveTooltip": "Make this the primary account",
       "noAccounts": "No accounts configured. Add accounts above to set priority.",
@@ -681,8 +411,6 @@
       "next": "Next",
       "unlimited": "Unlimited",
       "unavailable": "Unavailable",
-      "typeOAuth": "OAuth",
-      "typeAPI": "API",
       "payPerUse": "Pay-per-use",
       "needsAuth": "Not authenticated",
       "duplicateUsage": "Duplicate usage pattern",
@@ -691,10 +419,8 @@
       "needsReauthHint": "This profile's refresh token is invalid. Click to re-authenticate.",
       "sessionUsage": "Session usage (5-hour window)",
       "weeklyUsage": "Weekly usage (7-day window)",
-      "oauthSection": "Claude Accounts (cycle through first)",
-      "apiSection": "Fallback Endpoints (when all accounts exhausted)",
       "tipTitle": "How priority works",
-      "tipDescription": "Claude accounts are included in your subscription and will be cycled through first. API endpoints charge per request and are used as fallbacks when all Claude accounts hit their limits.",
+      "tipDescription": "When the account in use hits its session or weekly limit, tasks continue on the next available account in this order",
       "status": {
         "healthy": "Healthy",
         "moderate": "Moderate",
@@ -704,151 +430,8 @@
       }
     },
     "toast": {
-      "loadProfilesFailed": "Failed to Load Profiles",
-      "addProfileFailed": "Failed to Add Profile",
-      "deleteProfileFailed": "Failed to Delete Profile",
-      "renameProfileFailed": "Failed to Rename Profile",
-      "setActiveProfileFailed": "Failed to Set Active Profile",
-      "tokenSaved": "Token Saved",
-      "tokenSavedDescription": "Your token has been saved successfully.",
-      "tokenSaveFailed": "Failed to Save Token",
       "settingsUpdateFailed": "Failed to Update Settings",
       "tryAgain": "Please try again."
-    },
-    "alerts": {
-      "profileCreatedAuthFailed": "Profile created but failed to prepare authentication: {{error}}",
-      "authPrepareFailed": "Failed to prepare authentication: {{error}}",
-      "authStartFailedMessage": "Failed to start authentication. Please try again."
-    }
-  },
-  "providers": {
-    "card": {
-      "oauth": "OAuth",
-      "codex": "Codex",
-      "codexSubscription": "Codex subscription",
-      "claudeCode": "Claude Code",
-      "claudeCodeSubscription": "Claude Code subscription",
-      "zaiCodingPlan": "Coding Plan",
-      "zaiUsageBased": "Usage-based",
-      "zaiCodingPlanSubscription": "Z.AI Coding Plan",
-      "apiKey": "API key",
-      "active": "Active",
-      "setDefault": "Set Active",
-      "edit": "Edit account",
-      "useAccount": "Use this account",
-      "inUse": "In use",
-      "reauth": "Re-authenticate",
-      "delete": "Delete account",
-      "oauthAccount": "OAuth account",
-      "oauthLinked": "Linked account",
-      "noEndpoint": "No endpoint"
-    },
-    "default": {
-      "title": "Default provider",
-      "label": "Provider",
-      "description": "Agents use this provider's selected account. Other providers are only used when it's unavailable"
-    },
-    "section": {
-      "envDetected": "From env",
-      "envCredentialDetected": "Credentials detected from {{envVar}} environment variable",
-      "noAccounts": "No accounts configured",
-      "noAccountsShort": "No accounts",
-      "accountsMenu": "{{provider}} accounts",
-      "addOAuth": "Add OAuth account",
-      "addClaudeCode": "Add Claude Code account",
-      "addCodexSubscription": "Add Codex subscription",
-      "addCodingPlan": "Add coding plan",
-      "addUsageBased": "Add usage-based API key",
-      "addApiKey": "Add API key",
-      "addEndpoint": "Add endpoint"
-    },
-    "dialog": {
-      "addTitle": "Add account",
-      "editTitle": "Edit account",
-      "deleteTitle": "Delete account?",
-      "deleteDescription": "Are you sure you want to delete this account? This action cannot be undone.",
-      "cancel": "Cancel",
-      "close": "Close",
-      "delete": "Delete",
-      "deleting": "Deleting...",
-      "save": "Save changes",
-      "add": "Add account",
-      "optional": "(optional)",
-      "oauthDescription": "Connect using OAuth authentication",
-      "apiKeyDescription": "Add your API key and configuration",
-      "zaiCodingPlanDescription": "Add your Z.AI Coding Plan API key to use GLM models with your subscription",
-      "zaiUsageBasedDescription": "Add your Z.AI usage-based API key for pay-per-use access to GLM models",
-      "codexOAuthDescription": "Sign in with your ChatGPT Plus or Pro subscription to use Codex models",
-      "codexAuthenticating": "Opening OpenAI login in your browser...",
-      "codexWaiting": "Waiting for browser authentication...",
-      "codexSuccess": "Authenticated with OpenAI Codex",
-      "codexError": "OpenAI authentication failed: {{error}}",
-      "codexAuthenticate": "Authenticate with OpenAI",
-      "codexReauthenticate": "Reauthenticate with OpenAI",
-      "oauthInstructions": "To add an OAuth account, use the Claude Code authentication flow from the Claude Code tab above. OAuth accounts are linked to your Claude.ai subscription.",
-      "oauthAuthenticate": "Authenticate with Anthropic",
-      "oauthReauthenticate": "Reauthenticate with Anthropic",
-      "oauthAuthenticating": "Opening browser...",
-      "oauthWaiting": "Waiting for authorization...",
-      "oauthSuccess": "Authenticated as {{email}}",
-      "oauthError": "Authentication failed: {{error}}",
-      "oauthFallbackDescription": "If browser login doesn't work, use the embedded terminal",
-      "oauthNameRequired": "Enter an account name before authenticating",
-      "modelsDescription": "Add the model IDs available at this endpoint. These will appear in the model selector.",
-      "fields": {
-        "name": "Account name",
-        "apiKey": "API Key",
-        "baseUrl": "Base URL",
-        "region": "AWS region",
-        "models": "Models"
-      },
-      "placeholders": {
-        "name": "My account",
-        "apiKey": "sk-...",
-        "baseUrl": "https://...",
-        "modelId": "Model ID (e.g. llama-3.1-70b)",
-        "modelLabel": "Display name"
-      },
-      "toast": {
-        "added": "Account added",
-        "updated": "Account updated",
-        "error": "Failed to save account",
-        "duplicateEmail": "This email is already registered as \"{{existingName}}\""
-      },
-      "removeModel": "Remove {{model}}",
-      "addModel": "Add model"
-    },
-    "toast": {
-      "deleted": "Account deleted",
-      "deleteFailed": "Failed to delete account",
-      "reauthStarted": "Opening authentication...",
-      "reauthSuccess": "Re-authenticated successfully",
-      "reauthFailed": "Re-authentication failed"
-    },
-    "categories": {
-      "popular": "Popular",
-      "infrastructure": "Infrastructure",
-      "local": "Local & custom"
-    },
-    "ollama": {
-      "connection": {
-        "checking": "Checking Ollama connection...",
-        "connected": "Connected",
-        "connectedDescription": "Ollama is running and ready to use",
-        "modelsAvailable": "{{count}} LLM model(s) installed",
-        "noModels": "No LLM models installed yet",
-        "customUrl": "Custom URL",
-        "customUrlPlaceholder": "http://localhost:11434",
-        "notInstalled": "Ollama not installed",
-        "notInstalledDescription": "Install Ollama to run open-source AI models locally",
-        "notRunning": "Ollama not running",
-        "notRunningDescription": "Start the Ollama service to connect",
-        "install": "Install Ollama",
-        "retry": "Retry",
-        "learnMore": "Learn more",
-        "autoConnected": "Auto-connected as local provider",
-        "startCommand": "Run 'ollama serve' in your terminal"
-      }
     }
   },
   "debug": {
@@ -873,7 +456,6 @@
   "mcp": {
     "serversEnabled": "{{count}} servers enabled",
     "defaultsHint": "Defaults for new tasks; each task can change them",
-    "qaAgentsOnly": "QA agents only",
     "alwaysEnabled": "always enabled",
     "addServer": "Add server",
     "servers": {
@@ -984,77 +566,6 @@
       "description": "AI-fills GitHub PR templates from code changes"
     }
   },
-  "provider": {
-    "title": "AI Provider",
-    "description": "Configure your AI provider and model preferences",
-    "selection": {
-      "label": "Provider",
-      "description": "Select which AI provider to use for agent tasks",
-      "anthropic": "Anthropic",
-      "openai": "OpenAI",
-      "ollama": "Ollama (Local)",
-      "openrouter": "OpenRouter"
-    },
-    "apiKey": {
-      "label": "API Key",
-      "description": "Your API key for the selected provider",
-      "placeholder": "Enter your API key",
-      "anthropicPlaceholder": "sk-ant-...",
-      "openaiPlaceholder": "sk-...",
-      "openrouterPlaceholder": "sk-or-...",
-      "validation": {
-        "required": "API key is required for this provider",
-        "invalid": "Invalid API key format"
-      }
-    },
-    "ollama": {
-      "endpointUrl": "Ollama Endpoint URL",
-      "endpointDescription": "The URL where your Ollama instance is running",
-      "endpointPlaceholder": "http://localhost:11434",
-      "validation": {
-        "urlRequired": "Endpoint URL is required for Ollama",
-        "urlInvalid": "Invalid URL format (must be http:// or https://)"
-      }
-    },
-    "phaseModels": {
-      "title": "Per-Phase Model Preferences",
-      "description": "Configure which model to use for each pipeline phase",
-      "spec": {
-        "label": "Spec Creation Model",
-        "description": "Model used for discovery, requirements, and context gathering"
-      },
-      "planning": {
-        "label": "Planning Model",
-        "description": "Model used for implementation planning and architecture"
-      },
-      "coding": {
-        "label": "Coding Model",
-        "description": "Model used for code implementation"
-      },
-      "qa": {
-        "label": "QA Review Model",
-        "description": "Model used for quality assurance and validation"
-      },
-      "placeholder": "Select a model",
-      "useDefault": "Use default model"
-    },
-    "testConnection": {
-      "label": "Test Connection",
-      "testing": "Testing...",
-      "success": "Connection successful",
-      "failure": "Connection failed"
-    },
-    "toast": {
-      "saved": {
-        "title": "Provider settings saved",
-        "description": "Your AI provider configuration has been updated."
-      },
-      "error": {
-        "title": "Failed to save provider settings",
-        "description": "An error occurred while saving your provider configuration."
-      }
-    }
-  },
   "projectPages": {
     "initializeFirst": "Initialize Auto-Build in the project's General settings to configure this page.",
     "general": {
@@ -1134,6 +645,144 @@
       "add": "Add",
       "edit": "Edit",
       "delete": "Delete"
+    }
+  },
+  "claudeCode": {
+    "models": {
+      "haiku": "Haiku",
+      "sonnet": "Sonnet",
+      "opus": "Opus",
+      "fable": "Fable"
+    },
+    "efforts": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Max"
+    },
+    "execution": {
+      "title": "Task execution",
+      "modelChoice": "Model and effort",
+      "modelChoiceAutoDescription": "A short triage run picks the model, effort and whether to plan for each task",
+      "modelChoiceFixedDescription": "Every task uses the model and effort below",
+      "triageModes": {
+        "auto": "Automatic",
+        "fixed": "Fixed"
+      },
+      "model": "Model",
+      "modelDescription": "Model Claude Code uses for every task",
+      "effort": "Effort",
+      "effortDescription": "How much Claude Code thinks before it acts",
+      "triageModel": "Triage model",
+      "triageModelDescription": "Model that assesses each task before it starts",
+      "allowFable": "Allow Fable",
+      "allowFableDescription": "Let triage pick Fable for the hardest tasks. Fable may bill to usage credits",
+      "planning": "Planning",
+      "planningModes": {
+        "auto": "Automatic",
+        "always": "Always",
+        "never": "Never"
+      },
+      "planningDescriptions": {
+        "auto": "Triage decides whether a task is planned in plan mode before it is implemented",
+        "always": "Every task is planned in plan mode before it is implemented",
+        "never": "Tasks are implemented without a planning step"
+      },
+      "validation": "Validation",
+      "validationDescription": "Run the project's checks and a fresh review of the changes before handing a task to you",
+      "budget": "Budget per task",
+      "budgetDescription": "Stop a task when its estimated cost reaches this amount in US dollars. Leave empty for no limit",
+      "budgetPlaceholder": "No limit",
+      "fallbackModel": "Fallback model",
+      "fallbackModelDescription": "Model Claude Code switches to when the chosen one is overloaded",
+      "fallbackNone": "None",
+      "extraInstructions": "Extra instructions",
+      "extraInstructionsDescription": "Added to the system prompt of every task",
+      "extraInstructionsPlaceholder": "For example: run the tests with npm test before you finish"
+    },
+    "permissions": {
+      "title": "Permissions",
+      "label": "Permission checks",
+      "value": "Off",
+      "description": "Tasks run Claude Code with permission checks off (--dangerously-skip-permissions) because each task works in its own git worktree"
+    },
+    "inventory": {
+      "title": "Loaded for this project",
+      "configuration": "Your Claude Code configuration",
+      "description": "What Claude Code loads when it runs tasks in {{project}}",
+      "lastChecked": "Last checked {{time}}",
+      "loading": "Looking for Claude Code configuration...",
+      "error": "Couldn't read the Claude Code configuration: {{error}}",
+      "errorGeneric": "Couldn't read the Claude Code configuration",
+      "refresh": "Refresh",
+      "nothingFound": "No subagents, skills, commands, hooks, MCP servers, CLAUDE.md or settings files found",
+      "noneFound": "Not found: {{groups}}",
+      "groups": {
+        "agents": "Subagents",
+        "skills": "Skills",
+        "commands": "Slash commands",
+        "hooks": "Hooks",
+        "mcpServers": "MCP servers",
+        "memoryFiles": "CLAUDE.md files",
+        "settingsFiles": "Settings files"
+      },
+      "scopes": {
+        "user": "User",
+        "project": "Project",
+        "plugin": "Plugin",
+        "managed": "Managed"
+      }
+    }
+  },
+  "claudeAccounts": {
+    "title": "Claude accounts",
+    "inUse": "In use",
+    "use": "Use this account",
+    "signInAgain": "Sign in again",
+    "rename": "Rename",
+    "remove": "Remove",
+    "menu": "Actions for {{name}}",
+    "notSignedIn": "Not signed in",
+    "needsSignIn": "Needs to sign in again",
+    "rateLimited": "Rate limited",
+    "usage": "Session {{session}}% · Weekly {{weekly}}%",
+    "add": "Add Claude account",
+    "addButton": "Add",
+    "addDescription": "Sign in with another Claude subscription to switch to it when one hits a limit",
+    "addDescriptionMore": "Tasks switch to the next account when the one in use hits a limit",
+    "dialog": {
+      "addTitle": "Add Claude account",
+      "addDescription": "Name the account, then sign in with Claude in your browser",
+      "renameTitle": "Rename account",
+      "renameDescription": "The name is only shown in Auto Claude",
+      "name": "Account name",
+      "namePlaceholder": "Work, Personal...",
+      "signIn": "Sign in with Claude",
+      "tryAgain": "Try again",
+      "opening": "Opening your browser...",
+      "waiting": "Waiting for you to sign in...",
+      "signedIn": "Signed in",
+      "signedInAs": "Signed in as {{email}}",
+      "error": "Sign-in failed: {{error}}",
+      "errorGeneric": "Sign-in failed",
+      "save": "Save",
+      "cancel": "Cancel",
+      "done": "Done"
+    },
+    "removeDialog": {
+      "title": "Remove account?",
+      "description": "\"{{name}}\" and its sign-in are removed from Auto Claude"
+    },
+    "toast": {
+      "added": "Account added",
+      "removed": "Account removed",
+      "removeFailed": "Couldn't remove the account",
+      "renameFailed": "Couldn't rename the account",
+      "switchFailed": "Couldn't switch accounts",
+      "signInStarted": "Opening your browser to sign in",
+      "signedIn": "Signed in",
+      "signInFailed": "Sign-in failed"
     }
   }
 }

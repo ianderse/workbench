@@ -1,0 +1,317 @@
+/**
+ * Claude Code page (app settings): how tasks run in the Claude Code CLI. A short triage run picks
+ * each task's model, effort and whether to plan (or a fixed model and effort are used), then
+ * Claude Code plans, implements and validates in the task's worktree.
+ */
+
+import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Input } from '../ui/input';
+import { Switch } from '../ui/switch';
+import { Textarea } from '../ui/textarea';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { SettingsSection } from './SettingsSection';
+import { SegmentedControl, SettingsRow, SettingsRows } from './SettingsRow';
+import {
+  DEFAULT_MAX_TERMINALS,
+  MIN_TERMINALS,
+  MAX_TERMINALS_LIMIT,
+  DEFAULT_MAX_PARALLEL_TASKS,
+  MIN_PARALLEL_TASKS,
+  MAX_PARALLEL_TASKS_LIMIT
+} from '../../../shared/constants';
+import {
+  CLAUDE_EFFORTS,
+  CLAUDE_MODEL_ALIASES,
+  DEFAULT_CLAUDE_CODE_TASK_SETTINGS,
+  type ClaudeCodeTaskSettings as TaskSettings,
+  type ClaudeEffort,
+  type ClaudeModelAlias,
+  type PlanningPolicy,
+  type TriageMode
+} from '../../../shared/types/claude-code';
+import type { AppSettings } from '../../../shared/types';
+
+interface ClaudeCodeTaskSettingsProps {
+  settings: AppSettings;
+  onSettingsChange: (settings: AppSettings) => void;
+}
+
+/** Fallback model choices (`--fallback-model`); 'none' leaves it unset */
+const FALLBACK_OPTIONS = ['none', 'sonnet', 'haiku', 'opus'] as const;
+
+/** Task execution, permissions and limits sections of the Claude Code page */
+export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCodeTaskSettingsProps) {
+  const { t } = useTranslation('settings');
+  const stored = settings.claudeCodeTasks ?? {};
+  const current: TaskSettings = { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, ...stored };
+
+  const update = (patch: Partial<TaskSettings>) => {
+    onSettingsChange({ ...settings, claudeCodeTasks: { ...stored, ...patch } });
+  };
+
+  // The budget is typed as text so partial values ("1.") survive; saved when it parses
+  const [budgetDraft, setBudgetDraft] = useState(current.maxBudgetUsd?.toString() ?? '');
+  useEffect(() => {
+    setBudgetDraft((draft) => {
+      const parsed = draft.trim() === '' ? undefined : Number(draft);
+      return parsed === current.maxBudgetUsd ? draft : current.maxBudgetUsd?.toString() ?? '';
+    });
+  }, [current.maxBudgetUsd]);
+
+  const handleBudgetChange = (value: string) => {
+    setBudgetDraft(value);
+    if (value.trim() === '') {
+      update({ maxBudgetUsd: undefined });
+      return;
+    }
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) update({ maxBudgetUsd: parsed });
+  };
+
+  const modelLabel = (model: ClaudeModelAlias) => t(`claudeCode.models.${model}`);
+  const effortLabel = (effort: ClaudeEffort) => t(`claudeCode.efforts.${effort}`);
+
+  const modelSelect = (id: string, value: ClaudeModelAlias, onChange: (model: ClaudeModelAlias) => void) => (
+    <Select value={value} onValueChange={(v) => onChange(v as ClaudeModelAlias)}>
+      <SelectTrigger id={id} className="h-8">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {CLAUDE_MODEL_ALIASES.map((model) => (
+          <SelectItem key={model} value={model}>
+            {modelLabel(model)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+
+  const fallbackValue = current.fallbackModel && current.fallbackModel.trim() !== '' ? current.fallbackModel : 'none';
+
+  return (
+    <>
+      <SettingsSection title={t('claudeCode.execution.title')}>
+        <SettingsRows>
+          <SettingsRow
+            label={t('claudeCode.execution.modelChoice')}
+            description={
+              current.triage === 'auto'
+                ? t('claudeCode.execution.modelChoiceAutoDescription')
+                : t('claudeCode.execution.modelChoiceFixedDescription')
+            }
+          >
+            <SegmentedControl<TriageMode>
+              value={current.triage}
+              onValueChange={(triage) => update({ triage })}
+              ariaLabel={t('claudeCode.execution.modelChoice')}
+              options={[
+                { value: 'auto', label: t('claudeCode.execution.triageModes.auto') },
+                { value: 'fixed', label: t('claudeCode.execution.triageModes.fixed') }
+              ]}
+            />
+          </SettingsRow>
+
+          {current.triage === 'fixed' ? (
+            <>
+              <SettingsRow
+                label={t('claudeCode.execution.model')}
+                description={t('claudeCode.execution.modelDescription')}
+                htmlFor="claude-code-fixed-model"
+              >
+                {modelSelect('claude-code-fixed-model', current.fixedModel, (fixedModel) => update({ fixedModel }))}
+              </SettingsRow>
+              <SettingsRow
+                label={t('claudeCode.execution.effort')}
+                description={t('claudeCode.execution.effortDescription')}
+                htmlFor="claude-code-fixed-effort"
+              >
+                <Select value={current.fixedEffort} onValueChange={(v) => update({ fixedEffort: v as ClaudeEffort })}>
+                  <SelectTrigger id="claude-code-fixed-effort" className="h-8">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CLAUDE_EFFORTS.map((effort) => (
+                      <SelectItem key={effort} value={effort}>
+                        {effortLabel(effort)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </SettingsRow>
+            </>
+          ) : (
+            <>
+              <SettingsRow
+                label={t('claudeCode.execution.triageModel')}
+                description={t('claudeCode.execution.triageModelDescription')}
+                htmlFor="claude-code-triage-model"
+              >
+                {modelSelect('claude-code-triage-model', current.triageModel, (triageModel) => update({ triageModel }))}
+              </SettingsRow>
+              <SettingsRow
+                label={t('claudeCode.execution.allowFable')}
+                description={t('claudeCode.execution.allowFableDescription')}
+              >
+                <Switch
+                  checked={current.allowFable}
+                  onCheckedChange={(allowFable) => update({ allowFable })}
+                  aria-label={t('claudeCode.execution.allowFable')}
+                />
+              </SettingsRow>
+            </>
+          )}
+
+          <SettingsRow
+            label={t('claudeCode.execution.planning')}
+            description={t(`claudeCode.execution.planningDescriptions.${current.planning}`)}
+          >
+            <SegmentedControl<PlanningPolicy>
+              value={current.planning}
+              onValueChange={(planning) => update({ planning })}
+              ariaLabel={t('claudeCode.execution.planning')}
+              options={[
+                { value: 'auto', label: t('claudeCode.execution.planningModes.auto') },
+                { value: 'always', label: t('claudeCode.execution.planningModes.always') },
+                { value: 'never', label: t('claudeCode.execution.planningModes.never') }
+              ]}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('claudeCode.execution.validation')}
+            description={t('claudeCode.execution.validationDescription')}
+          >
+            <Switch
+              checked={current.validation}
+              onCheckedChange={(validation) => update({ validation })}
+              aria-label={t('claudeCode.execution.validation')}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('claudeCode.execution.budget')}
+            description={t('claudeCode.execution.budgetDescription')}
+            htmlFor="claude-code-budget"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-sm text-(--nav-label-color)">$</span>
+              <Input
+                id="claude-code-budget"
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step={0.5}
+                className="w-24"
+                placeholder={t('claudeCode.execution.budgetPlaceholder')}
+                value={budgetDraft}
+                onChange={(e) => handleBudgetChange(e.target.value)}
+              />
+            </div>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('claudeCode.execution.fallbackModel')}
+            description={t('claudeCode.execution.fallbackModelDescription')}
+            htmlFor="claude-code-fallback-model"
+          >
+            <Select
+              value={fallbackValue}
+              onValueChange={(v) => update({ fallbackModel: v === 'none' ? undefined : v })}
+            >
+              <SelectTrigger id="claude-code-fallback-model" className="h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FALLBACK_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option === 'none' ? t('claudeCode.execution.fallbackNone') : modelLabel(option)}
+                  </SelectItem>
+                ))}
+                {/* A custom chain set elsewhere stays selectable */}
+                {!(FALLBACK_OPTIONS as readonly string[]).includes(fallbackValue) && (
+                  <SelectItem value={fallbackValue}>{fallbackValue}</SelectItem>
+                )}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('claudeCode.execution.extraInstructions')}
+            description={t('claudeCode.execution.extraInstructionsDescription')}
+            htmlFor="claude-code-extra-instructions"
+            stacked
+          >
+            <Textarea
+              id="claude-code-extra-instructions"
+              rows={4}
+              placeholder={t('claudeCode.execution.extraInstructionsPlaceholder')}
+              value={current.extraInstructions ?? ''}
+              onChange={(e) => update({ extraInstructions: e.target.value === '' ? undefined : e.target.value })}
+            />
+          </SettingsRow>
+        </SettingsRows>
+      </SettingsSection>
+
+      <SettingsSection title={t('claudeCode.permissions.title')}>
+        <SettingsRows>
+          <SettingsRow
+            label={t('claudeCode.permissions.label')}
+            description={t('claudeCode.permissions.description')}
+          >
+            <span className="text-sm text-(--nav-label-color)">{t('claudeCode.permissions.value')}</span>
+          </SettingsRow>
+        </SettingsRows>
+      </SettingsSection>
+
+      {/* How many agent windows and parallel tasks a project can run */}
+      <SettingsSection title={t('general.limits')}>
+        <SettingsRows>
+          <SettingsRow
+            label={t('general.maxTerminals')}
+            description={t('general.maxTerminalsDescription', { min: MIN_TERMINALS, max: MAX_TERMINALS_LIMIT })}
+            htmlFor="maxTerminals"
+          >
+            <Input
+              id="maxTerminals"
+              type="number"
+              min={MIN_TERMINALS}
+              max={MAX_TERMINALS_LIMIT}
+              className="w-20"
+              value={settings.maxTerminals ?? DEFAULT_MAX_TERMINALS}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                if (e.target.value === '' || !Number.isFinite(value)) return;
+                const clamped = Math.min(MAX_TERMINALS_LIMIT, Math.max(MIN_TERMINALS, Math.round(value)));
+                onSettingsChange({ ...settings, maxTerminals: clamped });
+              }}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t('projectSections.queue.maxParallelTasks')}
+            description={t('projectSections.queue.maxParallelTasksDescription', {
+              min: MIN_PARALLEL_TASKS,
+              max: MAX_PARALLEL_TASKS_LIMIT
+            })}
+            htmlFor="maxParallelTasks"
+          >
+            <Input
+              id="maxParallelTasks"
+              type="number"
+              min={MIN_PARALLEL_TASKS}
+              max={MAX_PARALLEL_TASKS_LIMIT}
+              className="w-20"
+              value={settings.maxParallelTasks ?? DEFAULT_MAX_PARALLEL_TASKS}
+              onChange={(e) => {
+                const value = Number(e.target.value);
+                if (e.target.value === '' || !Number.isFinite(value)) return;
+                const clamped = Math.min(MAX_PARALLEL_TASKS_LIMIT, Math.max(MIN_PARALLEL_TASKS, Math.round(value)));
+                onSettingsChange({ ...settings, maxParallelTasks: clamped });
+              }}
+            />
+          </SettingsRow>
+        </SettingsRows>
+      </SettingsSection>
+    </>
+  );
+}

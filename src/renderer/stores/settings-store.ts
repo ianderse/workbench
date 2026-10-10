@@ -1,8 +1,6 @@
 import { create } from 'zustand';
-import type { AppSettings, PerProviderAgentConfig } from '../../shared/types';
+import type { AppSettings } from '../../shared/types';
 import type { APIProfile, ProfileFormData, TestConnectionResult, ModelInfo } from '@shared/types/profile';
-import type { BuiltinProvider, ProviderAccount } from '@shared/types/provider-account';
-import type { IPCResult } from '@shared/types/common';
 import { DEFAULT_APP_SETTINGS } from '../../shared/constants';
 import { toast } from '../hooks/use-toast';
 
@@ -26,10 +24,6 @@ interface SettingsState {
   modelsError: string | null;
   discoveredModels: Map<string, ModelInfo[]>; // Cache key -> models mapping
 
-  // Provider accounts state (unified multi-provider credentials)
-  providerAccounts: ProviderAccount[];
-  envCredentials: Record<string, boolean>;
-
   // Actions
   setSettings: (settings: AppSettings) => void;
   updateSettings: (updates: Partial<AppSettings>) => void;
@@ -46,17 +40,6 @@ interface SettingsState {
   setActiveProfile: (profileId: string | null) => Promise<boolean>;
   testConnection: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<TestConnectionResult | null>;
   discoverModels: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<ModelInfo[] | null>;
-
-  // Provider account actions
-  addProviderAccount: (account: Omit<ProviderAccount, 'id' | 'createdAt' | 'updatedAt'>) => Promise<IPCResult<ProviderAccount>>;
-  updateProviderAccount: (id: string, updates: Partial<ProviderAccount>) => Promise<IPCResult<ProviderAccount>>;
-  deleteProviderAccount: (id: string) => Promise<IPCResult>;
-  setQueueOrder: (order: string[]) => Promise<IPCResult>;
-  setCrossProviderQueueOrder: (order: string[]) => Promise<IPCResult>;
-  saveModelOverrides: (overrides: Record<string, unknown>) => Promise<IPCResult>;
-  getProviderAccounts: (provider?: BuiltinProvider) => ProviderAccount[];
-  checkEnvCredentials: () => Promise<IPCResult<Record<string, boolean>>>;
-  loadProviderAccounts: () => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -73,10 +56,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   // Test connection state
   isTestingConnection: false,
   testConnectionResult: null,
-
-  // Provider accounts state
-  providerAccounts: [],
-  envCredentials: {},
 
   // Model discovery state
   modelsLoading: false,
@@ -273,7 +252,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   },
 
   discoverModels: async (baseUrl: string, apiKey: string, signal?: AbortSignal): Promise<ModelInfo[] | null> => {
-    console.log('[settings-store] discoverModels called with:', { baseUrl, apiKey: `${apiKey.slice(-4)}` });
     // Generate cache key from baseUrl and apiKey (last 4 chars)
     const cacheKey = `${baseUrl}::${apiKey.slice(-4)}`;
 
@@ -281,16 +259,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     const state = useSettingsStore.getState();
     const cached = state.discoveredModels.get(cacheKey);
     if (cached) {
-      console.log('[settings-store] Returning cached models');
       return cached;
     }
 
     // Fetch from API
     set({ modelsLoading: true, modelsError: null });
     try {
-      console.log('[settings-store] Calling window.electronAPI.discoverModels...');
       const result = await window.electronAPI.discoverModels(baseUrl, apiKey, signal);
-      console.log('[settings-store] discoverModels result:', result);
 
       if (result.success && result.data) {
         const models = result.data.models;
@@ -506,23 +481,6 @@ export async function saveSettings(updates: Partial<AppSettings>): Promise<boole
   } catch {
     return false;
   }
-}
-
-/**
- * Save per-provider agent configuration.
- * Merges the updates into the existing provider config for the given provider.
- */
-export async function saveProviderAgentConfig(
-  provider: BuiltinProvider,
-  updates: Partial<PerProviderAgentConfig>
-): Promise<boolean> {
-  const { settings } = useSettingsStore.getState();
-  return saveSettings({
-    providerAgentConfig: {
-      ...settings.providerAgentConfig,
-      [provider]: { ...settings.providerAgentConfig?.[provider], ...updates },
-    },
-  });
 }
 
 /**

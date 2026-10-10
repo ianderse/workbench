@@ -264,6 +264,7 @@ export const IPC_CHANNELS = {
 
   // Claude Code CLI operations
   CLAUDE_CODE_CHECK_VERSION: 'claudeCode:checkVersion',
+  CLAUDE_CODE_GET_INVENTORY: 'claudeCode:getInventory',  // Agents, skills, hooks, MCP servers, CLAUDE.md files Claude Code loads for a project
   CLAUDE_CODE_INSTALL: 'claudeCode:install',
   CLAUDE_CODE_GET_VERSIONS: 'claudeCode:getVersions',
   CLAUDE_CODE_INSTALL_VERSION: 'claudeCode:installVersion',

@@ -25,6 +25,8 @@ import { getClaudeProfileManager } from '../claude-profile-manager';
 import { isValidConfigDir } from '../utils/config-path-validator';
 import { clearKeychainCache, getCredentialsFromKeychain, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
+import { getClaudeCodeInventory } from '../claude-code/inventory';
+import type { ClaudeCodeInventory } from '../../shared/types/claude-code';
 import semver from 'semver';
 
 const execFileAsync = promisify(execFile);
@@ -959,6 +961,19 @@ function checkProfileAuthentication(configDir: string): AuthCheckResult {
  * Register Claude Code IPC handlers
  */
 export function registerClaudeCodeHandlers(): void {
+  // What Claude Code loads for a project (Settings > Claude Code): read from the active profile's config dir
+  ipcMain.handle(
+    IPC_CHANNELS.CLAUDE_CODE_GET_INVENTORY,
+    async (_event, projectPath: string): Promise<IPCResult<ClaudeCodeInventory>> => {
+      try {
+        const configDir = getClaudeProfileManager().getActiveProfile()?.configDir;
+        return { success: true, data: await getClaudeCodeInventory(projectPath, configDir) };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+
   // Check Claude Code version
   ipcMain.handle(
     IPC_CHANNELS.CLAUDE_CODE_CHECK_VERSION,

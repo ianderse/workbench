@@ -1,216 +1,73 @@
 /**
- * AccountSettings - Unified account management across all AI providers
+ * AccountSettings - how Claude Code signs in
  *
- * claude.ai settings layout: one section per provider category (ProviderAccountsList),
- * followed by the automatic account switching section and the account priority
- * order (AccountPriorityList).
+ * claude.ai settings layout: Claude accounts (subscriptions, with usage), API profiles
+ * (Anthropic-compatible endpoints), automatic account switching and the switching order.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '../ui/switch';
 import { cn } from '../../lib/utils';
 import { SettingsSection } from './SettingsSection';
-import { SettingsRow, SettingsRows, SegmentedControl } from './SettingsRow';
+import { SettingsRow, SettingsRows } from './SettingsRow';
 import { AccountPriorityList, type UnifiedAccount } from './AccountPriorityList';
-import { ProviderAccountsList } from './ProviderAccountsList';
-import { useSettingsStore } from '../../stores/settings-store';
+import { ClaudeAccountsSection } from './ClaudeAccountsSection';
+import { ProfileList } from './ProfileList';
+import { useClaudeAccounts } from './hooks/useClaudeAccounts';
 import { useToast } from '../../hooks/use-toast';
-import { PROVIDER_REGISTRY } from '@shared/constants/providers';
-import type { AppSettings, ClaudeAutoSwitchSettings, ProfileUsageSummary } from '../../../shared/types';
+import type { AppSettings, ClaudeAutoSwitchSettings } from '../../../shared/types';
 
 interface AccountSettingsProps {
-  settings: AppSettings;
-  onSettingsChange: (settings: AppSettings) => void;
+  /** Kept for the page signature; accounts are stored by the main process, not in app settings */
+  settings?: AppSettings;
+  onSettingsChange?: (settings: AppSettings) => void;
   isOpen: boolean;
 }
 
-export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountSettingsProps) {
+/** Priority order entries are Claude profile ids with this prefix (shared with the profile scorer) */
+const PRIORITY_ID_PREFIX = 'oauth-';
+
+export function AccountSettings({ isOpen }: AccountSettingsProps) {
   const { t } = useTranslation('settings');
   const { toast } = useToast();
-  const { getProviderAccounts, setQueueOrder, setCrossProviderQueueOrder } = useSettingsStore();
+  const { profiles, activeProfileId, usage, reload } = useClaudeAccounts(isOpen);
 
-  // Derive priority orders from Zustand store (single source of truth)
-  const priorityOrder = settings.globalPriorityOrder ?? [];
-  const crossProviderPriorityOrder = settings.crossProviderPriorityOrder ?? [];
-
-  // ============================================
-  // Auto-switch settings state
-  // ============================================
   const [autoSwitchSettings, setAutoSwitchSettings] = useState<ClaudeAutoSwitchSettings | null>(null);
   const [isLoadingAutoSwitch, setIsLoadingAutoSwitch] = useState(false);
-
-  // ============================================
-  // Priority UI state
-  // ============================================
+  const [priorityOrder, setPriorityOrder] = useState<string[]>([]);
   const [isSavingPriority, setIsSavingPriority] = useState(false);
-  const [priorityTab, setPriorityTab] = useState<'default' | 'cross-provider'>('default');
 
-  // ============================================
-  // Usage data state
-  // ============================================
-  const [profileUsageData, setProfileUsageData] = useState<Map<string, ProfileUsageSummary>>(new Map());
-
-  const loadProfileUsageData = useCallback(async (forceRefresh: boolean = false) => {
-    try {
-      const result = await window.electronAPI.requestAllProfilesUsage?.(forceRefresh);
-      if (result?.success && result.data) {
-        const usageMap = new Map<string, ProfileUsageSummary>();
-        result.data.allProfiles.forEach(profile => {
-          usageMap.set(profile.profileId, profile);
-        });
-        setProfileUsageData(usageMap);
-      }
-    } catch {
-      // Non-fatal
-    }
-  }, []);
-
-  // Build unified accounts list sorted by a given priority order
-  const buildUnifiedAccountsForOrder = useCallback((order: string[]): UnifiedAccount[] => {
-    const allAccounts = getProviderAccounts();
-    return allAccounts.map(account => {
-      const usageData = (account.claudeProfileId
-        ? profileUsageData.get(account.claudeProfileId)
-        : undefined) ?? profileUsageData.get(account.id);
-      const profileEmail = usageData?.profileEmail || account.email;
-
-      const identifier = account.authType === 'oauth'
-        ? (profileEmail || PROVIDER_REGISTRY.find(p => p.id === account.provider)?.name || t('accounts.priority.noEmail'))
-        : (account.baseUrl ?? (PROVIDER_REGISTRY.find(p => p.id === account.provider)?.name ?? account.provider));
-
-      return {
-        id: account.id,
-        name: account.name,
-        type: account.authType === 'oauth' ? 'oauth' : 'api',
-        displayName: account.name,
-        identifier,
-        provider: account.provider,
-        profileEmail,
-        isActive: order.length > 0 ? order[0] === account.id : false,
-        isNext: false,
-        isAvailable: true,
-        hasUnlimitedUsage: account.authType === 'api-key',
-        sessionPercent: usageData?.sessionPercent,
-        weeklyPercent: usageData?.weeklyPercent,
-        isRateLimited: usageData?.isRateLimited,
-        rateLimitType: usageData?.rateLimitType,
-        needsReauthentication: usageData?.needsReauthentication,
-      } satisfies UnifiedAccount;
-    }).sort((a, b) => {
-      if (order.length === 0) return 0;
-      const aPos = order.indexOf(a.id);
-      const bPos = order.indexOf(b.id);
-      return (aPos === -1 ? Infinity : aPos) - (bPos === -1 ? Infinity : bPos);
+  const showUpdateFailed = useCallback((description?: string) => {
+    toast({
+      variant: 'destructive',
+      title: t('accounts.toast.settingsUpdateFailed'),
+      description: description || t('accounts.toast.tryAgain'),
     });
-  }, [getProviderAccounts, profileUsageData, t]);
+  }, [t, toast]);
 
-  const unifiedAccounts = buildUnifiedAccountsForOrder(priorityOrder);
-  const crossProviderUnifiedAccounts = buildUnifiedAccountsForOrder(
-    crossProviderPriorityOrder.length > 0 ? crossProviderPriorityOrder : priorityOrder
-  );
-
-  const handlePriorityReorder = async (newOrder: string[]) => {
-    setIsSavingPriority(true);
-    try {
-      await setQueueOrder(newOrder);
-    } catch {
-      toast({
-        variant: 'destructive',
-        title: t('accounts.toast.settingsUpdateFailed'),
-        description: t('accounts.toast.tryAgain'),
-      });
-    } finally {
-      setIsSavingPriority(false);
-    }
-  };
-
-  const handleCrossProviderPriorityReorder = async (newOrder: string[]) => {
-    setIsSavingPriority(true);
-    try {
-      await setCrossProviderQueueOrder(newOrder);
-    } catch {
-      toast({
-        variant: 'destructive',
-        title: t('accounts.toast.settingsUpdateFailed'),
-        description: t('accounts.toast.tryAgain'),
-      });
-    } finally {
-      setIsSavingPriority(false);
-    }
-  };
-
-  const handleSetActive = useCallback(async (accountId: string) => {
-    const newOrder = [accountId, ...priorityOrder.filter(id => id !== accountId)];
-    setIsSavingPriority(true);
-    try {
-      await setQueueOrder(newOrder);
-    } catch {
-      toast({
-        variant: 'destructive',
-        title: t('accounts.toast.settingsUpdateFailed'),
-        description: t('accounts.toast.tryAgain'),
-      });
-    } finally {
-      setIsSavingPriority(false);
-    }
-  }, [priorityOrder, setQueueOrder, toast, t]);
-
-  const handleCrossProviderSetActive = useCallback(async (accountId: string) => {
-    const cpOrder = crossProviderPriorityOrder.length > 0 ? crossProviderPriorityOrder : priorityOrder;
-    const newOrder = [accountId, ...cpOrder.filter(id => id !== accountId)];
-    setIsSavingPriority(true);
-    try {
-      await setCrossProviderQueueOrder(newOrder);
-    } catch {
-      toast({
-        variant: 'destructive',
-        title: t('accounts.toast.settingsUpdateFailed'),
-        description: t('accounts.toast.tryAgain'),
-      });
-    } finally {
-      setIsSavingPriority(false);
-    }
-  }, [crossProviderPriorityOrder, priorityOrder, setCrossProviderQueueOrder, toast, t]);
-
-  const handlePriorityTabChange = useCallback((tab: 'default' | 'cross-provider') => {
-    setPriorityTab(tab);
-    // Lazy-initialize cross-provider order from global order on first tab switch
-    if (tab === 'cross-provider' && crossProviderPriorityOrder.length === 0 && priorityOrder.length > 0) {
-      setCrossProviderQueueOrder(priorityOrder);
-    }
-  }, [crossProviderPriorityOrder.length, priorityOrder, setCrossProviderQueueOrder]);
-
-  useEffect(() => {
-    if (isOpen) {
-      loadAutoSwitchSettings();
-      loadProfileUsageData(false); // Use cached data; push-based listener below provides fresh updates
-    }
-  }, [isOpen, loadProfileUsageData]);
-
-  useEffect(() => {
-    const unsubscribe = window.electronAPI.onAllProfilesUsageUpdated?.((allProfilesUsage) => {
-      const usageMap = new Map<string, ProfileUsageSummary>();
-      allProfilesUsage.allProfiles.forEach(profile => {
-        usageMap.set(profile.profileId, profile);
-      });
-      setProfileUsageData(usageMap);
-    });
-    return () => { unsubscribe?.(); };
-  }, []);
-
-  const loadAutoSwitchSettings = async () => {
+  const loadAutoSwitchSettings = useCallback(async () => {
     setIsLoadingAutoSwitch(true);
     try {
       const result = await window.electronAPI.getAutoSwitchSettings();
-      if (result.success && result.data) {
-        setAutoSwitchSettings(result.data);
-      }
+      if (result.success && result.data) setAutoSwitchSettings(result.data);
     } catch {
       // Non-fatal
     } finally {
       setIsLoadingAutoSwitch(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    void loadAutoSwitchSettings();
+    window.electronAPI.getAccountPriorityOrder?.()
+      .then((result) => {
+        if (result.success && result.data) setPriorityOrder(result.data);
+      })
+      .catch(() => {
+        // Non-fatal: accounts keep their natural order
+      });
+  }, [isOpen, loadAutoSwitchSettings]);
 
   const handleUpdateAutoSwitch = async (updates: Partial<ClaudeAutoSwitchSettings>) => {
     setIsLoadingAutoSwitch(true);
@@ -219,24 +76,80 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
       if (result.success) {
         await loadAutoSwitchSettings();
       } else {
-        toast({
-          variant: 'destructive',
-          title: t('accounts.toast.settingsUpdateFailed'),
-          description: result.error || t('accounts.toast.tryAgain'),
-        });
+        showUpdateFailed(result.error);
       }
     } catch {
-      toast({
-        variant: 'destructive',
-        title: t('accounts.toast.settingsUpdateFailed'),
-        description: t('accounts.toast.tryAgain'),
-      });
+      showUpdateFailed();
     } finally {
       setIsLoadingAutoSwitch(false);
     }
   };
 
-  const totalAccounts = unifiedAccounts.length;
+  // Claude accounts in switching order (accounts missing from the saved order come last)
+  const orderedProfiles = [...profiles].sort((a, b) => {
+    const aPos = priorityOrder.indexOf(`${PRIORITY_ID_PREFIX}${a.id}`);
+    const bPos = priorityOrder.indexOf(`${PRIORITY_ID_PREFIX}${b.id}`);
+    return (aPos === -1 ? Infinity : aPos) - (bPos === -1 ? Infinity : bPos);
+  });
+
+  const priorityAccounts: UnifiedAccount[] = orderedProfiles.map((profile) => {
+    const summary = usage.get(profile.id);
+    const email = summary?.profileEmail || profile.email;
+    const isAuthenticated = summary?.isAuthenticated ?? profile.isAuthenticated !== false;
+    return {
+      id: profile.id,
+      name: profile.name,
+      type: 'oauth',
+      displayName: profile.name,
+      identifier: email || t('accounts.priority.noEmail'),
+      profileEmail: email,
+      isActive: profile.id === activeProfileId,
+      isNext: false,
+      isAvailable: isAuthenticated,
+      isAuthenticated,
+      hasUnlimitedUsage: false,
+      sessionPercent: summary?.sessionPercent,
+      weeklyPercent: summary?.weeklyPercent,
+      isRateLimited: summary?.isRateLimited,
+      rateLimitType: summary?.rateLimitType,
+      needsReauthentication: summary?.needsReauthentication,
+    };
+  });
+
+  const savePriorityOrder = async (profileIds: string[]) => {
+    const order = profileIds.map((id) => `${PRIORITY_ID_PREFIX}${id}`);
+    setIsSavingPriority(true);
+    try {
+      const result = await window.electronAPI.setAccountPriorityOrder(order);
+      if (result.success) {
+        setPriorityOrder(order);
+      } else {
+        showUpdateFailed(result.error);
+      }
+    } catch {
+      showUpdateFailed();
+    } finally {
+      setIsSavingPriority(false);
+    }
+  };
+
+  // Use an account now and put it first in the order
+  const handleSetActive = async (profileId: string) => {
+    setIsSavingPriority(true);
+    try {
+      const result = await window.electronAPI.setActiveClaudeProfile(profileId);
+      if (!result.success) {
+        showUpdateFailed(result.error);
+        return;
+      }
+    } finally {
+      setIsSavingPriority(false);
+    }
+    await savePriorityOrder([profileId, ...orderedProfiles.map((p) => p.id).filter((id) => id !== profileId)]);
+    await reload();
+  };
+
+  const totalAccounts = profiles.length;
 
   const thresholdSlider = (
     id: string,
@@ -270,8 +183,11 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
 
   return (
     <>
-      {/* Provider accounts: one section per provider category */}
-      <ProviderAccountsList />
+      {/* Claude subscriptions Claude Code signs in with */}
+      <ClaudeAccountsSection />
+
+      {/* Anthropic-compatible endpoints */}
+      <ProfileList />
 
       {/* Automatic account switching */}
       {totalAccounts > 1 && (
@@ -372,48 +288,16 @@ export function AccountSettings({ settings, onSettingsChange, isOpen }: AccountS
         </SettingsSection>
       )}
 
-      {/* Account priority order */}
+      {/* Switching order */}
       {totalAccounts > 1 && autoSwitchSettings?.enabled && (
         <SettingsSection title={t('accounts.priority.title')}>
-          <SettingsRows>
-            <SettingsRow
-              label={t('accounts.priority.modeLabel')}
-              description={
-                priorityTab === 'cross-provider'
-                  ? t('accounts.priority.crossProviderDescription')
-                  : t('accounts.priority.description')
-              }
-            >
-              <SegmentedControl
-                value={priorityTab}
-                onValueChange={handlePriorityTabChange}
-                ariaLabel={t('accounts.priority.modeLabel')}
-                options={[
-                  { value: 'default', label: t('accounts.priority.tabs.default') },
-                  { value: 'cross-provider', label: t('accounts.priority.tabs.crossProvider') },
-                ]}
-              />
-            </SettingsRow>
-            <div className="pt-1">
-              {priorityTab === 'cross-provider' ? (
-                <AccountPriorityList
-                  key="cross-provider"
-                  accounts={crossProviderUnifiedAccounts}
-                  onReorder={handleCrossProviderPriorityReorder}
-                  onSetActive={handleCrossProviderSetActive}
-                  isLoading={isSavingPriority}
-                />
-              ) : (
-                <AccountPriorityList
-                  key="default"
-                  accounts={unifiedAccounts}
-                  onReorder={handlePriorityReorder}
-                  onSetActive={handleSetActive}
-                  isLoading={isSavingPriority}
-                />
-              )}
-            </div>
-          </SettingsRows>
+          <p className="-mt-2 mb-1 text-sm text-(--nav-label-color)">{t('accounts.priority.description')}</p>
+          <AccountPriorityList
+            accounts={priorityAccounts}
+            onReorder={(ids) => void savePriorityOrder(ids)}
+            onSetActive={(id) => void handleSetActive(id)}
+            isLoading={isSavingPriority}
+          />
         </SettingsSection>
       )}
     </>

@@ -22,6 +22,8 @@ import { cn } from '../../lib/utils';
 import { useSettings } from './hooks/useSettings';
 import { ThemeSettings } from './ThemeSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { ClaudeCodeTaskSettings } from './ClaudeCodeTaskSettings';
+import { ClaudeCodeInventorySection } from './ClaudeCodeInventorySection';
 import { AdvancedSettings } from './AdvancedSettings';
 import { ClaudeCodeSettings } from './ClaudeCodeSettings';
 import { GraphifySettings } from './GraphifySettings';
@@ -50,13 +52,15 @@ interface AppSettingsDialogProps {
 }
 
 // App-level settings pages (claude.ai layout: related settings grouped on one page)
-type AppPage = 'general' | 'accounts' | 'agent' | 'connectors' | 'devtools' | 'updates';
+type AppPage = 'general' | 'accounts' | 'claude-code' | 'connectors' | 'devtools' | 'updates';
 
 // Section ids accepted from the rest of the app; older ids map onto the page that now holds them
-export type AppSection = AppPage | 'terminal-fonts' | 'appearance' | 'display' | 'notifications' | 'paths' | 'debug' | 'integrations' | 'api-profiles';
+export type AppSection = AppPage | 'agent' | 'terminal-fonts' | 'appearance' | 'display' | 'notifications' | 'paths' | 'debug' | 'integrations' | 'api-profiles';
 
 const LEGACY_SECTION_PAGE: Record<string, AppPage> = {
-  'terminal-fonts': 'agent',
+  // The Agents page became the Claude Code page (limits live there)
+  agent: 'claude-code',
+  'terminal-fonts': 'claude-code',
   appearance: 'general',
   display: 'general',
   notifications: 'general',
@@ -86,7 +90,7 @@ const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'general', icon: GearIcon },
   { kind: 'app', id: 'accounts', icon: CircleUserRound },
   // The wide, short creature reads small at 18px: 20px, with the extra 2px taken out of the gap
-  { kind: 'app', id: 'agent', icon: AgentOutlineIcon, iconClassName: '-mx-px h-5 w-5', iconStrokeWidth: 1.35 },
+  { kind: 'app', id: 'claude-code', icon: AgentOutlineIcon, iconClassName: '-mx-px h-5 w-5', iconStrokeWidth: 1.35 },
   { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'app', id: 'devtools', icon: CodeXml },
   { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
@@ -223,8 +227,18 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
         );
       case 'accounts':
         return <AccountSettings settings={settings} onSettingsChange={setSettings} isOpen={open} />;
-      case 'agent':
-        return <GeneralSettings settings={settings} onSettingsChange={setSettings} section="agent" />;
+      case 'claude-code':
+        return (
+          <>
+            <ClaudeCodeTaskSettings settings={settings} onSettingsChange={setSettings} />
+            {/* What Claude Code loads from the user's own configuration for the selected project */}
+            {selectedProject && (
+              <ClaudeCodeInventorySection projectPath={selectedProject.path} projectName={selectedProject.name} />
+            )}
+            {/* Claude Code CLI (status, install/update, version switching) */}
+            <ClaudeCodeSettings />
+          </>
+        );
       case 'connectors':
         return <ConnectorsSettings settings={settings} onSettingsChange={setSettings} />;
       case 'devtools':
@@ -239,8 +253,6 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
         return (
           <>
             <AdvancedSettings settings={settings} onSettingsChange={setSettings} section="updates" version={version} />
-            {/* Claude Code CLI (status, install/update, version and installation switching) */}
-            <ClaudeCodeSettings />
             {/* Graphify CLI (builds the projects' memory graphs) */}
             <GraphifySettings />
           </>
