@@ -156,7 +156,7 @@ describe('runInsights', () => {
         prompt: 'CodebaseGraph tool section',
         commandPrompt: 'graphify commands section',
         cli: '/home/me/.local/bin/graphify',
-        graph: '/project/.auto-claude/memory/graphify-out/graph.json',
+        graph: '/project/.auto-claude/knowledge/graphify-out/graph.json',
       },
     })).promise;
     const { args, systemPrompt, graphifyOut } = record();
@@ -167,7 +167,7 @@ describe('runInsights', () => {
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
     expect(systemPrompt).toContain('graphify commands section');
     expect(systemPrompt).not.toContain('CodebaseGraph tool section');
-    expect(graphifyOut).toBe('/project/.auto-claude/memory/graphify-out');
+    expect(graphifyOut).toBe('/project/.auto-claude/knowledge/graphify-out');
   });
 
   it('shows the command of a Bash graph search', async () => {

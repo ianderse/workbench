@@ -239,11 +239,11 @@ export async function createOrGetWorktree(
   // ------------------------------------------------------------------
   // Step 7: Copy spec directory into the worktree
   //
-  // .auto-claude/specs/ is gitignored, so it is NOT present in the
+  // .auto-claude/tasks/ is gitignored, so it is NOT present in the
   // newly-created worktree checkout. Copy it from the main project so
   // that agents can read spec.md, implementation_plan.json, etc.
   // ------------------------------------------------------------------
-  const specsRelDir = getSpecsDir(autoBuildPath); // e.g. ".auto-claude/specs"
+  const specsRelDir = getSpecsDir(autoBuildPath); // e.g. ".auto-claude/tasks"
   const sourceSpecDir = join(projectPath, specsRelDir, specId);
   const destSpecDir = join(worktreePath, specsRelDir, specId);
 

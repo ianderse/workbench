@@ -17,9 +17,9 @@ export interface GraphifyAPI {
   installGraphifyClaudeCommand: () => Promise<IPCResult<{ configDirs: number; missing: number }>>;
   /** The project's memory graph, or null when it has not been built */
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo | null>>;
-  /** Build (or rebuild) the project's memory graph in .auto-claude/memory */
+  /** Build (or rebuild) the project's memory graph in .auto-claude/knowledge */
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo>>;
-  /** Whether the project has a memory graph (.auto-claude/memory) */
+  /** Whether the project has a memory graph (.auto-claude/knowledge) */
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   /** The project's memory graph for the graph view */
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<GraphifyGraph | null>>;

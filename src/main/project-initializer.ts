@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } fr
 import path from 'path';
 import { execFileSync } from 'child_process';
 import { getToolPath } from './cli-tool-manager';
+import { DATA_DIR_NAMES } from '../shared/constants';
 
 /**
  * Debug logging - only logs when DEBUG=true or in development mode
@@ -222,8 +223,8 @@ function ensureGitignoreEntries(projectPath: string, entries: string[]): void {
  * Data directories created in .auto-claude for each project
  */
 const DATA_DIRECTORIES = [
-  'specs',
-  'insights'
+  DATA_DIR_NAMES.tasks,
+  DATA_DIR_NAMES.chats
 ];
 
 /**

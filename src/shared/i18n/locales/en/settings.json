@@ -308,8 +308,8 @@
       "useClaudeMd": "Use CLAUDE.md",
       "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context",
       "useGraphify": "Use Graphify",
-      "useGraphifyDescription": "Give agents the project's memory graph, built under Memory index on the Project page",
-      "useGraphifyNotInstalled": "Install Graphify on the Updates page to use the project's memory graph"
+      "useGraphifyDescription": "Give agents the project's knowledge graph, built under Knowledge index on the Project page",
+      "useGraphifyNotInstalled": "Install Graphify on the Updates page to use the project's knowledge graph"
     },
     "queue": {
       "title": "Queue",
@@ -585,9 +585,9 @@
       "score": "Score {{score}}",
       "filter": "Filter",
       "loadingMemories": "Loading memories...",
-      "memoryIndex": "Memory index",
+      "memoryIndex": "Knowledge index",
       "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
-      "noMemoryIndex": "Map the project's code into a Graphify graph in .auto-claude/memory",
+      "noMemoryIndex": "Map the project's code into a Graphify graph in .auto-claude/knowledge",
       "memoryIndexNotInstalled": "Install Graphify on the Updates page to build a memory graph",
       "memoryIndexNotEnabled": "Turn on Use Graphify on the Memory page to build a memory graph",
       "buildMemoryIndex": "Build",

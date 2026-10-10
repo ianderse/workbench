@@ -418,14 +418,14 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       );
 
       // Create .auto-claude directory first (before adding project so it gets detected)
-      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "specs"), { recursive: true });
+      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks"), { recursive: true });
 
       // Add a project - it will detect .auto-claude
       const addResult = await ipcMain.invokeHandler("project:add", {}, TEST_PROJECT_PATH);
       const projectId = (addResult as { data: { id: string } }).data.id;
 
-      // Create a spec directory with implementation plan in .auto-claude/specs
-      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "specs", "001-test-feature");
+      // Create a spec directory with implementation plan in .auto-claude/tasks
+      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks", "001-test-feature");
       mkdirSync(specDir, { recursive: true });
       writeFileSync(
         path.join(specDir, "implementation_plan.json"),
@@ -488,7 +488,7 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       );
 
       // Create .auto-claude directory first (before adding project so it gets detected)
-      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "specs"), { recursive: true });
+      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks"), { recursive: true });
 
       // Add a project first
       const addResult = await ipcMain.invokeHandler("project:add", {}, TEST_PROJECT_PATH);
@@ -616,7 +616,7 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       await ipcMain.invokeHandler("project:add", {}, TEST_PROJECT_PATH);
 
       // Create a spec/task directory with implementation_plan.json
-      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "specs", "task-1");
+      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks", "task-1");
       mkdirSync(specDir, { recursive: true });
       writeFileSync(
         path.join(specDir, "implementation_plan.json"),

@@ -58,6 +58,7 @@ import type {
 import type { McpConnectorSettings } from '../../shared/types/settings';
 import type { ExecutionPhase } from '../../shared/constants/phase-protocol';
 import type { SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
+import { DATA_DIR_NAMES } from '../../shared/constants';
 
 const execFileAsync = promisify(execFile);
 
@@ -611,7 +612,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       this.info.configDir = configDir;
       this.saveInfo();
     }
-    const specDirRelative = path.join('.auto-claude', 'specs', this.config.specId);
+    const specDirRelative = path.join('.auto-claude', DATA_DIR_NAMES.tasks, this.config.specId);
     const args = [
       '-p',
       '--input-format', 'stream-json',

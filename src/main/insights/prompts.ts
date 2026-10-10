@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeParseJson } from '../utils/json-repair';
+import { DATA_DIR_NAMES } from '../../shared/constants';
 
 /** A message in the insights conversation history */
 export interface InsightsMessage {
@@ -43,7 +44,7 @@ function loadProjectContext(projectDir: string): string {
     }
   }
 
-  const tasksPath = join(projectDir, '.auto-claude', 'specs');
+  const tasksPath = join(projectDir, '.auto-claude', DATA_DIR_NAMES.tasks);
   if (existsSync(tasksPath)) {
     try {
       const taskDirs = readdirSync(tasksPath, { withFileTypes: true })

@@ -69,6 +69,8 @@ import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
 import { AppTray, isWindowCloseAllowed } from './app-tray';
 import type { AppSettings, AuthFailureInfo } from '../shared/types';
+import { projectStore } from './project-store';
+import { migrateProjectDataDirs } from './data-dir-migration';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Migrate userData from previous app names (aperant, then auto-claude-ui → auto-claude)
@@ -492,7 +494,7 @@ if (isWindows()) {
 }
 
 // Initialize the application
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Set app user model id for Windows
   electronApp.setAppUserModelId(is.dev ? 'com.autoclaude.app.dev' : 'com.autoclaude.app');
 
@@ -534,6 +536,12 @@ app.whenReady().then(() => {
   app.on('browser-window-created', (_, window) => {
     optimizer.watchWindowShortcuts(window);
   });
+
+  // Move projects' data folders to their current names (specs -> tasks, memory -> knowledge,
+  // insights -> chats) before anything reads tasks
+  await Promise.all(
+    projectStore.getProjects().map((project) => migrateProjectDataDirs(project.path, project.autoBuildPath))
+  );
 
   // Initialize agent manager
   agentManager = new AgentManager();

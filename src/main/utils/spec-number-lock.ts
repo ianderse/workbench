@@ -17,6 +17,7 @@ import {
   readFileSync
 } from 'fs';
 import path from 'path';
+import { DATA_DIR_NAMES } from '../../shared/constants';
 
 export class SpecNumberLockError extends Error {
   constructor(message: string) {
@@ -150,7 +151,7 @@ export class SpecNumberLock {
     const specsBase = autoBuildPath || '.auto-claude';
 
     // 1. Scan main project specs
-    const mainSpecsDir = path.join(this.projectDir, specsBase, 'specs');
+    const mainSpecsDir = path.join(this.projectDir, specsBase, DATA_DIR_NAMES.tasks);
     maxNumber = Math.max(maxNumber, this.scanSpecsDir(mainSpecsDir));
 
     // 2. Scan all worktree specs
@@ -164,7 +165,7 @@ export class SpecNumberLock {
               worktreesDir,
               worktree.name,
               specsBase,
-              'specs'
+              DATA_DIR_NAMES.tasks
             );
             maxNumber = Math.max(maxNumber, this.scanSpecsDir(worktreeSpecsDir));
           }

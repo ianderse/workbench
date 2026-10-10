@@ -57,7 +57,7 @@ const navItems: NavItem[] = [
   { id: 'kanban', labelKey: 'navigation:items.kanban', icon: KanbanIcon },
   { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentsIcon },
   { id: 'insights', labelKey: 'navigation:items.insights', icon: InsightsIcon },
-  // Only shown when the project has a memory graph (.auto-claude/memory)
+  // Only shown when the project has a memory graph (.auto-claude/knowledge)
   { id: 'memory', labelKey: 'navigation:items.memory', icon: GraphIcon },
 ];
 

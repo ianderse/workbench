@@ -285,7 +285,7 @@ describe('ProjectStore', () => {
 
     it('should read tasks from filesystem correctly', async () => {
       // Create spec directory structure in .auto-claude (the data directory)
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '001-test-feature');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '001-test-feature');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -332,7 +332,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine status as backlog when no subtasks completed', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '002-pending');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '002-pending');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -372,7 +372,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine status as ai_review when all subtasks completed', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '003-complete');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '003-complete');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -412,7 +412,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine status as human_review when plan status is human_review', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '004-rejected');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '004-rejected');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -452,7 +452,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine reviewReason from plan when status is human_review', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '005-approved');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '005-approved');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -494,7 +494,7 @@ describe('ProjectStore', () => {
 
     it('should determine status as done when plan status is explicitly done', async () => {
       // User explicitly marking task as done via drag-and-drop sets status to done
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '006-done');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '006-done');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -533,7 +533,7 @@ describe('ProjectStore', () => {
     });
 
     it('should load the Claude Code run state and fall back to the plan description', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '007-claude-run');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '007-claude-run');
       mkdirSync(specsDir, { recursive: true });
 
       writeFileSync(
@@ -557,7 +557,7 @@ describe('ProjectStore', () => {
       expect(tasks[0].claudeRun?.phases[0].name).toBe('triage');
     });
     it('should prefer the user-entered description from task_metadata.json over a rewritten requirements.json', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '008-user-description');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '008-user-description');
       mkdirSync(specsDir, { recursive: true });
 
       const userDescription = 'Exactly what the user typed';
@@ -636,7 +636,7 @@ describe('ProjectStore', () => {
   describe('archiveTasks - multi-location handling', () => {
     it('should archive task from main specs directory only', async () => {
       // Create spec directory in main location only
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '001-test-task');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '001-test-task');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -669,11 +669,11 @@ describe('ProjectStore', () => {
 
     it('should archive task from BOTH main and worktree locations', async () => {
       // Create spec directory in main location
-      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '002-multi-location');
+      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '002-multi-location');
       mkdirSync(mainSpecsDir, { recursive: true });
 
       // Create spec directory in worktree location
-      // Worktree path: .auto-claude/worktrees/tasks/<worktreeName>/.auto-claude/specs/<taskId>
+      // Worktree path: .auto-claude/worktrees/tasks/<worktreeName>/.auto-claude/tasks/<taskId>
       const worktreeDir = path.join(
         TEST_PROJECT_PATH,
         '.auto-claude',
@@ -681,7 +681,7 @@ describe('ProjectStore', () => {
         'tasks',
         'my-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '002-multi-location'
       );
       mkdirSync(worktreeDir, { recursive: true });
@@ -732,7 +732,7 @@ describe('ProjectStore', () => {
         'tasks',
         'only-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '003-worktree-only'
       );
       mkdirSync(worktreeDir, { recursive: true });
@@ -781,7 +781,7 @@ describe('ProjectStore', () => {
 
     it('should reject path traversal attempts in taskId', async () => {
       // Create a valid spec dir
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', 'valid-task');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', 'valid-task');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = { feature: 'Test', phases: [] };
@@ -823,7 +823,7 @@ describe('ProjectStore', () => {
   describe('unarchiveTasks - multi-location handling', () => {
     it('should unarchive task from BOTH main and worktree locations', async () => {
       // Create archived task in both locations
-      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '004-unarchive-test');
+      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '004-unarchive-test');
       mkdirSync(mainSpecsDir, { recursive: true });
 
       const worktreeDir = path.join(
@@ -833,7 +833,7 @@ describe('ProjectStore', () => {
         'tasks',
         'unarchive-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '004-unarchive-test'
       );
       mkdirSync(worktreeDir, { recursive: true });
@@ -877,7 +877,7 @@ describe('ProjectStore', () => {
 
   describe('cache invalidation', () => {
     it('should invalidate cache after archiveTasks', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '005-cache-test');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '005-cache-test');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -918,7 +918,7 @@ describe('ProjectStore', () => {
     });
 
     it('should return fresh data after invalidateTasksCache is called', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '006-invalidate-test');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '006-invalidate-test');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -962,7 +962,7 @@ describe('ProjectStore', () => {
   describe('getTasks - worktree deduplication', () => {
     it('should not duplicate tasks that exist in both main and worktree', async () => {
       // Create same task in both main and worktree
-      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '007-dedupe-test');
+      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '007-dedupe-test');
       mkdirSync(mainSpecsDir, { recursive: true });
 
       const worktreeDir = path.join(
@@ -972,7 +972,7 @@ describe('ProjectStore', () => {
         'tasks',
         'dedupe-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '007-dedupe-test'
       );
       mkdirSync(worktreeDir, { recursive: true });

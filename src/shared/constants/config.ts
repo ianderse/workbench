@@ -88,10 +88,30 @@ export const DEFAULT_PROJECT_SETTINGS = {
 // Auto Build File Paths
 // ============================================
 
+/**
+ * Folders inside a project's .auto-claude data directory. Older versions used other names
+ * (LEGACY_DATA_DIR_NAMES); projects are migrated when the app starts or a project is added.
+ */
+export const DATA_DIR_NAMES = {
+  /** One folder per task (task_metadata.json, implementation_plan.json, claude_run.json, logs) */
+  tasks: 'tasks',
+  /** The project's Graphify knowledge graph */
+  knowledge: 'knowledge',
+  /** Claude page (Insights) chat sessions and attachments */
+  chats: 'chats',
+} as const;
+
+/** Names the data folders had before (tasks were "specs", knowledge "memory", chats "insights") */
+export const LEGACY_DATA_DIR_NAMES: Record<keyof typeof DATA_DIR_NAMES, string> = {
+  tasks: 'specs',
+  knowledge: 'memory',
+  chats: 'insights',
+};
+
 // File paths relative to project
 // IMPORTANT: All paths use .auto-claude/ (the installed instance), NOT auto-claude/ (source code)
 export const AUTO_BUILD_PATHS = {
-  SPECS_DIR: '.auto-claude/specs',
+  SPECS_DIR: `.auto-claude/${DATA_DIR_NAMES.tasks}`,
   IMPLEMENTATION_PLAN: 'implementation_plan.json',
   SPEC_FILE: 'spec.md',
   QA_REPORT: 'qa_report.md',
@@ -103,10 +123,10 @@ export const AUTO_BUILD_PATHS = {
 } as const;
 
 /**
- * Get the specs directory path.
- * All specs go to .auto-claude/specs/ (the project's data directory).
+ * Get the tasks directory path (relative to the project): one folder per task in
+ * .auto-claude/tasks/ (the project's data directory).
  */
 export function getSpecsDir(autoBuildPath: string | undefined): string {
   const basePath = autoBuildPath || '.auto-claude';
-  return `${basePath}/specs`;
+  return `${basePath}/${DATA_DIR_NAMES.tasks}`;
 }

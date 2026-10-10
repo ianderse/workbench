@@ -2,8 +2,8 @@
  * Graphify (https://github.com/Graphify-Labs/graphify) builds a knowledge graph of a project's code.
  *
  * Auto Claude detects the `graphify` CLI (Settings > Updates), sets up its /graphify command in
- * Claude Code, builds each project's memory graph into .auto-claude/memory (Settings > Project >
- * Memory index), and gives agents a CodebaseGraph tool to search it when the project's "Use
+ * Claude Code, builds each project's memory graph into .auto-claude/knowledge (Settings > Project >
+ * Knowledge index), and gives agents a CodebaseGraph tool to search it when the project's "Use
  * Graphify" setting is on. Everything runs asynchronously so the main process never blocks on the
  * CLI.
  */

@@ -24,7 +24,7 @@ reviews, requests changes (same session continues) or merges.
 - **Connectors** — MCP servers added to a task's Claude Code session (`--mcp-config`: Context7, Electron, Puppeteer,
   user-added servers) with app-wide defaults in Settings and per-task choices in the task dialog
 - **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
-  project's code, built into `.auto-claude/memory` and offered to agents
+  project's code, built into `.auto-claude/knowledge` and offered to agents
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
 - **Authentication** — Claude subscription accounts (each a `CLAUDE_CONFIG_DIR`) or API profiles with any
   Anthropic-compatible endpoint
@@ -181,9 +181,9 @@ auto-claude/
 Claude Code docs: https://code.claude.com/docs/en/ (CLI reference, headless mode, sub-agents, model config,
 permission modes, worktrees, hooks, skills).
 
-### Spec Directory
+### Task Directory
 
-Each task's `.auto-claude/specs/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and
+Each task's `.auto-claude/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and
 mirrored task list), `claude_run.json`, `task_logs.json`, `plan.md` (when planned) and `attachments/`.
 
 ### MCP Connectors
@@ -198,12 +198,12 @@ session, on top of the user's own Claude Code MCP configuration. Helpers live in
 
 `src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
 Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
-.auto-claude/memory` (Settings > Project > Memory index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
+.auto-claude/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
 `index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Memory page) is on,
 task runs and the Claude page (Insights) get `GRAPHIFY_OUT`, the graphify CLI on `PATH` and a prompt section about
 graphify's search commands (Insights limits Bash to those commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
 `~/.claude` and each Claude profile's config dir; "Claude Code command" row on Settings > Updates), and agent windows
-get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/memory`. Project memory
+get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/knowledge`. Project memory
 settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
 
 ### Electron MCP (testing the app from a task)

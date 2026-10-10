@@ -28,7 +28,7 @@ describe('getProjectCostMetrics', () => {
 
   it('sums the run costs of every task in initialized projects and skips the others', async () => {
     const initialized = path.join(root, 'a');
-    const specs = path.join(initialized, '.auto-claude', 'specs');
+    const specs = path.join(initialized, '.auto-claude', 'tasks');
     mkdirSync(path.join(specs, '001-one'), { recursive: true });
     mkdirSync(path.join(specs, '002-two'), { recursive: true });
     mkdirSync(path.join(specs, '003-never-ran'), { recursive: true });

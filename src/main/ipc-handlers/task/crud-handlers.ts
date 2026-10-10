@@ -1,5 +1,5 @@
 import { ipcMain, nativeImage } from 'electron';
-import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir } from '../../../shared/constants';
+import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, Task, TaskMetadata } from '../../../shared/types';
 import path from 'path';
 import { execFile } from 'child_process';
@@ -368,7 +368,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
         }
 
         const autoBuildDir = project.autoBuildPath || '.auto-claude';
-        const specDir = path.join(project.path, autoBuildDir, 'specs', task.specId);
+        const specDir = path.join(project.path, autoBuildDir, DATA_DIR_NAMES.tasks, task.specId);
 
         if (!existsSync(specDir)) {
           return { success: false, error: 'Spec directory not found' };

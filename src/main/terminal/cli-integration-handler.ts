@@ -245,7 +245,7 @@ const YOLO_MODE_FLAG = ' --dangerously-skip-permissions';
 /**
  * Claude Code flag that tells it where the project's memory graph is, when the terminal's project
  * has one: Graphify's /graphify skill looks for graphify-out in the working directory, while the
- * graph lives in .auto-claude/memory (the terminal's GRAPHIFY_OUT points there). Left out when the
+ * graph lives in .auto-claude/knowledge (the terminal's GRAPHIFY_OUT points there). Left out when the
  * path has characters that would need escaping inside the shell command.
  */
 function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut'>): string {

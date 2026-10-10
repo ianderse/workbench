@@ -1,6 +1,6 @@
 /**
  * Graphify IPC handlers: CLI version check and install, and its /graphify command in Claude Code
- * (Settings > Updates), and each project's memory graph (Settings > Project > Memory index)
+ * (Settings > Updates), and each project's memory graph (Settings > Project > Knowledge index)
  */
 
 import { ipcMain } from 'electron';
