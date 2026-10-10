@@ -473,5 +473,20 @@ export class TerminalManager {
    */
   private handleTerminalData(terminal: TerminalProcess, data: string): void {
     TerminalEventHandler.handleTerminalData(terminal, data, this.eventCallbacks);
+    this.closeOnCliExit(terminal, data);
+  }
+
+  /**
+   * A CLI the app launched in this window (Claude Code in an agent window) exited: end the
+   * shell so the window closes like after typing `exit`. Skipped when the app restarts the CLI.
+   */
+  private closeOnCliExit(terminal: TerminalProcess, data: string): void {
+    if (!ClaudeIntegration.shouldCloseOnCliExit(terminal, data)) return;
+    debugLog('[TerminalManager] CLI exited, closing the window:', terminal.id);
+    try {
+      terminal.pty.kill();
+    } catch (error) {
+      debugError('[TerminalManager] Failed to end the shell after the CLI exited:', error);
+    }
   }
 }

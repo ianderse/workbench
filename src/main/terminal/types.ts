@@ -34,6 +34,10 @@ export interface TerminalProcess {
    * keys and the shell's output is held back
    */
   follower?: { handleInput(data: string): void; stop(): void };
+  /** The app is restarting the window's CLI (account switch): its exit must not close the window */
+  cliRestarting?: boolean;
+  /** Last output characters, to find the CLI exit marker when it is split across chunks */
+  cliExitTail?: string;
 }
 
 /**

@@ -54,22 +54,13 @@ export function useTerminalEvents({
         }
         onExitRef.current?.(exitCode);
 
-        // Auto-remove exited terminals from store after a short delay
-        // This prevents them from counting toward the max terminal limit
-        // and ensures they don't get persisted and restored on next launch
-        setTimeout(() => {
-          const currentStore = useTerminalStore.getState();
-          const currentTerminal = currentStore.getTerminal(terminalId);
-          // Only remove if still exited (user hasn't recreated it)
-          if (currentTerminal?.status === 'exited') {
-            // First call destroyTerminal to clean up persisted session on disk
-            // (the PTY is already dead, but this ensures session removal)
-            window.electronAPI.destroyTerminal(terminalId).catch(() => {
-              // Ignore errors - PTY may already be gone
-            });
-            currentStore.removeTerminal(terminalId);
-          }
-        }, 2000); // 2 second delay to show exit message
+        // The shell exited (typed `exit`, or Claude Code exited in an agent window): close the
+        // window right away, like its close button. Waiting let the grid remount it during its
+        // exit grace period, which started a new shell in the same window
+        window.electronAPI.destroyTerminal(terminalId).catch(() => {
+          // Ignore errors - the PTY is already gone; this removes its persisted session
+        });
+        store.removeTerminal(terminalId);
       }
     });
 
