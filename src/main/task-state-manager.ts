@@ -21,7 +21,7 @@ interface TaskContextEntry {
 
 const TERMINAL_EVENTS = new Set<string>([
   'QA_PASSED',
-  'PLANNING_COMPLETE',
+  'QA_FAILED',
   'PLANNING_FAILED',
   'CODING_FAILED',
   'QA_MAX_ITERATIONS',
@@ -88,9 +88,7 @@ export class TaskStateManager {
       return;
     }
     const actor = this.getOrCreateActor(taskId);
-    // Only mark as unexpected if the process exited with a non-zero code.
-    // A code-0 exit is normal (e.g., spec creation finished, plan created, waiting for review).
-    // Sending unexpected:true for code-0 exits incorrectly transitions plan_review → error.
+    // Only mark as unexpected if the run ended with a non-zero code
     const isUnexpected = exitCode !== 0;
     actor.send({
       type: 'PROCESS_EXITED',
@@ -126,17 +124,12 @@ export class TaskStateManager {
       case 'in_progress': {
         // Use XState as source of truth for determining correct event
         const currentState = this.getCurrentState(taskId);
-        if (currentState === 'plan_review') {
-          this.handleUiEvent(taskId, { type: 'PLAN_APPROVED' }, task, project);
-        } else if (currentState === 'queued' || (!currentState && task.status === 'queue' && task.rateLimitHold)) {
-          // Rate-limit hold released: restart via planning; the build orchestrator
-          // skips straight to coding/QA when a plan already exists.
+        if (currentState === 'queued' || (!currentState && task.status === 'queue' && task.rateLimitHold)) {
+          // Rate-limit hold released: restart via planning; the Claude Code run continues
+          // from its saved state (triage/plan/implementation aren't repeated)
           this.handleUiEvent(taskId, { type: 'PLANNING_STARTED' }, task, project);
         } else if (currentState === 'human_review' || currentState === 'error') {
           this.handleUiEvent(taskId, { type: 'USER_RESUMED' }, task, project);
-        } else if (!currentState && task.reviewReason === 'plan_review') {
-          // Fallback: No actor exists (e.g., after app restart), use task data
-          this.handleUiEvent(taskId, { type: 'PLAN_APPROVED' }, task, project);
         } else if (
           currentState === 'backlog' ||
           (!currentState && (task.status === 'backlog' || (task.status === 'queue' && !task.rateLimitHold)))
@@ -179,14 +172,6 @@ export class TaskStateManager {
       return undefined;
     }
     return String(actor.getSnapshot().value);
-  }
-
-  /**
-   * Check if the task is currently in plan_review state.
-   * Used by TASK_START to determine correct event to send.
-   */
-  isInPlanReview(taskId: string): boolean {
-    return this.getCurrentState(taskId) === 'plan_review';
   }
 
   /**
@@ -403,7 +388,7 @@ export class TaskStateManager {
         stateValue = 'qa_review';
         break;
       case 'human_review':
-        stateValue = reviewReason === 'plan_review' ? 'plan_review' : 'human_review';
+        stateValue = 'human_review';
         contextReviewReason = reviewReason;
         break;
       case 'pr_created':

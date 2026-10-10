@@ -18,9 +18,10 @@
  */
 
 import path from 'path';
-import { readFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { AUTO_BUILD_PATHS, getSpecsDir } from '../../../shared/constants';
-import type { TaskStatus, Project, Task, RateLimitHold } from '../../../shared/types';
+import type { TaskStatus, Project, Task, RateLimitHold, SubtaskStatus } from '../../../shared/types';
+import { CLAUDE_RUN_FILE, resetClaudeRunInfo } from '../../claude-code/task-runner';
 import { projectStore } from '../../project-store';
 import type { TaskEventPayload } from '../../agent/task-event-schema';
 import { writeFileAtomicSync } from '../../utils/atomic-file';
@@ -507,77 +508,6 @@ export async function createPlanIfNotExists(
 }
 
 /**
- * Reset all stuck subtasks (in_progress or failed) to pending state.
- * This enables automatic recovery when tasks are interrupted by rate limits or errors.
- * Thread-safe with withPlanLock.
- *
- * @param planPath - Path to the implementation_plan.json file
- * @param projectId - Optional project ID to invalidate cache (recommended for performance)
- * @returns Object with success flag and count of reset subtasks
- */
-export async function resetStuckSubtasks(planPath: string, projectId?: string): Promise<{ success: boolean; resetCount: number }> {
-  return withPlanLock(planPath, async () => {
-    try {
-      console.log(`[plan-file-utils] Reading implementation_plan.json to reset stuck subtasks`, { planPath });
-
-      // Read file directly without existence check to avoid TOCTOU race condition
-      const planContent = readFileSync(planPath, 'utf-8');
-      const plan = safeParseJson<Record<string, unknown>>(planContent);
-      if (!plan) {
-        console.warn(`[plan-file-utils] Unrepairable JSON in ${planPath} - subtask reset skipped`);
-        return { success: false, resetCount: 0 };
-      }
-
-      let resetCount = 0;
-
-      // Iterate through all phases and subtasks
-      if (plan.phases && Array.isArray(plan.phases)) {
-        for (const phase of plan.phases) {
-          if (phase.subtasks && Array.isArray(phase.subtasks)) {
-            for (const subtask of phase.subtasks) {
-              // Only reset subtasks that are stuck (in_progress or failed)
-              // NEVER reset completed subtasks to avoid redoing work
-              if (subtask.status === 'in_progress' || subtask.status === 'failed') {
-                const originalStatus = subtask.status;
-                subtask.status = 'pending';
-                subtask.started_at = null;
-                subtask.completed_at = null;
-                resetCount++;
-                console.log(`[plan-file-utils] Reset subtask ${subtask.id} from ${originalStatus} to pending`);
-              }
-            }
-          }
-        }
-      }
-
-      // Only write if we actually reset something
-      if (resetCount > 0) {
-        plan.updated_at = new Date().toISOString();
-        writeFileAtomicSync(planPath, JSON.stringify(plan, null, 2));
-        console.log(`[plan-file-utils] Successfully reset ${resetCount} stuck subtask(s) in implementation_plan.json`);
-
-        // Invalidate tasks cache since subtask status changed
-        if (projectId) {
-          projectStore.invalidateTasksCache(projectId);
-        }
-      } else {
-        console.log(`[plan-file-utils] No stuck subtasks found to reset`);
-      }
-
-      return { success: true, resetCount };
-    } catch (err) {
-      // File not found is expected - return success with 0 count
-      if (isFileNotFoundError(err)) {
-        console.warn(`[plan-file-utils] implementation_plan.json not found at ${planPath} - no subtasks to reset`);
-        return { success: false, resetCount: 0 };
-      }
-      console.warn(`[plan-file-utils] Could not reset stuck subtasks at ${planPath}:`, err);
-      return { success: false, resetCount: 0 };
-    }
-  });
-}
-
-/**
  * Update task_metadata.json to add PR URL.
  * This is a simple JSON file update (no locking needed as it's rarely updated concurrently).
  *
@@ -615,42 +545,89 @@ export function updateTaskMetadataPrUrl(metadataPath: string, prUrl: string): bo
   }
 }
 
+/** Name of the plan phase that mirrors Claude Code's task list */
+export const CLAUDE_TASK_LIST_PHASE_NAME = 'Claude Code task list';
+
 /**
- * Sync phases (subtask data) from a source plan to the main project's plan file.
- * This ensures that subtask completion statuses written by the agent in the worktree
- * are reflected in the main project plan, which is the source of truth for getTasks().
+ * Mirror Claude Code's task list (TaskCreate/TaskUpdate) as the task's subtasks: one phase
+ * in implementation_plan.json. Preserves every other field of the plan.
  *
- * Preserves all existing fields in the main plan (status, reviewReason, xstateState, etc.)
- * and only updates the phases array and updated_at timestamp.
+ * @returns the updated plan, or null if it couldn't be written
  */
-export function syncPlanPhasesToMainSync(
-  mainPlanPath: string,
-  phases: unknown[],
+export function writePlanSubtasksSync(
+  planPath: string,
+  subtasks: Array<{ id: string; title: string; description: string; status: SubtaskStatus }>,
   projectId?: string
-): boolean {
+): Record<string, unknown> | null {
   try {
-    const planContent = readFileSync(mainPlanPath, 'utf-8');
-    const plan = safeParseJson<Record<string, unknown>>(planContent);
-    if (!plan) {
-      console.warn(`[plan-file-utils] Unrepairable JSON in ${mainPlanPath} - phase sync skipped`);
-      return false;
+    let plan: Record<string, unknown>;
+    try {
+      const parsed = safeParseJson<Record<string, unknown>>(readFileSync(planPath, 'utf-8'));
+      if (!parsed) {
+        console.warn(`[plan-file-utils] Unrepairable JSON in ${planPath} - subtasks not written`);
+        return null;
+      }
+      plan = parsed;
+    } catch (readErr) {
+      if (!isFileNotFoundError(readErr)) throw readErr;
+      mkdirSync(path.dirname(planPath), { recursive: true });
+      plan = { created_at: new Date().toISOString() };
     }
 
-    plan.phases = phases;
+    plan.phases = subtasks.length > 0
+      ? [{
+          phase: 1,
+          name: CLAUDE_TASK_LIST_PHASE_NAME,
+          type: 'implementation',
+          subtasks: subtasks.map((s) => ({
+            id: s.id,
+            title: s.title,
+            description: s.description || s.title,
+            status: s.status,
+          })),
+        }]
+      : [];
     plan.updated_at = new Date().toISOString();
 
-    writeFileAtomicSync(mainPlanPath, JSON.stringify(plan, null, 2));
-
-    if (projectId) {
-      projectStore.invalidateTasksCache(projectId);
-    }
-
-    return true;
+    writeFileAtomicSync(planPath, JSON.stringify(plan, null, 2));
+    if (projectId) projectStore.invalidateTasksCache(projectId);
+    return plan;
   } catch (err) {
-    if (isFileNotFoundError(err)) {
-      return false;
-    }
-    console.warn(`[plan-file-utils] Could not sync phases to ${mainPlanPath}:`, err);
+    console.warn(`[plan-file-utils] Could not write subtasks to ${planPath}:`, err);
+    return null;
+  }
+}
+
+/**
+ * Forget a task's Claude Code run so the next start triages and runs from scratch:
+ * resets claude_run.json and clears the mirrored subtasks. Call it when the task's
+ * worktree is discarded.
+ */
+export function resetTaskRunState(project: Project, task: Task): void {
+  const specDir = path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId);
+  if (existsSync(path.join(specDir, CLAUDE_RUN_FILE))) {
+    resetClaudeRunInfo(specDir);
+  }
+  const planPath = getPlanPath(project, task);
+  if (existsSync(planPath)) {
+    writePlanSubtasksSync(planPath, [], project.id);
+  }
+  projectStore.invalidateTasksCache(project.id);
+}
+
+/**
+ * Whether a task's run got past planning: Claude Code started implementing (claude_run.json)
+ * or the plan has subtasks. Used to decide where a stopped task goes (backlog vs review).
+ */
+export function hasStartedImplementation(project: Project, task: Task): boolean {
+  if (hasPlanWithSubtasks(project, task)) return true;
+  const specDir = path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId);
+  try {
+    const info = safeParseJson<{ phases?: Array<{ name?: string }> }>(
+      readFileSync(path.join(specDir, CLAUDE_RUN_FILE), 'utf-8')
+    );
+    return !!info?.phases?.some((p) => p.name === 'implement' || p.name === 'revise');
+  } catch {
     return false;
   }
 }

@@ -1,26 +1,27 @@
 import type { BrowserWindow } from "electron";
 import path from "path";
-import { existsSync, readFileSync } from "fs";
-import { safeParseJson } from "../utils/json-repair";
+import { existsSync } from "fs";
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir } from "../../shared/constants";
 import type {
   SDKRateLimitInfo,
   AuthFailureInfo,
   ImplementationPlan,
 } from "../../shared/types";
+import type { ClaudeRunInfo } from "../../shared/types/claude-code";
 import { XSTATE_SETTLED_STATES, XSTATE_ACTIVE_STATES, XSTATE_TO_PHASE, mapStateToLegacy } from "../../shared/state-machines";
 import { AgentManager } from "../agent";
-import type { ProcessType, ExecutionProgressData } from "../agent";
+import type { ProcessType, ExecutionProgressData, AgentAuthFailure } from "../agent";
+import type { TaskEventPayload } from "../agent/task-event-schema";
+import type { TaskRunSubtask } from "../claude-code/task-runner";
 import { titleGenerator } from "../title-generator";
 import { fileWatcher } from "../file-watcher";
 import { notificationService } from "../notification-service";
-import { persistPlanLastEventSync, getPlanPath, persistPlanPhaseSync, persistPlanStatusAndReasonSync, hasPlanWithSubtasks, syncPlanPhasesToMainSync } from "./task/plan-file-utils";
+import { persistPlanLastEventSync, getPlanPath, persistPlanPhaseSync, persistPlanStatusAndReasonSync, hasStartedImplementation, writePlanSubtasksSync } from "./task/plan-file-utils";
 import { findTaskWorktree } from "../worktree-paths";
 import { findTaskAndProject } from "./task/shared";
 import { safeSendToRenderer } from "./utils";
 import { getClaudeProfileManager } from "../claude-profile-manager";
 import { taskStateManager } from "../task-state-manager";
-import { readSettingsFile } from "../settings-utils";
 import { parseRateLimitHold } from "../../shared/utils/rate-limit-hold";
 import { applyRateLimitHold } from "./task/rate-limit-hold";
 import { refreshGraphifyIndex } from "../graphify";
@@ -35,17 +36,21 @@ const fallbackTimers = new Map<string, NodeJS.Timeout>();
 
 /**
  * Before holding a rate-limited task until its reset time, try switching to another
- * Claude profile (same rules as AgentProcess.handleRateLimitWithAutoSwap).
+ * Claude profile. The restarted run continues from its saved state (claude_run.json).
  *
- * Only applies to the legacy Claude profile system: when provider accounts are
- * configured, auth is resolved from the provider queue on restart, so switching
- * the active legacy profile would not change the account used.
+ * Only applies when the run used a Claude profile (`event.profileId`, set by AgentManager);
+ * runs on an API profile have no other account to switch to.
  *
  * @returns true if the task was restarted on another profile (no hold needed)
  */
-function tryAutoSwapBeforeHold(agentManager: AgentManager, taskId: string): boolean {
-  const providerAccounts = readSettingsFile()?.providerAccounts;
-  if (Array.isArray(providerAccounts) && providerAccounts.length > 0) {
+function tryAutoSwapBeforeHold(
+  agentManager: AgentManager,
+  taskId: string,
+  event: TaskEventPayload,
+  getMainWindow: () => BrowserWindow | null
+): boolean {
+  const limitedProfileId = typeof event.profileId === "string" ? event.profileId : undefined;
+  if (!limitedProfileId) {
     return false;
   }
   const profileManager = getClaudeProfileManager();
@@ -53,13 +58,29 @@ function tryAutoSwapBeforeHold(agentManager: AgentManager, taskId: string): bool
   if (!autoSwitch.enabled || !autoSwitch.autoSwitchOnRateLimit) {
     return false;
   }
-  const currentProfileId = profileManager.getActiveProfile()?.id;
-  const bestProfile = profileManager.getBestAvailableProfile(currentProfileId);
+  const bestProfile = profileManager.getBestAvailableProfile(limitedProfileId);
   if (!bestProfile) {
     return false;
   }
-  console.warn(`[agent-events-handlers] Rate limit for ${taskId}: switching profile ${currentProfileId} -> ${bestProfile.id} instead of holding`);
-  return agentManager.restartTask(taskId, bestProfile.id);
+  console.warn(`[agent-events-handlers] Rate limit for ${taskId}: switching profile ${limitedProfileId} -> ${bestProfile.id} instead of holding`);
+  if (!agentManager.restartTask(taskId, bestProfile.id)) {
+    return false;
+  }
+  const rateLimitInfo: SDKRateLimitInfo = {
+    source: "task",
+    projectId: event.projectId,
+    taskId,
+    resetTime: typeof event.resetAt === "string" ? event.resetAt : undefined,
+    profileId: limitedProfileId,
+    profileName: profileManager.getProfile(limitedProfileId)?.name,
+    detectedAt: new Date(),
+    originalError: typeof event.message === "string" ? event.message : undefined,
+    wasAutoSwapped: true,
+    swappedToProfile: { id: bestProfile.id, name: bestProfile.name },
+    swapReason: "reactive",
+  };
+  safeSendToRenderer(getMainWindow, IPC_CHANNELS.CLAUDE_SDK_RATE_LIMIT, rateLimitInfo);
+  return true;
 }
 
 /**
@@ -119,12 +140,7 @@ export function registerAgenteventsHandlers(
   });
 
   // Handle auth failure events (401 errors requiring re-authentication)
-  agentManager.on("auth-failure", (taskId: string, authFailure: {
-    profileId?: string;
-    failureType?: 'missing' | 'invalid' | 'expired' | 'unknown';
-    message?: string;
-    originalError?: string;
-  }) => {
+  agentManager.on("auth-failure", (taskId: string, authFailure: AgentAuthFailure) => {
     console.warn(`[AgentEvents] Auth failure detected for task ${taskId}:`, authFailure);
 
     // Get profile name for display
@@ -146,39 +162,28 @@ export function registerAgenteventsHandlers(
     safeSendToRenderer(getMainWindow, IPC_CHANNELS.CLAUDE_AUTH_FAILURE, authFailureInfo);
   });
 
-  agentManager.on("exit", (taskId: string, code: number | null, processType: ProcessType, projectId?: string) => {
+  agentManager.on("exit", (taskId: string, code: number | null, _processType: ProcessType, projectId?: string) => {
     // Use projectId from event to scope the lookup (prevents cross-project contamination)
     const { task: exitTask, project: exitProject } = findTaskAndProject(taskId, projectId);
     const exitProjectId = exitProject?.id || projectId;
 
-    // Skip handleProcessExited for successful spec-creation exits — the spec → build
-    // transition (line 132+) will start a new agent, and calling handleProcessExited
-    // here would mark the task as stuck (no terminal event seen for spec creation).
-    const isSpecToBuildTransition = processType === 'spec-creation' && code === 0;
-    if (!isSpecToBuildTransition) {
-      taskStateManager.handleProcessExited(taskId, code, exitTask, exitProject);
-    }
+    taskStateManager.handleProcessExited(taskId, code, exitTask, exitProject);
 
     // Fallback safety net: If XState failed to transition the task out of an active state,
-    // force it to human_review after a short delay. This prevents tasks from getting stuck
-    // when the process exits without XState properly handling it.
-    // Skip for spec→build transitions: a new process starts immediately, and the timer
-    // would incorrectly force USER_STOPPED on the newly started execution process.
+    // force it out after a short delay. This prevents tasks from getting stuck when the run
+    // ends without XState seeing its terminal event.
     // We check XState's current state directly to avoid stale cache issues from projectStore.
     // Store timer reference so it can be cancelled if task restarts within the window.
-    if (isSpecToBuildTransition) {
-      // Cancel any existing timer and skip setting a new one
-      cancelFallbackTimer(taskId);
-    }
-    const timer = !isSpecToBuildTransition ? setTimeout(() => {
+    cancelFallbackTimer(taskId);
+    const timer = setTimeout(() => {
       const currentState = taskStateManager.getCurrentState(taskId);
 
       if (currentState && XSTATE_ACTIVE_STATES.has(currentState)) {
         const { task: checkTask, project: checkProject } = findTaskAndProject(taskId, projectId);
         if (checkTask && checkProject) {
           if (code === 0) {
-            // Clean exit (code 0) means the task completed successfully but the terminal
-            // event (e.g., QA_PASSED) was lost in transit. Treat as completed, not stopped.
+            // Clean exit (code 0) means the run completed but the terminal event
+            // (QA_PASSED) was lost in transit. Treat as completed, not stopped.
             console.warn(
               `[agent-events-handlers] Task ${taskId} still in XState ${currentState} ` +
               `${STUCK_TASK_FALLBACK_TIMEOUT_MS}ms after clean exit (code 0), forcing QA_PASSED`
@@ -187,8 +192,8 @@ export function registerAgenteventsHandlers(
               type: 'QA_PASSED', iteration: 0, testsRun: {}
             }, checkTask, checkProject);
           } else {
-            // Non-zero exit code — task was stopped or crashed
-            const hasPlan = hasPlanWithSubtasks(checkProject, checkTask);
+            // Non-zero exit code — the run failed or crashed
+            const hasPlan = hasStartedImplementation(checkProject, checkTask);
             console.warn(
               `[agent-events-handlers] Task ${taskId} still in XState ${currentState} ` +
               `${STUCK_TASK_FALLBACK_TIMEOUT_MS}ms after exit (code ${code}), forcing USER_STOPPED (hasPlan: ${hasPlan})`
@@ -199,35 +204,11 @@ export function registerAgenteventsHandlers(
       }
       // Clean up timer reference after it fires
       fallbackTimers.delete(taskId);
-    }, STUCK_TASK_FALLBACK_TIMEOUT_MS) : null;
+    }, STUCK_TASK_FALLBACK_TIMEOUT_MS);
+    fallbackTimers.set(taskId, timer);
 
-    // Store timer reference for potential cancellation
-    if (timer) {
-      fallbackTimers.set(taskId, timer);
-    }
-
-    // Send final plan state to renderer BEFORE unwatching
-    // This ensures the renderer has the final subtask data (fixes 0/0 subtask bug)
-    // Always prefer the worktree plan — it has the most current subtask data
-    // from agent execution. The file watcher may have been watching main project.
-    let finalPlan = fileWatcher.getCurrentPlan(taskId);
-    if (exitTask && exitProject) {
-      const worktreePath = findTaskWorktree(exitProject.path, exitTask.specId);
-      if (worktreePath) {
-        const specsBaseDir = getSpecsDir(exitProject.autoBuildPath);
-        const worktreePlanPath = path.join(worktreePath, specsBaseDir, exitTask.specId, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
-        try {
-          const content = readFileSync(worktreePlanPath, 'utf-8');
-          const parsed = safeParseJson<ImplementationPlan>(content);
-          if (parsed) {
-            finalPlan = parsed;
-          }
-          // If null, JSON is corrupt even after repair — keep fileWatcher plan
-        } catch {
-          // Worktree plan file not readable - keep fileWatcher plan
-        }
-      }
-    }
+    // Send final plan state to renderer BEFORE unwatching, so it has the final subtasks
+    const finalPlan = fileWatcher.getCurrentPlan(taskId);
     if (finalPlan) {
       safeSendToRenderer(
         getMainWindow,
@@ -238,53 +219,9 @@ export function registerAgenteventsHandlers(
       );
     }
 
-    // Sync subtask data from worktree plan to main project's plan file.
-    // The agent writes subtask statuses to the worktree; the main plan's phases
-    // may be stale. Syncing ensures getTasks() dedup (which prefers main) sees correct data.
-    if (finalPlan?.phases && exitTask && exitProject) {
-      syncPlanPhasesToMainSync(getPlanPath(exitProject, exitTask), finalPlan.phases, exitProjectId);
-    }
-
     fileWatcher.unwatch(taskId).catch((err) => {
       console.error(`[agent-events-handlers] Failed to unwatch for ${taskId}:`, err);
     });
-
-    if (processType === "spec-creation") {
-      console.warn(`[Task ${taskId}] Spec creation completed with code ${code}`);
-      // When spec creation succeeds, automatically transition to task execution (build phase)
-      if (code === 0) {
-        const { task: specTask, project: specProject } = findTaskAndProject(taskId, projectId);
-        if (specTask && specProject) {
-          const specsBaseDir = getSpecsDir(specProject.autoBuildPath);
-          const specDir = path.join(specProject.path, specsBaseDir, specTask.specId);
-          const specFilePath = path.join(specDir, AUTO_BUILD_PATHS.SPEC_FILE);
-          if (existsSync(specFilePath)) {
-            console.warn(`[Task ${taskId}] Spec created successfully — starting task execution`);
-            // Re-watch the spec directory for the build phase
-            fileWatcher.watch(taskId, specDir).catch((err) => {
-              console.error(`[agent-events-handlers] Failed to re-watch spec dir for ${taskId}:`, err);
-            });
-            const baseBranch = specTask.metadata?.baseBranch || specProject.settings?.mainBranch;
-            agentManager.startTaskExecution(
-              taskId,
-              specProject.path,
-              specTask.specId,
-              {
-                parallel: false,
-                workers: 1,
-                baseBranch,
-                useWorktree: specTask.metadata?.useWorktree,
-                useLocalBranch: specTask.metadata?.useLocalBranch,
-              },
-              specProject.id
-            );
-          } else {
-            console.warn(`[Task ${taskId}] Spec creation succeeded but spec.md not found — not starting execution`);
-          }
-        }
-      }
-      return;
-    }
 
     const { task, project } = findTaskAndProject(taskId, projectId);
     if (!task || !project) return;
@@ -303,23 +240,6 @@ export function registerAgenteventsHandlers(
   agentManager.on("task-event", (taskId: string, event, projectId?: string) => {
     console.debug(`[agent-events-handlers] Received task-event for ${taskId}:`, event.type, event);
 
-    if (taskStateManager.getLastSequence(taskId) === undefined) {
-      const { task, project } = findTaskAndProject(taskId, projectId);
-      if (task && project) {
-        try {
-          const planPath = getPlanPath(project, task);
-          const planContent = readFileSync(planPath, "utf-8");
-          const plan = JSON.parse(planContent);
-          const lastSeq = plan?.lastEvent?.sequence;
-          if (typeof lastSeq === "number" && lastSeq >= 0) {
-            taskStateManager.setLastSequence(taskId, lastSeq);
-          }
-        } catch {
-          // Ignore missing/invalid plan files
-        }
-      }
-    }
-
     const { task, project } = findTaskAndProject(taskId, projectId);
     if (!task || !project) {
       console.debug(`[agent-events-handlers] No task/project found for ${taskId}`);
@@ -336,7 +256,7 @@ export function registerAgenteventsHandlers(
     // persist the hold (and notify the renderer) BEFORE XState moves the task to the
     // queue, so queue auto-promotion sees the hold and skips this task.
     if (event.type === "RATE_LIMIT_HOLD") {
-      if (tryAutoSwapBeforeHold(agentManager, taskId)) {
+      if (tryAutoSwapBeforeHold(agentManager, taskId, event, getMainWindow)) {
         return;
       }
       const hold = parseRateLimitHold({ ...event, pausedAt: event.timestamp });
@@ -369,20 +289,30 @@ export function registerAgenteventsHandlers(
     }
   });
 
+  // Claude Code run state (triage, phases, cost, validation) → renderer
+  agentManager.on("run-info", (taskId: string, info: ClaudeRunInfo, projectId?: string) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_CLAUDE_RUN_UPDATE, taskId, info, projectId);
+  });
+
+  // Claude Code's task list → the task's subtasks (implementation_plan.json phases)
+  agentManager.on("subtasks", (taskId: string, subtasks: TaskRunSubtask[], projectId?: string) => {
+    const { task, project } = findTaskAndProject(taskId, projectId);
+    if (!task || !project) return;
+    const plan = writePlanSubtasksSync(getPlanPath(project, task), subtasks, project.id);
+    if (plan) {
+      safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_PROGRESS, taskId, plan as unknown as ImplementationPlan, project.id);
+    }
+  });
+
   agentManager.on("execution-progress", (taskId: string, progress: ExecutionProgressData, projectId?: string) => {
     // Use projectId from event to scope the lookup (prevents cross-project contamination)
     const { task, project } = findTaskAndProject(taskId, projectId);
     const taskProjectId = project?.id || projectId;
 
     // Check if XState has already established a terminal/review state for this task.
-    // XState is the source of truth for status. When XState is in a terminal state
-    // (e.g., plan_review after PLANNING_COMPLETE), execution-progress events from the
-    // agent process are stale and must not overwrite XState's persisted status.
-    //
-    // Example: When requireReviewBeforeCoding=true, the process exits with code 1 after
-    // PLANNING_COMPLETE. The exit handler emits execution-progress with phase='failed',
-    // which would incorrectly overwrite status='human_review' with status='error' via
-    // persistPlanPhaseSync.
+    // XState is the source of truth for status. When XState is in a settled state
+    // (e.g., error after CODING_FAILED), execution-progress events from the run are
+    // stale and must not overwrite XState's persisted status.
     const currentXState = taskStateManager.getCurrentState(taskId);
     const xstateInTerminalState = currentXState && XSTATE_SETTLED_STATES.has(currentXState);
 
@@ -392,29 +322,17 @@ export function registerAgenteventsHandlers(
       const mainPlanPath = getPlanPath(project, task);
       persistPlanPhaseSync(mainPlanPath, progress.phase, project.id);
 
-      // Also persist to worktree if task has one
+      // Also persist to the worktree copy so getTasks() sees the same phase there
       const worktreePath = findTaskWorktree(project.path, task.specId);
       if (worktreePath) {
-        const specsBaseDir = getSpecsDir(project.autoBuildPath);
-        const worktreeSpecDir = path.join(worktreePath, specsBaseDir, task.specId);
         const worktreePlanPath = path.join(
-          worktreeSpecDir,
+          worktreePath,
+          getSpecsDir(project.autoBuildPath),
+          task.specId,
           AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN
         );
         if (existsSync(worktreePlanPath)) {
           persistPlanPhaseSync(worktreePlanPath, progress.phase, project.id);
-        }
-
-        // Re-watch the worktree path if the file watcher is still watching the main project path.
-        // This handles the case where the task started before the worktree existed:
-        // the initial watch fell back to the main project spec dir, but now the worktree
-        // is available and implementation_plan.json is being written there.
-        const currentWatchDir = fileWatcher.getWatchedSpecDir(taskId);
-        if (currentWatchDir && currentWatchDir !== worktreeSpecDir && existsSync(worktreePlanPath)) {
-          console.warn(`[agent-events-handlers] Re-watching worktree path for ${taskId}: ${worktreeSpecDir}`);
-          fileWatcher.watch(taskId, worktreeSpecDir).catch((err) => {
-            console.error(`[agent-events-handlers] Failed to re-watch worktree for ${taskId}:`, err);
-          });
         }
       }
     } else if (xstateInTerminalState && progress.phase) {
@@ -476,10 +394,8 @@ export function registerAgenteventsHandlers(
 
     safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_PROGRESS, taskId, plan, project?.id);
 
-    // Re-stamp XState status fields if the backend overwrote the plan file without them.
-    // The planner agent writes implementation_plan.json via the Write tool, which replaces
-    // the entire file and strips the frontend's status/xstateState/executionPhase fields.
-    // This causes tasks to snap back to backlog on refresh.
+    // Re-stamp XState status fields if the plan file was rewritten without them
+    // (otherwise tasks snap back to backlog on refresh).
     const planWithStatus = plan as { xstateState?: string; executionPhase?: string; status?: string };
     const currentXState = taskStateManager.getCurrentState(taskId);
     if (currentXState && !planWithStatus.xstateState && task && project) {

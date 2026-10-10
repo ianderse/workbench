@@ -1,16 +1,9 @@
 /**
- * Phase Event Protocol Constants
- * ===============================
- * Single source of truth for execution phase communication between
- * the TypeScript AI agent layer and the Electron renderer.
- *
- * See src/main/ai/ for the TypeScript agent implementation.
- *
- * Protocol: __EXEC_PHASE__:{"phase":"coding","message":"Starting"}
+ * Execution Phase Constants
+ * =========================
+ * Single source of truth for the execution phases a task run reports
+ * (src/main/claude-code/task-runner.ts) and the renderer shows.
  */
-
-// Protocol marker prefix - must match Python's PHASE_MARKER_PREFIX
-export const PHASE_MARKER_PREFIX = '__EXEC_PHASE__:' as const;
 
 // Protocol version for future compatibility checks
 export const PHASE_PROTOCOL_VERSION = '1.0.0' as const;

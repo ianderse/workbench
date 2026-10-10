@@ -21,7 +21,7 @@ import { cp, rm } from 'fs/promises';
 import { join, resolve } from 'path';
 import { promisify } from 'util';
 
-import { getSpecsDir } from '../../../shared/constants';
+import { getSpecsDir } from '../../shared/constants';
 
 // ---------------------------------------------------------------------------
 // Internal helpers

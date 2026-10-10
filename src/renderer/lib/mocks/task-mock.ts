@@ -74,7 +74,6 @@ export const taskMock = {
 
   checkTaskRunning: async () => ({ success: true, data: false }),
 
-  resumePausedTask: async () => ({ success: true }),
 
   // Worktree change detection
   checkWorktreeChanges: async (_taskId: string) => ({
@@ -104,6 +103,7 @@ export const taskMock = {
   onTaskLog: () => () => {},
   onTaskStatusChange: () => () => {},
   onTaskRateLimitHoldChange: () => () => {},
+  onTaskClaudeRunUpdate: () => () => {},
   onTaskExecutionProgress: () => () => {},
   onTaskLogsChanged: () => () => {},
   onTaskLogsStream: () => () => {},

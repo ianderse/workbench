@@ -2,8 +2,9 @@
  * Task-related types
  */
 
-import type { ThinkingLevel, PhaseModelConfig, PhaseThinkingConfig } from './settings';
+import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
+import type { ClaudeRunInfo } from './claude-code';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -14,8 +15,7 @@ export type TaskOrderState = Record<TaskStatus, string[]>;
 // - 'completed': All subtasks done and QA passed, ready for final approval/merge
 // - 'errors': Subtasks failed during execution
 // - 'qa_rejected': QA found issues that need fixing
-// - 'plan_review': Spec/plan created and awaiting approval before coding starts
-export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'plan_review' | 'stopped';
+export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'stopped';
 
 export type SubtaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
@@ -141,46 +141,19 @@ export interface TaskDraft {
   projectId: string;
   title: string;
   description: string;
-  category: TaskCategory | '';
-  priority: TaskPriority | '';
-  complexity: TaskComplexity | '';
-  impact: TaskImpact | '';
-  profileId?: string;  // Agent profile ID ('auto', 'complex', 'balanced', 'quick', 'custom')
-  model: ModelType | '';
-  thinkingLevel: ThinkingLevel | '';
-  // Auto profile - per-phase configuration
-  phaseModels?: PhaseModelConfig;
-  phaseThinking?: PhaseThinkingConfig;
   images: ImageAttachment[];
   referencedFiles: ReferencedFile[];
-  requireReviewBeforeCoding?: boolean;
-  fastMode?: boolean;
   mcpConnectors?: string[];
   pushNewBranches?: boolean;
   savedAt: Date;
 }
 
-// Task metadata from ideation or manual entry
-export type TaskComplexity = 'trivial' | 'small' | 'medium' | 'large' | 'complex';
-export type TaskImpact = 'low' | 'medium' | 'high' | 'critical';
-export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 // Re-export ThinkingLevel (defined in settings.ts) for convenience
 export type { ThinkingLevel };
 /** Model identifier — Claude shorthands or concrete model IDs from any provider */
 export type ModelType = string;
-export type TaskCategory =
-  | 'feature'
-  | 'bug_fix'
-  | 'refactoring'
-  | 'documentation'
-  | 'security'
-  | 'performance'
-  | 'ui_ux'
-  | 'infrastructure'
-  | 'testing';
-
 export interface TaskMetadata {
-  // The description the user entered (shown on the task card; spec agents may rewrite requirements.json)
+  // The description the user entered (shown on the task card)
   userDescription?: string;
 
   // Origin tracking
@@ -193,12 +166,6 @@ export interface TaskMetadata {
   githubUrl?: string;  // GitHub issue URL
   githubBatchTheme?: string;  // Theme/title of the GitHub issue batch
 
-  // Classification
-  category?: TaskCategory;
-  complexity?: TaskComplexity;
-  impact?: TaskImpact;
-  priority?: TaskPriority;
-
   // Context
   rationale?: string;  // Why this task matters
   problemSolved?: string;  // What problem this addresses
@@ -208,9 +175,6 @@ export interface TaskMetadata {
   affectedFiles?: string[];  // Files likely to be modified
   dependencies?: string[];  // Other features/tasks this depends on
   acceptanceCriteria?: string[];  // What defines "done"
-
-  // Effort estimation
-  estimatedEffort?: TaskComplexity;
 
   // Type-specific metadata (from different idea types)
   securitySeverity?: 'low' | 'medium' | 'high' | 'critical';
@@ -224,19 +188,6 @@ export interface TaskMetadata {
   // Referenced files (files/folders from project for context)
   referencedFiles?: ReferencedFile[];
 
-  // Review settings
-  requireReviewBeforeCoding?: boolean;  // Require human review of spec/plan before coding starts
-
-  // Agent configuration (from agent profile or manual selection)
-  model?: ModelType;  // Claude model to use (haiku, sonnet, opus) - used when not auto profile
-  thinkingLevel?: ThinkingLevel;  // Thinking budget level (low, medium, high)
-  provider?: string;  // Active provider when task was created (anthropic, openai, google, etc.)
-  // Auto profile - per-phase model configuration
-  isAutoProfile?: boolean;  // True when using Auto (Optimized) profile
-  phaseModels?: PhaseModelConfig;  // Per-phase model configuration
-  phaseThinking?: PhaseThinkingConfig;  // Per-phase thinking configuration
-  phaseProviders?: Record<string, string>;  // Per-phase provider preference (cross-provider mode)
-  fastMode?: boolean;  // Fast Mode — faster Opus 4.6 output, higher cost per token
   // MCP connectors enabled for this task (ids: context7, memory, electron, puppeteer, custom ids).
   // Copied from the Connectors defaults when the task is created; unset means use the defaults
   mcpConnectors?: string[];
@@ -289,6 +240,7 @@ export interface Task {
   location?: 'main' | 'worktree';  // Where task was loaded from (main project or worktree)
   specsPath?: string;  // Full path to specs directory for this task
   rateLimitHold?: RateLimitHold;  // Set while the task is queued waiting for a rate-limit reset
+  claudeRun?: ClaudeRunInfo;  // Claude Code run state (claude_run.json): triage, plan, session, phases, validation
   createdAt: Date;
   updatedAt: Date;
 }

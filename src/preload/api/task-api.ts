@@ -12,6 +12,7 @@ import type {
   TaskLogStreamChunk,
   ReviewReason,
   RateLimitHold,
+  ClaudeRunInfo,
   MergeProgress,
   SupportedIDE,
   SupportedTerminal,
@@ -52,7 +53,6 @@ export interface TaskAPI {
     options?: import('../../shared/types').TaskRecoveryOptions
   ) => Promise<IPCResult<TaskRecoveryResult>>;
   checkTaskRunning: (taskId: string) => Promise<IPCResult<boolean>>;
-  resumePausedTask: (taskId: string) => Promise<IPCResult>;
 
   // Worktree Change Detection
   checkWorktreeChanges: (taskId: string) => Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>>;
@@ -82,6 +82,7 @@ export interface TaskAPI {
   onTaskLog: (callback: (taskId: string, log: string, projectId?: string) => void) => () => void;
   onTaskStatusChange: (callback: (taskId: string, status: TaskStatus, projectId?: string, reviewReason?: ReviewReason) => void) => () => void;
   onTaskRateLimitHoldChange: (callback: (taskId: string, hold: RateLimitHold | null, projectId?: string) => void) => () => void;
+  onTaskClaudeRunUpdate: (callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void) => () => void;
   onTaskExecutionProgress: (
     callback: (taskId: string, progress: import('../../shared/types').ExecutionProgress, projectId?: string) => void
   ) => () => void;
@@ -149,8 +150,6 @@ export const createTaskAPI = (): TaskAPI => ({
   checkTaskRunning: (taskId: string): Promise<IPCResult<boolean>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_CHECK_RUNNING, taskId),
 
-  resumePausedTask: (taskId: string): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_RESUME_PAUSED, taskId),
 
   // Worktree Change Detection
   checkWorktreeChanges: (taskId: string): Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>> =>
@@ -267,6 +266,23 @@ export const createTaskAPI = (): TaskAPI => ({
     ipcRenderer.on(IPC_CHANNELS.TASK_STATUS_CHANGE, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.TASK_STATUS_CHANGE, handler);
+    };
+  },
+
+  onTaskClaudeRunUpdate: (
+    callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      taskId: string,
+      run: ClaudeRunInfo,
+      projectId?: string
+    ): void => {
+      callback(taskId, run, projectId);
+    };
+    ipcRenderer.on(IPC_CHANNELS.TASK_CLAUDE_RUN_UPDATE, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TASK_CLAUDE_RUN_UPDATE, handler);
     };
   },
 

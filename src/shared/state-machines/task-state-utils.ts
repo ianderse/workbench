@@ -14,7 +14,7 @@ import type { TaskStatus, ReviewReason, ExecutionPhase } from '../types';
  * If you add/remove a state in the machine, update this array.
  */
 export const TASK_STATE_NAMES = [
-  'backlog', 'planning', 'plan_review', 'coding',
+  'backlog', 'planning', 'coding',
   'qa_review', 'qa_fixing', 'queued', 'human_review', 'error',
   'creating_pr', 'pr_created', 'done'
 ] as const;
@@ -33,7 +33,7 @@ export type TaskStateName = typeof TASK_STATE_NAMES[number];
  * blocks — new execution-progress events flow through normally.
  */
 export const XSTATE_SETTLED_STATES: ReadonlySet<string> = new Set<TaskStateName>([
-  'plan_review', 'queued', 'human_review', 'error', 'creating_pr', 'pr_created', 'done'
+  'queued', 'human_review', 'error', 'creating_pr', 'pr_created', 'done'
 ]);
 
 /**
@@ -48,7 +48,6 @@ export const XSTATE_ACTIVE_STATES: ReadonlySet<string> = new Set<TaskStateName>(
 export const XSTATE_TO_PHASE: Record<TaskStateName, ExecutionPhase> & Record<string, ExecutionPhase | undefined> = {
   'backlog': 'idle',
   'planning': 'planning',
-  'plan_review': 'planning',
   'coding': 'coding',
   'qa_review': 'qa_review',
   'qa_fixing': 'qa_fixing',
@@ -77,8 +76,6 @@ export function mapStateToLegacy(
     case 'planning':
     case 'coding':
       return { status: 'in_progress' };
-    case 'plan_review':
-      return { status: 'human_review', reviewReason: 'plan_review' };
     case 'qa_review':
     case 'qa_fixing':
       return { status: 'ai_review' };

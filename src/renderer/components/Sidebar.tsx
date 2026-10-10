@@ -376,18 +376,9 @@ export function Sidebar({
               <p className="text-foreground mb-2">{t('dialogs:initialize.willDo')}</p>
               <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                 <li>{t('dialogs:initialize.createFolder')}</li>
-                <li>{t('dialogs:initialize.copyFramework')}</li>
                 <li>{t('dialogs:initialize.setupSpecs')}</li>
               </ul>
             </div>
-            {!settings.autoBuildPath && (
-              <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
-                <p className="text-foreground">{t('dialogs:initialize.sourcePathNotConfigured')}</p>
-                <p className="text-muted-foreground mt-1">
-                  {t('dialogs:initialize.sourcePathNotConfiguredDescription')}
-                </p>
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={handleSkipInit} disabled={isInitializing}>
@@ -396,7 +387,7 @@ export function Sidebar({
             <Button
               size="sm"
               onClick={handleInitialize}
-              disabled={isInitializing || !settings.autoBuildPath}
+              disabled={isInitializing}
             >
               {isInitializing ? (
                 <>

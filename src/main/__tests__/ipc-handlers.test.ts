@@ -167,7 +167,6 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
     startTaskExecution: ReturnType<typeof vi.fn>;
     startQAProcess: ReturnType<typeof vi.fn>;
     killTask: ReturnType<typeof vi.fn>;
-    configure: ReturnType<typeof vi.fn>;
   };
   let mockTerminalManager: {
     create: ReturnType<typeof vi.fn>;
@@ -201,7 +200,6 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       startTaskExecution: vi.fn(),
       startQAProcess: vi.fn(),
       killTask: vi.fn(),
-      configure: vi.fn(),
     });
 
     // Create mock terminal manager
@@ -552,18 +550,6 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       expect(data.defaultModel).toBe("opus");
     });
 
-    it("should configure agent manager when paths change", async () => {
-      const { setupIpcHandlers } = await import("../ipc-handlers");
-      setupIpcHandlers(
-        mockAgentManager as never,
-        mockTerminalManager as never,
-        () => mockMainWindow as never
-      );
-
-      await ipcMain.invokeHandler("settings:save", {}, { pythonPath: "/usr/bin/python3" });
-
-      expect(mockAgentManager.configure).toHaveBeenCalledWith("/usr/bin/python3", undefined);
-    });
   });
 
   describe("app:version handler", () => {

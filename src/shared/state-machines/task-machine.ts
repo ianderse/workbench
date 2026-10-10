@@ -8,13 +8,6 @@ export interface TaskContext {
 
 export type TaskEvent =
   | { type: 'PLANNING_STARTED' }
-  | {
-      type: 'PLANNING_COMPLETE';
-      hasSubtasks: boolean;
-      subtaskCount: number;
-      requireReviewBeforeCoding: boolean;
-    }
-  | { type: 'PLAN_APPROVED' }
   | { type: 'CODING_STARTED'; subtaskId: string; subtaskDescription: string }
   | { type: 'SUBTASK_COMPLETED'; subtaskId: string; completedCount: number; totalCount: number }
   | { type: 'ALL_SUBTASKS_DONE'; totalCount: number }
@@ -26,7 +19,7 @@ export type TaskEvent =
   | { type: 'PLANNING_FAILED'; error: string; recoverable: boolean }
   | { type: 'CODING_FAILED'; subtaskId: string; error: string; attemptCount: number }
   | { type: 'QA_MAX_ITERATIONS'; iteration: number; maxIterations: number }
-  | { type: 'QA_AGENT_ERROR'; iteration: number; consecutiveErrors: number }
+  | { type: 'QA_AGENT_ERROR'; iteration: number; consecutiveErrors: number; error?: string }
   | { type: 'PROCESS_EXITED'; exitCode: number; signal?: string; unexpected?: boolean }
   | { type: 'USER_STOPPED'; hasPlan?: boolean }
   | { type: 'RATE_LIMIT_HOLD'; resetAt: string; message: string; phase?: string }
@@ -56,16 +49,9 @@ export const taskMachine = createMachine(
           USER_STOPPED: 'backlog'
         }
       },
+      // Claude Code triage and (optional) plan mode
       planning: {
         on: {
-          PLANNING_COMPLETE: [
-            {
-              target: 'plan_review',
-              guard: 'requiresReview',
-              actions: 'setReviewReasonPlan'
-            },
-            { target: 'coding', actions: 'clearReviewReason' }
-          ],
           // Fallback: if CODING_STARTED arrives while in planning, transition to coding
           CODING_STARTED: { target: 'coding', actions: 'clearReviewReason' },
           // Fallback: if ALL_SUBTASKS_DONE arrives while in planning, go directly to qa_review
@@ -74,19 +60,15 @@ export const taskMachine = createMachine(
           QA_STARTED: 'qa_review',
           // Fallback: if QA_PASSED arrives while in planning (entire build completed), go to human_review
           QA_PASSED: { target: 'human_review', actions: 'setReviewReasonCompleted' },
+          QA_FAILED: { target: 'human_review', actions: 'setReviewReasonQaRejected' },
           PLANNING_FAILED: { target: 'error', actions: ['setReviewReasonErrors', 'setError'] },
+          CODING_FAILED: { target: 'error', actions: ['setReviewReasonErrors', 'setError'] },
+          QA_AGENT_ERROR: { target: 'error', actions: 'setReviewReasonErrors' },
           RATE_LIMIT_HOLD: { target: 'queued', actions: 'clearReviewReason' },
           USER_STOPPED: [
             { target: 'backlog', guard: 'noPlanYet', actions: 'clearReviewReason' },
             { target: 'human_review', actions: 'setReviewReasonStopped' }
           ],
-          PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
-        }
-      },
-      plan_review: {
-        on: {
-          PLAN_APPROVED: { target: 'coding', actions: 'clearReviewReason' },
-          USER_STOPPED: { target: 'backlog', actions: 'clearReviewReason' },
           PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
         }
       },
@@ -96,8 +78,9 @@ export const taskMachine = createMachine(
           // ALL_SUBTASKS_DONE means coder finished but QA hasn't started yet
           // Transition to qa_review - QA will emit QA_PASSED or QA_FAILED
           ALL_SUBTASKS_DONE: 'qa_review',
-          // Fallback: if QA_PASSED arrives while still in coding (missed QA_STARTED), go to human_review
+          // Validation already finished in an earlier run: the result arrives without QA_STARTED
           QA_PASSED: { target: 'human_review', actions: 'setReviewReasonCompleted' },
+          QA_FAILED: { target: 'human_review', actions: 'setReviewReasonQaRejected' },
           CODING_FAILED: { target: 'error', actions: ['setReviewReasonErrors', 'setError'] },
           // Fallback: if QA fails while XState is still in coding (missed QA_STARTED), handle gracefully
           QA_MAX_ITERATIONS: { target: 'error', actions: 'setReviewReasonErrors' },
@@ -107,9 +90,11 @@ export const taskMachine = createMachine(
           PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
         }
       },
+      // Claude Code validation (checks, review, commit). It fixes what it can inside the
+      // session, so a failed validation goes straight to human review.
       qa_review: {
         on: {
-          QA_FAILED: 'qa_fixing',
+          QA_FAILED: { target: 'human_review', actions: 'setReviewReasonQaRejected' },
           QA_PASSED: { target: 'human_review', actions: 'setReviewReasonCompleted' },
           QA_MAX_ITERATIONS: { target: 'error', actions: 'setReviewReasonErrors' },
           QA_AGENT_ERROR: { target: 'error', actions: 'setReviewReasonErrors' },
@@ -118,6 +103,7 @@ export const taskMachine = createMachine(
           PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
         }
       },
+      // Not entered anymore (the old QA fixer loop); kept so persisted tasks still restore
       qa_fixing: {
         on: {
           QA_FIXING_COMPLETE: 'qa_review',
@@ -158,7 +144,7 @@ export const taskMachine = createMachine(
       error: {
         on: {
           USER_RESUMED: { target: 'coding', actions: 'clearReviewReason' },
-          // Allow restarting from error back to planning (e.g., spec creation crashed)
+          // Allow restarting from error back to planning (e.g., triage failed)
           PLANNING_STARTED: { target: 'planning', actions: 'clearReviewReason' },
           MARK_DONE: 'done'
         }
@@ -180,13 +166,10 @@ export const taskMachine = createMachine(
   },
   {
     guards: {
-      requiresReview: ({ event }) =>
-        event.type === 'PLANNING_COMPLETE' && event.requireReviewBeforeCoding === true,
       noPlanYet: ({ event }) => event.type === 'USER_STOPPED' && event.hasPlan === false,
       unexpectedExit: ({ event }) => event.type === 'PROCESS_EXITED' && event.unexpected === true
     },
     actions: {
-      setReviewReasonPlan: assign({ reviewReason: () => 'plan_review' }),
       setReviewReasonCompleted: assign({ reviewReason: () => 'completed' }),
       setReviewReasonStopped: assign({ reviewReason: () => 'stopped' }),
       setReviewReasonQaRejected: assign({ reviewReason: () => 'qa_rejected' }),

@@ -532,38 +532,17 @@ describe('ProjectStore', () => {
       expect(tasks[0].status).toBe('done');
     });
 
-    it('should prefer original task description from requirements.json over plan description', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '007-description-priority');
+    it('should load the Claude Code run state and fall back to the plan description', async () => {
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '007-claude-run');
       mkdirSync(specsDir, { recursive: true });
-
-      const aiDescription = 'AI-generated implementation plan description';
-      const userDescription = 'User entered: preserve this exact original task description';
-
-      const plan = {
-        feature: 'Description Priority Feature',
-        description: aiDescription,
-        workflow_type: 'feature',
-        services_involved: [],
-        status: 'pending',
-        phases: [],
-        final_acceptance: [],
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
-        spec_file: 'spec.md'
-      };
 
       writeFileSync(
         path.join(specsDir, 'implementation_plan.json'),
-        JSON.stringify(plan)
+        JSON.stringify({ feature: 'Claude Run Feature', description: 'Plan description', status: 'pending', phases: [] })
       );
-
-      const requirements = {
-        task_description: userDescription,
-        workflow_type: 'feature'
-      };
       writeFileSync(
-        path.join(specsDir, 'requirements.json'),
-        JSON.stringify(requirements)
+        path.join(specsDir, 'claude_run.json'),
+        JSON.stringify({ version: 1, phases: [{ name: 'triage', startedAt: '2026-01-01T00:00:00Z' }], subagents: [], totalCostUsd: 0.5, updatedAt: '2026-01-01T00:00:00Z' })
       );
 
       const { ProjectStore } = await import('../project-store');
@@ -573,7 +552,9 @@ describe('ProjectStore', () => {
       const tasks = store.getTasks(project.id);
 
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].description).toBe(userDescription);
+      expect(tasks[0].description).toBe('Plan description');
+      expect(tasks[0].claudeRun?.totalCostUsd).toBe(0.5);
+      expect(tasks[0].claudeRun?.phases[0].name).toBe('triage');
     });
     it('should prefer the user-entered description from task_metadata.json over a rewritten requirements.json', async () => {
       const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '008-user-description');

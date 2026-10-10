@@ -45,7 +45,7 @@ describe('taskMachine', () => {
     it('should transition through the standard workflow', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 3, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'QA_PASSED', iteration: 1, testsRun: {} },
         { type: 'MARK_DONE' }
@@ -59,7 +59,7 @@ describe('taskMachine', () => {
     it('should set reviewReason to completed when QA passes', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 3, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'QA_PASSED', iteration: 1, testsRun: {} }
       ];
@@ -70,86 +70,47 @@ describe('taskMachine', () => {
     });
   });
 
-  describe('plan_review flow (requireReviewBeforeCoding: true)', () => {
-    it('should go to plan_review when requireReviewBeforeCoding is true', () => {
+  describe('Claude Code validation', () => {
+    it('goes to human_review with qa_rejected when validation fails', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 3, requireReviewBeforeCoding: true }
-      ];
-
-      const snapshot = runEvents(events);
-      expect(snapshot.value).toBe('plan_review');
-      expect(snapshot.context.reviewReason).toBe('plan_review');
-    });
-
-    it('should transition from plan_review to coding on PLAN_APPROVED', () => {
-      const events: TaskEvent[] = [
-        { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 3, requireReviewBeforeCoding: true },
-        { type: 'PLAN_APPROVED' }
-      ];
-
-      const snapshot = runEvents(events);
-      expect(snapshot.value).toBe('coding');
-      expect(snapshot.context.reviewReason).toBeUndefined();
-    });
-
-    it('should complete full flow with plan_review', () => {
-      const events: TaskEvent[] = [
-        { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 3, requireReviewBeforeCoding: true },
-        { type: 'PLAN_APPROVED' },
-        { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
-        { type: 'QA_PASSED', iteration: 1, testsRun: {} },
-        { type: 'MARK_DONE' }
-      ];
-
-      const snapshot = runEvents(events);
-      expect(snapshot.value).toBe('done');
-    });
-  });
-
-  describe('QA fixing flow', () => {
-    it('should transition to qa_fixing when QA fails', () => {
-      const events: TaskEvent[] = [
-        { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
-        { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
+        { type: 'QA_STARTED', iteration: 1, maxIterations: 1 },
         { type: 'QA_FAILED', iteration: 1, issueCount: 2, issues: ['issue1', 'issue2'] }
       ];
 
       const snapshot = runEvents(events);
-      expect(snapshot.value).toBe('qa_fixing');
+      expect(snapshot.value).toBe('human_review');
+      expect(snapshot.context.reviewReason).toBe('qa_rejected');
     });
 
-    it('should go back to qa_review after qa_fixing completes', () => {
-      const events: TaskEvent[] = [
-        { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
-        { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
-        { type: 'QA_FAILED', iteration: 1, issueCount: 2, issues: ['issue1', 'issue2'] },
-        { type: 'QA_FIXING_COMPLETE', iteration: 1 }
-      ];
-
-      const snapshot = runEvents(events);
-      expect(snapshot.value).toBe('qa_review');
+    it('accepts a validation result that arrives in coding (validated in an earlier run)', () => {
+      const failed = runEvents([
+        { type: 'USER_RESUMED' },
+        { type: 'QA_FAILED', iteration: 1, issueCount: 1, issues: ['issue'] }
+      ], 'human_review');
+      expect(failed.value).toBe('human_review');
+      expect(failed.context.reviewReason).toBe('qa_rejected');
     });
 
-    it('should allow multiple QA fix iterations', () => {
-      const events: TaskEvent[] = [
-        { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
-        { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
-        { type: 'QA_FAILED', iteration: 1, issueCount: 2, issues: ['issue1'] },
-        { type: 'QA_FIXING_COMPLETE', iteration: 1 },
-        { type: 'QA_FAILED', iteration: 2, issueCount: 1, issues: ['issue1'] },
-        { type: 'QA_FIXING_COMPLETE', iteration: 2 },
-        { type: 'QA_PASSED', iteration: 3, testsRun: {} }
-      ];
-
-      const snapshot = runEvents(events);
+    it('applies requested changes: human_review → coding → qa_review → human_review', () => {
+      const snapshot = runEvents([
+        { type: 'USER_RESUMED' },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Applying requested changes' },
+        { type: 'QA_STARTED', iteration: 1, maxIterations: 1 },
+        { type: 'QA_PASSED', iteration: 1, testsRun: {} }
+      ], 'human_review');
       expect(snapshot.value).toBe('human_review');
       expect(snapshot.context.reviewReason).toBe('completed');
+    });
+
+    it('goes to error when triage fails with CODING_FAILED during planning', () => {
+      const snapshot = runEvents([
+        { type: 'PLANNING_STARTED' },
+        { type: 'CODING_FAILED', subtaskId: '', error: 'boom', attemptCount: 1 }
+      ]);
+      expect(snapshot.value).toBe('error');
+      expect(snapshot.context.error).toBe('boom');
     });
   });
 
@@ -169,7 +130,7 @@ describe('taskMachine', () => {
     it('should transition to error on CODING_FAILED', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'CODING_FAILED', subtaskId: 'sub1', error: 'Coding error', attemptCount: 3 }
       ];
 
@@ -182,7 +143,7 @@ describe('taskMachine', () => {
     it('should transition to error on QA_MAX_ITERATIONS from qa_review', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'QA_MAX_ITERATIONS', iteration: 3, maxIterations: 3 }
       ];
@@ -195,7 +156,7 @@ describe('taskMachine', () => {
     it('should transition to error on QA_AGENT_ERROR', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'QA_AGENT_ERROR', iteration: 1, consecutiveErrors: 3 }
       ];
@@ -255,7 +216,7 @@ describe('taskMachine', () => {
     it('should go to human_review when stopped during coding', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'USER_STOPPED' }
       ];
 
@@ -267,7 +228,7 @@ describe('taskMachine', () => {
     it('should go to human_review when stopped during qa_review', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'USER_STOPPED' }
       ];
@@ -280,7 +241,7 @@ describe('taskMachine', () => {
     it('should resume from human_review to coding', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'USER_STOPPED' },
         { type: 'USER_RESUMED' }
       ];
@@ -295,7 +256,7 @@ describe('taskMachine', () => {
     it('should transition to creating_pr on CREATE_PR', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'QA_PASSED', iteration: 1, testsRun: {} },
         { type: 'CREATE_PR' }
@@ -308,7 +269,7 @@ describe('taskMachine', () => {
     it('should transition to pr_created on PR_CREATED', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'QA_PASSED', iteration: 1, testsRun: {} },
         { type: 'CREATE_PR' },
@@ -322,7 +283,7 @@ describe('taskMachine', () => {
     it('should transition from pr_created to done on MARK_DONE', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
         { type: 'QA_PASSED', iteration: 1, testsRun: {} },
         { type: 'CREATE_PR' },
@@ -350,7 +311,7 @@ describe('taskMachine', () => {
     it('should go to error on unexpected process exit during coding', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'PROCESS_EXITED', exitCode: 1, unexpected: true }
       ];
 
@@ -381,7 +342,7 @@ describe('taskMachine', () => {
       expect(snapshot.value).toBe('coding');
     });
 
-    it('should allow CODING_STARTED from planning (skipped PLANNING_COMPLETE)', () => {
+    it('should allow CODING_STARTED from planning (Claude Code starts implementing)', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
         { type: 'CODING_STARTED', subtaskId: 'sub1', subtaskDescription: 'Test' }
@@ -425,29 +386,13 @@ describe('taskMachine', () => {
     it('should allow QA_PASSED from coding (missed QA_STARTED)', () => {
       const events: TaskEvent[] = [
         { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
         { type: 'QA_PASSED', iteration: 1, testsRun: {} }
       ];
 
       const snapshot = runEvents(events);
       expect(snapshot.value).toBe('human_review');
       expect(snapshot.context.reviewReason).toBe('completed');
-    });
-  });
-
-  describe('qa_rejected flow', () => {
-    it('should set reviewReason to qa_rejected when QA fails in qa_fixing', () => {
-      const events: TaskEvent[] = [
-        { type: 'PLANNING_STARTED' },
-        { type: 'PLANNING_COMPLETE', hasSubtasks: true, subtaskCount: 1, requireReviewBeforeCoding: false },
-        { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
-        { type: 'QA_FAILED', iteration: 1, issueCount: 1, issues: ['issue'] },
-        { type: 'QA_FAILED', iteration: 2, issueCount: 1, issues: ['issue'] }
-      ];
-
-      const snapshot = runEvents(events);
-      expect(snapshot.value).toBe('human_review');
-      expect(snapshot.context.reviewReason).toBe('qa_rejected');
     });
   });
 

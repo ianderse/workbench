@@ -788,18 +788,9 @@ export function App() {
                 <p className="text-foreground mb-2">{t('initialize.willDo')}</p>
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                   <li>{t('initialize.createFolder')}</li>
-                  <li>{t('initialize.copyFramework')}</li>
                   <li>{t('initialize.setupSpecs')}</li>
                 </ul>
               </div>
-              {!settings.autoBuildPath && (
-                <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
-                  <p className="text-foreground">{t('initialize.sourcePathNotConfigured')}</p>
-                  <p className="text-muted-foreground mt-1">
-                    {t('initialize.sourcePathNotConfiguredDescription')}
-                  </p>
-                </div>
-              )}
               {initError && (
                 <div className="text-sm" role="alert">
                   <p className="text-destructive">{t('initialize.initFailed')}</p>
@@ -816,7 +807,7 @@ export function App() {
               <Button
                 size="sm"
                 onClick={handleInitialize}
-                disabled={isInitializing || !settings.autoBuildPath}
+                disabled={isInitializing}
               >
                 {isInitializing ? (
                   <>

@@ -63,34 +63,20 @@ export default defineConfig({
         'minimatch',
         // XState for task state machine
         'xstate',
-        // Vercel AI SDK packages (needed by worker thread + main process)
+        // Vercel AI SDK packages used by the Memory feature's embeddings
         'ai',
-        '@ai-sdk/anthropic',
         '@ai-sdk/openai',
         '@ai-sdk/google',
-        '@ai-sdk/amazon-bedrock',
         '@ai-sdk/azure',
-        '@ai-sdk/mistral',
-        '@ai-sdk/groq',
-        '@ai-sdk/xai',
         '@ai-sdk/openai-compatible',
         '@ai-sdk/provider',
         '@ai-sdk/provider-utils',
-        // Additional packages bundled into the main process (historically required
-        // when npm workspaces hoisted them out of the packaged node_modules)
-        '@ai-sdk/mcp',
-        '@modelcontextprotocol/sdk',
-        '@openrouter/ai-sdk-provider',
-        '@tavily/core',
       ]
     })],
     build: {
       rollupOptions: {
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
-          // Worker thread entry point — must be a separate chunk so it can be
-          // spawned via `new Worker(path)` from WorkerBridge
-          'ai/agent/worker': resolve(__dirname, 'src/main/ai/agent/worker.ts'),
         },
         // Native modules that must remain external (loaded from disk, not bundled).
         // @libsql/client is loaded lazily via globalThis.require() and resolved

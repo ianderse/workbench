@@ -10,7 +10,6 @@ import { XSTATE_SETTLED_STATES, XSTATE_TO_PHASE, TASK_STATE_NAMES } from '../../
 
 describe('XSTATE_SETTLED_STATES', () => {
   it('should contain the expected settled states', () => {
-    expect(XSTATE_SETTLED_STATES.has('plan_review')).toBe(true);
     expect(XSTATE_SETTLED_STATES.has('human_review')).toBe(true);
     expect(XSTATE_SETTLED_STATES.has('error')).toBe(true);
     expect(XSTATE_SETTLED_STATES.has('creating_pr')).toBe(true);
@@ -21,6 +20,7 @@ describe('XSTATE_SETTLED_STATES', () => {
   });
 
   it('should NOT contain active processing states', () => {
+    expect(XSTATE_SETTLED_STATES.has('plan_review')).toBe(false);
     expect(XSTATE_SETTLED_STATES.has('backlog')).toBe(false);
     expect(XSTATE_SETTLED_STATES.has('planning')).toBe(false);
     expect(XSTATE_SETTLED_STATES.has('coding')).toBe(false);
@@ -44,12 +44,6 @@ describe('settled state guard behavior', () => {
   function shouldBlockExecutionProgress(currentXState: string | undefined): boolean {
     return !!(currentXState && XSTATE_SETTLED_STATES.has(currentXState));
   }
-
-  it('should block execution-progress when XState is in plan_review', () => {
-    // After PLANNING_COMPLETE with requireReviewBeforeCoding=true,
-    // process exits with code 1 emitting phase='failed' — must be blocked
-    expect(shouldBlockExecutionProgress('plan_review')).toBe(true);
-  });
 
   it('should block execution-progress when XState is in human_review', () => {
     // After QA_PASSED, any stale events from the dying process must be blocked
@@ -94,7 +88,6 @@ describe('XSTATE_TO_PHASE', () => {
 
   it('should map settled states to non-active phases', () => {
     // Settled states should map to phases that indicate completion or stoppage
-    expect(XSTATE_TO_PHASE['plan_review']).toBe('planning');
     expect(XSTATE_TO_PHASE['human_review']).toBe('complete');
     expect(XSTATE_TO_PHASE['error']).toBe('failed');
     expect(XSTATE_TO_PHASE['done']).toBe('complete');

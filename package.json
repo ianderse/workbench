@@ -176,10 +176,6 @@
         "to": "icon.ico"
       },
       {
-        "from": "prompts",
-        "to": "prompts"
-      },
-      {
         "from": "node_modules/@libsql",
         "to": "node_modules/@libsql"
       },

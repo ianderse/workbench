@@ -11,6 +11,7 @@ import { ensureAbsolutePath } from './utils/path-helpers';
 import { writeFileAtomicSync } from './utils/atomic-file';
 import { safeParseJson } from './utils/json-repair';
 import { parseRateLimitHold } from '../shared/utils/rate-limit-hold';
+import { loadClaudeRunInfo } from './claude-code/task-runner';
 
 
 
@@ -459,46 +460,12 @@ export class ProjectStore {
           }
         }
 
+        // The description the user entered, then the plan's copy of it
         let description = '';
-        // PRIORITY 0: The description the user entered (spec agents may rewrite requirements.json)
         if (typeof metadata?.userDescription === 'string' && metadata.userDescription.trim()) {
           description = metadata.userDescription.trim();
-        }
-
-        const requirementsPath = path.join(specPath, AUTO_BUILD_PATHS.REQUIREMENTS);
-        // PRIORITY 1: Read task description from requirements.json
-        if (!description && existsSync(requirementsPath)) {
-          try {
-            const reqContent = readFileSync(requirementsPath, 'utf-8');
-            const requirements = JSON.parse(reqContent);
-            if (typeof requirements.task_description === 'string' && requirements.task_description.trim()) {
-              // Use the full task description that the user entered
-              description = requirements.task_description.trim();
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-
-        // PRIORITY 2: Fallback to plan description if user requirement text is missing
-        if (!description && plan?.description) {
+        } else if (plan?.description) {
           description = plan.description;
-        }
-
-        // PRIORITY 3: Final fallback to spec.md Overview (AI-synthesized content)
-        if (!description && existsSync(specFilePath)) {
-          try {
-            const content = readFileSync(specFilePath, 'utf-8');
-            // Extract full Overview section until next heading or end of file
-            // Use \n#{1,6}\s to match valid markdown headings (# to ######) with required space
-            // This avoids truncating at # in code blocks (e.g., Python comments)
-            const overviewMatch = content.match(/## Overview\s*\n+([\s\S]*?)(?=\n#{1,6}\s|$)/);
-            if (overviewMatch) {
-              description = overviewMatch[1].trim();
-            }
-          } catch {
-            // Ignore read errors
-          }
         }
 
         // Determine task status and review reason from plan
@@ -527,12 +494,8 @@ export class ProjectStore {
           });
         }) || [];
 
-        // Auto-correct status to human_review if all subtasks are completed
-        // This handles cases where task completed but app restarted before XState persisted the status
-        // (e.g., QA_PASSED event emitted but not processed before shutdown)
-        const { status: correctedStatus, reviewReason: correctedReviewReason } = this.correctStaleTaskStatus(
-          subtasks, hasJsonError, finalStatus, finalReviewReason, plan, planPath, dir.name
-        );
+        // Claude Code run state (triage, phases, cost, validation) lives in the main spec dir
+        const claudeRun = location === 'main' ? loadClaudeRunInfo(specPath) : null;
 
         // Extract staged status from plan (set when changes are merged with --no-commit)
         const planWithStaged = plan as unknown as { stagedInMainProject?: boolean; stagedAt?: string } | null;
@@ -578,15 +541,16 @@ export class ProjectStore {
           projectId,
           title,
           description: finalDescription,
-          status: correctedStatus,
+          status: finalStatus,
           subtasks,
           logs: [],
           metadata,
-          ...(correctedReviewReason !== undefined && { reviewReason: correctedReviewReason }),
+          ...(finalReviewReason !== undefined && { reviewReason: finalReviewReason }),
           ...(executionProgress && { executionProgress }),
           stagedInMainProject,
           stagedAt,
           ...(rateLimitHold && { rateLimitHold }),
+          ...(claudeRun && { claudeRun }),
           location, // Add location metadata (main vs worktree)
           specsPath: specPath, // Add full path to specs directory
           createdAt: new Date(plan?.created_at || Date.now()),
@@ -599,82 +563,6 @@ export class ProjectStore {
     }
 
     return tasks;
-  }
-
-  /**
-   * Correct stale task status when all subtasks are completed but status wasn't persisted.
-   * Extracted from loadTasksFromSpecsDir to keep read/write separation clear.
-   *
-   * NOTE: This method intentionally writes to implementation_plan.json to persist the
-   * correction and prevent repeated auto-corrections on every getTasks() call. The plan
-   * object is NOT mutated unless the write succeeds, preserving memory/disk consistency.
-   */
-  private correctStaleTaskStatus(
-    subtasks: { status: string }[],
-    hasJsonError: boolean,
-    finalStatus: TaskStatus,
-    finalReviewReason: ReviewReason | undefined,
-    plan: ImplementationPlan | null,
-    planPath: string,
-    taskName: string
-  ): { status: TaskStatus; reviewReason: ReviewReason | undefined } {
-    if (subtasks.length === 0 || hasJsonError) {
-      return { status: finalStatus, reviewReason: finalReviewReason };
-    }
-
-    // Held by a rate limit (e.g. during QA after all subtasks completed): the task
-    // is waiting to resume, not finished — leave it in the queue.
-    if (plan?.rateLimitHold) {
-      return { status: finalStatus, reviewReason: finalReviewReason };
-    }
-
-    const completedCount = subtasks.filter(s => s.status === 'completed').length;
-    const allCompleted = completedCount === subtasks.length;
-
-    // Only auto-correct if all subtasks are done and status is in an incomplete coding state.
-    // Preserve ai_review (QA in progress), error (needs investigation), human_review, done, pr_created.
-    if (!allCompleted || finalStatus === 'human_review' || finalStatus === 'done' || finalStatus === 'pr_created' || finalStatus === 'ai_review' || finalStatus === 'error') {
-      return { status: finalStatus, reviewReason: finalReviewReason };
-    }
-
-    // Skip auto-correction if plan was recently updated (backend may still be writing)
-    if (plan?.updated_at) {
-      const updatedAt = new Date(plan.updated_at).getTime();
-      const ageMs = Date.now() - updatedAt;
-      if (ageMs < 30_000) {
-        return { status: finalStatus, reviewReason: finalReviewReason };
-      }
-    }
-
-    console.warn(`[ProjectStore] Auto-correcting task ${taskName}: all ${subtasks.length} subtasks completed but status was ${finalStatus}. Setting to human_review.`);
-
-    if (plan) {
-      // Clone before mutation — only apply to the original plan object if the write succeeds
-      const correctedPlan = {
-        ...plan,
-        status: 'human_review' as const,
-        planStatus: 'review',
-        reviewReason: 'completed' as ReviewReason,
-        updated_at: new Date().toISOString(),
-        xstateState: 'human_review',
-        executionPhase: 'complete'
-      };
-      try {
-        // Atomic write to prevent 0-byte corruption on crash
-        writeFileAtomicSync(planPath, JSON.stringify(correctedPlan, null, 2));
-        // Write succeeded — apply mutations to the in-memory plan so the rest of
-        // loadTasksFromSpecsDir sees the corrected values (e.g., executionProgress)
-        Object.assign(plan, correctedPlan);
-        console.warn(`[ProjectStore] Persisted corrected status for task ${taskName}`);
-      } catch (writeError) {
-        // Write failed — leave the plan object unchanged and return the original status
-        // so there's no memory/disk inconsistency
-        console.error(`[ProjectStore] Failed to persist corrected status for task ${taskName}:`, writeError);
-        return { status: finalStatus, reviewReason: finalReviewReason };
-      }
-    }
-
-    return { status: 'human_review', reviewReason: 'completed' };
   }
 
   /**
@@ -760,7 +648,7 @@ export class ProjectStore {
     const phaseMap: Record<string, ExecutionPhase> = {
       'backlog': 'idle',
       'planning': 'planning',
-      'plan_review': 'planning',
+      'plan_review': 'planning', // persisted by older versions
       'coding': 'coding',
       'qa_review': 'qa_review',
       'qa_fixing': 'qa_fixing',

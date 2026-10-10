@@ -47,7 +47,7 @@ for (const envPath of possibleEnvPaths) {
 
 import { app, BrowserWindow, ipcMain, shell, nativeImage, session, screen, Menu, MenuItem } from 'electron';
 import { join } from 'path';
-import { accessSync, readFileSync, writeFileSync, rmSync, cpSync } from 'fs';
+import { writeFileSync, rmSync, cpSync } from 'fs';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { setupIpcHandlers } from './ipc-setup';
 import { rateLimitResumeScheduler } from './services/rate-limit-resume-scheduler';
@@ -546,93 +546,6 @@ app.whenReady().then(() => {
   // Initialize agent manager
   agentManager = new AgentManager();
 
-  // Load settings and configure agent manager with Python and auto-claude paths
-  // Uses EAFP pattern (try/catch) instead of LBYL (existsSync) to avoid TOCTOU race conditions
-  const settingsPath = join(app.getPath('userData'), 'settings.json');
-  try {
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-
-    // Validate and migrate autoBuildPath - must contain planner.md (prompts directory)
-    // Uses EAFP pattern (try/catch with accessSync) instead of existsSync to avoid TOCTOU race conditions
-    let validAutoBuildPath = settings.autoBuildPath;
-    if (validAutoBuildPath) {
-      const plannerMdPath = join(validAutoBuildPath, 'planner.md');
-      let plannerExists = false;
-      try {
-        accessSync(plannerMdPath);
-        plannerExists = true;
-      } catch {
-        // File doesn't exist or isn't accessible
-      }
-
-      if (!plannerExists) {
-        // Migration: Try to fix stale paths from old project structures
-        // Old structures: /path/to/project/prompts, auto-claude, apps/backend
-        // New structure: /path/to/project/prompts
-        let migrated = false;
-        const possibleCorrections = [
-          join(validAutoBuildPath.replace(/[/\\]apps[/\\]desktop[/\\]prompts[/\\]*$/, ''), 'prompts'),
-          join(validAutoBuildPath.replace(/[/\\]auto-claude[/\\]*$/, ''), 'prompts'),
-          join(validAutoBuildPath.replace(/[/\\]apps[/\\]backend[/\\]*$/, ''), 'prompts'),
-        ];
-        for (const correctedPath of possibleCorrections) {
-          const correctedPlannerPath = join(correctedPath, 'planner.md');
-          let correctedPathExists = false;
-          try {
-            accessSync(correctedPlannerPath);
-            correctedPathExists = true;
-          } catch {
-            // Corrected path doesn't exist
-          }
-
-          if (correctedPathExists) {
-            console.log('[main] Migrating autoBuildPath from old structure:', validAutoBuildPath, '->', correctedPath);
-            settings.autoBuildPath = correctedPath;
-            validAutoBuildPath = correctedPath;
-            migrated = true;
-
-            // Save the corrected setting - we're the only process modifying settings at startup
-            try {
-              writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-              console.log('[main] Successfully saved migrated autoBuildPath to settings');
-            } catch (writeError) {
-              console.warn('[main] Failed to save migrated autoBuildPath:', writeError);
-            }
-            break;
-          }
-        }
-
-        if (!migrated) {
-          console.warn('[main] Configured autoBuildPath is invalid (missing planner.md), will use auto-detection:', validAutoBuildPath);
-          validAutoBuildPath = undefined; // Let auto-detection find the correct path
-
-          // Clear the stale setting so this warning doesn't repeat every startup
-          try {
-            delete settings.autoBuildPath;
-            writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-            console.log('[main] Cleared stale autoBuildPath from settings');
-          } catch {
-            // Non-critical - warning will just repeat next startup
-          }
-        }
-      }
-    }
-
-    if (settings.pythonPath || validAutoBuildPath) {
-      console.warn('[main] Configuring AgentManager with settings:', {
-        pythonPath: settings.pythonPath,
-        autoBuildPath: validAutoBuildPath
-      });
-      agentManager.configure(settings.pythonPath, validAutoBuildPath);
-    }
-  } catch (error: unknown) {
-    // ENOENT means no settings file yet - that's fine, use defaults
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      // No settings file, use defaults - this is expected on first run
-    } else {
-      console.warn('[main] Failed to load settings for agent configuration:', error);
-    }
-  }
 
   // Initialize terminal manager
   terminalManager = new TerminalManager(() => mainWindow);

@@ -31,7 +31,6 @@ export const IPC_CHANNELS = {
   TASK_UPDATE_STATUS: 'task:updateStatus',
   TASK_RECOVER_STUCK: 'task:recoverStuck',
   TASK_CHECK_RUNNING: 'task:checkRunning',
-  TASK_RESUME_PAUSED: 'task:resumePaused',  // Resume a rate-limited or auth-paused task
   TASK_LOAD_IMAGE_THUMBNAIL: 'task:loadImageThumbnail',
   TASK_CHECK_WORKTREE_CHANGES: 'task:checkWorktreeChanges',
 
@@ -58,6 +57,7 @@ export const IPC_CHANNELS = {
   TASK_STATUS_CHANGE: 'task:statusChange',
   TASK_RATE_LIMIT_HOLD_CHANGE: 'task:rateLimitHoldChange',  // Rate-limit hold set/cleared (main -> renderer)
   TASK_EXECUTION_PROGRESS: 'task:executionProgress',
+  TASK_CLAUDE_RUN_UPDATE: 'task:claudeRunUpdate',  // Claude Code run state changed (main -> renderer): (taskId, ClaudeRunInfo, projectId)
 
   // Task phase logs (persistent, collapsible logs by phase)
   TASK_LOGS_GET: 'task:logsGet',           // Load logs from spec dir
