@@ -43,6 +43,7 @@ import { TASK_STATUS_LABELS } from '../../../shared/constants';
 import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
+import { TaskClaudeRun } from './TaskClaudeRun';
 import { TaskWarnings } from './TaskWarnings';
 import { TaskSubtasks } from './TaskSubtasks';
 import { TaskLogs } from './TaskLogs';
@@ -304,7 +305,7 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                   </DialogPrimitive.Description>
                   {window.DEBUG && (
                     <div className="mt-1 text-[11px] text-muted-foreground font-mono">
-                      status={task.status} reviewReason={task.reviewReason ?? 'none'} phase={task.executionProgress?.phase ?? 'none'} reviewRequired={task.metadata?.requireReviewBeforeCoding ? 'true' : 'false'}
+                      status={task.status} reviewReason={task.reviewReason ?? 'none'} phase={task.executionProgress?.phase ?? 'none'} session={task.claudeRun?.sessionId ?? 'none'}
                       <br />
                       projectId={activeProject?.id ?? 'none'} projectName={activeProject?.name ?? 'none'}
                     </div>
@@ -395,6 +396,14 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                     <div className="p-6 space-y-5 overflow-x-hidden max-w-full">
                       {/* Metadata */}
                       <TaskMetadata task={task} />
+
+                      {/* Claude Code run: triage, plan, validation, steps, session */}
+                      {task.claudeRun && (
+                        <>
+                          <Separator />
+                          <TaskClaudeRun run={task.claudeRun} />
+                        </>
+                      )}
 
                       {/* Human Review Section */}
                       {state.needsReview && (

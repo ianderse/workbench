@@ -16,8 +16,8 @@ const FILL_CLASS = 'bg-foreground/70';
 
 /**
  * Progress bar that adapts based on execution phase:
- * - Planning/Validation: Shows an animated activity bar
- * - Coding: Shows subtask-based progress
+ * - Triage/plan/validation: Shows an animated activity bar
+ * - Implementation: Shows progress through Claude Code's task list (activity bar when it has none)
  * - Stuck: Shows warning state with interrupted animation
  *
  * Performance: Uses IntersectionObserver to pause animations when not visible
@@ -65,8 +65,10 @@ export const PhaseProgressIndicator = memo(function PhaseProgressIndicator({
   const totalSubtasks = subtasks.length;
   const subtaskProgress = totalSubtasks > 0 ? Math.round((completedSubtasks / totalSubtasks) * 100) : 0;
 
-  // Determine if we should show indeterminate (activity) vs determinate (%) progress
-  const isIndeterminatePhase = phase === 'planning' || phase === 'qa_review' || phase === 'qa_fixing';
+  // Determine if we should show indeterminate (activity) vs determinate (%) progress.
+  // Coding is indeterminate too until Claude Code creates a task list (subtasks take precedence below)
+  const isIndeterminatePhase =
+    phase === 'planning' || phase === 'coding' || phase === 'qa_review' || phase === 'qa_fixing';
   // Show subtask progress whenever subtasks exist (stops pulsing animation when spec completes)
   const showSubtaskProgress = totalSubtasks > 0;
 
@@ -90,7 +92,7 @@ export const PhaseProgressIndicator = memo(function PhaseProgressIndicator({
               transition={isVisible ? { duration: 2, repeat: Infinity, ease: 'easeInOut' } : undefined}
             />
           ) : showSubtaskProgress ? (
-            // Determinate progress for coding phase
+            // Determinate progress through Claude Code's task list
             <motion.div
               key="determinate"
               className={cn('h-full rounded-full', FILL_CLASS)}

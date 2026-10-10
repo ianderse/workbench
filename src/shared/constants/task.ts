@@ -1,6 +1,6 @@
 /**
  * Task-related constants
- * Includes status, categories, complexity, priority, and execution phases
+ * Includes status columns, parallelism limits, execution phases and attachment limits
  */
 
 import type { TaskStatus } from '@shared/types/task';
@@ -91,19 +91,6 @@ export const SUBTASK_STATUS_COLORS: Record<string, string> = {
 // Execution Phases
 // ============================================
 
-// Execution phase labels
-export const EXECUTION_PHASE_LABELS: Record<string, string> = {
-  idle: 'Idle',
-  planning: 'Planning',
-  coding: 'Coding',
-  rate_limit_paused: 'Rate limited',
-  auth_failure_paused: 'Auth required',
-  qa_review: 'AI review',
-  qa_fixing: 'Fixing issues',
-  complete: 'Complete',
-  failed: 'Failed'
-};
-
 // Execution phase colors (for progress bars and indicators)
 export const EXECUTION_PHASE_COLORS: Record<string, string> = {
   idle: 'bg-muted text-muted-foreground',
@@ -117,19 +104,6 @@ export const EXECUTION_PHASE_COLORS: Record<string, string> = {
   failed: 'bg-destructive text-destructive-foreground'
 };
 
-// Execution phase badge colors (outline style)
-export const EXECUTION_PHASE_BADGE_COLORS: Record<string, string> = {
-  idle: 'bg-muted/50 text-muted-foreground border-muted',
-  planning: 'bg-amber-500/10 text-amber-500 border-amber-500/30',
-  coding: 'bg-info/10 text-info border-info/30',
-  rate_limit_paused: 'bg-orange-500/10 text-orange-400 border-orange-500/30',
-  auth_failure_paused: 'bg-red-500/10 text-red-400 border-red-500/30',
-  qa_review: 'bg-purple-500/10 text-purple-400 border-purple-500/30',
-  qa_fixing: 'bg-warning/10 text-warning border-warning/30',
-  complete: 'bg-success/10 text-success border-success/30',
-  failed: 'bg-destructive/10 text-destructive border-destructive/30'
-};
-
 // Execution phase progress weights (for overall progress calculation)
 export const EXECUTION_PHASE_WEIGHTS: Record<string, { start: number; end: number }> = {
   idle: { start: 0, end: 0 },
@@ -141,93 +115,6 @@ export const EXECUTION_PHASE_WEIGHTS: Record<string, { start: number; end: numbe
   qa_fixing: { start: 80, end: 95 },  // Same range as qa_review, cycles back
   complete: { start: 100, end: 100 },
   failed: { start: 0, end: 0 }
-};
-
-// ============================================
-// Task Categories
-// ============================================
-
-export const TASK_CATEGORY_LABELS: Record<string, string> = {
-  feature: 'Feature',
-  bug_fix: 'Bug Fix',
-  refactoring: 'Refactoring',
-  documentation: 'Docs',
-  security: 'Security',
-  performance: 'Performance',
-  ui_ux: 'UI/UX',
-  infrastructure: 'Infrastructure',
-  testing: 'Testing'
-};
-
-// Classification tags all share the theme's neutral tag style (no per-value colors)
-const TASK_TAG_CLASS = 'bg-muted text-muted-foreground border-border';
-
-export const TASK_CATEGORY_COLORS: Record<string, string> = {
-  feature: TASK_TAG_CLASS,
-  bug_fix: TASK_TAG_CLASS,
-  refactoring: TASK_TAG_CLASS,
-  documentation: TASK_TAG_CLASS,
-  security: TASK_TAG_CLASS,
-  performance: TASK_TAG_CLASS,
-  ui_ux: TASK_TAG_CLASS,
-  infrastructure: TASK_TAG_CLASS,
-  testing: TASK_TAG_CLASS
-};
-
-// ============================================
-// Task Complexity
-// ============================================
-
-export const TASK_COMPLEXITY_LABELS: Record<string, string> = {
-  trivial: 'Trivial',
-  small: 'Small',
-  medium: 'Medium',
-  large: 'Large',
-  complex: 'Complex'
-};
-
-export const TASK_COMPLEXITY_COLORS: Record<string, string> = {
-  trivial: TASK_TAG_CLASS,
-  small: TASK_TAG_CLASS,
-  medium: TASK_TAG_CLASS,
-  large: TASK_TAG_CLASS,
-  complex: TASK_TAG_CLASS
-};
-
-// ============================================
-// Task Impact
-// ============================================
-
-export const TASK_IMPACT_LABELS: Record<string, string> = {
-  low: 'Low Impact',
-  medium: 'Medium Impact',
-  high: 'High Impact',
-  critical: 'Critical Impact'
-};
-
-export const TASK_IMPACT_COLORS: Record<string, string> = {
-  low: TASK_TAG_CLASS,
-  medium: TASK_TAG_CLASS,
-  high: TASK_TAG_CLASS,
-  critical: TASK_TAG_CLASS
-};
-
-// ============================================
-// Task Priority
-// ============================================
-
-export const TASK_PRIORITY_LABELS: Record<string, string> = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  urgent: 'Urgent'
-};
-
-export const TASK_PRIORITY_COLORS: Record<string, string> = {
-  low: TASK_TAG_CLASS,
-  medium: TASK_TAG_CLASS,
-  high: TASK_TAG_CLASS,
-  urgent: TASK_TAG_CLASS
 };
 
 // ============================================

@@ -231,6 +231,14 @@ export function useIpcListeners(): void {
       }
     );
 
+    // Claude Code run state (triage, plan, steps, validation) replaces the task's claudeRun
+    const cleanupClaudeRun = window.electronAPI.onTaskClaudeRunUpdate(
+      (taskId: string, run: import('../../shared/types').ClaudeRunInfo, projectId?: string) => {
+        if (!isTaskForCurrentProject(projectId)) return;
+        useTaskStore.getState().updateTask(taskId, { claudeRun: run });
+      }
+    );
+
     const cleanupExecutionProgress = window.electronAPI.onTaskExecutionProgress(
       (taskId: string, progress: ExecutionProgress, projectId?: string) => {
         // Filter by project to prevent multi-project interference
@@ -271,6 +279,7 @@ export function useIpcListeners(): void {
       cleanupLog();
       cleanupStatus();
       cleanupRateLimitHold();
+      cleanupClaudeRun();
       cleanupExecutionProgress();
       cleanupAuthFailure();
       cleanupInsights();

@@ -1,16 +1,6 @@
 import { useState, useRef, useLayoutEffect, useId } from 'react';
 import { useTranslation } from 'react-i18next';
-import {
-  Target,
-  Bug,
-  Wrench,
-  FileCode,
-  Shield,
-  Gauge,
-  Palette,
-  ChevronDown,
-  ChevronUp
-} from 'lucide-react';
+import { Shield, ChevronDown, ChevronUp, type LucideIcon } from 'lucide-react';
 import { ExternalLink } from '../ui/external-link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -18,27 +8,9 @@ import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { cn, formatRelativeTime } from '../../lib/utils';
-import {
-  TASK_CATEGORY_LABELS,
-  TASK_COMPLEXITY_LABELS,
-  TASK_IMPACT_LABELS,
-  TASK_PRIORITY_LABELS,
-  JSON_ERROR_PREFIX
-} from '../../../shared/constants';
-import type { Task, TaskCategory } from '../../../shared/types';
-
-// Category icon mapping
-const CategoryIcon: Record<TaskCategory, typeof Target> = {
-  feature: Target,
-  bug_fix: Bug,
-  refactoring: Wrench,
-  documentation: FileCode,
-  security: Shield,
-  performance: Gauge,
-  ui_ux: Palette,
-  infrastructure: Wrench,
-  testing: FileCode
-};
+import { JSON_ERROR_PREFIX } from '../../../shared/constants';
+import type { Task } from '../../../shared/types';
+import { TaskAttachments } from './TaskAttachments';
 
 interface TaskMetadataProps {
   task: Task;
@@ -76,27 +48,19 @@ export function TaskMetadata({ task }: TaskMetadataProps) {
     }
   }, [task.id, task.description]);
 
-  const classification = task.metadata
+  const origin = task.metadata
     ? [
-        task.metadata.category && {
-          key: 'category',
-          icon: CategoryIcon[task.metadata.category],
-          label: TASK_CATEGORY_LABELS[task.metadata.category]
-        },
-        task.metadata.priority && { key: 'priority', label: TASK_PRIORITY_LABELS[task.metadata.priority] },
-        task.metadata.complexity && { key: 'complexity', label: TASK_COMPLEXITY_LABELS[task.metadata.complexity] },
-        task.metadata.impact && { key: 'impact', label: TASK_IMPACT_LABELS[task.metadata.impact] },
         task.metadata.securitySeverity && {
           key: 'severity',
           icon: Shield,
           label: `${task.metadata.securitySeverity} ${t('tasks:metadata.severity')}`
         },
         task.metadata.sourceType && { key: 'source', label: task.metadata.sourceType }
-      ].filter(Boolean) as { key: string; icon?: typeof Target; label: string }[]
+      ].filter(Boolean) as { key: string; icon?: LucideIcon; label: string }[]
     : [];
 
-  const metaItems: { key: string; icon?: typeof Target; label: string }[] = [
-    ...classification,
+  const metaItems: { key: string; icon?: LucideIcon; label: string }[] = [
+    ...origin,
     { key: 'created', label: t('tasks:metadata.created', { time: formatRelativeTime(task.createdAt) }) },
     { key: 'updated', label: t('tasks:metadata.updated', { time: formatRelativeTime(task.updatedAt) }) }
   ];
@@ -113,7 +77,7 @@ export function TaskMetadata({ task }: TaskMetadataProps) {
 
   return (
     <div className="space-y-4">
-      {/* Classification + timeline as one muted line */}
+      {/* Origin + timeline as one muted line */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-(--nav-label-color)">
         {metaItems.map((item, idx) => {
           const Icon = item.icon;
@@ -173,6 +137,11 @@ export function TaskMetadata({ task }: TaskMetadataProps) {
             </div>
           )}
         </div>
+      )}
+
+      {/* Reference images attached to the task */}
+      {task.metadata?.attachedImages && task.metadata.attachedImages.length > 0 && (
+        <TaskAttachments task={task} images={task.metadata.attachedImages} />
       )}
 
       {/* Secondary details as plain rows */}

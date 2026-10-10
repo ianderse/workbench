@@ -65,11 +65,6 @@ describe('isCompletedTask', () => {
       expect(isCompletedTask('human_review', 'qa_rejected')).toBe(false);
     });
 
-    it('should return false for human_review with reviewReason "plan_review"', () => {
-      // human_review with ReviewReason 'plan_review' is not completed
-      expect(isCompletedTask('human_review', 'plan_review')).toBe(false);
-    });
-
     it('should return false for human_review with reviewReason "stopped"', () => {
       // human_review with ReviewReason 'stopped' is not completed
       expect(isCompletedTask('human_review', 'stopped')).toBe(false);
@@ -138,7 +133,6 @@ describe('isCompletedTask', () => {
       expect(isCompletedTask('human_review')).toBe(false);
       expect(isCompletedTask('human_review', 'errors')).toBe(false);
       expect(isCompletedTask('human_review', 'qa_rejected')).toBe(false);
-      expect(isCompletedTask('human_review', 'plan_review')).toBe(false);
     });
 
     it('should exclude tasks in error state', () => {

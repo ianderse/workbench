@@ -2,12 +2,12 @@
  * TaskFormFields - Shared form fields component for task create/edit
  *
  * Bundles the common form fields used in both TaskCreationWizard and TaskEditDialog:
+ * - Title (edit dialog only; new tasks get a generated title)
  * - Description (required, with image paste/drop support)
  * - Reference images (clickable drop zone, Insights-style thumbnails)
- * - Title (optional)
- * - Agent profile selector
- * - Classification fields
- * - Review requirement and fast mode switches
+ * - Connectors (MCP servers for the task's Claude Code session)
+ *
+ * Model, effort and planning are decided per task by the Claude Code triage run.
  */
 import { useRef, useState, useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -15,25 +15,12 @@ import { Image as ImageIcon, ImagePlus, X } from 'lucide-react';
 import { Label } from '../ui/label';
 import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
-import { Switch } from '../ui/switch';
-import { AgentProfileSelector } from '../AgentProfileSelector';
-import { ClassificationFields } from './ClassificationFields';
-import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { SettingsSection } from '../settings/SettingsSection';
 import { useImageUpload } from './useImageUpload';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { cn } from '../../lib/utils';
 import { TaskConnectorRows } from './TaskConnectorRows';
-import type {
-  TaskCategory,
-  TaskPriority,
-  TaskComplexity,
-  TaskImpact,
-  ImageAttachment,
-  ModelType,
-  ThinkingLevel
-} from '../../../shared/types';
-import type { PhaseModelConfig, PhaseThinkingConfig } from '../../../shared/types/settings';
+import type { ImageAttachment } from '../../../shared/types';
 
 interface TaskFormFieldsProps {
   // Project context (for loading image thumbnails from disk)
@@ -49,44 +36,13 @@ interface TaskFormFieldsProps {
   /** Optional ref for the description textarea (used for @ mention autocomplete positioning) */
   descriptionRef?: React.RefObject<HTMLTextAreaElement | null>;
 
-  // Title field
-  title: string;
-  onTitleChange: (value: string) => void;
-
-  // Agent profile
-  profileId: string;
-  model: ModelType | '';
-  thinkingLevel: ThinkingLevel | '';
-  phaseModels?: PhaseModelConfig;
-  phaseThinking?: PhaseThinkingConfig;
-  onProfileChange: (profileId: string, model: ModelType | '', thinkingLevel: ThinkingLevel | '') => void;
-  onModelChange: (model: ModelType | '') => void;
-  onThinkingLevelChange: (level: ThinkingLevel | '') => void;
-  onPhaseModelsChange: (config: PhaseModelConfig | undefined) => void;
-  onPhaseThinkingChange: (config: PhaseThinkingConfig | undefined) => void;
-
-  // Classification
-  category: TaskCategory | '';
-  priority: TaskPriority | '';
-  complexity: TaskComplexity | '';
-  impact: TaskImpact | '';
-  onCategoryChange: (value: TaskCategory | '') => void;
-  onPriorityChange: (value: TaskPriority | '') => void;
-  onComplexityChange: (value: TaskComplexity | '') => void;
-  onImpactChange: (value: TaskImpact | '') => void;
+  // Title field (shown only when a change handler is given, i.e. in the edit dialog)
+  title?: string;
+  onTitleChange?: (value: string) => void;
 
   // Images
   images: ImageAttachment[];
   onImagesChange: (images: ImageAttachment[]) => void;
-
-  // Review requirement
-  requireReviewBeforeCoding: boolean;
-  onRequireReviewChange: (require: boolean) => void;
-
-  // Fast mode
-  fastMode?: boolean;
-  onFastModeChange?: (value: boolean) => void;
-  showFastModeToggle?: boolean;
 
   // MCP connectors for this task (ids); the rows show when a change handler is given
   mcpConnectors?: string[];
@@ -115,33 +71,10 @@ export function TaskFormFields({
   descriptionPlaceholder,
   descriptionOverlay,
   descriptionRef: externalDescriptionRef,
-  title,
+  title = '',
   onTitleChange,
-  profileId,
-  model,
-  thinkingLevel,
-  phaseModels,
-  phaseThinking,
-  onProfileChange,
-  onModelChange,
-  onThinkingLevelChange,
-  onPhaseModelsChange,
-  onPhaseThinkingChange,
-  category,
-  priority,
-  complexity,
-  impact,
-  onCategoryChange,
-  onPriorityChange,
-  onComplexityChange,
-  onImpactChange,
   images,
   onImagesChange,
-  requireReviewBeforeCoding,
-  onRequireReviewChange,
-  fastMode = false,
-  onFastModeChange,
-  showFastModeToggle = false,
   mcpConnectors = [],
   onMcpConnectorsChange,
   disabled = false,
@@ -257,6 +190,22 @@ export function TaskFormFields({
       <div>
         <SettingsSection title={t('tasks:form.sections.task')}>
           <div className="space-y-6">
+            {/* Title (edit dialog only) */}
+            {onTitleChange && (
+              <div className="space-y-2">
+                <Label htmlFor={`${prefix}title`} className="text-sm font-normal text-foreground">
+                  {t('tasks:form.taskTitle')}
+                </Label>
+                <Input
+                  id={`${prefix}title`}
+                  placeholder={t('tasks:form.titlePlaceholder')}
+                  value={title}
+                  onChange={(e) => onTitleChange(e.target.value)}
+                  disabled={disabled}
+                />
+              </div>
+            )}
+
             {/* Description (Primary - Required) */}
             <div className="space-y-2">
               <Label htmlFor={`${prefix}description`} className="text-sm font-normal text-foreground">
@@ -390,102 +339,20 @@ export function TaskFormFields({
               )}
             </div>
 
-            {/* Title (Optional) */}
-            <div className="space-y-2">
-              <Label htmlFor={`${prefix}title`} className="text-sm font-normal text-foreground">
-                {t('tasks:form.taskTitle')}{' '}
-                <span className="text-(--nav-label-color)">({t('common:labels.optional')})</span>
-              </Label>
-              <Input
-                id={`${prefix}title`}
-                placeholder={t('tasks:form.titlePlaceholder')}
-                value={title}
-                onChange={(e) => onTitleChange(e.target.value)}
-                disabled={disabled}
-              />
-              <p className="text-xs text-(--nav-label-color)">
-                {t('tasks:form.titleHelpText')}
-              </p>
-            </div>
           </div>
         </SettingsSection>
 
-        {/* Agent profile + per-phase model/thinking rows */}
-        <SettingsSection title={t('tasks:form.sections.agent')}>
-          <AgentProfileSelector
-            profileId={profileId}
-            model={model}
-            thinkingLevel={thinkingLevel}
-            phaseModels={phaseModels}
-            phaseThinking={phaseThinking}
-            onProfileChange={onProfileChange}
-            onModelChange={onModelChange}
-            onThinkingLevelChange={onThinkingLevelChange}
-            onPhaseModelsChange={onPhaseModelsChange}
-            onPhaseThinkingChange={onPhaseThinkingChange}
-            disabled={disabled}
-          />
-          {onMcpConnectorsChange && (
+        {/* MCP connectors for the task's Claude Code session */}
+        {onMcpConnectorsChange && (
+          <SettingsSection title={t('tasks:form.sections.connectors')}>
             <TaskConnectorRows
               value={mcpConnectors}
               onChange={onMcpConnectorsChange}
               disabled={disabled}
               idPrefix={prefix}
             />
-          )}
-        </SettingsSection>
-
-        {/* Classification */}
-        <SettingsSection title={t('tasks:form.sections.classification')}>
-          <div id={`${prefix}classification-section`}>
-            <ClassificationFields
-              category={category}
-              priority={priority}
-              complexity={complexity}
-              impact={impact}
-              onCategoryChange={onCategoryChange}
-              onPriorityChange={onPriorityChange}
-              onComplexityChange={onComplexityChange}
-              onImpactChange={onImpactChange}
-              disabled={disabled}
-              idPrefix={idPrefix}
-            />
-          </div>
-        </SettingsSection>
-
-        {/* Options: review requirement + fast mode */}
-        <SettingsSection title={t('tasks:form.sections.options')}>
-          <SettingsRows>
-            <SettingsRow
-              label={t('tasks:form.requireReviewLabel')}
-              description={t('tasks:form.requireReviewDescription')}
-              htmlFor={`${prefix}require-review`}
-            >
-              <Switch
-                id={`${prefix}require-review`}
-                checked={requireReviewBeforeCoding}
-                onCheckedChange={onRequireReviewChange}
-                disabled={disabled}
-              />
-            </SettingsRow>
-
-            {/* Fast Mode Toggle - shown when any phase uses an Opus model */}
-            {showFastModeToggle && onFastModeChange && (
-              <SettingsRow
-                label={t('tasks:form.fastModeLabel')}
-                description={`${t('tasks:form.fastModeDescription')} ${t('tasks:form.fastModeNotice')}`}
-                htmlFor={`${prefix}fast-mode`}
-              >
-                <Switch
-                  id={`${prefix}fast-mode`}
-                  checked={fastMode}
-                  onCheckedChange={onFastModeChange}
-                  disabled={disabled}
-                />
-              </SettingsRow>
-            )}
-          </SettingsRows>
-        </SettingsSection>
+          </SettingsSection>
+        )}
 
         {/* Extra sections from the parent (e.g., Git options in the creation wizard) */}
         {extraSections}

@@ -2,7 +2,7 @@ import { Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/button';
-import { persistTaskStatus, startTaskOrQueue } from '../../../stores/task-store';
+import { persistTaskStatus } from '../../../stores/task-store';
 import type { Task } from '../../../../shared/types';
 
 interface LoadingMessageProps {
@@ -33,13 +33,6 @@ interface NoWorkspaceMessageProps {
 export function NoWorkspaceMessage({ task, onClose }: NoWorkspaceMessageProps) {
   const { t } = useTranslation(['tasks', 'taskReview']);
   const [isMarkingDone, setIsMarkingDone] = useState(false);
-  const [isProceeding, setIsProceeding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  const isPlanReview =
-    task?.status === 'human_review' &&
-    task.reviewReason === 'plan_review';
 
   const handleMarkDone = async () => {
     if (!task) return;
@@ -56,51 +49,15 @@ export function NoWorkspaceMessage({ task, onClose }: NoWorkspaceMessageProps) {
     }
   };
 
-  const handleProceedToCoding = async () => {
-    if (!task) return;
-
-    setIsProceeding(true);
-    setError(null);
-    setNotice(null);
-    try {
-      const result = await startTaskOrQueue(task.id);
-      if (!result.success) {
-        setError(result.error || t('tasks:wizard.errors.startFailed'));
-      } else if (result.action === 'queued') {
-        setNotice(t('tasks:queue.movedToQueue'));
-      }
-    } catch (err) {
-      console.error('Error proceeding to coding:', err);
-      setError(err instanceof Error ? err.message : t('tasks:wizard.errors.startFailed'));
-    } finally {
-      setIsProceeding(false);
-    }
-  };
-
   return (
     <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
       <div className="flex items-center gap-4">
         <div className="min-w-0 flex-1 space-y-0.5">
-          <p className="text-foreground">
-            {isPlanReview ? t('taskReview:noWorkspace.planReviewTitle') : t('taskReview:noWorkspace.title')}
-          </p>
-          <p className="text-(--nav-label-color)">
-            {isPlanReview ? t('taskReview:noWorkspace.planReviewDescription') : t('taskReview:noWorkspace.description')}
-          </p>
+          <p className="text-foreground">{t('taskReview:noWorkspace.title')}</p>
+          <p className="text-(--nav-label-color)">{t('taskReview:noWorkspace.description')}</p>
         </div>
 
-        {isPlanReview ? (
-          <Button onClick={handleProceedToCoding} disabled={isProceeding} size="sm" className="shrink-0">
-            {isProceeding ? (
-              <>
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                {t('taskReview:noWorkspace.updating')}
-              </>
-            ) : (
-              t('taskReview:noWorkspace.proceedToCoding')
-            )}
-          </Button>
-        ) : task && task.status === 'human_review' && (
+        {task && task.status === 'human_review' && (
           <Button onClick={handleMarkDone} disabled={isMarkingDone} size="sm" className="shrink-0">
             {isMarkingDone ? (
               <>
@@ -113,13 +70,6 @@ export function NoWorkspaceMessage({ task, onClose }: NoWorkspaceMessageProps) {
           </Button>
         )}
       </div>
-
-      {error && (
-        <p className="mt-2 text-destructive">{error}</p>
-      )}
-      {notice && (
-        <p className="mt-2 text-(--nav-label-color)">{notice}</p>
-      )}
     </div>
   );
 }

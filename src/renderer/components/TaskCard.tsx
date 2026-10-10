@@ -15,7 +15,6 @@ import { cn, formatRelativeTime, sanitizeMarkdownForDisplay } from '../lib/utils
 import { PhaseProgressIndicator } from './PhaseProgressIndicator';
 import { StatusIndicator } from './settings/common/StatusIndicator';
 import {
-  EXECUTION_PHASE_LABELS,
   TASK_STATUS_COLUMNS,
   TASK_STATUS_LABELS,
   JSON_ERROR_PREFIX,
@@ -26,6 +25,7 @@ import { useToast } from '../hooks/use-toast';
 import type { Task, ReviewReason, TaskStatus } from '../../shared/types';
 import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
 import { formatTime } from '../../shared/utils/format-date-time';
+import { getTaskRunStep } from '../../shared/utils/claude-run';
 
 // Catastrophic stuck detection interval (ms).
 // XState handles all normal process-exit transitions via PROCESS_EXITED events.
@@ -67,9 +67,11 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
     prevTask.executionProgress?.phaseProgress === nextTask.executionProgress?.phaseProgress &&
     prevTask.subtasks.length === nextTask.subtasks.length &&
-    prevTask.metadata?.fastMode === nextTask.metadata?.fastMode &&
-    prevTask.metadata?.category === nextTask.metadata?.category &&
-    prevTask.metadata?.complexity === nextTask.metadata?.complexity &&
+    getTaskRunStep(prevTask.executionProgress?.phase, prevTask.claudeRun, prevTask.executionProgress?.message) ===
+      getTaskRunStep(nextTask.executionProgress?.phase, nextTask.claudeRun, nextTask.executionProgress?.message) &&
+    prevTask.claudeRun?.triage?.model === nextTask.claudeRun?.triage?.model &&
+    prevTask.claudeRun?.triage?.effort === nextTask.claudeRun?.triage?.effort &&
+    !!prevTask.claudeRun?.plan === !!nextTask.claudeRun?.plan &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
     prevTask.rateLimitHold?.resetAt === nextTask.rateLimitHold?.resetAt &&
@@ -98,7 +100,7 @@ export const TaskCard = memo(function TaskCard({
   onClick,
   onStatusChange
 }: TaskCardProps) {
-  const { t, i18n } = useTranslation(['tasks', 'errors']);
+  const { t } = useTranslation(['tasks', 'errors']);
   const { toast } = useToast();
   const [isStuck, setIsStuck] = useState(false);
   const [isRecovering, setIsRecovering] = useState(false);
@@ -274,8 +276,6 @@ export const TaskCard = memo(function TaskCard({
         return { label: t('reviewReason.hasErrors'), variant: 'destructive' };
       case 'qa_rejected':
         return { label: t('reviewReason.qaIssues'), variant: 'warning' };
-      case 'plan_review':
-        return { label: t('reviewReason.approvePlan'), variant: 'warning' };
       case 'stopped':
         return { label: t('reviewReason.stopped'), variant: 'warning' };
       default:
@@ -298,7 +298,8 @@ export const TaskCard = memo(function TaskCard({
   } else if (isIncomplete) {
     statusParts.push({ key: 'incomplete', label: t('labels.needsResume'), attention: true });
   } else if (hasActiveExecution && executionPhase) {
-    statusParts.push({ key: 'phase', label: EXECUTION_PHASE_LABELS[executionPhase], loading: isRunning });
+    const step = getTaskRunStep(executionPhase, task.claudeRun, task.executionProgress?.message);
+    statusParts.push({ key: 'phase', label: t(`execution.steps.${step}`), loading: isRunning });
   } else if (task.status !== 'done') {
     statusParts.push({ key: 'status', label: getStatusLabel(task.status) });
   }
@@ -312,8 +313,20 @@ export const TaskCard = memo(function TaskCard({
       title: task.rateLimitHold?.message || undefined,
     });
   }
+  // Model and effort chosen by triage, and whether Claude Code planned first
+  const triage = task.claudeRun?.triage;
+  if (triage) {
+    statusParts.push({
+      key: 'model',
+      label: t('claudeRun.modelEffort', {
+        model: t(`claudeRun.models.${triage.model}`, { defaultValue: triage.model }),
+        effort: t(`claudeRun.efforts.${triage.effort}`, { defaultValue: triage.effort })
+      }),
+      title: triage.reasoning || undefined
+    });
+    if (task.claudeRun?.plan) statusParts.push({ key: 'planned', label: t('claudeRun.planned') });
+  }
   if (isArchived) statusParts.push({ key: 'archived', label: t('status.archived') });
-  if (task.metadata?.fastMode) statusParts.push({ key: 'fast', label: t('metadata.fastMode') });
 
   return (
     <Card

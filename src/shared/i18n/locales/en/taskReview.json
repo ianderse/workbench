@@ -181,9 +181,6 @@
   "noWorkspace": {
     "title": "No workspace found",
     "description": "No isolated workspace was found for this task. The changes may have been made directly in your project.",
-    "planReviewTitle": "Human review required",
-    "planReviewDescription": "Human review required prior to coding. Review your spec.md for any necessary changes.",
-    "proceedToCoding": "Proceed to coding",
     "updating": "Updating..."
   },
   "stagedInProject": {

@@ -1124,6 +1124,15 @@ export async function unarchiveTasks(
 const DRAFT_KEY_PREFIX = 'task-creation-draft';
 
 /**
+ * Fields of the creation form kept in a draft. Drafts saved by older versions may hold more
+ * fields (title, classification, agent profile); loadDraft drops them.
+ */
+export type TaskCreationDraft = Pick<
+  TaskDraft,
+  'projectId' | 'description' | 'images' | 'referencedFiles' | 'mcpConnectors' | 'pushNewBranches' | 'savedAt'
+>;
+
+/**
  * Get the localStorage key for a project's draft
  */
 function getDraftKey(projectId: string): string {
@@ -1134,7 +1143,7 @@ function getDraftKey(projectId: string): string {
  * Save a task creation draft to localStorage
  * Note: For large images, we only store thumbnails in the draft to avoid localStorage limits
  */
-export function saveDraft(draft: TaskDraft): void {
+export function saveDraft(draft: TaskCreationDraft): void {
   try {
     const key = getDraftKey(draft.projectId);
     // Create a copy with thumbnails only to avoid localStorage size limits
@@ -1155,16 +1164,24 @@ export function saveDraft(draft: TaskDraft): void {
 /**
  * Load a task creation draft from localStorage
  */
-export function loadDraft(projectId: string): TaskDraft | null {
+export function loadDraft(projectId: string): TaskCreationDraft | null {
   try {
     const key = getDraftKey(projectId);
     const stored = localStorage.getItem(key);
     if (!stored) return null;
 
-    const draft = JSON.parse(stored);
-    // Convert savedAt back to Date
-    draft.savedAt = new Date(draft.savedAt);
-    return draft as TaskDraft;
+    const raw = JSON.parse(stored) as Record<string, unknown> | null;
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      projectId: typeof raw.projectId === 'string' ? raw.projectId : projectId,
+      description: typeof raw.description === 'string' ? raw.description : '',
+      images: Array.isArray(raw.images) ? (raw.images as ImageAttachment[]) : [],
+      referencedFiles: Array.isArray(raw.referencedFiles) ? (raw.referencedFiles as TaskCreationDraft['referencedFiles']) : [],
+      mcpConnectors: Array.isArray(raw.mcpConnectors) ? (raw.mcpConnectors as string[]) : undefined,
+      pushNewBranches: typeof raw.pushNewBranches === 'boolean' ? raw.pushNewBranches : undefined,
+      // Convert savedAt back to Date
+      savedAt: new Date(typeof raw.savedAt === 'string' ? raw.savedAt : Date.now())
+    };
   } catch (error) {
     console.error('Failed to load draft:', error);
     return null;
@@ -1192,19 +1209,11 @@ export function hasDraft(projectId: string): boolean {
 }
 
 /**
- * Check if a draft has any meaningful content (title, description, or images)
+ * Check if a draft has any meaningful content (description or images)
  */
-export function isDraftEmpty(draft: TaskDraft | null): boolean {
+export function isDraftEmpty(draft: Pick<TaskCreationDraft, 'description' | 'images'> | null): boolean {
   if (!draft) return true;
-  return (
-    !draft.title.trim() &&
-    !draft.description.trim() &&
-    draft.images.length === 0 &&
-    !draft.category &&
-    !draft.priority &&
-    !draft.complexity &&
-    !draft.impact
-  );
+  return !draft.description?.trim() && (draft.images?.length ?? 0) === 0;
 }
 
 // ============================================

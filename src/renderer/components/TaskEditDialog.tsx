@@ -1,30 +1,12 @@
 /**
  * TaskEditDialog - Dialog for editing task details
  *
- * Allows users to modify all task properties including title, description,
- * classification fields, images, and review settings.
+ * Edits the task's title, description, reference images and MCP connectors. Model, effort and
+ * planning are decided by the Claude Code triage run when the task starts.
  *
- * Now uses the shared TaskModalLayout for consistent styling with other task modals,
- * and TaskFormFields for the form content.
- *
- * Features:
- * - Pre-populates form with current task values
- * - Form validation (description required)
- * - Editable classification fields (category, priority, complexity, impact)
- * - Editable image attachments (add/remove images)
- * - Editable review settings (requireReviewBeforeCoding)
- * - Saves changes via persistUpdateTask (updates store + spec files)
- * - Prevents save when no changes have been made
- *
- * @example
- * ```tsx
- * <TaskEditDialog
- *   task={selectedTask}
- *   open={isEditDialogOpen}
- *   onOpenChange={setIsEditDialogOpen}
- *   onSaved={() => console.log('Task updated!')}
- * />
- * ```
+ * Uses the shared TaskModalLayout and TaskFormFields (same look as the creation dialog) and
+ * saves via persistUpdateTask (updates store + spec files). Closes without saving when nothing
+ * changed.
  */
 import { useState, useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,19 +16,9 @@ import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { persistUpdateTask } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
-import type { Task, ImageAttachment, TaskCategory, TaskPriority, TaskComplexity, TaskImpact, ModelType, ThinkingLevel } from '../../shared/types';
-import {
-  DEFAULT_AGENT_PROFILES,
-  DEFAULT_PHASE_MODELS,
-  DEFAULT_PHASE_THINKING,
-  FAST_MODE_MODELS,
-  PHASE_KEYS,
-  getProviderPreset
-} from '../../shared/constants';
-import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
+import type { Task, TaskMetadata, ImageAttachment } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
-import { useActiveProvider } from '../hooks/useActiveProvider';
 
 /**
  * Props for the TaskEditDialog component
@@ -64,19 +36,7 @@ interface TaskEditDialogProps {
 
 export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDialogProps) {
   const { t } = useTranslation(['tasks', 'common']);
-  // Get selected agent profile from settings for defaults
   const { settings } = useSettingsStore();
-  const { isAnthropic, provider: activeProvider } = useActiveProvider();
-
-  // Resolve per-provider settings (same chain as AgentProfileSettings)
-  const providerConfig = activeProvider ? settings.providerAgentConfig?.[activeProvider] : undefined;
-  const resolvedProfileId = providerConfig?.selectedAgentProfile ?? settings.selectedAgentProfile ?? 'auto';
-  const selectedProfile = DEFAULT_AGENT_PROFILES.find(
-    p => p.id === resolvedProfileId
-  ) || DEFAULT_AGENT_PROFILES.find(p => p.id === 'auto')!;
-  const providerPreset = activeProvider ? getProviderPreset(activeProvider, resolvedProfileId) : null;
-  const profilePhaseModels = providerPreset?.phaseModels ?? selectedProfile.phaseModels ?? DEFAULT_PHASE_MODELS;
-  const profilePhaseThinking = providerPreset?.phaseThinking ?? selectedProfile.phaseThinking ?? DEFAULT_PHASE_THINKING;
 
   // Get project path for loading image thumbnails from disk
   const projects = useProjectStore((state) => state.projects);
@@ -91,109 +51,24 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Classification fields
-  const [category, setCategory] = useState<TaskCategory | ''>(task.metadata?.category || '');
-  const [priority, setPriority] = useState<TaskPriority | ''>(task.metadata?.priority || '');
-  const [complexity, setComplexity] = useState<TaskComplexity | ''>(task.metadata?.complexity || '');
-  const [impact, setImpact] = useState<TaskImpact | ''>(task.metadata?.impact || '');
-
-  // Agent profile / model configuration
-  const [profileId, setProfileId] = useState<string>(() => {
-    if (task.metadata?.isAutoProfile) {
-      return 'auto';
-    }
-    const taskModel = task.metadata?.model;
-    const taskThinking = task.metadata?.thinkingLevel;
-    if (taskModel && taskThinking) {
-      const matchingProfile = DEFAULT_AGENT_PROFILES.find(
-        p => p.model === taskModel && p.thinkingLevel === taskThinking && !p.isAutoProfile
-      );
-      return matchingProfile?.id || 'custom';
-    }
-    return resolvedProfileId;
-  });
-  const [model, setModel] = useState<ModelType | ''>(task.metadata?.model || selectedProfile.model);
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | ''>(
-    task.metadata?.thinkingLevel || selectedProfile.thinkingLevel
-  );
-  const [phaseModels, setPhaseModels] = useState<PhaseModelConfig | undefined>(
-    task.metadata?.phaseModels || profilePhaseModels
-  );
-  const [phaseThinking, setPhaseThinking] = useState<PhaseThinkingConfig | undefined>(
-    task.metadata?.phaseThinking || profilePhaseThinking
-  );
-
   // Image attachments
   const [images, setImages] = useState<ImageAttachment[]>(task.metadata?.attachedImages || []);
-
-  // Review setting
-  const [requireReviewBeforeCoding, setRequireReviewBeforeCoding] = useState(
-    task.metadata?.requireReviewBeforeCoding ?? false
-  );
-
-  // Fast mode
-  const [fastMode, setFastMode] = useState(task.metadata?.fastMode ?? false);
 
   // MCP connectors: the task's own choice, or the Connectors defaults for tasks created before
   // connectors were per task. Saving changes only this task
   const taskConnectors = task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors);
   const [mcpConnectors, setMcpConnectors] = useState<string[]>(taskConnectors);
 
-  // Show Fast Mode toggle when any phase uses an Opus model
-  const showFastModeToggle = useMemo(() => {
-    if (!isAnthropic) return false;
-    if (!phaseModels) return false;
-    return PHASE_KEYS.some(phase => FAST_MODE_MODELS.includes(phaseModels[phase]));
-  }, [isAnthropic, phaseModels]);
-
-  // Disable fast mode toggle for tasks that have moved past backlog
-  const isFastModeEditable = task.status === 'backlog';
-
   // Reset form when task changes or dialog opens
   useEffect(() => {
     if (open) {
       setTitle(task.title);
       setDescription(task.description);
-      setCategory(task.metadata?.category || '');
-      setPriority(task.metadata?.priority || '');
-      setComplexity(task.metadata?.complexity || '');
-      setImpact(task.metadata?.impact || '');
-
-      // Reset model configuration
-      const taskModel = task.metadata?.model;
-      const taskThinking = task.metadata?.thinkingLevel;
-      const isAutoProfile = task.metadata?.isAutoProfile;
-
-      if (isAutoProfile) {
-        setProfileId('auto');
-        setModel(taskModel || selectedProfile.model);
-        setThinkingLevel(taskThinking || selectedProfile.thinkingLevel);
-        setPhaseModels(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS);
-        setPhaseThinking(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
-      } else if (taskModel && taskThinking) {
-        const matchingProfile = DEFAULT_AGENT_PROFILES.find(
-          p => p.model === taskModel && p.thinkingLevel === taskThinking && !p.isAutoProfile
-        );
-        setProfileId(matchingProfile?.id || 'custom');
-        setModel(taskModel);
-        setThinkingLevel(taskThinking);
-        setPhaseModels(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS);
-        setPhaseThinking(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
-      } else {
-        setProfileId(resolvedProfileId);
-        setModel(selectedProfile.model);
-        setThinkingLevel(selectedProfile.thinkingLevel);
-        setPhaseModels(profilePhaseModels);
-        setPhaseThinking(profilePhaseThinking);
-      }
-
       setImages(task.metadata?.attachedImages || []);
-      setRequireReviewBeforeCoding(task.metadata?.requireReviewBeforeCoding ?? false);
-      setFastMode(task.metadata?.fastMode ?? false);
       setMcpConnectors(task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors));
       setError(null);
     }
-  }, [open, task, resolvedProfileId, selectedProfile.model, selectedProfile.thinkingLevel, profilePhaseModels, profilePhaseThinking, settings.mcpConnectors]);
+  }, [open, task, settings.mcpConnectors]);
 
   const handleSave = async () => {
     // Validate input
@@ -208,18 +83,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     const hasChanges =
       trimmedTitle !== task.title ||
       trimmedDescription !== task.description ||
-      category !== (task.metadata?.category || '') ||
-      priority !== (task.metadata?.priority || '') ||
-      complexity !== (task.metadata?.complexity || '') ||
-      impact !== (task.metadata?.impact || '') ||
-      model !== (task.metadata?.model || '') ||
-      thinkingLevel !== (task.metadata?.thinkingLevel || '') ||
-      requireReviewBeforeCoding !== (task.metadata?.requireReviewBeforeCoding ?? false) ||
-      fastMode !== (task.metadata?.fastMode ?? false) ||
       [...mcpConnectors].sort().join(',') !== [...taskConnectors].sort().join(',') ||
-      JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []) ||
-      JSON.stringify(phaseModels) !== JSON.stringify(task.metadata?.phaseModels || DEFAULT_PHASE_MODELS) ||
-      JSON.stringify(phaseThinking) !== JSON.stringify(task.metadata?.phaseThinking || DEFAULT_PHASE_THINKING);
+      JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []);
 
     if (!hasChanges) {
       onOpenChange(false);
@@ -229,28 +94,15 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     setIsSaving(true);
     setError(null);
 
-    // Build metadata updates
-    const metadataUpdates: Partial<typeof task.metadata> = {};
-    if (category) metadataUpdates.category = category;
-    if (priority) metadataUpdates.priority = priority;
-    if (complexity) metadataUpdates.complexity = complexity;
-    if (impact) metadataUpdates.impact = impact;
-    if (model) metadataUpdates.model = model as ModelType;
-    if (thinkingLevel) metadataUpdates.thinkingLevel = thinkingLevel as ThinkingLevel;
-    if (activeProvider) metadataUpdates.provider = activeProvider;
-    if (phaseModels && phaseThinking) {
-      metadataUpdates.isAutoProfile = profileId === 'auto';
-      metadataUpdates.phaseModels = phaseModels;
-      metadataUpdates.phaseThinking = phaseThinking;
-    }
-    // Always set attachedImages to persist removal when all images are deleted
-    metadataUpdates.attachedImages = images.length > 0 ? images : [];
-    metadataUpdates.requireReviewBeforeCoding = requireReviewBeforeCoding;
-    metadataUpdates.fastMode = fastMode;
-    metadataUpdates.mcpConnectors = mcpConnectors;
+    const metadataUpdates: Partial<TaskMetadata> = {
+      // Always set attachedImages to persist removal when all images are deleted
+      attachedImages: images,
+      mcpConnectors
+    };
 
     const success = await persistUpdateTask(task.id, {
-      title: trimmedTitle,
+      // An emptied title keeps the current one
+      title: trimmedTitle || task.title,
       description: trimmedDescription,
       metadata: metadataUpdates
     });
@@ -299,37 +151,10 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         onDescriptionChange={setDescription}
         title={title}
         onTitleChange={setTitle}
-        profileId={profileId}
-        model={model}
-        thinkingLevel={thinkingLevel}
-        phaseModels={phaseModels}
-        phaseThinking={phaseThinking}
-        onProfileChange={(newProfileId, newModel, newThinkingLevel) => {
-          setProfileId(newProfileId);
-          setModel(newModel);
-          setThinkingLevel(newThinkingLevel);
-        }}
-        onModelChange={setModel}
-        onThinkingLevelChange={setThinkingLevel}
-        onPhaseModelsChange={setPhaseModels}
-        onPhaseThinkingChange={setPhaseThinking}
-        category={category}
-        priority={priority}
-        complexity={complexity}
-        impact={impact}
-        onCategoryChange={setCategory}
-        onPriorityChange={setPriority}
-        onComplexityChange={setComplexity}
-        onImpactChange={setImpact}
         images={images}
         onImagesChange={setImages}
-        requireReviewBeforeCoding={requireReviewBeforeCoding}
-        onRequireReviewChange={setRequireReviewBeforeCoding}
-        fastMode={fastMode}
-        onFastModeChange={setFastMode}
         mcpConnectors={mcpConnectors}
         onMcpConnectorsChange={setMcpConnectors}
-        showFastModeToggle={showFastModeToggle && isFastModeEditable}
         disabled={isSaving}
         error={error}
         onError={setError}

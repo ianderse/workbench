@@ -21,23 +21,13 @@ import { Combobox } from './ui/combobox';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { FileAutocomplete } from './FileAutocomplete';
-import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty } from '../stores/task-store';
+import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty, type TaskCreationDraft } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
 import { buildBranchOptions } from '../lib/branch-utils';
-import type { TaskCategory, TaskPriority, TaskComplexity, TaskImpact, TaskMetadata, ImageAttachment, TaskDraft, ModelType, ThinkingLevel, ReferencedFile } from '../../shared/types';
-import type { PhaseModelConfig, PhaseThinkingConfig } from '../../shared/types/settings';
-import {
-  DEFAULT_AGENT_PROFILES,
-  DEFAULT_PHASE_MODELS,
-  DEFAULT_PHASE_THINKING,
-  FAST_MODE_MODELS,
-  PHASE_KEYS,
-  getProviderPreset
-} from '../../shared/constants';
+import type { TaskMetadata, ImageAttachment, ReferencedFile } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useProjectBranches } from '../hooks/useProjectBranches';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
-import { useActiveProvider } from '../hooks/useActiveProvider';
 
 interface TaskCreationWizardProps {
   projectId: string;
@@ -55,27 +45,8 @@ export function TaskCreationWizard({
 }: TaskCreationWizardProps) {
   const { t } = useTranslation(['tasks', 'common']);
   const { settings } = useSettingsStore();
-  const { isAnthropic, provider: activeProvider } = useActiveProvider();
-
-  // Resolve per-provider settings (same chain as AgentProfileSettings)
-  const providerConfig = activeProvider ? settings.providerAgentConfig?.[activeProvider] : undefined;
-  const resolvedProfileId = providerConfig?.selectedAgentProfile ?? settings.selectedAgentProfile ?? 'auto';
-  const selectedProfile = DEFAULT_AGENT_PROFILES.find(
-    p => p.id === resolvedProfileId
-  ) || DEFAULT_AGENT_PROFILES.find(p => p.id === 'auto')!;
-  const providerPreset = activeProvider ? getProviderPreset(activeProvider, resolvedProfileId) : null;
-  const profilePhaseModels = providerPreset?.phaseModels ?? selectedProfile.phaseModels ?? DEFAULT_PHASE_MODELS;
-  const profilePhaseThinking = providerPreset?.phaseThinking ?? selectedProfile.phaseThinking ?? DEFAULT_PHASE_THINKING;
-  // When a provider is active, use provider-specific config or preset defaults (skip global fallback)
-  const resolvedPhaseModels = activeProvider
-    ? (providerConfig?.customPhaseModels ?? profilePhaseModels)
-    : (settings.customPhaseModels ?? profilePhaseModels);
-  const resolvedPhaseThinking = activeProvider
-    ? (providerConfig?.customPhaseThinking ?? profilePhaseThinking)
-    : (settings.customPhaseThinking ?? profilePhaseThinking);
 
   // Form state
-  const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -140,38 +111,13 @@ export function TaskCreationWizard({
     return selectedGitBranchDetail?.type === 'local';
   }, [baseBranch, branches]);
 
-  // Classification fields
-  const [category, setCategory] = useState<TaskCategory | ''>('');
-  const [priority, setPriority] = useState<TaskPriority | ''>('');
-  const [complexity, setComplexity] = useState<TaskComplexity | ''>('');
-  const [impact, setImpact] = useState<TaskImpact | ''>('');
-
-  // Model configuration
-  const [profileId, setProfileId] = useState<string>(resolvedProfileId);
-  const [model, setModel] = useState<ModelType | ''>(selectedProfile.model);
-  const [thinkingLevel, setThinkingLevel] = useState<ThinkingLevel | ''>(selectedProfile.thinkingLevel);
-  const [phaseModels, setPhaseModels] = useState<PhaseModelConfig | undefined>(resolvedPhaseModels);
-  const [phaseThinking, setPhaseThinking] = useState<PhaseThinkingConfig | undefined>(resolvedPhaseThinking);
-
   // Images and files
   const [images, setImages] = useState<ImageAttachment[]>([]);
   const [referencedFiles, setReferencedFiles] = useState<ReferencedFile[]>([]);
 
-  // Review setting
-  const [requireReviewBeforeCoding, setRequireReviewBeforeCoding] = useState(false);
-
-  // Fast mode
-  const [fastMode, setFastMode] = useState(false);
   // MCP connectors start from the Connectors defaults; changes stay with this task
   const defaultConnectors = useMemo(() => getDefaultMcpConnectorIds(settings.mcpConnectors), [settings.mcpConnectors]);
   const [mcpConnectors, setMcpConnectors] = useState<string[]>(defaultConnectors);
-
-  // Show Fast Mode toggle when any phase uses an Opus model
-  const showFastModeToggle = useMemo(() => {
-    if (!isAnthropic) return false;
-    if (!phaseModels) return false;
-    return PHASE_KEYS.some(phase => FAST_MODE_MODELS.includes(phaseModels[phase]));
-  }, [isAnthropic, phaseModels]);
 
   // Draft state
   const [isDraftRestored, setIsDraftRestored] = useState(false);
@@ -190,42 +136,18 @@ export function TaskCreationWizard({
     if (open && projectId) {
       const draft = loadDraft(projectId);
       if (draft && !isDraftEmpty(draft)) {
-        setTitle(draft.title);
         setDescription(draft.description);
-        setCategory(draft.category);
-        setPriority(draft.priority);
-        setComplexity(draft.complexity);
-        setImpact(draft.impact);
-        setProfileId(draft.profileId || resolvedProfileId);
-        setModel(draft.model || selectedProfile.model);
-        setThinkingLevel(draft.thinkingLevel || selectedProfile.thinkingLevel);
-        setPhaseModels(draft.phaseModels || resolvedPhaseModels);
-        setPhaseThinking(draft.phaseThinking || resolvedPhaseThinking);
         setImages(draft.images);
         setReferencedFiles(draft.referencedFiles ?? []);
-        setRequireReviewBeforeCoding(draft.requireReviewBeforeCoding ?? false);
-        setFastMode(draft.fastMode ?? false);
         setMcpConnectors(draft.mcpConnectors ?? defaultConnectors);
         setPushNewBranches(draft.pushNewBranches ?? projectPushNewBranches);
         setIsDraftRestored(true);
       } else {
         // No draft - reset to clean state for new task creation
         // This ensures no stale data from previous task creation persists
-        setTitle('');
         setDescription('');
-        setCategory('');
-        setPriority('');
-        setComplexity('');
-        setImpact('');
-        setProfileId(resolvedProfileId);
-        setModel(selectedProfile.model);
-        setThinkingLevel(selectedProfile.thinkingLevel);
-        setPhaseModels(resolvedPhaseModels);
-        setPhaseThinking(resolvedPhaseThinking);
         setImages([]);
         setReferencedFiles([]);
-        setRequireReviewBeforeCoding(false);
-        setFastMode(false);
         setMcpConnectors(defaultConnectors);
         setBaseBranch(PROJECT_DEFAULT_BRANCH);
         setUseWorktree(true);
@@ -233,33 +155,21 @@ export function TaskCreationWizard({
         setIsDraftRestored(false);
       }
     }
-  }, [open, projectId, projectPushNewBranches, resolvedProfileId, resolvedPhaseModels, resolvedPhaseThinking, selectedProfile.model, selectedProfile.thinkingLevel]);
+  }, [open, projectId, projectPushNewBranches]);
 
 
   /**
    * Get current form state as a draft
    */
-  const getCurrentDraft = useCallback((): TaskDraft => ({
+  const getCurrentDraft = useCallback((): TaskCreationDraft => ({
     projectId,
-    title,
     description,
-    category,
-    priority,
-    complexity,
-    impact,
-    profileId,
-    model,
-    thinkingLevel,
-    phaseModels,
-    phaseThinking,
     images,
     referencedFiles,
-    requireReviewBeforeCoding,
-    fastMode,
     mcpConnectors,
     pushNewBranches,
     savedAt: new Date()
-  }), [projectId, title, description, category, priority, complexity, impact, profileId, model, thinkingLevel, phaseModels, phaseThinking, images, referencedFiles, requireReviewBeforeCoding, fastMode, mcpConnectors, pushNewBranches]);
+  }), [projectId, description, images, referencedFiles, mcpConnectors, pushNewBranches]);
 
   /**
    * Detect @ mention being typed and show autocomplete
@@ -374,47 +284,8 @@ export function TaskCreationWizard({
       const allReferencedFiles = parseFileMentions(description, referencedFiles);
 
       const metadata: TaskMetadata = { sourceType: 'manual' };
-      if (category) metadata.category = category;
-      if (priority) metadata.priority = priority;
-      if (complexity) metadata.complexity = complexity;
-      if (impact) metadata.impact = impact;
-      if (model) metadata.model = model;
-      if (thinkingLevel) metadata.thinkingLevel = thinkingLevel;
-      if (activeProvider) metadata.provider = activeProvider;
-      if (phaseModels && phaseThinking) {
-        metadata.isAutoProfile = true;
-        metadata.phaseModels = phaseModels;
-        metadata.phaseThinking = phaseThinking;
-      }
-
-      // Cross-provider mode: override phaseModels/phaseThinking from mixed config
-      // and add phaseProviders to metadata
-      if (settings.customMixedProfileActive && settings.customMixedPhaseConfig) {
-        const mixed = settings.customMixedPhaseConfig;
-        metadata.phaseModels = {
-          spec: mixed.spec.modelId,
-          planning: mixed.planning.modelId,
-          coding: mixed.coding.modelId,
-          qa: mixed.qa.modelId,
-        };
-        metadata.phaseThinking = {
-          spec: mixed.spec.thinkingLevel,
-          planning: mixed.planning.thinkingLevel,
-          coding: mixed.coding.thinkingLevel,
-          qa: mixed.qa.thinkingLevel,
-        };
-        metadata.phaseProviders = {
-          spec: mixed.spec.provider,
-          planning: mixed.planning.provider,
-          coding: mixed.coding.provider,
-          qa: mixed.qa.provider,
-        };
-        metadata.isAutoProfile = true; // Ensure per-phase resolution is used
-      }
-
       if (images.length > 0) metadata.attachedImages = images;
       if (allReferencedFiles.length > 0) metadata.referencedFiles = allReferencedFiles;
-      if (requireReviewBeforeCoding) metadata.requireReviewBeforeCoding = true;
       // Always include baseBranch - resolve PROJECT_DEFAULT_BRANCH to actual branch name
       // This ensures the backend always knows which branch to use for worktree creation
       if (baseBranch === PROJECT_DEFAULT_BRANCH) {
@@ -429,10 +300,10 @@ export function TaskCreationWizard({
       // This preserves gitignored files (.env, configs) by not switching to origin
       if (isSelectedBranchLocal) metadata.useLocalBranch = true;
       if (!pushNewBranches) metadata.pushNewBranches = false;
-      metadata.fastMode = fastMode;
       metadata.mcpConnectors = mcpConnectors;
 
-      const task = await createTask(projectId, title.trim(), description.trim(), metadata);
+      // The title is generated from the description (and refined by triage when the task starts)
+      const task = await createTask(projectId, '', description.trim(), metadata);
       if (task) {
         clearDraft(projectId);
         resetForm();
@@ -448,21 +319,9 @@ export function TaskCreationWizard({
   };
 
   const resetForm = () => {
-    setTitle('');
     setDescription('');
-    setCategory('');
-    setPriority('');
-    setComplexity('');
-    setImpact('');
-    setProfileId(resolvedProfileId);
-    setModel(selectedProfile.model);
-    setThinkingLevel(selectedProfile.thinkingLevel);
-    setPhaseModels(resolvedPhaseModels);
-    setPhaseThinking(resolvedPhaseThinking);
     setImages([]);
     setReferencedFiles([]);
-    setRequireReviewBeforeCoding(false);
-    setFastMode(false);
     setMcpConnectors(defaultConnectors);
     setBaseBranch(PROJECT_DEFAULT_BRANCH);
     setUseWorktree(true);
@@ -615,39 +474,10 @@ export function TaskCreationWizard({
         descriptionPlaceholder={t('tasks:wizard.descriptionPlaceholder')}
         descriptionOverlay={descriptionOverlay}
         descriptionRef={descriptionRef}
-        title={title}
-        onTitleChange={setTitle}
-        profileId={profileId}
-        model={model}
-        thinkingLevel={thinkingLevel}
-        phaseModels={phaseModels}
-        phaseThinking={phaseThinking}
-        onProfileChange={(newProfileId, newModel, newThinkingLevel) => {
-          setProfileId(newProfileId);
-          setModel(newModel);
-          setThinkingLevel(newThinkingLevel);
-        }}
-        onModelChange={setModel}
-        onThinkingLevelChange={setThinkingLevel}
-        onPhaseModelsChange={setPhaseModels}
-        onPhaseThinkingChange={setPhaseThinking}
-        category={category}
-        priority={priority}
-        complexity={complexity}
-        impact={impact}
-        onCategoryChange={setCategory}
-        onPriorityChange={setPriority}
-        onComplexityChange={setComplexity}
-        onImpactChange={setImpact}
         images={images}
         onImagesChange={setImages}
-        requireReviewBeforeCoding={requireReviewBeforeCoding}
-        onRequireReviewChange={setRequireReviewBeforeCoding}
-        fastMode={fastMode}
-        onFastModeChange={setFastMode}
         mcpConnectors={mcpConnectors}
         onMcpConnectorsChange={setMcpConnectors}
-        showFastModeToggle={showFastModeToggle}
         disabled={isCreating}
         error={error}
         onError={setError}

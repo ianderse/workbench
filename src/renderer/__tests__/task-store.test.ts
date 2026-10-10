@@ -198,16 +198,16 @@ describe('Task Store', () => {
         tasks: [createTestTask({ id: 'task-1', status: 'in_progress' })]
       });
 
-      useTaskStore.getState().updateTaskStatus('task-1', 'human_review', 'plan_review');
+      useTaskStore.getState().updateTaskStatus('task-1', 'human_review', 'qa_rejected');
 
       const task = useTaskStore.getState().tasks[0];
       expect(task.status).toBe('human_review');
-      expect(task.reviewReason).toBe('plan_review');
+      expect(task.reviewReason).toBe('qa_rejected');
     });
 
     it('should clear reviewReason when not provided', () => {
       useTaskStore.setState({
-        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'plan_review' })]
+        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'stopped' })]
       });
 
       useTaskStore.getState().updateTaskStatus('task-1', 'in_progress');
@@ -219,7 +219,7 @@ describe('Task Store', () => {
 
     it('should update when only reviewReason changes', () => {
       useTaskStore.setState({
-        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'plan_review' })]
+        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'stopped' })]
       });
 
       useTaskStore.getState().updateTaskStatus('task-1', 'human_review', 'completed');

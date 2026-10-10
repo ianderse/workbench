@@ -23,7 +23,6 @@ import remarkGfm from 'remark-gfm';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
 import {
   useInsightsStore,
@@ -47,10 +46,6 @@ import { InsightsModelSelector } from './InsightsModelSelector';
 import { AttachmentPreviewDialog } from './AttachmentPreviewDialog';
 import type { InsightsChatMessage, InsightsModelConfig, TaskMetadata, ImageAttachment } from '../../shared/types';
 import {
-  TASK_CATEGORY_LABELS,
-  TASK_CATEGORY_COLORS,
-  TASK_COMPLEXITY_LABELS,
-  TASK_COMPLEXITY_COLORS,
   MAX_IMAGE_SIZE,
   parseInsightsError
 } from '../../shared/constants';
@@ -814,34 +809,6 @@ function MessageBubble({
                 <p className="mb-3 text-sm text-muted-foreground">
                   {task.description}
                 </p>
-                {task.metadata && (task.metadata.category || task.metadata.complexity) && (
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {task.metadata.category && (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'text-xs',
-                          TASK_CATEGORY_COLORS[task.metadata.category]
-                        )}
-                      >
-                        {TASK_CATEGORY_LABELS[task.metadata.category] ||
-                          task.metadata.category}
-                      </Badge>
-                    )}
-                    {task.metadata.complexity && (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'text-xs',
-                          TASK_COMPLEXITY_COLORS[task.metadata.complexity]
-                        )}
-                      >
-                        {TASK_COMPLEXITY_LABELS[task.metadata.complexity] ||
-                          task.metadata.complexity}
-                      </Badge>
-                    )}
-                  </div>
-                )}
                 <Button
                   size="sm"
                   variant={isCreated ? 'outline' : 'default'}
