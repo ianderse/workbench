@@ -104,6 +104,7 @@ export const taskMock = {
   onTaskStatusChange: () => () => {},
   onTaskRateLimitHoldChange: () => () => {},
   onTaskClaudeRunUpdate: () => () => {},
+  setQueueOrder: () => {},
   onTaskExecutionProgress: () => () => {},
   onTaskLogsChanged: () => () => {},
   onTaskLogsStream: () => () => {},

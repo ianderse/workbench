@@ -170,6 +170,12 @@ function validatePlanData(plan: ImplementationPlan): boolean {
   return true;
 }
 
+/** Send a project's Queue column order to the main process (the queue starts the top task first) */
+function syncQueueOrder(projectId: string, order: string[]): void {
+  if (typeof window === 'undefined') return;
+  window.electronAPI?.setQueueOrder?.(projectId, order);
+}
+
 // localStorage key prefix for task order persistence
 const TASK_ORDER_KEY_PREFIX = 'task-order-state';
 
@@ -628,6 +634,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           columnCounts: Object.entries(validatedOrder).map(([col, ids]) => ({ col, count: ids.length }))
         });
         set({ taskOrder: validatedOrder });
+        // Keep the main-process queue in step with the board's Queue column order
+        syncQueueOrder(projectId, validatedOrder.queue);
       } else {
         debugLog('[TaskStore.loadTaskOrder] No stored task order found, using empty order');
         set({ taskOrder: createEmptyTaskOrder() });
@@ -648,6 +656,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
       const key = getTaskOrderKey(projectId);
       localStorage.setItem(key, JSON.stringify(state.taskOrder));
+      // The main-process queue starts the top task of the Queue column first
+      syncQueueOrder(projectId, state.taskOrder.queue ?? []);
       return true;
     } catch (error) {
       console.error('Failed to save task order:', error);

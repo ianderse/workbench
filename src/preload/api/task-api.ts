@@ -83,6 +83,7 @@ export interface TaskAPI {
   onTaskStatusChange: (callback: (taskId: string, status: TaskStatus, projectId?: string, reviewReason?: ReviewReason) => void) => () => void;
   onTaskRateLimitHoldChange: (callback: (taskId: string, hold: RateLimitHold | null, projectId?: string) => void) => () => void;
   onTaskClaudeRunUpdate: (callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void) => () => void;
+  setQueueOrder: (projectId: string, order: string[]) => void;
   onTaskExecutionProgress: (
     callback: (taskId: string, progress: import('../../shared/types').ExecutionProgress, projectId?: string) => void
   ) => () => void;
@@ -268,6 +269,9 @@ export const createTaskAPI = (): TaskAPI => ({
       ipcRenderer.removeListener(IPC_CHANNELS.TASK_STATUS_CHANGE, handler);
     };
   },
+
+  setQueueOrder: (projectId: string, order: string[]): void =>
+    ipcRenderer.send(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, projectId, order),
 
   onTaskClaudeRunUpdate: (
     callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void

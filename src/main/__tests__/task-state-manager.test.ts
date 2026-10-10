@@ -442,6 +442,46 @@ describe('TaskStateManager', () => {
     });
   });
 
+  describe('status change listener', () => {
+    afterEach(() => {
+      manager.setStatusChangeListener(null);
+    });
+
+    it('reports every status the machine emits (used by the task queue)', () => {
+      const listener = vi.fn();
+      manager.setStatusChangeListener(listener);
+      const codingTask = createMockTask({
+        status: 'in_progress',
+        executionProgress: { phase: 'coding', phaseProgress: 50, overallProgress: 50 }
+      });
+
+      manager.handleUiEvent(codingTask.id, { type: 'USER_STOPPED', hasPlan: true }, codingTask, mockProject);
+
+      expect(listener).toHaveBeenLastCalledWith(codingTask.id, 'human_review', mockProject.id);
+    });
+
+    it('reports a failed run leaving In Progress', () => {
+      const listener = vi.fn();
+      manager.setStatusChangeListener(listener);
+      const codingTask = createMockTask({
+        status: 'in_progress',
+        executionProgress: { phase: 'coding', phaseProgress: 50, overallProgress: 50 }
+      });
+
+      manager.handleProcessExited(codingTask.id, 1, codingTask, mockProject);
+
+      expect(listener).toHaveBeenLastCalledWith(codingTask.id, 'human_review', mockProject.id);
+    });
+
+    it('keeps emitting when the listener throws', () => {
+      manager.setStatusChangeListener(() => {
+        throw new Error('boom');
+      });
+      expect(() => manager.handleUiEvent(mockTask.id, { type: 'PLANNING_STARTED' }, mockTask, mockProject)).not.toThrow();
+      expect(manager.getCurrentState(mockTask.id)).toBe('planning');
+    });
+  });
+
   describe('actor state restoration', () => {
     it('should restore actor state from task with in_progress status', () => {
       const taskInProgress = createMockTask({

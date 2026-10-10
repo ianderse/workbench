@@ -49,6 +49,46 @@ export const TASK_STATUS_COLORS: Record<TaskStatusColumn | 'pr_created' | 'error
   error: 'bg-destructive/10 text-destructive'
 };
 
+/**
+ * Kanban column a task is shown in: pr_created tasks sit in Done and error tasks in
+ * Human Review (errors need human attention).
+ */
+export function getTaskColumn(status: TaskStatus): TaskStatusColumn {
+  if (status === 'pr_created') return 'done';
+  if (status === 'error') return 'human_review';
+  return status;
+}
+
+/**
+ * Columns a task may be moved to from each column, by drag and drop or the card's
+ * "Move to" menu. Mirrors the task state machine (src/shared/state-machines/task-machine.ts),
+ * which ignores other moves:
+ * - Backlog: queue it or start it
+ * - Queue: send it back to the backlog or start it
+ * - In Progress: none (the task is running; stop it first)
+ * - AI Review: stop validation and review it now
+ * - Human Review (also failed tasks): queue it, resume it or mark it done
+ * - Done: none (final)
+ */
+export const TASK_COLUMN_TRANSITIONS: Record<TaskStatusColumn, readonly TaskStatusColumn[]> = {
+  backlog: ['queue', 'in_progress'],
+  queue: ['backlog', 'in_progress'],
+  in_progress: [],
+  ai_review: ['human_review'],
+  human_review: ['queue', 'in_progress', 'done'],
+  done: []
+};
+
+/** Columns a task with this status may be moved to (never its own column) */
+export function getAllowedTaskMoves(status: TaskStatus): readonly TaskStatusColumn[] {
+  return TASK_COLUMN_TRANSITIONS[getTaskColumn(status)];
+}
+
+/** Whether a task with status `from` may be moved to the `to` column */
+export function canMoveTask(from: TaskStatus, to: TaskStatus): boolean {
+  return getAllowedTaskMoves(from).includes(getTaskColumn(to));
+}
+
 /** Default max parallel tasks when no project setting is configured */
 export const DEFAULT_MAX_PARALLEL_TASKS = 3;
 export const MIN_PARALLEL_TASKS = 1;

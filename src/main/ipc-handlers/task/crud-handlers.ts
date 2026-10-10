@@ -313,6 +313,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       if (specPaths.length === 0 && !hasErrors) {
         console.warn(`[TASK_DELETE] No spec directories found for task ${taskId} - already removed`);
         projectStore.invalidateTasksCache(project.id);
+        taskQueue.request(project.id);
         return { success: true };
       }
 
@@ -340,6 +341,8 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
 
       // Invalidate cache since a task was deleted
       projectStore.invalidateTasksCache(project.id);
+      // Deleting a task may free a slot or empty a Queue position
+      taskQueue.request(project.id);
 
       if (hasErrors) {
         return {

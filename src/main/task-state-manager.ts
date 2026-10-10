@@ -38,6 +38,7 @@ export class TaskStateManager {
   private terminalEventSeen = new Set<string>();
   private getMainWindow: (() => BrowserWindow | null) | null = null;
   private onTaskCompleted: ((taskId: string, project: Project) => void) | null = null;
+  private onStatusChange: ((taskId: string, status: TaskStatus, projectId?: string) => void) | null = null;
 
   configure(getMainWindow: () => BrowserWindow | null): void {
     this.getMainWindow = getMainWindow;
@@ -49,6 +50,14 @@ export class TaskStateManager {
    */
   setTaskCompletedListener(listener: (taskId: string, project: Project) => void): void {
     this.onTaskCompleted = listener;
+  }
+
+  /**
+   * Called after every status the machine emits (persisted first), e.g. so the task
+   * queue can fill a slot freed by a task leaving In Progress
+   */
+  setStatusChangeListener(listener: ((taskId: string, status: TaskStatus, projectId?: string) => void) | null): void {
+    this.onStatusChange = listener;
   }
 
   handleTaskEvent(taskId: string, event: TaskEventPayload, task: Task, project: Project): boolean {
@@ -339,6 +348,11 @@ export class TaskStateManager {
     reviewReason: ReviewReason | undefined,
     projectId?: string
   ): void {
+    try {
+      this.onStatusChange?.(taskId, status, projectId);
+    } catch (error) {
+      console.warn(`[TaskStateManager] Status change listener failed for ${taskId}:`, error);
+    }
     if (!this.getMainWindow) {
       console.warn(`[TaskStateManager] emitStatus: No main window, cannot emit status ${status} for ${taskId}`);
       return;

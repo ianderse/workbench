@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../../shared/constants';
 import type { IPCResult } from '../../../shared/types';
 import { projectStore } from '../../project-store';
+import { taskQueue } from '../../services/task-queue';
 
 /**
  * Register task archive handlers
@@ -24,6 +25,8 @@ export function registerTaskArchiveHandlers(): void {
 
       if (result) {
         console.warn('[IPC] TASK_ARCHIVE success');
+        // Leaving or re-entering Queue / In Progress may free a slot or queue a task
+        taskQueue.request(projectId);
         return { success: true, data: true };
       } else {
         console.error('[IPC] TASK_ARCHIVE failed');
@@ -44,6 +47,8 @@ export function registerTaskArchiveHandlers(): void {
 
       if (result) {
         console.warn('[IPC] TASK_UNARCHIVE success');
+        // Leaving or re-entering Queue / In Progress may free a slot or queue a task
+        taskQueue.request(projectId);
         return { success: true, data: true };
       } else {
         console.error('[IPC] TASK_UNARCHIVE failed');

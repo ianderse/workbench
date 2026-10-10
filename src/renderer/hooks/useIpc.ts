@@ -222,8 +222,8 @@ export function useIpcListeners(): void {
     );
 
     // Rate-limit hold changes are applied immediately (not batched) so the hold is
-    // already on the task when the accompanying status change (-> queue) triggers
-    // queue auto-promotion; otherwise the held task would be restarted right away.
+    // already on the task when the accompanying status change (-> queue) arrives.
+    // Queue auto-promotion (which skips held tasks) runs in the main process.
     const cleanupRateLimitHold = window.electronAPI.onTaskRateLimitHoldChange(
       (taskId: string, hold: import('../../shared/types').RateLimitHold | null, projectId?: string) => {
         if (!isTaskForCurrentProject(projectId)) return;

@@ -14,6 +14,7 @@ import type { BrowserWindow } from 'electron';
 import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { resetMemoryService } from './context/memory-service-factory';
+import { taskQueue } from '../services/task-queue';
 import { configureTools, getToolPath, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache } from '../cli-tool-manager';
 
 const settingsPath = getSettingsPath();
@@ -148,6 +149,11 @@ export function registerSettingsHandlers(
           preWarmToolCache(['claude']).catch((error) => {
             console.warn('[SETTINGS_SAVE] Failed to re-warm CLI cache:', error);
           });
+        }
+
+        // A higher parallel task limit frees slots for queued tasks
+        if (settings.maxParallelTasks !== undefined) {
+          taskQueue.request();
         }
 
         // Reset memory service singleton when memory-related settings change

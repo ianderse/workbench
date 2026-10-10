@@ -51,6 +51,7 @@ import { writeFileSync, rmSync, cpSync } from 'fs';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { setupIpcHandlers } from './ipc-setup';
 import { rateLimitResumeScheduler } from './services/rate-limit-resume-scheduler';
+import { taskQueue } from './services/task-queue';
 import { AgentManager } from './agent';
 import { TerminalManager } from './terminal-manager';
 import { getUsageMonitor } from './claude-profile/usage-monitor';
@@ -551,6 +552,8 @@ app.whenReady().then(() => {
     if (scheduled > 0) {
       console.warn(`[main] Scheduled ${scheduled} rate-limit-held task(s) for resume`);
     }
+    // Start queued tasks that fit the parallel task limit (e.g. queued before a restart)
+    taskQueue.request();
   });
 
   // Create window
@@ -736,6 +739,7 @@ app.on('before-quit', (event) => {
   // Stop synchronous services immediately
   stopPeriodicUpdates();
   rateLimitResumeScheduler.dispose();
+  taskQueue.dispose();
 
   const usageMonitor = getUsageMonitor();
   usageMonitor.stop();

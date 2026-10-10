@@ -28,6 +28,9 @@ import { getAPIProfileEnv } from '../../services/profile';
 import { loadClaudeRunInfo } from '../../claude-code/task-runner';
 import { rateLimitResumeScheduler, type HeldTaskRef } from '../../services/rate-limit-resume-scheduler';
 import { clearRateLimitHold } from './rate-limit-hold';
+import { taskQueue } from '../../services/task-queue';
+import { taskQueueOrder } from '../../services/task-queue-order';
+import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
 
 const execFileAsync = promisify(execFile);
 
@@ -136,6 +139,30 @@ function saveFeedbackImages(specDir: string, images: ImageAttachment[] | undefin
     }
   }
   return saved;
+}
+
+/**
+ * Start queued tasks whenever a project has free In Progress slots (see services/task-queue.ts).
+ * Passes are requested after every status change, and use the same start flow as TASK_START.
+ */
+function configureTaskQueue(agentManager: AgentManager, startTask: (taskId: string) => Promise<void>): void {
+  taskQueue.configure({
+    listProjectIds: () => projectStore.getProjects().map((p) => p.id),
+    listTasks: (projectId) => projectStore.getTasks(projectId),
+    getMaxParallelTasks: (projectId) => resolveMaxParallelTasks(
+      (readSettingsFile() as { maxParallelTasks?: number } | undefined)?.maxParallelTasks,
+      projectStore.getProject(projectId)?.settings?.maxParallelTasks
+    ),
+    getQueueOrder: (projectId) => taskQueueOrder.get(projectId),
+    isTaskRunning: (taskId) => agentManager.isRunning(taskId),
+    startTask: async (taskId) => {
+      await startTask(taskId);
+      // startTask reports problems (git, auth) to the renderer; it started when the machine is active
+      return XSTATE_ACTIVE_STATES.has(taskStateManager.getCurrentState(taskId) ?? '');
+    },
+  });
+  // Any status change may free a slot (a task leaving In Progress) or queue a task
+  taskStateManager.setStatusChangeListener((_taskId, _status, projectId) => taskQueue.request(projectId));
 }
 
 /**
@@ -302,7 +329,16 @@ export function registerTaskExecutionHandlers(
       }
       return refs;
     },
-    resumeTask: resumeHeldTask,
+    // Serialized with queue promotion so both can't fill the same free slot
+    resumeTask: (taskId, projectId) => taskQueue.runExclusive(projectId, () => resumeHeldTask(taskId, projectId)),
+  });
+
+  configureTaskQueue(agentManager, startTask);
+
+  // The board's Queue column order (top first): the queue starts the top task first
+  ipcMain.on(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, (_, projectId: string, order: string[]) => {
+    if (typeof projectId !== 'string' || !Array.isArray(order)) return;
+    taskQueueOrder.set(projectId, order);
   });
 
   /**
@@ -513,6 +549,9 @@ export function registerTaskExecutionHandlers(
             mainWindow.webContents.send(IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'in_progress', project.id);
           }
         }
+
+        // A task moved to the queue (or out of In Progress) may be startable right away
+        taskQueue.request(project.id);
 
         return { success: true };
       } catch (error) {
