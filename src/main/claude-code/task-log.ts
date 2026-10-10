@@ -107,9 +107,10 @@ export class TaskLogWriter {
     this.add(phase, 'phase_start', message);
   }
 
-  endPhase(phase: TaskLogPhase, success: boolean, message: string): void {
+  /** End a step: completed or failed, or stopped when the run was stopped before it finished */
+  endPhase(phase: TaskLogPhase, success: boolean | 'stopped', message: string): void {
     const target = this.data.phases[phase];
-    target.status = success ? 'completed' : 'failed';
+    target.status = success === 'stopped' ? 'stopped' : success ? 'completed' : 'failed';
     target.completed_at = new Date().toISOString();
     this.add(phase, 'phase_end', message);
     this.saveNow();

@@ -111,6 +111,7 @@ function getPhaseStatusIcon(status: string) {
     case 'completed':
       return null;
     case 'failed':
+    case 'stopped':
       return null;
     case 'active':
       return <Clock className="h-4 w-4 text-muted-foreground animate-pulse" />;
@@ -127,6 +128,10 @@ function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled,
   let status = phaseLog?.status || 'pending';
   if (status === 'active' && isTaskSettled) {
     status = 'completed';
+  }
+  // Logs written before steps could be "stopped" recorded a stopped run as failed
+  if (status === 'failed' && phaseLog?.entries.at(-1)?.type === 'phase_end' && phaseLog.entries.at(-1)?.content === 'Stopped') {
+    status = 'stopped';
   }
   const hasEntries = (phaseLog?.entries.length || 0) > 0;
   const { durationMs, costUsd } = useMemo(() => summarizeLogPhase(runPhases, phase), [runPhases, phase]);
@@ -163,6 +168,7 @@ function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled,
           <span className="shrink-0">{getPhaseStatusIcon(status)}</span>
           <span className="text-sm text-foreground">{t(`tasks:logs.phases.${phase}`)}</span>
           {status === 'failed' && <span className="text-xs text-destructive">{t('tasks:execution.phases.failed')}</span>}
+          {status === 'stopped' && <span className="text-xs text-(--nav-label-color)">{t('tasks:logs.stopped')}</span>}
           {summaryParts.length > 0 && (
             <span className="text-xs text-(--nav-label-color) tabular-nums">
               {summaryParts.join(' · ')}

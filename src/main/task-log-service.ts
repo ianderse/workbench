@@ -504,7 +504,7 @@ export class TaskLogService extends EventEmitter {
             phase,
             timestamp: currPhase.started_at || new Date().toISOString()
           } as TaskLogStreamChunk);
-        } else if (currPhase.status === 'completed' || currPhase.status === 'failed') {
+        } else if (currPhase.status === 'completed' || currPhase.status === 'failed' || currPhase.status === 'stopped') {
           this.emit('stream-chunk', specId, {
             type: 'phase_end',
             phase,

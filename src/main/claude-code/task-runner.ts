@@ -450,7 +450,7 @@ export class ClaudeTaskRun {
 
     if (outcome.stopped) {
       this.endPhase(phase, { isError: true, error: 'Stopped' });
-      this.log.endPhase(logPhase, false, 'Stopped');
+      this.log.endPhase(logPhase, 'stopped', 'Stopped');
       return { status: 'stopped' };
     }
     if (outcome.rateLimit) return this.rateLimited(name, phase, outcome.rateLimit);

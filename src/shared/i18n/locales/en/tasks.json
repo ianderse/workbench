@@ -306,6 +306,7 @@
   "logs": {
     "empty": "No logs yet",
     "emptyHint": "Logs will appear here when the task runs",
+    "stopped": "Stopped",
     "entries_one": "{{count}} entry",
     "entries_other": "{{count}} entries",
     "phases": {
