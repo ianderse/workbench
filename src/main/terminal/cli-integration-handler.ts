@@ -248,7 +248,7 @@ const YOLO_MODE_FLAG = ' --dangerously-skip-permissions';
  * graph lives in .auto-claude/memory (the terminal's GRAPHIFY_OUT points there). Left out when the
  * path has characters that would need escaping inside the shell command.
  */
-function graphifyHintFlag(terminal: TerminalProcess): string {
+function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut'>): string {
   const out = terminal.graphifyOut;
   if (!out || /["'$`%!]/.test(out) || (!isWindows() && out.includes('\\'))) return '';
   const graph = path.join(out, 'graph.json');
@@ -257,6 +257,66 @@ function graphifyHintFlag(terminal: TerminalProcess): string {
     `under the working directory. For /graphify questions about the code, run graphify query, explain, path or ` +
     `affected with --graph ${graph}, and do not rebuild the graph.`;
   return ` --append-system-prompt ${isWindows() ? `"${text}"` : `'${text}'`}`;
+}
+
+/**
+ * Options for launching Claude Code on a specific session (an agent window resuming a task)
+ */
+export interface InvokeCLIOptions {
+  /** Resume this Claude Code session (`claude --resume <id>`) instead of starting a new one */
+  resumeSessionId?: string;
+  /**
+   * Claude config dir that holds the session transcript. When set, Claude Code runs with this
+   * CLAUDE_CONFIG_DIR even if the terminal (or its active profile) uses another one.
+   */
+  configDir?: string;
+}
+
+/** Session ids are UUIDs; anything else is refused so it never reaches the shell unescaped */
+const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/** Whether a Claude Code session id is safe to pass on the command line */
+export function isValidClaudeSessionId(sessionId: string): boolean {
+  return SESSION_ID_PATTERN.test(sessionId);
+}
+
+/**
+ * Flags that resume a Claude Code session (` --resume <id>`).
+ * Throws for ids that are not plain session ids.
+ */
+export function buildResumeSessionFlag(sessionId: string): string {
+  if (!isValidClaudeSessionId(sessionId)) {
+    throw new Error(`Invalid Claude Code session id: ${sessionId}`);
+  }
+  return ` --resume ${sessionId}`;
+}
+
+/**
+ * Extra flags for an agent window's `claude` command: the resumed session (if any), YOLO mode,
+ * and the Graphify hint
+ */
+export function buildClaudeExtraFlags(
+  terminal: Pick<TerminalProcess, 'graphifyOut'>,
+  dangerouslySkipPermissions: boolean | undefined,
+  resumeSessionId?: string
+): string | undefined {
+  const flags =
+    `${resumeSessionId ? buildResumeSessionFlag(resumeSessionId) : ''}` +
+    `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
+  return flags || undefined;
+}
+
+/**
+ * The CLAUDE_CONFIG_DIR to force for a resumed session, or undefined to keep the terminal's
+ * environment. `~` is expanded; the default ~/.claude needs no override (Claude Code uses it
+ * when CLAUDE_CONFIG_DIR is unset, and setting it would move its .claude.json).
+ */
+export function resolveSessionConfigDir(configDir: string | undefined): string | undefined {
+  if (!configDir) return undefined;
+  const expanded = configDir.startsWith('~') ? path.join(os.homedir(), configDir.slice(1)) : configDir;
+  const normalized = path.resolve(expanded);
+  if (normalized === path.resolve(os.homedir(), '.claude')) return undefined;
+  return normalized;
 }
 
 // ============================================================================
@@ -1181,11 +1241,13 @@ export async function invokeCLIAsync(
   cwd: string | undefined,
   profileId: string | undefined,
   getWindow: WindowGetter,
-  dangerouslySkipPermissions?: boolean
+  dangerouslySkipPermissions?: boolean,
+  options: InvokeCLIOptions = {}
 ): Promise<void> {
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
   const previousProfileId = terminal.claudeProfileId;
+  const { resumeSessionId } = options;
 
   const startTime = Date.now();
 
@@ -1196,8 +1258,10 @@ export async function invokeCLIAsync(
     debugLog('[ClaudeIntegration:invokeCLIAsync] CWD:', cwd);
     debugLog('[ClaudeIntegration:invokeCLIAsync] Dangerously skip permissions:', dangerouslySkipPermissions);
 
-    // Compute extra flags for YOLO mode
-    const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` || undefined;
+    debugLog('[ClaudeIntegration:invokeCLIAsync] Resume session:', resumeSessionId);
+
+    // Extra flags: the resumed session, YOLO mode and the Graphify hint
+    const extraFlags = buildClaudeExtraFlags(terminal, dangerouslySkipPermissions, resumeSessionId);
 
     terminal.isCLIMode = true;
     // Store YOLO mode setting so it persists across profile switches
@@ -1209,7 +1273,8 @@ export async function invokeCLIAsync(
     const settings = await readSettingsFileAsync();
     const preferredCLI = (settings?.preferredCLI as SupportedCLI | undefined) || 'claude-code';
 
-    if (preferredCLI !== 'claude-code') {
+    // A resumed task session is always a Claude Code session, whatever the preferred CLI
+    if (preferredCLI !== 'claude-code' && !resumeSessionId) {
       // Non-Claude CLI: change directory if needed, then run the CLI command directly
       const cwdCommand = buildCdCommand(cwd, terminal.shellType);
       const command = getCLICommand(preferredCLI, settings?.customCLIPath as string | undefined);
@@ -1263,6 +1328,29 @@ export async function invokeCLIAsync(
       previousProfileId,
       needsEnvOverride
     });
+
+    // A resumed session must run on the config dir that holds its transcript, even when the
+    // terminal already uses that profile or the profile is the default one
+    const sessionConfigDir = resumeSessionId
+      ? resolveSessionConfigDir(options.configDir ?? activeProfile?.configDir)
+      : undefined;
+    if (sessionConfigDir) {
+      ensureOnboardingComplete(sessionConfigDir);
+      const command = buildClaudeShellCommand(
+        cwdCommand,
+        pathPrefix,
+        escapedClaudeCmd,
+        { method: 'config-dir', configDir: sessionConfigDir },
+        extraFlags
+      );
+      debugLog('[ClaudeIntegration:invokeCLIAsync] Resuming session (configDir method, history-safe)');
+      PtyManager.writeToPty(terminal, command);
+      if (activeProfile) {
+        profileManager.markProfileUsed(activeProfile.id);
+      }
+      finalizeClaudeInvoke(terminal, activeProfile, getWindow);
+      return;
+    }
 
     // Try to execute using profile-specific method (configDir or temp-file) with async file operations
     const executed = await executeProfileCommandAsync({

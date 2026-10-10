@@ -157,6 +157,30 @@ export class TerminalManager {
   }
 
   /**
+   * Resume a task's Claude Code session in a terminal (`claude --resume <id>` in the task's
+   * worktree), on the profile and config dir the session ran on (async - non-blocking)
+   */
+  async resumeTaskSessionAsync(
+    id: string,
+    options: { sessionId: string; cwd: string; profileId?: string; configDir?: string },
+    dangerouslySkipPermissions?: boolean
+  ): Promise<void> {
+    const terminal = this.terminals.get(id);
+    if (!terminal) {
+      return;
+    }
+
+    await ClaudeIntegration.invokeCLIAsync(
+      terminal,
+      options.cwd,
+      options.profileId,
+      this.getWindow,
+      dangerouslySkipPermissions,
+      { resumeSessionId: options.sessionId, configDir: options.configDir }
+    );
+  }
+
+  /**
    * Invoke Claude in a terminal with optional profile override
    * @deprecated Use invokeCLIAsync for non-blocking behavior
    */

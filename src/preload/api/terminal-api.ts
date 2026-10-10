@@ -34,6 +34,7 @@ export interface TerminalAPI {
   sendTerminalInput: (id: string, data: string) => void;
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<IPCResult<{ success: boolean }>>;
   invokeCLIInTerminal: (id: string, cwd?: string) => void;
+  resumeTaskSessionInTerminal: (id: string, options: import('../../shared/types').TerminalTaskSessionOptions) => void;
   generateTerminalName: (command: string, cwd?: string) => Promise<IPCResult<string>>;
   setTerminalTitle: (id: string, title: string) => void;
   setTerminalWorktreeConfig: (id: string, config: TerminalWorktreeConfig | undefined) => void;
@@ -137,6 +138,9 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   invokeCLIInTerminal: (id: string, cwd?: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TERMINAL_INVOKE_CLI, id, cwd),
+
+  resumeTaskSessionInTerminal: (id: string, options: import('../../shared/types').TerminalTaskSessionOptions): void =>
+    ipcRenderer.send(IPC_CHANNELS.TERMINAL_RESUME_TASK_SESSION, id, options),
 
   generateTerminalName: (command: string, cwd?: string): Promise<IPCResult<string>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_GENERATE_NAME, command, cwd),

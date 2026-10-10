@@ -788,6 +788,106 @@ describe('invokeCLIAsync', () => {
       expect(terminal.dangerouslySkipPermissions).toBe(true);
     });
 
+    it('resumes a task session in its worktree on the config dir that holds the transcript', async () => {
+      mockGetClaudeCliInvocationAsync.mockResolvedValue({
+        command: '/opt/claude/bin/claude',
+        env: { PATH: '/opt/claude/bin:/usr/bin' },
+      });
+      const profileManager = {
+        getActiveProfile: vi.fn(),
+        getProfile: vi.fn(() => ({ id: 'work', name: 'Work', isDefault: true, configDir: '/tmp/work-config' })),
+        getProfileToken: vi.fn(() => null),
+        markProfileUsed: vi.fn(),
+      };
+      mockInitializeClaudeProfileManager.mockResolvedValue(profileManager);
+
+      // The terminal already runs on that profile: the config dir is still set explicitly
+      const terminal = createMockTerminal({ claudeProfileId: 'work' });
+
+      const { invokeCLIAsync } = await import('../cli-integration-handler');
+      await invokeCLIAsync(terminal, '/tmp/project/.auto-claude/worktrees/tasks/001-x', 'work', () => null, true, {
+        resumeSessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+        configDir: '/tmp/task-config',
+      });
+
+      const written = mockWriteToPty.mock.calls[0][1] as string;
+      expect(written).toContain(buildCdCommand('/tmp/project/.auto-claude/worktrees/tasks/001-x'));
+      expect(written).toContain(getConfigDirCommand(platform, '/tmp/task-config'));
+      expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455 --dangerously-skip-permissions');
+      expect(profileManager.markProfileUsed).toHaveBeenCalledWith('work');
+      expect(terminal.isCLIMode).toBe(true);
+    });
+
+    it('falls back to the profile config dir when the run has none', async () => {
+      mockGetClaudeCliInvocationAsync.mockResolvedValue({
+        command: '/opt/claude/bin/claude',
+        env: { PATH: '/opt/claude/bin:/usr/bin' },
+      });
+      const profileManager = {
+        getActiveProfile: vi.fn(),
+        getProfile: vi.fn(() => ({ id: 'work', name: 'Work', isDefault: false, configDir: '/tmp/work-config' })),
+        getProfileToken: vi.fn(() => null),
+        markProfileUsed: vi.fn(),
+      };
+      mockInitializeClaudeProfileManager.mockResolvedValue(profileManager);
+
+      const terminal = createMockTerminal();
+
+      const { invokeCLIAsync } = await import('../cli-integration-handler');
+      await invokeCLIAsync(terminal, '/tmp/wt', 'work', () => null, false, { resumeSessionId: 'sess-1' });
+
+      const written = mockWriteToPty.mock.calls[0][1] as string;
+      expect(written).toContain(getConfigDirCommand(platform, '/tmp/work-config'));
+      expect(written).toContain('--resume sess-1');
+      expect(written).not.toContain('--dangerously-skip-permissions');
+    });
+
+    it('refuses a session id that is not a plain id', async () => {
+      mockGetClaudeCliInvocationAsync.mockResolvedValue({
+        command: '/opt/claude/bin/claude',
+        env: { PATH: '/opt/claude/bin:/usr/bin' },
+      });
+      mockInitializeClaudeProfileManager.mockResolvedValue({
+        getActiveProfile: vi.fn(() => ({ id: 'default', name: 'Default', isDefault: true })),
+        getProfile: vi.fn(),
+        getProfileToken: vi.fn(() => null),
+        markProfileUsed: vi.fn(),
+      });
+
+      const terminal = createMockTerminal();
+
+      const { invokeCLIAsync } = await import('../cli-integration-handler');
+      await expect(
+        invokeCLIAsync(terminal, '/tmp/wt', undefined, () => null, false, { resumeSessionId: 'x; rm -rf ~' })
+      ).rejects.toThrow('Invalid Claude Code session id');
+      expect(mockWriteToPty).not.toHaveBeenCalled();
+      expect(terminal.isCLIMode).toBe(false);
+    });
+
+  });
+});
+
+describe('task session resume helpers', () => {
+  it('builds the resume flag only for plain session ids', async () => {
+    const { buildResumeSessionFlag, isValidClaudeSessionId } = await import('../cli-integration-handler');
+    expect(buildResumeSessionFlag('0b7c6c1e-1234-4abc-9def-001122334455')).toBe(
+      ' --resume 0b7c6c1e-1234-4abc-9def-001122334455'
+    );
+    expect(isValidClaudeSessionId('abc_123')).toBe(true);
+    expect(isValidClaudeSessionId('-abc')).toBe(false);
+    expect(isValidClaudeSessionId('a b')).toBe(false);
+    expect(isValidClaudeSessionId('$(id)')).toBe(false);
+    expect(() => buildResumeSessionFlag("a'b")).toThrow();
+  });
+
+  it('only forces a config dir other than the default ~/.claude', async () => {
+    const os = await import('os');
+    const path = await import('path');
+    const { resolveSessionConfigDir } = await import('../cli-integration-handler');
+    expect(resolveSessionConfigDir(undefined)).toBeUndefined();
+    expect(resolveSessionConfigDir(path.join(os.homedir(), '.claude'))).toBeUndefined();
+    expect(resolveSessionConfigDir('~/.claude')).toBeUndefined();
+    expect(resolveSessionConfigDir('~/.claude-profiles/work')).toBe(path.join(os.homedir(), '.claude-profiles', 'work'));
   });
 });
 

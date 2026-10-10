@@ -1,8 +1,9 @@
 /**
- * Helpers for showing a task's Claude Code run (triage, steps, cost) in the UI.
+ * Helpers for showing a task's Claude Code run (triage, steps, cost) in the UI, and for opening
+ * its session in an agent window.
  */
-import type { ClaudeRunInfo, ClaudeRunPhaseName } from '../types/claude-code';
-import type { ExecutionPhase } from '../types/task';
+import type { ClaudeRunInfo, ClaudeRunPhase, ClaudeRunPhaseName } from '../types/claude-code';
+import type { ExecutionPhase, Task } from '../types/task';
 
 /**
  * What a running task is doing, as a `tasks:execution.steps.*` key:
@@ -88,8 +89,61 @@ export function formatDurationMs(ms: number): string {
   return `${minutes}m ${String(seconds).padStart(2, '0')}s`;
 }
 
-/** Shell command that reopens the task's Claude Code session in its worktree */
-export function buildResumeCommand(sessionId: string, worktreePath?: string): string {
-  const resume = `claude --resume ${sessionId}`;
-  return worktreePath ? `cd "${worktreePath}" && ${resume}` : resume;
+/** How long a run step took: its reported duration, or the time between its start and end */
+export function getRunPhaseDurationMs(phase: ClaudeRunPhase): number | undefined {
+  if (phase.durationMs !== undefined) return phase.durationMs;
+  if (!phase.endedAt) return undefined;
+  const ms = new Date(phase.endedAt).getTime() - new Date(phase.startedAt).getTime();
+  return Number.isFinite(ms) && ms >= 0 ? ms : undefined;
+}
+
+/** Log sections of a task (Logs tab) */
+export type TaskLogPhase = 'planning' | 'coding' | 'validation';
+
+/** Which run steps each log section covers */
+const RUN_PHASES_BY_LOG_PHASE: Record<TaskLogPhase, ClaudeRunPhaseName[]> = {
+  planning: ['triage', 'plan'],
+  coding: ['implement', 'revise'],
+  validation: ['validate']
+};
+
+/**
+ * Total duration and cost of the run steps in a log section (triage + plan for planning,
+ * implement + revise for coding, validate for validation). A field is left out when none of
+ * the section's steps reported it.
+ */
+export function summarizeLogPhase(
+  phases: ClaudeRunPhase[] | undefined,
+  logPhase: TaskLogPhase
+): { durationMs?: number; costUsd?: number } {
+  const names = RUN_PHASES_BY_LOG_PHASE[logPhase];
+  let durationMs: number | undefined;
+  let costUsd: number | undefined;
+  for (const phase of phases ?? []) {
+    if (!names.includes(phase.name)) continue;
+    const duration = getRunPhaseDurationMs(phase);
+    if (duration !== undefined) durationMs = (durationMs ?? 0) + duration;
+    if (phase.costUsd !== undefined) costUsd = (costUsd ?? 0) + phase.costUsd;
+  }
+  return {
+    ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(costUsd !== undefined ? { costUsd } : {})
+  };
+}
+
+/**
+ * Why a task's Claude Code session cannot be opened in an agent window, or null when it can:
+ * there is no session yet, or the task is running (another process is writing to the session)
+ */
+export function getTaskSessionBlocker(
+  task: Pick<Task, 'status' | 'claudeRun'>
+): 'noSession' | 'running' | null {
+  if (!task.claudeRun?.sessionId) return 'noSession';
+  if (task.status === 'in_progress') return 'running';
+  return null;
+}
+
+/** Git branch of a task's worktree (`<project>/.auto-claude/worktrees/tasks/<specId>`) */
+export function getTaskWorktreeBranch(specId: string): string {
+  return `auto-claude/${specId}`;
 }

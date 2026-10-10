@@ -5,11 +5,13 @@ import type { Task } from '../../../shared/types';
 import { TaskListIcon } from '../icons/app-icons';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { cn } from '../../lib/utils';
+import { getTaskSessionBlocker } from '../../../shared/utils/claude-run';
 import { PHASE_CONFIG } from './types';
 
 interface TaskSelectorProps {
   terminalId: string;
-  backlogTasks: Task[];
+  /** Tasks to pick from: tasks with a Claude Code session, and backlog tasks */
+  tasks: Task[];
   associatedTask?: Task;
   onTaskSelect: (taskId: string) => void;
   onClearTask: () => void;
@@ -22,7 +24,7 @@ interface TaskSelectorProps {
  */
 export function TaskSelector({
   terminalId: _terminalId,
-  backlogTasks,
+  tasks,
   associatedTask,
   onTaskSelect,
   onClearTask,
@@ -48,10 +50,10 @@ export function TaskSelector({
   // Available tasks (the linked one is not listed), filtered by the search query
   const filteredTasks = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return backlogTasks
+    return tasks
       .filter((task) => task.id !== associatedTask?.id)
       .filter((task) => !query || task.title.toLowerCase().includes(query));
-  }, [backlogTasks, associatedTask?.id, searchQuery]);
+  }, [tasks, associatedTask?.id, searchQuery]);
 
   // Reset search and keyboard focus whenever the list opens
   useEffect(() => {
@@ -68,9 +70,13 @@ export function TaskSelector({
     }
   }, [focusedIndex]);
 
-  const selectTask = (taskId: string) => {
+  // A task whose session is being written by its run cannot be picked
+  const isTaskRunning = (task: Task) => !!task.claudeRun?.sessionId && getTaskSessionBlocker(task) === 'running';
+
+  const selectTask = (task: Task) => {
+    if (isTaskRunning(task)) return;
     setIsOpen(false);
-    onTaskSelect(taskId);
+    onTaskSelect(task.id);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -82,7 +88,7 @@ export function TaskSelector({
       setFocusedIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter' && focusedIndex >= 0 && filteredTasks[focusedIndex]) {
       e.preventDefault();
-      selectTask(filteredTasks[focusedIndex].id);
+      selectTask(filteredTasks[focusedIndex]);
     }
   };
 
@@ -105,7 +111,7 @@ export function TaskSelector({
               ) : (
                 <PhaseIcon className="h-4 w-4" strokeWidth={1.75} />
               )}
-              <span>{phaseConfig.label}</span>
+              <span className="max-w-40 truncate">{associatedTask.title}</span>
             </>
           ) : (
             <>
@@ -191,10 +197,13 @@ export function TaskSelector({
           <div id={listboxId} role="listbox" aria-label={t('taskSelector.availableTasks')}>
             {filteredTasks.length === 0 ? (
               <div className="px-3 py-2 text-sm text-(--nav-label-color)">
-                {backlogTasks.length === 0 ? t('taskSelector.noTasks') : t('taskSelector.noResults')}
+                {tasks.length === 0 ? t('taskSelector.noTasks') : t('taskSelector.noResults')}
               </div>
             ) : (
-              filteredTasks.map((task, index) => (
+              filteredTasks.map((task, index) => {
+                const running = isTaskRunning(task);
+                const hasSession = !!task.claudeRun?.sessionId;
+                return (
                 <div
                   key={task.id}
                   id={getOptionId(index)}
@@ -205,20 +214,28 @@ export function TaskSelector({
                   role="option"
                   tabIndex={-1}
                   aria-selected={focusedIndex === index}
+                  aria-disabled={running || undefined}
                   className={cn(
-                    'cursor-pointer truncate rounded-lg px-3 py-2 text-sm text-foreground',
-                    focusedIndex === index ? 'bg-nav-hover' : 'hover:bg-nav-hover'
+                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-foreground',
+                    running ? 'cursor-default opacity-60' : 'cursor-pointer',
+                    focusedIndex === index && !running ? 'bg-nav-hover' : !running && 'hover:bg-nav-hover'
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
-                    selectTask(task.id);
+                    selectTask(task);
                   }}
                   onMouseEnter={() => setFocusedIndex(index)}
-                  title={task.title}
+                  title={running ? t('taskSelector.runningHint') : task.title}
                 >
-                  {task.title}
+                  <span className="min-w-0 flex-1 truncate">{task.title}</span>
+                  {hasSession && (
+                    <span className="shrink-0 text-xs text-(--nav-label-color)">
+                      {running ? t('taskSelector.running') : t('taskSelector.resumeSession')}
+                    </span>
+                  )}
                 </div>
-              ))
+                );
+              })
             )}
           </div>
         </div>

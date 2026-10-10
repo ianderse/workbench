@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron';
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
-import type { IPCResult, TerminalCreateOptions, ClaudeProfile, ClaudeProfileSettings, ClaudeUsageSnapshot, AllProfilesUsage } from '../../shared/types';
+import type { IPCResult, TerminalCreateOptions, TerminalTaskSessionOptions, ClaudeProfile, ClaudeProfileSettings, ClaudeUsageSnapshot, AllProfilesUsage } from '../../shared/types';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { TerminalManager } from '../terminal-manager';
@@ -77,6 +77,22 @@ export function registerTerminalHandlers(
         await terminalManager.invokeCLIAsync(id, cwd, undefined, dangerouslySkipPermissions);
       })().catch((error) => {
         console.warn('[terminal-handlers] Failed to invoke Claude:', error);
+      });
+    }
+  );
+
+  // Resume a task's Claude Code session in an agent window (`claude --resume <id>` in the task's
+  // worktree, on the profile the session ran on)
+  ipcMain.on(
+    IPC_CHANNELS.TERMINAL_RESUME_TASK_SESSION,
+    (_, id: string, options: TerminalTaskSessionOptions) => {
+      (async () => {
+        if (!options?.sessionId || !options.cwd) return;
+        const settings = await readSettingsFileAsync();
+        const dangerouslySkipPermissions = settings?.dangerouslySkipPermissions === true;
+        await terminalManager.resumeTaskSessionAsync(id, options, dangerouslySkipPermissions);
+      })().catch((error) => {
+        console.warn('[terminal-handlers] Failed to resume the task session:', error);
       });
     }
   );

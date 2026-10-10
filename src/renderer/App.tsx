@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { debugLog } from '../shared/utils/debug-logger';
@@ -526,6 +526,21 @@ export function App() {
     setActiveProject(projectId);
     setActiveView((view) => (view === 'projects' ? 'kanban' : view));
   }, [openProjectTab, setActiveProject]);
+
+  // "Open agent" in task details opens the task's session in a new agent window: close the task
+  // dialog and show the Agents page of the task's project
+  const agentsViewRequest = useTerminalStore((state) => state.agentsViewRequest);
+  const handledAgentsViewSeqRef = useRef(0);
+  useEffect(() => {
+    if (!agentsViewRequest || agentsViewRequest.seq === handledAgentsViewSeqRef.current) return;
+    handledAgentsViewSeqRef.current = agentsViewRequest.seq;
+    setSelectedTask(null);
+    const project = projects.find((p) => p.path === agentsViewRequest.projectPath);
+    if (project && project.id !== (activeProjectId || selectedProjectId)) {
+      handleSelectProject(project.id);
+    }
+    setActiveView('terminals');
+  }, [agentsViewRequest, projects, activeProjectId, selectedProjectId, handleSelectProject]);
 
   const handleProjectTabClose = (projectId: string) => {
     // Show confirmation dialog before removing the project

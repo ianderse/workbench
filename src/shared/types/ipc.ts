@@ -2,9 +2,20 @@
  * IPC (Inter-Process Communication) types for Electron API
  */
 
+/** A task's Claude Code session to resume in an agent window (`claude --resume <sessionId>`) */
+export interface TerminalTaskSessionOptions {
+  /** Claude Code session id of the task run */
+  sessionId: string;
+  /** Directory to resume in (the task's worktree, where the session ran) */
+  cwd: string;
+  /** Claude profile the session ran on */
+  profileId?: string;
+  /** Claude config dir that holds the session transcript */
+  configDir?: string;
+}
+
 import type { IPCResult } from './common';
 import type { KanbanPreferences } from './kanban';
-import type { SupportedIDE, SupportedTerminal } from './settings';
 import type {
   Project,
   ProjectSettings,
@@ -185,6 +196,7 @@ export interface ElectronAPI {
   sendTerminalInput: (id: string, data: string) => void;
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<IPCResult<{ success: boolean }>>;
   invokeCLIInTerminal: (id: string, cwd?: string) => void;
+  resumeTaskSessionInTerminal: (id: string, options: TerminalTaskSessionOptions) => void;
   generateTerminalName: (command: string, cwd?: string) => Promise<IPCResult<string>>;
   setTerminalTitle: (id: string, title: string) => void;
   setTerminalWorktreeConfig: (id: string, config: TerminalWorktreeConfig | undefined) => void;

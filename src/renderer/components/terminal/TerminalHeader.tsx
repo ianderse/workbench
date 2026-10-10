@@ -58,7 +58,11 @@ export function TerminalHeader({
   pendingCLIResume,
 }: TerminalHeaderProps) {
   const { t } = useTranslation(['terminal', 'common']);
-  const backlogTasks = tasks.filter((t) => t.status === 'backlog');
+  // Tasks an agent window can pick: those with a Claude Code session to resume (not archived),
+  // and backlog tasks (their description is sent to the running session)
+  const selectableTasks = tasks.filter(
+    (task) => (!!task.claudeRun?.sessionId && !task.metadata?.archivedAt) || task.status === 'backlog'
+  );
 
   // Check if 2+ terminals have pending Claude resume
   // Use a derived selector returning a primitive to avoid re-renders on unrelated terminal changes
@@ -117,7 +121,7 @@ export function TerminalHeader({
         {isCLIMode && (
           <TaskSelector
             terminalId={terminalId}
-            backlogTasks={backlogTasks}
+            tasks={selectableTasks}
             associatedTask={associatedTask}
             onTaskSelect={onTaskSelect}
             onClearTask={onClearTask}
