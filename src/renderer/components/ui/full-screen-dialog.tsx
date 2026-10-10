@@ -88,7 +88,7 @@ const FullScreenDialogFooter = ({
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={cn('flex items-center justify-end gap-2 px-6 pb-6', DIALOG_FOOTER_BAR_CLASS, className)}
+    className={cn('flex items-center justify-end gap-4 px-6 pb-6', DIALOG_FOOTER_BAR_CLASS, className)}
     {...props}
   />
 );

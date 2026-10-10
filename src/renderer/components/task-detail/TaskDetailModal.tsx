@@ -466,7 +466,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
             </div>
 
             {/* Footer: task actions (the close button stays at the top) */}
-            <div className="flex shrink-0 items-center justify-end gap-1 px-6 py-3 electron-no-drag">
+            <div className="flex shrink-0 items-center justify-end gap-2 px-6 py-3 electron-no-drag">
               {task.metadata?.archivedAt && (
                 <Button variant="ghost" size="sm" className="gap-1.5" onClick={handleUnarchive} disabled={isUnarchiving}>
                   {isUnarchiving ? (

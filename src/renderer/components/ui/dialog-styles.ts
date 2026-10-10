@@ -43,4 +43,4 @@ export const DIALOG_DESCRIPTION_CLASS = 'text-sm leading-5 text-(--nav-label-col
 
 /** Footer: actions right-aligned below the content, no divider or fixed bar */
 export const DIALOG_FOOTER_BAR_CLASS = 'pt-2';
-export const DIALOG_FOOTER_ACTIONS_CLASS = 'flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end';
+export const DIALOG_FOOTER_ACTIONS_CLASS = 'flex flex-col-reverse gap-4 sm:flex-row sm:items-center sm:justify-end';

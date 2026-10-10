@@ -152,7 +152,7 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
 
       {/* Changes in the task's worktree */}
       {(worktreeStatus?.exists || worktreeAction) && (
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
           <p className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-(--nav-label-color)">
             {worktreeStatus?.exists && (<>
             <span>{t('taskReview:workspace.fileCount', { count: worktreeStatus.filesChanged || 0 })}</span>
