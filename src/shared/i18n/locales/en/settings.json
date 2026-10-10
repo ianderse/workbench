@@ -355,6 +355,17 @@
       "autoSwitchOnAuthFailure": "Auto-switch on auth failure",
       "autoSwitchOnAuthFailureDescription": "Automatically switch to another authenticated account when authentication fails"
     },
+    "metrics": {
+      "title": "Metrics",
+      "tasks_one": "{{count}} task",
+      "tasks_other": "{{count}} tasks",
+      "total": "Total",
+      "updated": "Spending of all tasks · updated {{time}}",
+      "notUpdated": "Spending of all tasks",
+      "refresh": "Refresh",
+      "empty": "No initialized projects",
+      "error": "Could not read the projects' spending"
+    },
     "priority": {
       "title": "Account priority order",
       "dragHandle": "Drag to reorder",

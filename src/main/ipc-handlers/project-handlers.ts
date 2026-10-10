@@ -10,9 +10,11 @@ import type {
   InitializationResult,
   AutoBuildVersionInfo,
   GitStatus,
-  GitBranchDetail
+  GitBranchDetail,
+  ProjectCostMetrics
 } from '../../shared/types';
 import { projectStore } from '../project-store';
+import { getProjectCostMetrics } from '../project-metrics';
 import {
   initializeProject,
   isInitialized,
@@ -209,6 +211,18 @@ export function registerProjectHandlers(
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error'
         };
+      }
+    }
+  );
+
+  // Spending per initialized project (Settings > Accounts > Metrics)
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECT_COST_METRICS,
+    async (): Promise<IPCResult<ProjectCostMetrics[]>> => {
+      try {
+        return { success: true, data: await getProjectCostMetrics(projectStore.getProjects()) };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
       }
     }
   );

@@ -9,7 +9,8 @@ import type {
   ProjectEnvConfig,
   GitStatus,
   KanbanPreferences,
-  GitBranchDetail
+  GitBranchDetail,
+  ProjectCostMetrics
 } from '../../shared/types';
 
 // Tab state interface (persisted in main process)
@@ -24,6 +25,7 @@ export interface ProjectAPI {
   addProject: (projectPath: string) => Promise<IPCResult<Project>>;
   removeProject: (projectId: string) => Promise<IPCResult>;
   getProjects: () => Promise<IPCResult<Project[]>>;
+  getProjectCostMetrics: () => Promise<IPCResult<ProjectCostMetrics[]>>;
   updateProjectSettings: (
     projectId: string,
     settings: Partial<ProjectSettings>
@@ -146,6 +148,9 @@ export const createProjectAPI = (): ProjectAPI => ({
 
   getProjects: (): Promise<IPCResult<Project[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.PROJECT_LIST),
+
+  getProjectCostMetrics: (): Promise<IPCResult<ProjectCostMetrics[]>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_COST_METRICS),
 
   updateProjectSettings: (
     projectId: string,

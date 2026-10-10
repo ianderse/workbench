@@ -12,6 +12,17 @@ export interface Project {
   updatedAt: Date;
 }
 
+/** Spending of one initialized project (Settings > Accounts > Metrics) */
+export interface ProjectCostMetrics {
+  projectId: string;
+  name: string;
+  path: string;
+  /** Tasks (spec directories) in the project */
+  taskCount: number;
+  /** Sum of the tasks' Claude Code run costs (USD) */
+  totalCostUsd: number;
+}
+
 export interface ProjectSettings {
   model: string;
   memoryBackend: 'memory' | 'file';

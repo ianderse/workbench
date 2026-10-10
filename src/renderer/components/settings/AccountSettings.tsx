@@ -2,7 +2,8 @@
  * AccountSettings - how Claude Code signs in
  *
  * claude.ai settings layout: Claude accounts (subscriptions, with usage), API profiles
- * (Anthropic-compatible endpoints), automatic account switching and the switching order.
+ * (Anthropic-compatible endpoints), spending per project (Metrics), automatic account switching
+ * and the switching order.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +14,7 @@ import { SettingsRow, SettingsRows } from './SettingsRow';
 import { AccountPriorityList, type UnifiedAccount } from './AccountPriorityList';
 import { ClaudeAccountsSection } from './ClaudeAccountsSection';
 import { ProfileList } from './ProfileList';
+import { ProjectMetricsSection } from './ProjectMetricsSection';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
 import { useToast } from '../../hooks/use-toast';
 import type { AppSettings, ClaudeAutoSwitchSettings } from '../../../shared/types';
@@ -190,6 +192,9 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
           <ProfileList />
         </SettingsRows>
       </SettingsSection>
+
+      {/* Spending per project (all tasks' Claude Code run costs) */}
+      <ProjectMetricsSection />
 
       {/* Automatic account switching */}
       {totalAccounts > 1 && (
