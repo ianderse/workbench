@@ -13,7 +13,7 @@ import {
 } from '../ui/select';
 import { Input } from '../ui/input';
 import { PasswordInput } from '../project-settings/PasswordInput';
-import { OllamaModelSelector } from '../onboarding/OllamaModelSelector';
+import { OllamaModelSelector } from './OllamaModelSelector';
 import type { MemoryEmbeddingProvider } from '../../../shared/types';
 
 export interface MemoryPanelConfig {
@@ -45,7 +45,7 @@ interface MemoryConfigPanelProps {
 }
 
 /**
- * Shared memory configuration panel used in both the onboarding wizard and project settings.
+ * Shared memory configuration panel used in project settings.
  *
  * Includes:
  * - Enable Memory toggle

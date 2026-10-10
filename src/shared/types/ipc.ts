@@ -322,7 +322,6 @@ export interface ElectronAPI {
     claude: import('./cli').ToolDetectionResult;
   }>>;
   /** Check if Claude Code onboarding is complete (reads ~/.claude.json) */
-  getClaudeCodeOnboardingStatus: () => Promise<IPCResult<{ hasCompletedOnboarding: boolean }>>;
 
   // API Profile management (custom Anthropic-compatible endpoints)
   getAPIProfiles: () => Promise<IPCResult<ProfilesFile>>;

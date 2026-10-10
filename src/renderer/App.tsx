@@ -26,13 +26,12 @@ import { Insights } from './components/Insights';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AuthFailureModal } from './components/AuthFailureModal';
-import { OnboardingWizard } from './components/onboarding';
 import { AppUpdateNotification } from './components/AppUpdateNotification';
 import { ProactiveSwapListener } from './components/ProactiveSwapListener';
 import { useProjectStore, loadProjects, initializeProject, removeProject } from './stores/project-store';
 import { useTaskStore, loadTasks } from './stores/task-store';
 import { useSettingsStore, loadSettings, loadProfiles, saveSettings } from './stores/settings-store';
-import { useClaudeProfileStore, loadClaudeProfiles } from './stores/claude-profile-store';
+import { loadClaudeProfiles } from './stores/claude-profile-store';
 import { useTerminalStore, restoreTerminalSessions } from './stores/terminal-store';
 import { initDownloadProgressListener } from './stores/download-store';
 import { GlobalDownloadIndicator } from './components/GlobalDownloadIndicator';
@@ -73,7 +72,6 @@ export function App() {
   const setActiveProject = useProjectStore((state) => state.setActiveProject);
   const tasks = useTaskStore((state) => state.tasks);
   const settings = useSettingsStore((state) => state.settings);
-  const settingsLoading = useSettingsStore((state) => state.isLoading);
 
   // Keep the terminal limit in sync with the "Maximum windows" setting
   useEffect(() => {
@@ -81,12 +79,6 @@ export function App() {
       useTerminalStore.getState().setMaxTerminals(settings.maxTerminals);
     }
   }, [settings.maxTerminals]);
-
-  // API Profile state
-  const profiles = useSettingsStore((state) => state.profiles);
-
-  // Claude Profile state (OAuth)
-  const claudeProfiles = useClaudeProfileStore((state) => state.profiles);
 
   // UI State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -114,7 +106,6 @@ export function App() {
       setActiveView('kanban');
     }
   }, [activeView, memoryGraphAvailable]);
-  const [isOnboardingWizardOpen, setIsOnboardingWizardOpen] = useState(false);
   const [isRefreshingTasks, setIsRefreshingTasks] = useState(false);
 
   // Initialize dialog state
@@ -199,35 +190,6 @@ export function App() {
       }
     }
   }, [projects, activeProjectId, selectedProjectId, openProjectIds, openProjectTab, setActiveProject, projectTabs.length, projectTabs.map]);
-
-  // Track if settings have been loaded at least once
-  const [settingsHaveLoaded, setSettingsHaveLoaded] = useState(false);
-
-  // Mark settings as loaded when loading completes
-  useEffect(() => {
-    if (!settingsLoading && !settingsHaveLoaded) {
-      setSettingsHaveLoaded(true);
-    }
-  }, [settingsLoading, settingsHaveLoaded]);
-
-  // First-run detection - show onboarding wizard if not completed
-  // Only check AFTER settings have been loaded from disk to avoid race condition
-  useEffect(() => {
-    // Check if either auth method is configured
-    // API profiles: if profiles exist, auth is configured (user has gone through setup)
-    const hasAPIProfileConfigured = profiles.length > 0;
-    const hasOAuthConfigured = claudeProfiles.some(p =>
-      p.oauthToken || (p.isDefault && p.configDir)
-    );
-    const hasAnyAuth = hasAPIProfileConfigured || hasOAuthConfigured;
-
-    // Only show wizard if onboarding not completed AND no auth is configured
-    if (settingsHaveLoaded &&
-        settings.onboardingCompleted === false &&
-        !hasAnyAuth) {
-      setIsOnboardingWizardOpen(true);
-    }
-  }, [settingsHaveLoaded, settings.onboardingCompleted, profiles, claudeProfiles]);
 
   const { t, i18n } = useTranslation('dialogs');
 
@@ -854,20 +816,6 @@ export function App() {
           setSettingsInitialSection('accounts');
           setIsSettingsDialogOpen(true);
         }} />
-
-        {/* Onboarding Wizard - shows on first launch when onboardingCompleted is false */}
-        <OnboardingWizard
-          open={isOnboardingWizardOpen}
-          onOpenChange={setIsOnboardingWizardOpen}
-          onOpenTaskCreator={() => {
-            setIsOnboardingWizardOpen(false);
-            setIsNewTaskDialogOpen(true);
-          }}
-          onOpenSettings={() => {
-            setIsOnboardingWizardOpen(false);
-            setIsSettingsDialogOpen(true);
-          }}
-        />
 
         {/* App Update Notification - shows when new app version is available */}
         <AppUpdateNotification />

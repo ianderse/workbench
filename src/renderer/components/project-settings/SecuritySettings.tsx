@@ -12,7 +12,7 @@ import {
 } from '../ui/select';
 import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
-import { OllamaModelSelector } from '../onboarding/OllamaModelSelector';
+import { OllamaModelSelector } from '../shared/OllamaModelSelector';
 import { useGraphifyVersion } from '../../hooks/useGraphifyVersion';
 import type { ProjectEnvConfig, ProjectSettings as ProjectSettingsType, MemoryEmbeddingProvider } from '../../../shared/types';
 
