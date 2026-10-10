@@ -42,7 +42,7 @@ import {
 } from '../ui/dialog-styles';
 import { stopTask, submitReview, recoverStuckTask, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, retryTask } from '../../stores/task-store';
 import { useProjectStore } from '../../stores/project-store';
-import { TASK_STATUS_LABELS } from '../../../shared/constants';
+import { TASK_STATUS_LABELS, getTaskColumn, type TaskStatusColumn } from '../../../shared/constants';
 import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
@@ -51,6 +51,16 @@ import { TaskWarnings } from './TaskWarnings';
 import { TaskLogs } from './TaskLogs';
 import { TaskReview } from './TaskReview';
 import type { Task, WorktreeCreatePROptions } from '../../../shared/types';
+
+// Status label colors: the top line color of each Kanban column (globals.css `--column-*`)
+const STATUS_BADGE_CLASSES: Record<TaskStatusColumn, string> = {
+  backlog: 'text-(--column-backlog) bg-(--column-backlog)/10',
+  queue: 'text-(--column-queue) bg-(--column-queue)/10',
+  in_progress: 'text-(--column-in-progress) bg-(--column-in-progress)/10',
+  ai_review: 'text-(--column-ai-review) bg-(--column-ai-review)/10',
+  human_review: 'text-(--column-human-review) bg-(--column-human-review)/10',
+  done: 'text-(--column-done) bg-(--column-done)/10',
+};
 
 interface TaskDetailModalProps {
   open: boolean;
@@ -237,20 +247,6 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     onOpenChange(false);
   };
 
-  // Helper function to get status badge variant
-  const getStatusBadgeVariant = (status: string, isStuck: boolean) => {
-    if (isStuck) return 'warning';
-    switch (status) {
-      case 'done':
-        return 'success';
-      case 'human_review':
-        return 'purple';
-      case 'in_progress':
-        return 'info';
-      default:
-        return 'secondary';
-    }
-  };
 
 
 
@@ -308,10 +304,19 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                             <AlertTriangle className="h-3 w-3" />
                             {t('tasks:detailHeader.incomplete')}
                           </Badge>
+                      ) : taskHasErrors(task) ? (
+                        <Badge variant="outline" className="text-xs border-current bg-red-500/10 text-red-500">
+                          {t('tasks:detailHeader.failed')}
+                        </Badge>
                       ) : (
+                        // Same color as the top line of the task's Kanban column
                         <Badge
-                          variant={getStatusBadgeVariant(task.status, state.isStuck)}
-                          className={cn('text-xs', (task.status === 'in_progress' && !state.isStuck) && 'status-running')}
+                          variant="outline"
+                          className={cn(
+                            'text-xs border-current',
+                            STATUS_BADGE_CLASSES[getTaskColumn(task.status)],
+                            task.status === 'in_progress' && 'status-running'
+                          )}
                         >
                           {t(TASK_STATUS_LABELS[task.status])}
                         </Badge>

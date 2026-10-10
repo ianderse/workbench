@@ -653,29 +653,38 @@ body {
   outline-offset: 2px;
 }
 
-/* Column status colors for Kanban */
+/* Column status colors for Kanban (also used by the task dialog's status label) */
+:root {
+  --column-backlog: var(--muted-foreground);
+  --column-queue: #22d3ee;
+  --column-in-progress: var(--info);
+  --column-ai-review: var(--warning);
+  --column-human-review: #A855F7;
+  --column-done: var(--success);
+}
+
 .column-backlog {
-  border-top-color: var(--muted-foreground);
+  border-top-color: var(--column-backlog);
 }
 
 .column-queue {
-  border-top-color: #22d3ee;
+  border-top-color: var(--column-queue);
 }
 
 .column-in-progress {
-  border-top-color: var(--info);
+  border-top-color: var(--column-in-progress);
 }
 
 .column-ai-review {
-  border-top-color: var(--warning);
+  border-top-color: var(--column-ai-review);
 }
 
 .column-human-review {
-  border-top-color: #A855F7;
+  border-top-color: var(--column-human-review);
 }
 
 .column-done {
-  border-top-color: var(--success);
+  border-top-color: var(--column-done);
 }
 
 /* Progress bar working animation - subtle glow sweep */

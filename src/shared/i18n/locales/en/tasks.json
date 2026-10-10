@@ -334,7 +334,8 @@
   },
   "detailHeader": {
     "stuck": "Stuck",
-    "incomplete": "Incomplete"
+    "incomplete": "Incomplete",
+    "failed": "Failed"
   },
   "claudeRun": {
     "modelEffort": "{{model}} · {{effort}}",

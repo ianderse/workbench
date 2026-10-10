@@ -35,20 +35,6 @@ export const TASK_STATUS_LABELS: Record<TaskStatusColumn | 'pr_created' | 'error
   error: 'columns.error'
 };
 
-// Status colors for UI
-// Note: pr_created maps to 'done' column in Kanban view (see KanbanBoard.tsx)
-// Note: error maps to 'human_review' column in Kanban view (errors need human attention)
-export const TASK_STATUS_COLORS: Record<TaskStatusColumn | 'pr_created' | 'error', string> = {
-  backlog: 'bg-muted text-muted-foreground',
-  queue: 'bg-cyan-500/10 text-cyan-400',
-  in_progress: 'bg-info/10 text-info',
-  ai_review: 'bg-warning/10 text-warning',
-  human_review: 'bg-purple-500/10 text-purple-400',
-  done: 'bg-success/10 text-success',
-  pr_created: 'bg-info/10 text-info',
-  error: 'bg-destructive/10 text-destructive'
-};
-
 /**
  * Kanban column a task is shown in: pr_created tasks sit in Done and error tasks in
  * Human Review (errors need human attention).
