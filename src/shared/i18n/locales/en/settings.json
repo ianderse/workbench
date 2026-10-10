@@ -387,6 +387,8 @@
       "needsReauthHint": "This profile's refresh token is invalid. Click to re-authenticate.",
       "sessionUsage": "Session usage (5-hour window)",
       "weeklyUsage": "Weekly usage (7-day window)",
+      "sessionShort": "Session {{percent}}%",
+      "weeklyShort": "Weekly {{percent}}%",
       "tipTitle": "How priority works",
       "tipDescription": "When the account in use hits its session or weekly limit, tasks continue on the next available account in this order",
       "status": {
@@ -462,16 +464,6 @@
     "advancedHeaders": "Additional headers",
     "status": {
       "needsAuth": "Authentication required"
-    },
-    "hints": {
-      "github": "This looks like a GitHub MCP server. You'll need a Personal Access Token with appropriate scopes.",
-      "createGithubPat": "Create GitHub PAT",
-      "google": "This looks like a Google API. You'll need an OAuth token or API key.",
-      "createGoogleToken": "Create Google Credentials",
-      "anthropic": "This looks like an Anthropic API. You'll need an API key.",
-      "createAnthropicKey": "Create Anthropic API Key",
-      "openai": "This looks like an OpenAI API. You'll need an API key.",
-      "createOpenaiKey": "Create OpenAI API Key"
     },
     "serverIdPreview": "ID: {{id}}",
     "removeHeader": "Remove header {{name}}"

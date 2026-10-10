@@ -7,9 +7,7 @@
 
 export { StagedSuccessMessage } from './StagedSuccessMessage';
 export { WorkspaceStatus } from './WorkspaceStatus';
-export { MergePreviewSummary } from './MergePreviewSummary';
 export { QAFeedbackSection } from './QAFeedbackSection';
 export { ConflictDetailsDialog } from './ConflictDetailsDialog';
 export { CreatePRDialog } from './CreatePRDialog';
 export { LoadingMessage, NoWorkspaceMessage, StagedInProjectMessage } from './WorkspaceMessages';
-export { getSeverityIcon, getSeverityVariant } from './utils';

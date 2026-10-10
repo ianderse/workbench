@@ -1,6 +1,6 @@
 import { useState, useRef, useLayoutEffect, useId, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Shield, ChevronDown, ChevronUp, type LucideIcon } from 'lucide-react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { ExternalLink } from '../ui/external-link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -57,20 +57,15 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
 
   const origin = task.metadata
     ? [
-        task.metadata.securitySeverity && {
-          key: 'severity',
-          icon: Shield,
-          label: `${task.metadata.securitySeverity} ${t('tasks:metadata.severity')}`
-        },
         // Who created the task: suggested by an agent (Claude chat) or added by the user
         task.metadata.sourceType && {
           key: 'source',
           label: AGENT_SOURCES.has(task.metadata.sourceType) ? t('tasks:metadata.byAgent') : t('tasks:metadata.byUser')
         }
-      ].filter(Boolean) as { key: string; icon?: LucideIcon; label: string }[]
+      ].filter(Boolean) as { key: string; label: string }[]
     : [];
 
-  const metaItems: { key: string; icon?: LucideIcon; label: string }[] = [
+  const metaItems: { key: string; label: string }[] = [
     ...origin,
     { key: 'created', label: t('tasks:metadata.created', { time: formatRelativeTime(task.createdAt) }) },
     { key: 'updated', label: t('tasks:metadata.updated', { time: formatRelativeTime(task.updatedAt) }) }
@@ -90,18 +85,12 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
     <div className="space-y-4">
       {/* Origin + timeline as one muted line */}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-(--nav-label-color)">
-        {metaItems.map((item, idx) => {
-          const Icon = item.icon;
-          return (
-            <span key={item.key} className="flex items-center gap-2">
-              {idx > 0 && <span aria-hidden="true">·</span>}
-              <span className="flex items-center gap-1">
-                {Icon && <Icon className="h-3 w-3" strokeWidth={1.75} />}
-                {item.label}
-              </span>
-            </span>
-          );
-        })}
+        {metaItems.map((item, idx) => (
+          <span key={item.key} className="flex items-center gap-2">
+            {idx > 0 && <span aria-hidden="true">·</span>}
+            <span>{item.label}</span>
+          </span>
+        ))}
       </div>
 
       {/* Description - primary content in the claude info box */}

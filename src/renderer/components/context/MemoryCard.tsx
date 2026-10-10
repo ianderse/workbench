@@ -1,25 +1,11 @@
 import { useState, useMemo } from 'react';
-import {
-  CheckCircle2,
-  XCircle,
-  Lightbulb,
-  FileCode,
-  AlertTriangle,
-  Sparkles,
-  ChevronDown,
-  ChevronUp,
-  Flag,
-  Pin,
-  ShieldCheck,
-  Trash2
-} from 'lucide-react';
+import { ChevronDown, ChevronUp, Pin, ShieldCheck, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import type { RendererMemory } from '../../../shared/types';
 import { memoryTypeLabels } from './constants';
 import { formatDate } from './utils';
-import { PRReviewCard } from './PRReviewCard';
 import { cn } from '../../lib/utils';
 
 interface MemoryCardProps {
@@ -71,17 +57,14 @@ function parseMemoryContent(content: string): ParsedMemoryContent | null {
 }
 
 function SectionHeader({
-  icon: Icon,
   title,
   count
 }: {
-  icon: React.ComponentType<{ className?: string }>;
   title: string;
   count?: number;
 }) {
   return (
     <div className="flex items-center gap-2 mb-2">
-      <Icon className="h-4 w-4 text-muted-foreground" />
       <span className="text-sm font-medium text-foreground">{title}</span>
       {count !== undefined && count > 0 && (
         <Badge variant="secondary" className="text-xs px-1.5 py-0">
@@ -115,16 +98,6 @@ function ListItem({
   );
 }
 
-
-// Check if memory content looks like a PR review (by content structure only)
-function isPRReviewMemory(memory: RendererMemory): boolean {
-  try {
-    const parsed = JSON.parse(memory.content);
-    return parsed.prNumber !== undefined && parsed.verdict !== undefined;
-  } catch {
-    return false;
-  }
-}
 
 // Dead-end memory: parse structured approach/failure info
 function DeadEndContent({ parsed, sections }: { parsed: ParsedMemoryContent; sections: Record<string, string> }) {
@@ -213,11 +186,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
     );
   }, [parsed, memory.relatedFiles, memory.tags]);
 
-  // Delegate PR reviews to specialized component
-  if (isPRReviewMemory(memory)) {
-    return <PRReviewCard memory={memory} />;
-  }
-
   const typeLabel =
     memoryTypeLabels[memory.type] ||
     t(`memory.types.${memory.type}`, { defaultValue: memory.type.replace(/_/g, ' ') });
@@ -255,15 +223,10 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
             <div className="flex flex-wrap items-center gap-x-2 text-sm text-foreground">
               <span>{typeLabel}</span>
               {sessionLabel && <span className="text-(--nav-label-color)">{sessionLabel}</span>}
-              {memory.pinned && (
-                <Pin className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={t('memory.badges.pinned')} />
-              )}
-              {memory.needsReview && (
-                <Flag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={t('memory.badges.needsReview')} />
-              )}
-              {memory.userVerified && (
-                <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-label={t('memory.badges.verified')} />
-              )}
+              {/* Status in text, like the rest of the settings pages */}
+              {memory.pinned && <span className="text-(--nav-label-color)">{t('memory.badges.pinned')}</span>}
+              {memory.needsReview && <span className="text-(--nav-label-color)">{t('memory.badges.needsReview')}</span>}
+              {memory.userVerified && <span className="text-(--nav-label-color)">{t('memory.badges.verified')}</span>}
             </div>
             <div className="mt-0.5 truncate text-sm text-(--nav-label-color)" title={specId}>
               {[formatDate(memory.createdAt), t('memory.confidence', { value: Math.round(memory.confidence * 100) }), sourceLabel, specId]
@@ -373,7 +336,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
             {parsed?.what_worked && parsed.what_worked.length > 0 && (
               <div>
                 <SectionHeader
-                  icon={CheckCircle2}
                   title={sections.whatWorked}
                   count={parsed.what_worked.length}
                 />
@@ -391,7 +353,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
             {parsed?.what_failed && parsed.what_failed.length > 0 && (
               <div>
                 <SectionHeader
-                  icon={XCircle}
                   title={sections.whatFailed}
                   count={parsed.what_failed.length}
                 />
@@ -409,9 +370,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
             {parsed?.discoveries?.approach_outcome?.approach_used && (
               <div>
                 <SectionHeader
-                  icon={
-                    parsed.discoveries.approach_outcome.success ? CheckCircle2 : AlertTriangle
-                  }
                   title={sections.approach}
                 />
                 <div className="pl-4 space-y-2">
@@ -437,7 +395,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
               (parsed?.discoveries?.recommendations?.length ?? 0) > 0) && (
               <div>
                 <SectionHeader
-                  icon={Lightbulb}
                   title={sections.recommendations}
                   count={
                     (parsed?.recommendations_for_next_session?.length ?? 0) +
@@ -460,7 +417,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
               parsed.discoveries.patterns_discovered.length > 0 && (
                 <div>
                   <SectionHeader
-                    icon={Sparkles}
                     title={sections.patterns}
                     count={parsed.discoveries.patterns_discovered.length}
                   />
@@ -485,7 +441,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
               parsed.discoveries.gotchas_discovered.length > 0 && (
                 <div>
                   <SectionHeader
-                    icon={AlertTriangle}
                     title={sections.gotchas}
                     count={parsed.discoveries.gotchas_discovered.length}
                   />
@@ -508,7 +463,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
               parsed.discoveries.changed_files.length > 0 && (
                 <div>
                   <SectionHeader
-                    icon={FileCode}
                     title={sections.changedFiles}
                     count={parsed.discoveries.changed_files.length}
                   />
@@ -526,7 +480,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
             {parsed?.discoveries?.file_insights && parsed.discoveries.file_insights.length > 0 && (
               <div>
                 <SectionHeader
-                  icon={FileCode}
                   title={sections.fileInsights}
                   count={parsed.discoveries.file_insights.length}
                 />
@@ -554,7 +507,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
             {parsed?.subtasks_completed && parsed.subtasks_completed.length > 0 && (
               <div>
                 <SectionHeader
-                  icon={CheckCircle2}
                   title={sections.subtasksCompleted}
                   count={parsed.subtasks_completed.length}
                 />
@@ -576,7 +528,6 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
                   onClick={() => setFilesExpanded(!filesExpanded)}
                   className="flex items-center gap-2 mb-2 group"
                 >
-                  <FileCode className="h-4 w-4 text-muted-foreground" />
                   <span className="text-sm font-medium text-foreground">{sections.relatedFiles}</span>
                   <Badge variant="secondary" className="text-xs px-1.5 py-0">
                     {memory.relatedFiles.length}
@@ -588,7 +539,7 @@ export function MemoryCard({ memory, onVerify, onPin, onDeprecate }: MemoryCardP
                   )}
                 </button>
                 {filesExpanded && (
-                  <div className="flex flex-wrap gap-1.5 pl-6">
+                  <div className="flex flex-wrap gap-1.5">
                     {memory.relatedFiles.map((file) => (
                       <Badge key={file} variant="outline" className="text-xs font-mono">
                         {file}

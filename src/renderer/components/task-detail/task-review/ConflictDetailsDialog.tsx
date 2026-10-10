@@ -9,7 +9,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../../ui/alert-dialog';
-import { getSeverityIcon } from './utils';
 import type { MergeConflict, MergeStats, GitConflictInfo } from '../../../../shared/types';
 
 interface ConflictDetailsDialogProps {
@@ -51,7 +50,6 @@ export function ConflictDetailsDialog({
                 <div key={idx} className="py-3 text-sm">
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
-                      {getSeverityIcon(conflict.severity)}
                       <span className="truncate font-mono text-xs text-foreground" title={conflict.file}>
                         {conflict.file}
                       </span>

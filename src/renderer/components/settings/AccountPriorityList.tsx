@@ -27,9 +27,7 @@ import {
   GripVertical,
   Check,
   Infinity,
-  AlertCircle,
-  Clock,
-  TrendingUp
+  AlertCircle
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
@@ -146,9 +144,8 @@ function SortableAccountItem({ account, index, onSetActive }: SortableAccountIte
           <div className="mt-1 flex items-center gap-4 text-xs text-(--nav-label-color)">
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="flex items-center gap-1.5 tabular-nums">
-                  <Clock className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  {Math.round(account.sessionPercent)}%
+                <span className="tabular-nums">
+                  {t('accounts.priority.sessionShort', { percent: Math.round(account.sessionPercent) })}
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs">
@@ -157,9 +154,8 @@ function SortableAccountItem({ account, index, onSetActive }: SortableAccountIte
             </Tooltip>
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="flex items-center gap-1.5 tabular-nums">
-                  <TrendingUp className="h-3.5 w-3.5" strokeWidth={1.75} />
-                  {Math.round(account.weeklyPercent ?? 0)}%
+                <span className="tabular-nums">
+                  {t('accounts.priority.weeklyShort', { percent: Math.round(account.weeklyPercent ?? 0) })}
                 </span>
               </TooltipTrigger>
               <TooltipContent side="top" className="text-xs">

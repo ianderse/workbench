@@ -180,7 +180,6 @@ export interface TaskMetadata {
   acceptanceCriteria?: string[];  // What defines "done"
 
   // Type-specific metadata (from different idea types)
-  securitySeverity?: 'low' | 'medium' | 'high' | 'critical';
   performanceCategory?: string;
   uiuxCategory?: string;
   codeQualitySeverity?: 'suggestion' | 'minor' | 'major' | 'critical';

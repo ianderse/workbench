@@ -1,4 +1,4 @@
-import { FolderOpen, FolderPlus, Clock, ChevronRight, Folder } from 'lucide-react';
+import { FolderOpen, FolderPlus, ChevronRight, Folder } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from './ui/button';
 import { Card } from './ui/card';
@@ -78,8 +78,7 @@ export function WelcomeScreen({
         {recentProjects.length > 0 && (
           <Card className="border border-border bg-card/50 backdrop-blur-sm">
             <div className="p-4 pb-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <Clock className="h-4 w-4" />
+              <div className="text-sm font-medium text-muted-foreground">
                 {t('welcome:recentProjects.title')}
               </div>
             </div>

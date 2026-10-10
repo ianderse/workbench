@@ -10,7 +10,7 @@
  */
 
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
-import { Activity, TrendingUp, AlertCircle, Clock, Info, LogIn } from 'lucide-react';
+import { Activity, TrendingUp, AlertCircle } from 'lucide-react';
 import {
   Popover,
   PopoverContent,
@@ -299,11 +299,9 @@ export function UsageIndicator() {
         >
           <div className="p-3 space-y-3">
             <div className="flex items-center gap-1.5 pb-2 border-b">
-              <Activity className="h-3.5 w-3.5" />
               <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
             </div>
             <div className="flex items-start gap-2.5 py-1">
-              <Info className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
               <div className="min-w-0 space-y-1">
                 <p className="truncate text-xs font-medium">{activeApiProfile.name} · {providerName}</p>
                 <p className="text-xs text-muted-foreground leading-relaxed">{message}</p>
@@ -364,7 +362,6 @@ export function UsageIndicator() {
         >
           <div className="p-3 space-y-3">
             <div className="flex items-center gap-1.5 pb-2 border-b">
-              <Activity className="h-3.5 w-3.5" />
               <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
             </div>
 
@@ -382,7 +379,6 @@ export function UsageIndicator() {
                 </>
               ) : (
                 <>
-                  <Info className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
                   <div className="space-y-1">
                     <p className="text-xs font-medium">{t('common:usage.dataUnavailable')}</p>
                     <p className="text-[10px] text-muted-foreground leading-relaxed">
@@ -473,7 +469,6 @@ export function UsageIndicator() {
         <div className="p-3 space-y-3">
           {/* Header with overall status */}
           <div className="flex items-center gap-1.5 pb-2 border-b">
-            <Icon className="h-3.5 w-3.5" />
             <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
           </div>
 
@@ -496,7 +491,6 @@ export function UsageIndicator() {
                 onClick={handleOpenAccounts}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-xs font-medium"
               >
-                <LogIn className="h-3.5 w-3.5" />
                 {t('common:usage.reauthButton')}
               </button>
             </div>
@@ -506,7 +500,6 @@ export function UsageIndicator() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground font-medium text-[11px] flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
                     {sessionLabel}
                   </span>
                   <span className={`font-semibold tabular-nums text-xs ${getColorClass(usage.sessionPercent).replace('500', '600')}`}>
@@ -514,8 +507,7 @@ export function UsageIndicator() {
                   </span>
                 </div>
                 {sessionResetTime && (
-                  <div className="text-[10px] text-muted-foreground pl-4 flex items-center gap-1">
-                    <Info className="h-2.5 w-2.5" />
+                  <div className="text-[10px] text-muted-foreground">
                     {sessionResetTime}
                   </div>
                 )}
@@ -541,7 +533,6 @@ export function UsageIndicator() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground font-medium text-[11px] flex items-center gap-1">
-                    <TrendingUp className="h-3 w-3" />
                     {weeklyLabel}
                   </span>
                   <span className={`font-semibold tabular-nums text-xs ${getColorClass(usage.weeklyPercent).replace('500', '600')}`}>
@@ -549,8 +540,7 @@ export function UsageIndicator() {
                   </span>
                 </div>
                 {weeklyResetTime && (
-                  <div className="text-[10px] text-muted-foreground pl-4 flex items-center gap-1">
-                    <Info className="h-2.5 w-2.5" />
+                  <div className="text-[10px] text-muted-foreground">
                     {weeklyResetTime}
                   </div>
                 )}

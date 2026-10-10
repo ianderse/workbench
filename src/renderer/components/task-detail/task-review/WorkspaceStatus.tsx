@@ -1,8 +1,7 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import {
   Loader2,
-  RotateCcw,
-  AlertTriangle
+  RotateCcw
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/button';
@@ -249,14 +248,7 @@ export function WorkspaceStatus({
         {/* Merge status */}
         {mergePreview && showMergeStatus && (
           <SettingsRow
-            label={
-              <span className="flex items-center gap-1.5">
-                {(needsAIMerge || hasAIConflicts) && (
-                  <AlertTriangle className="h-4 w-4 text-muted-foreground" strokeWidth={1.75} />
-                )}
-                {mergeStatusTitle}
-              </span>
-            }
+            label={mergeStatusTitle}
             description={mergeStatusDetail}
           >
             {(needsAIMerge || hasAIConflicts) && (

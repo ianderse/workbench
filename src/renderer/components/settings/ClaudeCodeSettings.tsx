@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  AlertTriangle,
   Loader2,
   Download,
   RefreshCw
@@ -373,9 +372,8 @@ export function ClaudeCodeSettings() {
 
       {/* Install/Update error display */}
       {installError && (
-        <div className="mt-3 flex items-center gap-2 rounded-xl bg-segment-track px-4 py-3 text-sm text-foreground">
-          <AlertTriangle className="h-4 w-4 shrink-0 text-[var(--error)]" strokeWidth={1.75} />
-          <span>{installError}</span>
+        <div className="mt-3 rounded-xl bg-segment-track px-4 py-3 text-sm text-foreground">
+          {installError}
         </div>
       )}
 
