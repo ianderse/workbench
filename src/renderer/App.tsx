@@ -401,11 +401,13 @@ export function App() {
     const logsChanged =
       JSON.stringify(selectedTask.logs || []) !==
       JSON.stringify(updatedTask.logs || []);
+    // The Claude Code run (session, steps, costs) is replaced as a whole on every update
+    const claudeRunChanged = selectedTask.claudeRun !== updatedTask.claudeRun;
 
     const hasChanged =
       subtasksChanged || statusChanged || titleChanged || descriptionChanged ||
       metadataChanged || executionProgressChanged || qaReportChanged ||
-      reviewReasonChanged || logsChanged;
+      reviewReasonChanged || logsChanged || claudeRunChanged;
 
     debugLog('[App] Task comparison', {
       hasChanged,
@@ -419,6 +421,7 @@ export function App() {
         qaReport: qaReportChanged,
         reviewReason: reviewReasonChanged,
         logs: logsChanged,
+        claudeRun: claudeRunChanged,
       },
     });
 
@@ -433,6 +436,7 @@ export function App() {
       if (qaReportChanged) reasons.push('QAReport');
       if (reviewReasonChanged) reasons.push('ReviewReason');
       if (logsChanged) reasons.push('Logs');
+      if (claudeRunChanged) reasons.push('ClaudeRun');
 
       debugLog('[App] Updating selectedTask', {
         taskId: updatedTask.id,
