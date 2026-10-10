@@ -27,9 +27,8 @@
     "alreadyMergedTooltip": "The task's changes are already present in your branch. Marking as done will clean up the worktree without merging.",
     "matchingFiles": "Matching files",
     "supersededTitle": "Changes superseded",
-    "supersededDescription": "Your current branch has a newer version of these changes. Consider discarding this task or viewing the comparison.",
+    "supersededDescription": "Your current branch has a newer version of these changes. View the comparison, or delete the task if you no longer need it.",
     "supersededCompareTooltip": "View a detailed comparison to see how the current branch differs from this task's changes.",
-    "supersededDiscardTooltip": "Remove this task's worktree since the changes are no longer needed.",
     "status": {
       "branchDiverged": "Branch diverged",
       "aiWillResolve": "AI will resolve",
@@ -43,7 +42,6 @@
       "details": "Details",
       "refresh": "Refresh",
       "stageOnly": "Stage only",
-      "discardBuild": "Discard build",
       "stageOnlyDescription": "Stage the changes so you can review them in your IDE before committing"
     },
     "buttons": {
@@ -58,7 +56,6 @@
     },
     "actions": {
       "markAsDone": "Mark as done",
-      "discardTask": "Discard task",
       "viewComparison": "View comparison"
     }
   },
@@ -162,21 +159,17 @@
     "resultsDescriptionWithSkipped": "{{success}} succeeded, {{skipped}} skipped, {{failed}} failed"
   },
   "workspace": {
-    "title": "Build ready for review",
     "loading": "Loading workspace info...",
     "fileCount_one": "{{count}} file",
     "fileCount_other": "{{count}} files",
     "commitCount_one": "{{count}} commit",
     "commitCount_other": "{{count}} commits",
-    "viewChanges": "View changes",
-    "branch": "Branch",
-    "worktree": "Worktree",
-    "openIn": "Open in {{app}}",
     "uncommittedChanges_one": "{{count}} uncommitted change in the main project",
     "uncommittedChanges_other": "{{count}} uncommitted changes in the main project",
     "uncommittedChangesHint": "Commit or stash them in your terminal before staging to avoid conflicts.",
     "checkConflicts": "Check for conflicts",
-    "checkingConflicts": "Checking for conflicts..."
+    "checkingConflicts": "Checking for conflicts...",
+    "targetBranch": "Branch the changes merge into"
   },
   "noWorkspace": {
     "title": "No workspace found",
@@ -187,26 +180,6 @@
     "title": "Changes staged in project",
     "description": "This task's changes have been staged in your main project.",
     "descriptionOn": "This task's changes have been staged in your main project on {{date}}."
-  },
-  "discard": {
-    "title": "Discard build",
-    "confirmMessage": "Are you sure you want to discard all changes for",
-    "warning": "This will permanently delete the isolated workspace and all uncommitted changes. The task will be moved back to Planning.",
-    "filesChanged": "Files changed",
-    "lines": "Lines",
-    "discarding": "Discarding...",
-    "confirm": "Discard build"
-  },
-  "diff": {
-    "title": "Changed files",
-    "noChanges": "No changes found",
-    "noFiles": "No changed files found",
-    "status": {
-      "added": "Added",
-      "deleted": "Deleted",
-      "modified": "Modified",
-      "renamed": "Renamed"
-    }
   },
   "conflicts": {
     "title": "Merge conflicts preview",

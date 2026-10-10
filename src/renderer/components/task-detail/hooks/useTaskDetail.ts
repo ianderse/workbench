@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useProjectStore } from '../../../stores/project-store';
 import { useSettingsStore } from '../../../stores/settings-store';
 import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, loadTasks, hasRecentActivity } from '../../../stores/task-store';
-import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, WorktreeDiff, MergeConflict, MergeStats, GitConflictInfo, ImageAttachment } from '../../../../shared/types';
+import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, ImageAttachment } from '../../../../shared/types';
 
 /**
  * Validates task subtasks structure to prevent infinite loops during resume.
@@ -65,13 +65,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [isCheckingChanges, setIsCheckingChanges] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [worktreeStatus, setWorktreeStatus] = useState<WorktreeStatus | null>(null);
-  const [worktreeDiff, setWorktreeDiff] = useState<WorktreeDiff | null>(null);
   const [isLoadingWorktree, setIsLoadingWorktree] = useState(false);
   const [isMerging, setIsMerging] = useState(false);
-  const [isDiscarding, setIsDiscarding] = useState(false);
-  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [showDiffDialog, setShowDiffDialog] = useState(false);
   const [stageOnly, setStageOnly] = useState(false); // Default to full merge for proper cleanup (fixes #243)
   const [stagedSuccess, setStagedSuccess] = useState<string | null>(null);
   const [stagedProjectPath, setStagedProjectPath] = useState<string | undefined>(undefined);
@@ -199,15 +195,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
       setIsLoadingWorktree(true);
       setWorkspaceError(null);
 
-      Promise.all([
-        window.electronAPI.getWorktreeStatus(task.id),
-        window.electronAPI.getWorktreeDiff(task.id)
-      ]).then(([statusResult, diffResult]) => {
+      window.electronAPI.getWorktreeStatus(task.id).then((statusResult) => {
         if (statusResult.success && statusResult.data) {
           setWorktreeStatus(statusResult.data);
-        }
-        if (diffResult.success && diffResult.data) {
-          setWorktreeDiff(diffResult.data);
         }
       }).catch((err) => {
         console.error('Failed to load worktree info:', err);
@@ -216,7 +206,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
       });
     } else {
       setWorktreeStatus(null);
-      setWorktreeDiff(null);
     }
   }, [task.id, needsReview]);
 
@@ -230,12 +219,13 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
         const result = await window.electronAPI.getTaskLogs(currentProject.id, task.specId);
         if (result.success && result.data) {
           setPhaseLogs(result.data);
-          // Auto-expand active phase
-          const activePhase = (['planning', 'coding', 'validation'] as TaskLogPhase[]).find(
-            phase => result.data?.phases[phase]?.status === 'active'
+          // Auto-expand the active phase and failed phases (so their errors are visible)
+          const data = result.data;
+          const openPhases = (['planning', 'coding', 'validation'] as TaskLogPhase[]).filter(
+            phase => data.phases[phase]?.status === 'active' || data.phases[phase]?.status === 'failed'
           );
-          if (activePhase) {
-            setExpandedPhases(new Set([activePhase]));
+          if (openPhases.length > 0) {
+            setExpandedPhases(new Set(openPhases));
           }
         }
       } catch (err) {
@@ -254,14 +244,14 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     const unsubscribe = window.electronAPI.onTaskLogsChanged((specId, logs) => {
       if (specId === task.specId) {
         setPhaseLogs(logs);
-        // Auto-expand newly active phase
-        const activePhase = (['planning', 'coding', 'validation'] as TaskLogPhase[]).find(
-          phase => logs.phases[phase]?.status === 'active'
+        // Auto-expand a newly active or failed phase
+        const openPhases = (['planning', 'coding', 'validation'] as TaskLogPhase[]).filter(
+          phase => logs.phases[phase]?.status === 'active' || logs.phases[phase]?.status === 'failed'
         );
-        if (activePhase) {
+        if (openPhases.length > 0) {
           setExpandedPhases(prev => {
             const next = new Set(prev);
-            next.add(activePhase);
+            for (const phase of openPhases) next.add(phase);
             return next;
           });
         }
@@ -393,15 +383,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     // Reload worktree status
     setIsLoadingWorktree(true);
     try {
-      const [statusResult, diffResult] = await Promise.all([
-        window.electronAPI.getWorktreeStatus(task.id),
-        window.electronAPI.getWorktreeDiff(task.id)
-      ]);
+      const statusResult = await window.electronAPI.getWorktreeStatus(task.id);
       if (statusResult.success && statusResult.data) {
         setWorktreeStatus(statusResult.data);
-      }
-      if (diffResult.success && diffResult.data) {
-        setWorktreeDiff(diffResult.data);
       }
 
       // Reload task data from store to reflect cleared staged state
@@ -512,13 +496,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     isCheckingChanges,
     isEditDialogOpen,
     worktreeStatus,
-    worktreeDiff,
     isLoadingWorktree,
     isMerging,
-    isDiscarding,
-    showDiscardDialog,
     workspaceError,
-    showDiffDialog,
     stageOnly,
     stagedSuccess,
     stagedProjectPath,
@@ -558,13 +538,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setIsCheckingChanges,
     setIsEditDialogOpen,
     setWorktreeStatus,
-    setWorktreeDiff,
     setIsLoadingWorktree,
     setIsMerging,
-    setIsDiscarding,
-    setShowDiscardDialog,
     setWorkspaceError,
-    setShowDiffDialog,
     setStageOnly,
     setStagedSuccess,
     setStagedProjectPath,

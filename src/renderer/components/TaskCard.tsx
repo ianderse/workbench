@@ -12,20 +12,15 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { cn, formatRelativeTime, sanitizeMarkdownForDisplay } from '../lib/utils';
-import { PhaseProgressIndicator } from './PhaseProgressIndicator';
-import { StatusIndicator } from './settings/common/StatusIndicator';
 import {
-  TASK_STATUS_COLUMNS,
   TASK_STATUS_LABELS,
+  getAllowedTaskMoves,
   JSON_ERROR_PREFIX,
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
 import { stopTask, checkTaskRunning, recoverStuckTask, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue } from '../stores/task-store';
 import { useToast } from '../hooks/use-toast';
-import type { Task, ReviewReason, TaskStatus } from '../../shared/types';
-import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
-import { formatTime } from '../../shared/utils/format-date-time';
-import { getTaskRunStep } from '../../shared/utils/claude-run';
+import type { Task, TaskStatus } from '../../shared/types';
 
 // Catastrophic stuck detection interval (ms).
 // XState handles all normal process-exit transitions via PROCESS_EXITED events.
@@ -65,18 +60,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.updatedAt === nextTask.updatedAt &&
     prevTask.reviewReason === nextTask.reviewReason &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
-    prevTask.executionProgress?.phaseProgress === nextTask.executionProgress?.phaseProgress &&
-    prevTask.subtasks.length === nextTask.subtasks.length &&
-    getTaskRunStep(prevTask.executionProgress?.phase, prevTask.claudeRun, prevTask.executionProgress?.message) ===
-      getTaskRunStep(nextTask.executionProgress?.phase, nextTask.claudeRun, nextTask.executionProgress?.message) &&
-    prevTask.claudeRun?.triage?.model === nextTask.claudeRun?.triage?.model &&
-    prevTask.claudeRun?.triage?.effort === nextTask.claudeRun?.triage?.effort &&
-    !!prevTask.claudeRun?.plan === !!nextTask.claudeRun?.plan &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
-    prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
-    prevTask.rateLimitHold?.resetAt === nextTask.rateLimitHold?.resetAt &&
-    // Check if any subtask statuses changed (compare all subtasks)
-    prevTask.subtasks.every((s, i) => s.status === nextTask.subtasks[i]?.status)
+    prevTask.metadata?.prUrl === nextTask.metadata?.prUrl
   );
 
   // Only log when actually re-rendering (reduces noise significantly)
@@ -107,24 +92,9 @@ export const TaskCard = memo(function TaskCard({
   const stuckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const isRunning = task.status === 'in_progress';
-  const executionPhase = task.executionProgress?.phase;
-  const hasActiveExecution = executionPhase && executionPhase !== 'idle' && executionPhase !== 'complete' && executionPhase !== 'failed';
 
   // Check if task is in human_review but has no completed subtasks (crashed/incomplete)
   const isIncomplete = isIncompleteHumanReview(task);
-
-  // Rate-limit hold: queued until the provider limit resets, then resumed automatically
-  const isOnHold = isTaskOnRateLimitHold(task);
-  const holdResumeLabel = useMemo(() => {
-    const resetAt = task.rateLimitHold?.resetAt;
-    if (!resetAt) return null;
-    const resetDate = new Date(resetAt);
-    if (Number.isNaN(resetDate.getTime())) return null;
-    const isToday = resetDate.toDateString() === new Date().toDateString();
-    return isToday
-      ? formatTime(resetDate)
-      : `${resetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${formatTime(resetDate)}`;
-  }, [task.rateLimitHold?.resetAt]);
 
   // Memoize expensive computations to avoid running on every render
   // Truncate description for card display - full description shown in modal
@@ -155,10 +125,13 @@ export const TaskCard = memo(function TaskCard({
     [task.updatedAt]
   );
 
-  // Memoize status menu items to avoid recreating on every render
+  // Memoize status menu items to avoid recreating on every render.
+  // Lists only the columns the task may move to (same rule as drag and drop).
   const statusMenuItems = useMemo(() => {
     if (!onStatusChange) return null;
-    return TASK_STATUS_COLUMNS.filter(status => status !== task.status).map((status) => (
+    const allowedMoves = getAllowedTaskMoves(task.status);
+    if (allowedMoves.length === 0) return null;
+    return allowedMoves.map((status) => (
       <DropdownMenuItem
         key={status}
         onClick={() => onStatusChange(status)}
@@ -252,81 +225,7 @@ export const TaskCard = memo(function TaskCard({
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'in_progress':
-        return t('labels.running');
-      case 'ai_review':
-        return t('labels.aiReview');
-      case 'human_review':
-        return t('labels.needsReview');
-      case 'done':
-        return t('status.complete');
-      default:
-        return t('labels.pending');
-    }
-  };
-
-  const getReviewReasonLabel = (reason?: ReviewReason): { label: string; variant: 'success' | 'destructive' | 'warning' } | null => {
-    if (!reason) return null;
-    switch (reason) {
-      case 'completed':
-        return { label: t('reviewReason.completed'), variant: 'success' };
-      case 'errors':
-        return { label: t('reviewReason.hasErrors'), variant: 'destructive' };
-      case 'qa_rejected':
-        return { label: t('reviewReason.qaIssues'), variant: 'warning' };
-      case 'stopped':
-        return { label: t('reviewReason.stopped'), variant: 'warning' };
-      default:
-        return null;
-    }
-  };
-
-  // When executionPhase is 'complete', always show 'completed' badge regardless of reviewReason
-  // This ensures the user sees "Complete" when the task finished successfully
-  const effectiveReviewReason: ReviewReason | undefined =
-    executionPhase === 'complete' ? 'completed' : task.reviewReason;
-  const reviewReasonInfo = task.status === 'human_review' ? getReviewReasonLabel(effectiveReviewReason) : null;
-
   const isArchived = !!task.metadata?.archivedAt;
-
-  // The card's status line, most important first
-  const statusParts: { key: string; label: string; loading?: boolean; attention?: boolean; title?: string }[] = [];
-  if (isStuck) {
-    statusParts.push({ key: 'stuck', label: t('labels.needsRecovery'), attention: true });
-  } else if (isIncomplete) {
-    statusParts.push({ key: 'incomplete', label: t('labels.needsResume'), attention: true });
-  } else if (hasActiveExecution && executionPhase) {
-    const step = getTaskRunStep(executionPhase, task.claudeRun, task.executionProgress?.message);
-    statusParts.push({ key: 'phase', label: t(`execution.steps.${step}`), loading: isRunning });
-  } else if (task.status !== 'done') {
-    statusParts.push({ key: 'status', label: getStatusLabel(task.status) });
-  }
-  if (reviewReasonInfo && !isStuck && !isIncomplete) {
-    statusParts.push({ key: 'review', label: reviewReasonInfo.label, attention: reviewReasonInfo.variant === 'destructive' });
-  }
-  if (isOnHold && holdResumeLabel) {
-    statusParts.push({
-      key: 'hold',
-      label: t('labels.onHoldUntil', { time: holdResumeLabel }),
-      title: task.rateLimitHold?.message || undefined,
-    });
-  }
-  // Model and effort chosen by triage, and whether Claude Code planned first
-  const triage = task.claudeRun?.triage;
-  if (triage) {
-    statusParts.push({
-      key: 'model',
-      label: t('claudeRun.modelEffort', {
-        model: t(`claudeRun.models.${triage.model}`, { defaultValue: triage.model }),
-        effort: t(`claudeRun.efforts.${triage.effort}`, { defaultValue: triage.effort })
-      }),
-      title: triage.reasoning || undefined
-    });
-    if (task.claudeRun?.plan) statusParts.push({ key: 'planned', label: t('claudeRun.planned') });
-  }
-  if (isArchived) statusParts.push({ key: 'archived', label: t('status.archived') });
 
   return (
     <Card
@@ -352,35 +251,6 @@ export const TaskCard = memo(function TaskCard({
           <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2">
             {sanitizedDescription}
           </p>
-        )}
-
-        {/* Status line: muted text like the settings dialog, with a spinner while an agent runs */}
-        {statusParts.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-(--nav-label-color)">
-            {statusParts.map((part, index) => (
-              <span key={part.key} className="inline-flex min-w-0 items-center gap-1.5" title={part.title}>
-                {index > 0 && <span aria-hidden="true">·</span>}
-                <StatusIndicator
-                  state={part.loading ? 'loading' : 'neutral'}
-                  tone={part.attention ? 'foreground' : 'muted'}
-                >
-                  {part.label}
-                </StatusIndicator>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Progress section - Phase-aware with animations */}
-        {(task.subtasks.length > 0 || hasActiveExecution || isRunning || isStuck) && (
-          <div className="mt-3">
-            <PhaseProgressIndicator
-              phase={executionPhase}
-              subtasks={task.subtasks}
-              isStuck={isStuck}
-              isRunning={isRunning}
-            />
-          </div>
         )}
 
         {/* Footer */}
@@ -441,18 +311,17 @@ export const TaskCard = memo(function TaskCard({
                   </Button>
                 )}
               </div>
-            ) : (task.status === 'backlog' || task.status === 'in_progress') && (
+            ) : isRunning && (
+              /* Tasks start from the task dialog; a running task can be stopped from its card */
               <Button
                 variant="ghost"
                 size="sm"
                 className={ICON_BUTTON_CLASS}
                 onClick={handleStartStop}
-                title={isRunning ? t('actions.stop') : t('actions.start')}
-                aria-label={isRunning ? t('actions.stop') : t('actions.start')}
+                title={t('actions.stop')}
+                aria-label={t('actions.stop')}
               >
-                {isRunning
-                  ? <Square className="h-4 w-4" strokeWidth={1.75} />
-                  : <Play className="h-4 w-4" strokeWidth={1.75} />}
+                <Square className="h-4 w-4" strokeWidth={1.75} />
               </Button>
             )}
 

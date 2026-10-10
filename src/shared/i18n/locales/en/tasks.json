@@ -23,7 +23,9 @@
     "taskActions": "Task actions",
     "selectTask": "Select task: {{title}}",
     "unarchive": "Unarchive",
-    "unarchiveFailed": "Failed to unarchive the task: {{error}}"
+    "unarchiveFailed": "Failed to unarchive the task: {{error}}",
+    "retry": "Retry",
+    "edit": "Edit"
   },
   "labels": {
     "running": "Running",
@@ -71,7 +73,7 @@
     "emptyBacklog": "No tasks planned",
     "emptyBacklogHint": "Add a task to get started",
     "emptyQueue": "Queue is empty",
-    "emptyQueueHint": "Tasks will wait here when parallel task limit is reached",
+    "emptyQueueHint": "Wait the parallel task limit to free up",
     "emptyInProgress": "Nothing running",
     "emptyInProgressHint": "Start a task from Planning",
     "emptyAiReview": "No tasks in review",
@@ -169,7 +171,9 @@
     "targetAudience": "Target audience",
     "dependencies": "Dependencies",
     "acceptanceCriteria": "Acceptance criteria",
-    "affectedFiles": "Affected files"
+    "affectedFiles": "Affected files",
+    "byAgent": "By agent",
+    "byUser": "By user"
   },
   "images": {
     "removeImageAriaLabel": "Remove image {{filename}}",
@@ -213,16 +217,17 @@
     }
   },
   "feedback": {
-    "dragDropHint": "Drag & drop images or paste screenshots",
-    "imageAdded": "Image added successfully",
     "maxImagesError": "Maximum of {{count}} images allowed",
     "invalidTypeError": "Invalid image type. Allowed: {{types}}",
     "removeImage": "Remove image",
     "processingError": "Failed to process image",
     "requestChanges": "Request changes",
-    "description": "Found issues? Describe what needs to change and Claude Code will apply it in the same session, then validate again.",
-    "placeholder": "Describe the issues or changes needed...",
-    "submitting": "Submitting..."
+    "description": "Claude Code applies them in the same session, then validates again",
+    "placeholder": "Describe what to change",
+    "submitting": "Submitting...",
+    "addImages": "Add images",
+    "dropImages": "Drop images to attach",
+    "send": "Request changes"
   },
   "review": {
     "mergeTooltip": "Merges changes from the task's worktree branch back to your base branch. AI will resolve any conflicts. You can then choose whether to keep or remove the worktree."
@@ -252,15 +257,6 @@
       "processDropFailed": "Failed to process dropped image"
     },
     "titlePlaceholder": "Task title"
-  },
-  "subtasks": {
-    "untitled": "Subtask {{number}}",
-    "expandAll": "Expand all",
-    "collapseAll": "Collapse all",
-    "empty": "No task list",
-    "emptyHint": "Claude Code didn't use a task list for this task. Its progress shows in the logs",
-    "completedOf": "{{completed}} of {{total}} completed",
-    "verification": "Verification"
   },
   "bulkPR": {
     "selectAllInColumn": "Select all tasks in column",
@@ -296,7 +292,6 @@
   "detailTabs": {
     "label": "Task sections",
     "overview": "Overview",
-    "subtasks": "Task list ({{count}})",
     "logs": "Logs"
   },
   "detail": {
@@ -342,8 +337,6 @@
     "incomplete": "Incomplete"
   },
   "claudeRun": {
-    "title": "Claude Code",
-    "none": "None",
     "modelEffort": "{{model}} · {{effort}}",
     "planned": "Planned",
     "models": {
@@ -359,85 +352,11 @@
       "xhigh": "extra high",
       "max": "max"
     },
-    "scopes": {
-      "trivial": "trivial",
-      "small": "small",
-      "medium": "medium",
-      "large": "large"
-    },
-    "triage": {
-      "label": "Triage",
-      "planFirst": "plan first",
-      "noPlan": "no plan",
-      "scope": "{{scope}} scope",
-      "verification": "Verify with",
-      "source": {
-        "auto": "Chosen by the triage run",
-        "fixed": "Set in Settings",
-        "fallback": "Default model and effort, the triage run failed"
-      }
-    },
-    "plan": "Plan",
-    "validation": {
-      "label": "Validation",
-      "status": {
-        "passed": "Passed",
-        "failed": "Failed",
-        "partial": "Partially passed"
-      },
-      "checkPassed": "passed",
-      "checkFailed": "failed",
-      "findings": "Findings",
-      "severity": {
-        "critical": "Critical",
-        "major": "Major",
-        "minor": "Minor"
-      },
-      "fixed": "fixed",
-      "notFixed": "not fixed"
-    },
-    "summary": "Summary",
-    "steps": {
-      "label": "Steps",
-      "running": "running",
-      "failed": "Failed",
-      "names": {
-        "triage": "Triage",
-        "plan": "Plan",
-        "implement": "Implementation",
-        "validate": "Validation",
-        "revise": "Revision"
-      }
-    },
-    "totalCost": "Total cost",
-    "subagents": {
-      "label": "Subagents",
-      "status": {
-        "running": "running",
-        "completed": "completed",
-        "failed": "failed",
-        "stopped": "stopped"
-      }
-    },
     "session": {
-      "label": "Session",
-      "copyResume": "Copy resume command",
-      "copied": "Copied"
-    },
-    "loaded": {
-      "label": "What Claude Code loaded",
-      "version": "Claude Code {{version}}",
-      "mcpServers": "MCP servers",
-      "mcpStatus": {
-        "connected": "connected",
-        "failed": "failed",
-        "pending": "pending",
-        "needs-auth": "needs authentication",
-        "disabled": "disabled"
-      },
-      "skills": "Skills",
-      "agents": "Agents",
-      "plugins": "Plugins"
+      "openAgent": "Open agent",
+      "running": "Available once the task stops running",
+      "noProject": "The task's project is not open",
+      "noRoom": "All agent windows of this project are in use. Close one to open this session"
     }
   }
 }

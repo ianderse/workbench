@@ -1,10 +1,8 @@
-import type { Task, WorktreeStatus, WorktreeDiff, MergeConflict, MergeStats, GitConflictInfo, ImageAttachment, WorktreeCreatePRResult } from '../../../shared/types';
+import type { Task, WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, ImageAttachment, WorktreeCreatePRResult } from '../../../shared/types';
 import {
   StagedSuccessMessage,
   WorkspaceStatus,
   QAFeedbackSection,
-  DiscardDialog,
-  DiffViewDialog,
   ConflictDetailsDialog,
   LoadingMessage,
   NoWorkspaceMessage,
@@ -17,12 +15,8 @@ interface TaskReviewProps {
   feedback: string;
   isSubmitting: boolean;
   worktreeStatus: WorktreeStatus | null;
-  worktreeDiff: WorktreeDiff | null;
   isLoadingWorktree: boolean;
   isMerging: boolean;
-  isDiscarding: boolean;
-  showDiscardDialog: boolean;
-  showDiffDialog: boolean;
   workspaceError: string | null;
   stageOnly: boolean;
   stagedSuccess: string | null;
@@ -38,15 +32,10 @@ interface TaskReviewProps {
   /** Callback when images change */
   onImagesChange?: (images: ImageAttachment[]) => void;
   onMerge: () => void;
-  onDiscard: () => void;
-  onShowDiscardDialog: (show: boolean) => void;
-  onShowDiffDialog: (show: boolean) => void;
   onStageOnlyChange: (value: boolean) => void;
   onShowConflictDialog: (show: boolean) => void;
   onLoadMergePreview: () => void;
   onClose?: () => void;
-  onSwitchToTerminals?: () => void;
-  onOpenInbuiltTerminal?: (id: string, cwd: string) => void;
   onReviewAgain?: () => void;
   // PR creation
   showPRDialog: boolean;
@@ -59,7 +48,7 @@ interface TaskReviewProps {
  * TaskReview Component
  *
  * Main component for reviewing task completion, displaying workspace status,
- * merge previews, and providing options to merge, stage, or discard changes.
+ * merge previews, and providing options to merge, stage, or create a pull request.
  *
  * This component has been refactored into smaller, focused sub-components for better
  * maintainability. See ./task-review/ directory for individual component implementations.
@@ -69,12 +58,8 @@ export function TaskReview({
   feedback,
   isSubmitting,
   worktreeStatus,
-  worktreeDiff,
   isLoadingWorktree,
   isMerging,
-  isDiscarding,
-  showDiscardDialog,
-  showDiffDialog,
   workspaceError,
   stageOnly,
   stagedSuccess,
@@ -88,21 +73,28 @@ export function TaskReview({
   images,
   onImagesChange,
   onMerge,
-  onDiscard,
-  onShowDiscardDialog,
-  onShowDiffDialog,
   onStageOnlyChange,
   onShowConflictDialog,
   onLoadMergePreview,
   onClose,
-  onSwitchToTerminals,
-  onOpenInbuiltTerminal,
   onReviewAgain,
   showPRDialog,
   isCreatingPR,
   onShowPRDialog,
   onCreatePR
 }: TaskReviewProps) {
+  const showsWorkspace = !isLoadingWorktree && !stagedSuccess && !task.stagedInMainProject && !!worktreeStatus?.exists;
+  const feedbackSection = (
+    <QAFeedbackSection
+      feedback={feedback}
+      isSubmitting={isSubmitting}
+      onFeedbackChange={onFeedbackChange}
+      onReject={onReject}
+      images={images}
+      onImagesChange={onImagesChange}
+    />
+  );
+
   return (
     <div className="space-y-6">
 
@@ -139,49 +131,19 @@ export function TaskReview({
           mergePreview={mergePreview}
           isLoadingPreview={isLoadingPreview}
           isMerging={isMerging}
-          isDiscarding={isDiscarding}
-          isCreatingPR={isCreatingPR}
-          onShowDiffDialog={onShowDiffDialog}
-          onShowDiscardDialog={onShowDiscardDialog}
           onShowConflictDialog={onShowConflictDialog}
           onLoadMergePreview={onLoadMergePreview}
           onStageOnlyChange={onStageOnlyChange}
           onMerge={onMerge}
-          onShowPRDialog={onShowPRDialog}
-          onClose={onClose}
-          onSwitchToTerminals={onSwitchToTerminals}
-          onOpenInbuiltTerminal={onOpenInbuiltTerminal}
+          beforeActions={feedbackSection}
         />
       ) : (
         <NoWorkspaceMessage task={task} onClose={onClose} />
       )}
 
-      {/* QA Feedback Section */}
-      <QAFeedbackSection
-        feedback={feedback}
-        isSubmitting={isSubmitting}
-        onFeedbackChange={onFeedbackChange}
-        onReject={onReject}
-        images={images}
-        onImagesChange={onImagesChange}
-      />
-
-      {/* Discard Confirmation Dialog */}
-      <DiscardDialog
-        open={showDiscardDialog}
-        task={task}
-        worktreeStatus={worktreeStatus}
-        isDiscarding={isDiscarding}
-        onOpenChange={onShowDiscardDialog}
-        onDiscard={onDiscard}
-      />
-
-      {/* Diff View Dialog */}
-      <DiffViewDialog
-        open={showDiffDialog}
-        worktreeDiff={worktreeDiff}
-        onOpenChange={onShowDiffDialog}
-      />
+      {/* Request changes (inside the workspace section when a worktree exists, so its
+          check-for-conflicts / create PR / merge buttons stay at the bottom) */}
+      {!showsWorkspace && feedbackSection}
 
       {/* Conflict Details Dialog */}
       <ConflictDetailsDialog

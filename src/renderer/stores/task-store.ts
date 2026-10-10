@@ -1297,6 +1297,13 @@ export function isIncompleteHumanReview(task: Task): boolean {
   return completedSubtasks === 0;
 }
 
+/** Whether a task ended with errors (the card shows "Has errors") */
+export function taskHasErrors(task: Task): boolean {
+  return task.status === 'error'
+    || (task.status === 'human_review' && task.reviewReason === 'errors')
+    || task.executionProgress?.phase === 'failed';
+}
+
 /**
  * Get the count of completed subtasks for a task
  */

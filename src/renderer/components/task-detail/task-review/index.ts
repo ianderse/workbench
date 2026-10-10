@@ -9,8 +9,6 @@ export { StagedSuccessMessage } from './StagedSuccessMessage';
 export { WorkspaceStatus } from './WorkspaceStatus';
 export { MergePreviewSummary } from './MergePreviewSummary';
 export { QAFeedbackSection } from './QAFeedbackSection';
-export { DiscardDialog } from './DiscardDialog';
-export { DiffViewDialog } from './DiffViewDialog';
 export { ConflictDetailsDialog } from './ConflictDetailsDialog';
 export { CreatePRDialog } from './CreatePRDialog';
 export { LoadingMessage, NoWorkspaceMessage, StagedInProjectMessage } from './WorkspaceMessages';

@@ -2,9 +2,7 @@ import { useState, useEffect, useRef, type ReactNode } from 'react';
 import {
   Loader2,
   RotateCcw,
-  AlertTriangle,
-  Code,
-  Terminal
+  AlertTriangle
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../../ui/button';
@@ -12,8 +10,7 @@ import { Switch } from '../../ui/switch';
 import { SettingsRow, SettingsRows } from '../../settings/SettingsRow';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../ui/tooltip';
 import { MergeProgressOverlay } from './MergeProgressOverlay';
-import type { WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, SupportedIDE, SupportedTerminal, MergeProgress, MergeLogEntry, MergeLogEntryType } from '../../../../shared/types';
-import { useSettingsStore } from '../../../stores/settings-store';
+import type { WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, MergeProgress, MergeLogEntry, MergeLogEntryType } from '../../../../shared/types';
 
 // Maximum log entries to keep to prevent memory issues during long merges
 const MAX_LOG_ENTRIES = 500;
@@ -26,57 +23,17 @@ interface WorkspaceStatusProps {
   mergePreview: { files: string[]; conflicts: MergeConflict[]; summary: MergeStats; gitConflicts?: GitConflictInfo; uncommittedChanges?: { hasChanges: boolean; files: string[]; count: number } | null } | null;
   isLoadingPreview: boolean;
   isMerging: boolean;
-  isDiscarding: boolean;
-  isCreatingPR?: boolean;
-  onShowDiffDialog: (show: boolean) => void;
-  onShowDiscardDialog: (show: boolean) => void;
   onShowConflictDialog: (show: boolean) => void;
   onLoadMergePreview: () => void;
   onStageOnlyChange: (value: boolean) => void;
   onMerge: () => void;
-  onShowPRDialog?: (show: boolean) => void;
-  onClose?: () => void;
-  onSwitchToTerminals?: () => void;
-  onOpenInbuiltTerminal?: (id: string, cwd: string) => void;
+  /** Content shown between the workspace details and the action buttons (e.g. the request-changes form) */
+  beforeActions?: ReactNode;
 }
 
 /**
- * Displays the workspace status including change summary, merge preview, and action buttons
+ * Displays the workspace status: change summary, branch, merge preview and actions
  */
-// IDE display names for button labels (short names for buttons)
-const IDE_LABELS: Partial<Record<SupportedIDE, string>> = {
-  vscode: 'VS Code',
-  cursor: 'Cursor',
-  windsurf: 'Windsurf',
-  zed: 'Zed',
-  sublime: 'Sublime',
-  webstorm: 'WebStorm',
-  intellij: 'IntelliJ',
-  pycharm: 'PyCharm',
-  xcode: 'Xcode',
-  vim: 'Vim',
-  neovim: 'Neovim',
-  emacs: 'Emacs',
-  custom: 'IDE'
-};
-
-// Terminal display names for button labels (short names for buttons)
-const TERMINAL_LABELS: Partial<Record<SupportedTerminal, string>> = {
-  system: 'Terminal',
-  terminal: 'Terminal',
-  iterm2: 'iTerm',
-  warp: 'Warp',
-  ghostty: 'Ghostty',
-  alacritty: 'Alacritty',
-  kitty: 'Kitty',
-  wezterm: 'WezTerm',
-  hyper: 'Hyper',
-  windowsterminal: 'Terminal',
-  gnometerminal: 'Terminal',
-  konsole: 'Konsole',
-  custom: 'Terminal'
-};
-
 export function WorkspaceStatus({
   taskId,
   worktreeStatus,
@@ -85,23 +42,13 @@ export function WorkspaceStatus({
   mergePreview,
   isLoadingPreview,
   isMerging,
-  isDiscarding,
-  isCreatingPR,
-  onShowDiffDialog,
-  onShowDiscardDialog,
   onShowConflictDialog,
   onLoadMergePreview,
   onStageOnlyChange,
   onMerge,
-  onShowPRDialog,
-  onClose,
-  onSwitchToTerminals,
-  onOpenInbuiltTerminal
+  beforeActions
 }: WorkspaceStatusProps) {
   const { t } = useTranslation(['taskReview', 'common', 'tasks']);
-  const { settings } = useSettingsStore();
-  const preferredIDE = settings.preferredIDE || 'vscode';
-  const preferredTerminal = settings.preferredTerminal || 'system';
 
   // Merge progress state
   const [mergeProgress, setMergeProgress] = useState<MergeProgress | null>(null);
@@ -215,32 +162,6 @@ export function WorkspaceStatus({
     };
   }, []);
 
-  const handleOpenInIDE = async () => {
-    if (!worktreeStatus.worktreePath) return;
-    try {
-      await window.electronAPI.worktreeOpenInIDE(
-        worktreeStatus.worktreePath,
-        preferredIDE,
-        settings.customIDEPath
-      );
-    } catch (err) {
-      console.error('Failed to open in IDE:', err);
-    }
-  };
-
-  const handleOpenInTerminal = async () => {
-    if (!worktreeStatus.worktreePath) return;
-    try {
-      await window.electronAPI.worktreeOpenInTerminal(
-        worktreeStatus.worktreePath,
-        preferredTerminal,
-        settings.customTerminalPath
-      );
-    } catch (err) {
-      console.error('Failed to open in terminal:', err);
-    }
-  };
-
   const hasGitConflicts = mergePreview?.gitConflicts?.hasConflicts;
   const hasUncommittedChanges = mergePreview?.uncommittedChanges?.hasChanges;
   const uncommittedCount = mergePreview?.uncommittedChanges?.count || 0;
@@ -319,58 +240,11 @@ export function WorkspaceStatus({
     }
   }
 
-  const actionsDisabled = isMerging || isDiscarding;
+  const actionsDisabled = isMerging;
 
   return (
     <div className="space-y-3">
       <SettingsRows>
-        {/* Summary: title + change stats */}
-        <SettingsRow
-          label={t('taskReview:workspace.title')}
-          description={
-            <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span>{t('taskReview:workspace.fileCount', { count: worktreeStatus.filesChanged || 0 })}</span>
-              <span aria-hidden="true">·</span>
-              <span>{t('taskReview:workspace.commitCount', { count: worktreeStatus.commitCount || 0 })}</span>
-              <span aria-hidden="true">·</span>
-              <span className="tabular-nums text-success">+{worktreeStatus.additions || 0}</span>
-              <span className="tabular-nums text-destructive">-{worktreeStatus.deletions || 0}</span>
-            </span>
-          }
-        >
-          <Button variant="outline" size="sm" onClick={() => onShowDiffDialog(true)}>
-            {t('taskReview:workspace.viewChanges')}
-          </Button>
-        </SettingsRow>
-
-        {/* Branch: spec branch -> user's current branch (merge target) */}
-        {worktreeStatus.branch && (
-          <SettingsRow
-            label={t('taskReview:workspace.branch')}
-            description={
-              <span className="break-all font-mono text-xs">
-                {worktreeStatus.branch} → {targetBranch}
-              </span>
-            }
-          />
-        )}
-
-        {/* Worktree path + open in IDE / terminal */}
-        {worktreeStatus.worktreePath && (
-          <SettingsRow
-            label={t('taskReview:workspace.worktree')}
-            description={<span className="break-all font-mono text-xs">{worktreeStatus.worktreePath}</span>}
-          >
-            <Button variant="outline" size="sm" onClick={handleOpenInIDE}>
-              <Code className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
-              {t('taskReview:workspace.openIn', { app: IDE_LABELS[preferredIDE] })}
-            </Button>
-            <Button variant="outline" size="sm" onClick={handleOpenInTerminal}>
-              <Terminal className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
-              {t('taskReview:workspace.openIn', { app: TERMINAL_LABELS[preferredTerminal] })}
-            </Button>
-          </SettingsRow>
-        )}
 
         {/* Merge status */}
         {mergePreview && showMergeStatus && (
@@ -466,79 +340,22 @@ export function WorkspaceStatus({
         <MergeProgressOverlay mergeProgress={mergeProgress} logEntries={logEntries} />
       )}
 
-      {/* Actions */}
+      {beforeActions}
+
+      {/* Actions: check for conflicts, create PR, merge (below everything else) */}
       <div className="flex flex-wrap items-center justify-end gap-2">
-        {/* Discard - superseded shows it as a primary action instead */}
-        {!isSuperseded && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => onShowDiscardDialog(true)}
-            disabled={actionsDisabled || isCreatingPR}
-            className="mr-auto text-muted-foreground hover:text-destructive"
-          >
-            {t('taskReview:merge.status.discardBuild')}
-          </Button>
-        )}
-
-        {/* No merge preview yet - check for conflicts */}
-        {!mergePreview && !isLoadingPreview && (
-          <Button size="sm" onClick={onLoadMergePreview} disabled={actionsDisabled}>
-            {t('taskReview:workspace.checkConflicts')}
-          </Button>
-        )}
-
-        {/* Loading merge preview */}
-        {isLoadingPreview && (
-          <Button size="sm" disabled>
-            <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            {t('taskReview:workspace.checkingConflicts')}
-          </Button>
-        )}
-
-        {/* Superseded - view comparison or discard */}
+        {/* Superseded - view comparison */}
         {mergePreview && !isLoadingPreview && isSuperseded && (
-          <>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="outline" size="sm" onClick={() => onShowConflictDialog(true)} disabled={actionsDisabled}>
-                  {t('taskReview:merge.actions.viewComparison')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="max-w-xs">{t('taskReview:merge.supersededCompareTooltip')}</p>
-              </TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="destructive" size="sm" onClick={() => onShowDiscardDialog(true)} disabled={actionsDisabled}>
-                  {t('taskReview:merge.actions.discardTask')}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p className="max-w-xs">{t('taskReview:merge.supersededDiscardTooltip')}</p>
-              </TooltipContent>
-            </Tooltip>
-          </>
-        )}
-
-        {/* Create PR - hidden for already merged / superseded */}
-        {onShowPRDialog && !isAlreadyMerged && !isSuperseded && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => onShowPRDialog(true)}
-            disabled={actionsDisabled || isCreatingPR}
-          >
-            {isCreatingPR ? (
-              <>
-                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                {t('taskReview:pr.actions.creating')}
-              </>
-            ) : (
-              t('common:buttons.createPR')
-            )}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" onClick={() => onShowConflictDialog(true)} disabled={actionsDisabled}>
+                {t('taskReview:merge.actions.viewComparison')}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className="max-w-xs">{t('taskReview:merge.supersededCompareTooltip')}</p>
+            </TooltipContent>
+          </Tooltip>
         )}
 
         {/* Already merged - mark as done */}

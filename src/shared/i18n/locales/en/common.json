@@ -46,7 +46,6 @@
     "confirm": "Confirm",
     "retry": "Retry",
     "create": "Create",
-    "createPR": "Create PR",
     "open": "Open",
     "start": "Start",
     "refresh": "Refresh",
@@ -59,7 +58,9 @@
     "gotIt": "Got it",
     "continue": "Continue",
     "saving": "Saving...",
-    "deleting": "Deleting..."
+    "deleting": "Deleting...",
+    "openPR": "Open PR",
+    "createPR": "Create PR"
   },
   "actions": {
     "save": "Save",

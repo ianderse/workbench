@@ -20,7 +20,8 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/colla
 import { cn } from '../../lib/utils';
 import { formatDateTime } from '../../../shared/utils/format-date-time';
 import { useSettingsStore } from '../../stores/settings-store';
-import type { Task, TaskLogs, TaskLogPhase, TaskPhaseLog, TaskLogEntry } from '../../../shared/types';
+import { summarizeLogPhase, formatCostUsd, formatDurationMs } from '../../../shared/utils/claude-run';
+import type { Task, TaskLogs, TaskLogPhase, TaskPhaseLog, TaskLogEntry, ClaudeRunPhase } from '../../../shared/types';
 
 // Neutral chip for tool activity (no per-tool colors)
 const TOOL_CHIP_CLASS = 'text-muted-foreground bg-segment-track';
@@ -69,6 +70,7 @@ export function TaskLogs({
                 phaseLog={phaseLogs.phases[phase]}
                 isExpanded={expandedPhases.has(phase)}
                 onToggle={() => onTogglePhase(phase)}
+                runPhases={task.claudeRun?.phases}
                 isTaskSettled={task.status === 'human_review' || task.status === 'done' || task.status === 'pr_created' || task.status === 'error'}
               />
             ))}
@@ -99,6 +101,8 @@ interface PhaseLogSectionProps {
   isExpanded: boolean;
   onToggle: () => void;
   isTaskSettled?: boolean;
+  /** Claude Code run steps, for the section's duration and cost */
+  runPhases?: ClaudeRunPhase[];
 }
 
 // Same status icons as the subtasks list: none once a phase has finished (failure is labelled)
@@ -115,7 +119,7 @@ function getPhaseStatusIcon(status: string) {
   }
 }
 
-function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled }: PhaseLogSectionProps) {
+function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled, runPhases }: PhaseLogSectionProps) {
   const { t } = useTranslation(['tasks']);
   const logOrder = useSettingsStore(s => s.settings.logOrder);
   // If the task is in a settled state (human_review, done, etc.), any "active" phase
@@ -125,6 +129,22 @@ function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled 
     status = 'completed';
   }
   const hasEntries = (phaseLog?.entries.length || 0) > 0;
+  const { durationMs, costUsd } = useMemo(() => summarizeLogPhase(runPhases, phase), [runPhases, phase]);
+  const summaryParts = [
+    hasEntries ? t('tasks:logs.entries', { count: phaseLog?.entries.length ?? 0 }) : null,
+    durationMs !== undefined ? formatDurationMs(durationMs) : null,
+    costUsd !== undefined ? formatCostUsd(costUsd) : null
+  ].filter((part): part is string => !!part);
+
+  // A failed section ends with a phase_end entry that holds the error: show it as an error
+  const failedEndEntry = useMemo(() => {
+    if (status !== 'failed') return null;
+    const entries = phaseLog?.entries || [];
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].type === 'phase_end') return entries[i];
+    }
+    return null;
+  }, [status, phaseLog?.entries]);
 
   // Memoize sorted entries to avoid re-calculating on every render
   // Entries are naturally in chronological order (oldest first from append())
@@ -143,9 +163,9 @@ function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled 
           <span className="shrink-0">{getPhaseStatusIcon(status)}</span>
           <span className="text-sm text-foreground">{t(`tasks:logs.phases.${phase}`)}</span>
           {status === 'failed' && <span className="text-xs text-destructive">{t('tasks:execution.phases.failed')}</span>}
-          {hasEntries && (
-            <span className="text-xs text-(--nav-label-color)">
-              {t('tasks:logs.entries', { count: phaseLog?.entries.length ?? 0 })}
+          {summaryParts.length > 0 && (
+            <span className="text-xs text-(--nav-label-color) tabular-nums">
+              {summaryParts.join(' · ')}
             </span>
           )}
           <ChevronRight
@@ -162,7 +182,10 @@ function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled 
             <p className="text-xs text-muted-foreground">{t('tasks:logs.empty')}</p>
           ) : (
             displayedEntries.map((entry) => (
-              <LogEntry key={`${entry.timestamp}-${entry.type}-${entry.content}`} entry={entry} />
+              <LogEntry
+                key={`${entry.timestamp}-${entry.type}-${entry.content}`}
+                entry={entry === failedEndEntry ? { ...entry, type: 'error' } : entry}
+              />
             ))
           )}
         </div>

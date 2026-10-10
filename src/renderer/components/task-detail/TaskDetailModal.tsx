@@ -2,12 +2,12 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useToast } from '../../hooks/use-toast';
-import { Separator } from '../ui/separator';
 import { Tabs, TabsContent } from '../ui/tabs';
 import { SegmentedControl } from '../settings/SettingsRow';
 import { ScrollArea } from '../ui/scroll-area';
 import { TooltipProvider } from '../ui/tooltip';
 import { Badge } from '../ui/badge';
+import { Button } from '../ui/button';
 import { buttonVariants } from '../ui/button';
 import {
   AlertDialog,
@@ -25,7 +25,10 @@ import {
   AlertTriangle,
   Pencil,
   X,
-  ArchiveRestore
+  ArchiveRestore,
+  GitPullRequest,
+  Play,
+  RotateCcw
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import {
@@ -37,15 +40,14 @@ import {
   DIALOG_SURFACE_CLASS,
   DIALOG_TITLE_CLASS
 } from '../ui/dialog-styles';
-import { stopTask, submitReview, recoverStuckTask, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks } from '../../stores/task-store';
+import { stopTask, submitReview, recoverStuckTask, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, retryTask } from '../../stores/task-store';
 import { useProjectStore } from '../../stores/project-store';
 import { TASK_STATUS_LABELS } from '../../../shared/constants';
 import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
-import { TaskClaudeRun } from './TaskClaudeRun';
+import { TaskOpenAgentButton } from './TaskOpenAgentButton';
 import { TaskWarnings } from './TaskWarnings';
-import { TaskSubtasks } from './TaskSubtasks';
 import { TaskLogs } from './TaskLogs';
 import { TaskReview } from './TaskReview';
 import type { Task, WorktreeCreatePROptions } from '../../../shared/types';
@@ -54,11 +56,9 @@ interface TaskDetailModalProps {
   open: boolean;
   task: Task | null;
   onOpenChange: (open: boolean) => void;
-  onSwitchToTerminals?: () => void;
-  onOpenInbuiltTerminal?: (id: string, cwd: string) => void;
 }
 
-export function TaskDetailModal({ open, task, onOpenChange, onSwitchToTerminals, onOpenInbuiltTerminal }: TaskDetailModalProps) {
+export function TaskDetailModal({ open, task, onOpenChange }: TaskDetailModalProps) {
   // Don't render anything if no task
   if (!task) {
     return null;
@@ -69,18 +69,17 @@ export function TaskDetailModal({ open, task, onOpenChange, onSwitchToTerminals,
       open={open}
       task={task}
       onOpenChange={onOpenChange}
-      onSwitchToTerminals={onSwitchToTerminals}
-      onOpenInbuiltTerminal={onOpenInbuiltTerminal}
     />
   );
 }
 
 // Separate component to use hooks only when task exists
-function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals, onOpenInbuiltTerminal }: { open: boolean; task: Task; onOpenChange: (open: boolean) => void; onSwitchToTerminals?: () => void; onOpenInbuiltTerminal?: (id: string, cwd: string) => void }) {
+function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; task: Task; onOpenChange: (open: boolean) => void }) {
   const { t } = useTranslation(['tasks']);
   const { toast } = useToast();
   const state = useTaskDetail({ task });
   const [isUnarchiving, setIsUnarchiving] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   // Archived tasks can be brought back to the board from here
   const handleUnarchive = async () => {
@@ -124,6 +123,22 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
       } else if (result.action === 'queued') {
         toast({ title: t('tasks:queue.movedToQueue') });
       }
+    }
+  };
+
+  // Retry starts the task over: worktree changes and the previous run are discarded
+  const handleRetry = async () => {
+    setIsRetrying(true);
+    const result = await retryTask(task.id);
+    setIsRetrying(false);
+    if (!result.success) {
+      toast({
+        title: t('tasks:wizard.errors.startFailed'),
+        description: result.error,
+        variant: 'destructive',
+      });
+    } else if (result.action === 'queued') {
+      toast({ title: t('tasks:queue.movedToQueue') });
     }
   };
 
@@ -184,19 +199,6 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
     } finally {
       state.setIsMerging(false);
     }
-  };
-
-  const handleDiscard = async () => {
-    state.setIsDiscarding(true);
-    state.setWorkspaceError(null);
-    const result = await window.electronAPI.discardWorktree(task.id);
-    if (result.success && result.data?.success) {
-      state.setShowDiscardDialog(false);
-      onOpenChange(false);
-    } else {
-      state.setWorkspaceError(result.data?.message || result.error || 'Failed to discard changes');
-    }
-    state.setIsDiscarding(false);
   };
 
   const handleCreatePR = async (options: WorktreeCreatePROptions) => {
@@ -271,8 +273,8 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
             )}
           >
             {/* Header */}
-            {/* pr-32 keeps the title clear of the header action buttons */}
-            <div className="relative shrink-0 px-6 pb-4 pr-32 pt-6">
+            {/* pr-14 keeps the title clear of the close button */}
+            <div className="relative shrink-0 px-6 pb-4 pr-14 pt-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0 overflow-hidden">
                   <DialogPrimitive.Title className={cn(DIALOG_TITLE_CLASS, 'truncate')}>
@@ -283,6 +285,19 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                       <Badge variant="outline" className="text-xs font-mono">
                         {task.specId}
                       </Badge>
+                      {/* Branch the task's worktree merges into */}
+                      {state.worktreeStatus?.exists && (
+                        <>
+                          <span className="text-xs text-muted-foreground" aria-hidden="true">→</span>
+                          <Badge
+                            variant="outline"
+                            className="text-xs font-mono"
+                            title={t('taskReview:workspace.targetBranch')}
+                          >
+                            {state.worktreeStatus.currentProjectBranch || state.worktreeStatus.baseBranch || 'main'}
+                          </Badge>
+                        </>
+                      )}
                       {state.isStuck ? (
                         <Badge variant="warning" className="text-xs flex items-center gap-1 animate-pulse">
                           <AlertTriangle className="h-3 w-3" />
@@ -312,42 +327,6 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                   )}
                 </div>
                 <div className="absolute right-3 top-3 z-10 flex items-center gap-1 electron-no-drag">
-                  {task.metadata?.archivedAt && (
-                    <button
-                      type="button"
-                      className={cn(DIALOG_CLOSE_BUTTON_CLASS, 'static')}
-                      onClick={handleUnarchive}
-                      disabled={isUnarchiving}
-                      title={t('tasks:actions.unarchive')}
-                      aria-label={t('tasks:actions.unarchive')}
-                    >
-                      {isUnarchiving ? (
-                        <Loader2 className={cn(DIALOG_CLOSE_ICON_CLASS, 'animate-spin')} />
-                      ) : (
-                        <ArchiveRestore className={DIALOG_CLOSE_ICON_CLASS} strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
-                      )}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className={cn(DIALOG_CLOSE_BUTTON_CLASS, 'static hover:bg-destructive/10 hover:text-destructive')}
-                    onClick={() => state.setShowDeleteDialog(true)}
-                    disabled={state.isRunning && !state.isStuck}
-                    title={t('tasks:actions.delete')}
-                    aria-label={t('tasks:actions.delete')}
-                  >
-                    <Trash2 className={DIALOG_CLOSE_ICON_CLASS} strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
-                  </button>
-                  <button
-                    type="button"
-                    className={cn(DIALOG_CLOSE_BUTTON_CLASS, 'static')}
-                    onClick={() => state.setIsEditDialogOpen(true)}
-                    disabled={state.isRunning && !state.isStuck}
-                    title={t('tasks:kanban.editTask')}
-                    aria-label={t('tasks:kanban.editTask')}
-                  >
-                    <Pencil className={DIALOG_CLOSE_ICON_CLASS} strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
-                  </button>
                   <DialogPrimitive.Close
                     className={cn(DIALOG_CLOSE_BUTTON_CLASS, 'static')}
                     aria-label={t('common:buttons.close')}
@@ -384,7 +363,6 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                     ariaLabel={t('tasks:detailTabs.label')}
                     options={[
                       { value: 'overview', label: t('tasks:detailTabs.overview') },
-                      { value: 'subtasks', label: t('tasks:detailTabs.subtasks', { count: task.subtasks.length }) },
                       { value: 'logs', label: t('tasks:detailTabs.logs') }
                     ]}
                   />
@@ -395,31 +373,52 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                   <ScrollArea className="h-full">
                     <div className="p-6 space-y-5 overflow-x-hidden max-w-full">
                       {/* Metadata */}
-                      <TaskMetadata task={task} />
-
-                      {/* Claude Code run: triage, plan, validation, steps, session */}
-                      {task.claudeRun && (
-                        <>
-                          <Separator />
-                          <TaskClaudeRun run={task.claudeRun} />
-                        </>
-                      )}
+                      <TaskMetadata
+                        task={task}
+                        worktreeStatus={state.worktreeStatus}
+                        worktreeAction={(task.claudeRun?.sessionId || task.metadata?.prUrl || (state.needsReview && state.worktreeStatus?.exists)) ? (
+                          <>
+                            <TaskOpenAgentButton task={task} />
+                            {/* A PR that exists opens in the browser; otherwise create one (primary action) */}
+                            {task.metadata?.prUrl ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="gap-1.5"
+                                onClick={() => void window.electronAPI.openExternal(task.metadata!.prUrl!)}
+                              >
+                                <GitPullRequest className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                {t('common:buttons.openPR')}
+                              </Button>
+                            ) : state.needsReview && state.worktreeStatus?.exists && (
+                              <Button
+                                size="sm"
+                                className="gap-1.5"
+                                onClick={() => state.setShowPRDialog(true)}
+                                disabled={state.isMerging || state.isCreatingPR}
+                              >
+                                {state.isCreatingPR ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <GitPullRequest className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                )}
+                                {state.isCreatingPR ? t('taskReview:pr.actions.creating') : t('common:buttons.createPR')}
+                              </Button>
+                            )}
+                          </>
+                        ) : undefined}
+                      />
 
                       {/* Human Review Section */}
                       {state.needsReview && (
                         <>
-                          <Separator />
                           <TaskReview
                             task={task}
                             feedback={state.feedback}
                             isSubmitting={state.isSubmitting}
                             worktreeStatus={state.worktreeStatus}
-                            worktreeDiff={state.worktreeDiff}
                             isLoadingWorktree={state.isLoadingWorktree}
                             isMerging={state.isMerging}
-                            isDiscarding={state.isDiscarding}
-                            showDiscardDialog={state.showDiscardDialog}
-                            showDiffDialog={state.showDiffDialog}
                             workspaceError={state.workspaceError}
                             stageOnly={state.stageOnly}
                             stagedSuccess={state.stagedSuccess}
@@ -433,15 +432,10 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                             images={state.feedbackImages}
                             onImagesChange={state.setFeedbackImages}
                             onMerge={handleMerge}
-                            onDiscard={handleDiscard}
-                            onShowDiscardDialog={state.setShowDiscardDialog}
-                            onShowDiffDialog={state.setShowDiffDialog}
                             onStageOnlyChange={state.setStageOnly}
                             onShowConflictDialog={state.setShowConflictDialog}
                             onLoadMergePreview={state.loadMergePreview}
                             onClose={handleClose}
-                            onSwitchToTerminals={onSwitchToTerminals}
-                            onOpenInbuiltTerminal={onOpenInbuiltTerminal}
                             onReviewAgain={state.handleReviewAgain}
                             showPRDialog={state.showPRDialog}
                             isCreatingPR={state.isCreatingPR}
@@ -452,11 +446,6 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                       )}
                     </div>
                   </ScrollArea>
-                </TabsContent>
-
-                {/* Subtasks Tab */}
-                <TabsContent value="subtasks" className="flex-1 min-h-0 overflow-hidden mt-0">
-                  <TaskSubtasks task={task} />
                 </TabsContent>
 
                 {/* Logs Tab */}
@@ -474,6 +463,58 @@ function TaskDetailModalContent({ open, task, onOpenChange, onSwitchToTerminals,
                 </TabsContent>
 
               </Tabs>
+            </div>
+
+            {/* Footer: task actions (the close button stays at the top) */}
+            <div className="flex shrink-0 items-center justify-end gap-1 px-6 py-3 electron-no-drag">
+              {task.metadata?.archivedAt && (
+                <Button variant="ghost" size="sm" className="gap-1.5" onClick={handleUnarchive} disabled={isUnarchiving}>
+                  {isUnarchiving ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArchiveRestore className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                  )}
+                  {t('tasks:actions.unarchive')}
+                </Button>
+              )}
+              {/* Retry a task that stopped with an error: starts it over from a clean worktree */}
+              {taskHasErrors(task) && !state.isRunning && (
+                <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRetrying} onClick={() => void handleRetry()}>
+                  {isRetrying ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                  )}
+                  {t('tasks:actions.retry')}
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => state.setShowDeleteDialog(true)}
+                disabled={state.isRunning && !state.isStuck}
+              >
+                <Trash2 className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                {t('tasks:actions.delete')}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => state.setIsEditDialogOpen(true)}
+                disabled={state.isRunning && !state.isStuck}
+              >
+                <Pencil className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                {t('tasks:actions.edit')}
+              </Button>
+              {/* Start a task waiting in Planning (Backlog) */}
+              {task.status === 'backlog' && (
+                <Button size="sm" className="gap-1.5" onClick={() => void handleStartStop()}>
+                  <Play className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                  {t('tasks:actions.start')}
+                </Button>
+              )}
             </div>
 
           </DialogPrimitive.Content>

@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, useId } from 'react';
+import { useState, useRef, useLayoutEffect, useId, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Shield, ChevronDown, ChevronUp, type LucideIcon } from 'lucide-react';
 import { ExternalLink } from '../ui/external-link';
@@ -9,18 +9,25 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { cn, formatRelativeTime } from '../../lib/utils';
 import { JSON_ERROR_PREFIX } from '../../../shared/constants';
-import type { Task } from '../../../shared/types';
+import type { Task, WorktreeStatus } from '../../../shared/types';
 import { TaskAttachments } from './TaskAttachments';
 
 interface TaskMetadataProps {
   task: Task;
+  /** The task worktree's change summary, shown under the description */
+  worktreeStatus?: WorktreeStatus | null;
+  /** Action shown at the right end of the change summary row (Create PR) */
+  worktreeAction?: ReactNode;
 }
 
 // Height threshold for collapsing long descriptions (~8 lines)
 const COLLAPSED_HEIGHT = 200;
 
-export function TaskMetadata({ task }: TaskMetadataProps) {
-  const { t } = useTranslation(['tasks', 'errors']);
+/** Task sources that mean an agent created the task (e.g. a suggestion in the Claude chat) */
+const AGENT_SOURCES = new Set(['insights', 'ideation', 'roadmap']);
+
+export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetadataProps) {
+  const { t } = useTranslation(['tasks', 'errors', 'taskReview']);
   const [isExpanded, setIsExpanded] = useState(false);
   const [hasOverflow, setHasOverflow] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -55,7 +62,11 @@ export function TaskMetadata({ task }: TaskMetadataProps) {
           icon: Shield,
           label: `${task.metadata.securitySeverity} ${t('tasks:metadata.severity')}`
         },
-        task.metadata.sourceType && { key: 'source', label: task.metadata.sourceType }
+        // Who created the task: suggested by an agent (Claude chat) or added by the user
+        task.metadata.sourceType && {
+          key: 'source',
+          label: AGENT_SOURCES.has(task.metadata.sourceType) ? t('tasks:metadata.byAgent') : t('tasks:metadata.byUser')
+        }
       ].filter(Boolean) as { key: string; icon?: LucideIcon; label: string }[]
     : [];
 
@@ -136,6 +147,23 @@ export function TaskMetadata({ task }: TaskMetadataProps) {
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Changes in the task's worktree */}
+      {(worktreeStatus?.exists || worktreeAction) && (
+        <div className="flex items-center gap-2">
+          <p className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-sm text-(--nav-label-color)">
+            {worktreeStatus?.exists && (<>
+            <span>{t('taskReview:workspace.fileCount', { count: worktreeStatus.filesChanged || 0 })}</span>
+            <span aria-hidden="true">·</span>
+            <span>{t('taskReview:workspace.commitCount', { count: worktreeStatus.commitCount || 0 })}</span>
+            <span aria-hidden="true">·</span>
+            <span className="tabular-nums text-success">+{worktreeStatus.additions || 0}</span>
+            <span className="tabular-nums text-destructive">-{worktreeStatus.deletions || 0}</span>
+            </>)}
+          </p>
+          {worktreeAction}
         </div>
       )}
 
