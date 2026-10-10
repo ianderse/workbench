@@ -176,8 +176,7 @@
     "byUser": "By user"
   },
   "images": {
-    "removeImageAriaLabel": "Remove image {{filename}}",
-    "pasteHint": "Tip: Paste screenshots directly with {{shortcut}} to add reference images."
+    "removeImageAriaLabel": "Remove image {{filename}}"
   },
   "imagePreview": {
     "close": "Close preview",
@@ -192,8 +191,8 @@
   },
   "wizard": {
     "createTitle": "Create new task",
-    "createDescription": "Describe what you want done. Claude Code assesses the task, picks a model and effort, plans when needed, then implements it in an isolated worktree.",
-    "descriptionPlaceholder": "Describe the feature, bug fix, or improvement you want to implement. Be as specific as possible about requirements, constraints, and expected behavior. Type @ to reference files.",
+    "createDescription": "Claude Code plans and builds it in an isolated worktree",
+    "descriptionPlaceholder": "What should Claude Code do? Type @ to reference files",
     "draftRestored": "Draft restored",
     "startFresh": "Start fresh",
     "creating": "Creating...",
@@ -242,11 +241,11 @@
   },
   "form": {
     "description": "Description",
-    "descriptionPlaceholder": "Describe the feature, bug fix, or improvement you want to implement. Be as specific as possible about requirements, constraints, and expected behavior.",
+    "descriptionPlaceholder": "What should Claude Code do?",
+    "attachImages": "Attach images",
+    "dropToAttach": "Drop images to attach",
     "imageAddedSuccess": "Image added successfully!",
-    "taskTitle": "Title",
     "sections": {
-      "task": "Task",
       "connectors": "Connectors"
     },
     "errors": {
@@ -255,8 +254,7 @@
       "invalidImageType": "Invalid image type. Allowed: PNG, JPEG, GIF, WebP",
       "processPasteFailed": "Failed to process pasted image",
       "processDropFailed": "Failed to process dropped image"
-    },
-    "titlePlaceholder": "Task title"
+    }
   },
   "bulkPR": {
     "selectAllInColumn": "Select all tasks in column",
@@ -284,9 +282,6 @@
     "keyboardHint": "↑↓ to navigate · Enter to select · Esc to close"
   },
   "referenceImages": {
-    "title": "Reference images (optional)",
-    "description": "Add visual references like screenshots or designs to help the AI understand your requirements.",
-    "dropZone": "Drop images here or click to browse",
     "preview": "Preview {{filename}}"
   },
   "detailTabs": {

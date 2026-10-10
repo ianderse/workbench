@@ -19,11 +19,12 @@ import { SettingsRow, SettingsRows } from './settings/SettingsRow';
 import { SettingsSection } from './settings/SettingsSection';
 import { Combobox } from './ui/combobox';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
-import { TaskFormFields } from './task-form/TaskFormFields';
+import { TaskFormFields, DESCRIPTION_TEXT_CLASS } from './task-form/TaskFormFields';
 import { FileAutocomplete } from './FileAutocomplete';
 import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty, type TaskCreationDraft } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
 import { buildBranchOptions } from '../lib/branch-utils';
+import { cn } from '../lib/utils';
 import type { TaskMetadata, ImageAttachment, ReferencedFile } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useProjectBranches } from '../hooks/useProjectBranches';
@@ -353,15 +354,10 @@ export function TaskCreationWizard({
   // Render @ mention highlight overlay for the description textarea
   const descriptionOverlay = (
     <div
-      className="absolute inset-0 pointer-events-none overflow-hidden rounded-lg border border-transparent"
-      style={{
-        padding: '0.5rem 0.75rem',
-        font: 'inherit',
-        lineHeight: '1.5',
-        wordWrap: 'break-word',
-        whiteSpace: 'pre-wrap',
-        color: 'transparent'
-      }}
+      className={cn(
+        'pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-transparent',
+        DESCRIPTION_TEXT_CLASS
+      )}
     >
       {description.split(/(@[\w\-./\\]+\.\w+)/g).map((part, i) => {
         if (part.match(/^@[\w\-./\\]+\.\w+$/)) {

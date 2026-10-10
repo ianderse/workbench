@@ -1,8 +1,8 @@
 /**
  * TaskEditDialog - Dialog for editing task details
  *
- * Edits the task's title, description, reference images and MCP connectors. Model, effort and
- * planning are decided by the Claude Code triage run when the task starts.
+ * Edits the task's description, reference images and MCP connectors (the title is kept). Model,
+ * effort and planning are decided by the Claude Code triage run when the task starts.
  *
  * Uses the shared TaskModalLayout and TaskFormFields (same look as the creation dialog) and
  * saves via persistUpdateTask (updates store + spec files). Closes without saving when nothing
@@ -46,7 +46,6 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   }, [projects, task.projectId]);
 
   // Form state
-  const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -62,7 +61,6 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   // Reset form when task changes or dialog opens
   useEffect(() => {
     if (open) {
-      setTitle(task.title);
       setDescription(task.description);
       setImages(task.metadata?.attachedImages || []);
       setMcpConnectors(task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors));
@@ -78,10 +76,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     }
 
     // Check if anything changed
-    const trimmedTitle = title.trim();
     const trimmedDescription = description.trim();
     const hasChanges =
-      trimmedTitle !== task.title ||
       trimmedDescription !== task.description ||
       [...mcpConnectors].sort().join(',') !== [...taskConnectors].sort().join(',') ||
       JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []);
@@ -101,8 +97,6 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     };
 
     const success = await persistUpdateTask(task.id, {
-      // An emptied title keeps the current one
-      title: trimmedTitle || task.title,
       description: trimmedDescription,
       metadata: metadataUpdates
     });
@@ -149,8 +143,6 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         specId={task.specId}
         description={description}
         onDescriptionChange={setDescription}
-        title={title}
-        onTitleChange={setTitle}
         images={images}
         onImagesChange={setImages}
         mcpConnectors={mcpConnectors}

@@ -2,25 +2,27 @@
  * TaskFormFields - Shared form fields component for task create/edit
  *
  * Bundles the common form fields used in both TaskCreationWizard and TaskEditDialog:
- * - Title (edit dialog only; new tasks get a generated title)
- * - Description (required, with image paste/drop support)
- * - Reference images (clickable drop zone, Insights-style thumbnails)
+ * - Description: a composer like the Claude page's (Insights) input, with image thumbnails,
+ *   a "+" button to attach images, paste (Ctrl/Cmd+V) and drag and drop
  * - Connectors (MCP servers for the task's Claude Code session)
  *
  * Model, effort and planning are decided per task by the Claude Code triage run.
  */
 import { useRef, useState, useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Image as ImageIcon, ImagePlus, X } from 'lucide-react';
-import { Label } from '../ui/label';
-import { Input } from '../ui/input';
-import { Textarea } from '../ui/textarea';
+import { Image as ImageIcon, Plus, X } from 'lucide-react';
 import { SettingsSection } from '../settings/SettingsSection';
 import { useImageUpload } from './useImageUpload';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { cn } from '../../lib/utils';
 import { TaskConnectorRows } from './TaskConnectorRows';
 import type { ImageAttachment } from '../../../shared/types';
+
+/**
+ * Padding and font of the description text. The creation dialog's @ mention overlay uses it too,
+ * so the highlighted text lines up with the textarea's.
+ */
+export const DESCRIPTION_TEXT_CLASS = 'px-4 pt-4 pb-1 text-[0.9375rem] leading-relaxed';
 
 interface TaskFormFieldsProps {
   // Project context (for loading image thumbnails from disk)
@@ -35,10 +37,6 @@ interface TaskFormFieldsProps {
   descriptionOverlay?: ReactNode;
   /** Optional ref for the description textarea (used for @ mention autocomplete positioning) */
   descriptionRef?: React.RefObject<HTMLTextAreaElement | null>;
-
-  // Title field (shown only when a change handler is given, i.e. in the edit dialog)
-  title?: string;
-  onTitleChange?: (value: string) => void;
 
   // Images
   images: ImageAttachment[];
@@ -71,8 +69,6 @@ export function TaskFormFields({
   descriptionPlaceholder,
   descriptionOverlay,
   descriptionRef: externalDescriptionRef,
-  title = '',
-  onTitleChange,
   images,
   onImagesChange,
   mcpConnectors = [],
@@ -188,86 +184,22 @@ export function TaskFormFields({
       />
 
       <div>
-        <SettingsSection title={t('tasks:form.sections.task')}>
-          <div className="space-y-6">
-            {/* Title (edit dialog only) */}
-            {onTitleChange && (
-              <div className="space-y-2">
-                <Label htmlFor={`${prefix}title`} className="text-sm font-normal text-foreground">
-                  {t('tasks:form.taskTitle')}
-                </Label>
-                <Input
-                  id={`${prefix}title`}
-                  placeholder={t('tasks:form.titlePlaceholder')}
-                  value={title}
-                  onChange={(e) => onTitleChange(e.target.value)}
-                  disabled={disabled}
-                />
-              </div>
-            )}
-
-            {/* Description (Primary - Required) */}
-            <div className="space-y-2">
-              <Label htmlFor={`${prefix}description`} className="text-sm font-normal text-foreground">
-                {t('tasks:form.description')} <span className="text-destructive">*</span>
-              </Label>
-              <div className="relative">
-                {/* Optional overlay (e.g., @ mention highlighting) */}
-                {descriptionOverlay}
-                <Textarea
-                  ref={descriptionRef}
-                  id={`${prefix}description`}
-                  placeholder={descriptionPlaceholder || t('tasks:form.descriptionPlaceholder')}
-                  value={description}
-                  onChange={(e) => onDescriptionChange(e.target.value)}
-                  onPaste={handlePaste}
-                  // Drag and drop is disabled on the description; images go through the drop zone below
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = 'none';
-                  }}
-                  onDrop={(e) => e.preventDefault()}
-                  rows={6}
-                  disabled={disabled}
-                  aria-required="true"
-                  aria-describedby={`${prefix}description-help`}
-                  className={cn(
-                    'resize-y min-h-[150px] max-h-[400px] relative',
-                    descriptionOverlay && 'bg-transparent'
-                  )}
-                  style={descriptionOverlay ? { caretColor: 'auto' } : undefined}
-                />
-              </div>
-              <p id={`${prefix}description-help`} className="text-xs text-(--nav-label-color)">
-                {t('images.pasteHint', { shortcut: navigator.platform.includes('Mac') ? '⌘V' : 'Ctrl+V' })}
-              </p>
-
-              {/* Optional children (e.g., @ mention autocomplete) */}
-              {children}
-            </div>
-
-            {/* Paste Success Indicator */}
-            {pasteSuccess && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground animate-in fade-in slide-in-from-top-1 duration-200">
-                <ImageIcon className="h-4 w-4 text-success" strokeWidth={1.75} />
-                {t('tasks:form.imageAddedSuccess')}
-              </div>
-            )}
-
-            {/* Reference Images */}
-            <div className="space-y-2">
-              <div className="space-y-1">
-                <Label className="text-sm font-normal text-foreground">
-                  {t('tasks:referenceImages.title')}
-                </Label>
-                <p className="text-sm text-(--nav-label-color)">
-                  {t('tasks:referenceImages.description')}
-                </p>
-              </div>
-
-              {/* Thumbnails (same look as the Insights composer attachments) */}
+        <div className="mb-10 space-y-6 last:mb-0">
+          {/* Description (required): composer with attachments, like the Claude page's input */}
+          <div className="space-y-2">
+            <div
+              className={cn(
+                'relative rounded-(--radius-composer) bg-card',
+                'shadow-[0_4px_20px_rgba(0,0,0,0.075),0_0_0_1px_var(--input)]',
+                'transition-shadow duration-150 focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.1),0_0_0_1px_var(--input)]'
+              )}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              {/* Attached images */}
               {images.length > 0 && (
-                <div className="flex flex-wrap items-center gap-3 pt-2">
+                <div className="flex flex-wrap items-center gap-3 px-4 pt-4">
                   {images.map((image) => (
                     <div key={image.id} className="group relative" title={image.filename}>
                       <button
@@ -301,46 +233,78 @@ export function TaskFormFields({
                 </div>
               )}
 
-              {/* Drop zone: drag images here or click to pick files */}
-              {canAddMore && (
-                <>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    className="hidden"
-                    tabIndex={-1}
-                    aria-hidden="true"
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files ?? []);
-                      e.target.value = '';
-                      if (files.length > 0) void addFiles(files);
-                    }}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    onDragOver={handleDragOver}
-                    onDragLeave={handleDragLeave}
-                    onDrop={handleDrop}
-                    disabled={disabled}
-                    className={cn(
-                      'flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border py-5',
-                      'text-sm text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground',
-                      'focus-visible:outline-none focus-visible:shadow-(--shadow-focus) disabled:pointer-events-none disabled:opacity-50',
-                      isDragOver && 'border-foreground/40 bg-nav-hover text-foreground'
-                    )}
-                  >
-                    <ImagePlus className="h-4 w-4" strokeWidth={1.75} />
-                    {t('tasks:referenceImages.dropZone')}
-                  </button>
-                </>
+              <div className="relative">
+                {/* Optional overlay (e.g., @ mention highlighting) */}
+                {descriptionOverlay}
+                <textarea
+                  ref={descriptionRef}
+                  id={`${prefix}description`}
+                  placeholder={descriptionPlaceholder || t('tasks:form.descriptionPlaceholder')}
+                  value={description}
+                  onChange={(e) => onDescriptionChange(e.target.value)}
+                  onPaste={handlePaste}
+                  rows={5}
+                  disabled={disabled}
+                  aria-required="true"
+                  aria-label={t('tasks:form.description')}
+                  className={cn(
+                    'relative block max-h-96 min-h-[7.5rem] w-full resize-none overflow-y-auto border-0 bg-transparent',
+                    DESCRIPTION_TEXT_CLASS,
+                    'text-foreground placeholder:text-muted-foreground',
+                    'focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60'
+                  )}
+                  style={descriptionOverlay ? { caretColor: 'auto' } : undefined}
+                />
+              </div>
+
+              {/* Toolbar: attach images */}
+              <div className="flex items-center px-2.5 pb-2.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  onChange={(e) => {
+                    const files = Array.from(e.target.files ?? []);
+                    e.target.value = '';
+                    if (files.length > 0) void addFiles(files);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={disabled || !canAddMore}
+                  title={t('tasks:form.attachImages')}
+                  aria-label={t('tasks:form.attachImages')}
+                >
+                  <Plus className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Drag-over overlay */}
+              {isDragOver && (
+                <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-(--radius-composer) border-2 border-dashed border-primary bg-primary/5">
+                  <span className="text-sm font-medium text-primary">{t('tasks:form.dropToAttach')}</span>
+                </div>
               )}
             </div>
 
+            {/* Optional children (e.g., @ mention autocomplete) */}
+            {children}
           </div>
-        </SettingsSection>
+
+          {/* Paste Success Indicator */}
+          {pasteSuccess && (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground animate-in fade-in slide-in-from-top-1 duration-200">
+              <ImageIcon className="h-4 w-4 text-success" strokeWidth={1.75} />
+              {t('tasks:form.imageAddedSuccess')}
+            </div>
+          )}
+        </div>
 
         {/* MCP connectors for the task's Claude Code session */}
         {onMcpConnectorsChange && (
