@@ -194,7 +194,6 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             htmlFor="claude-code-budget"
           >
             <div className="flex items-center gap-1.5">
-              <span className="text-sm text-(--nav-label-color)">$</span>
               <Input
                 id="claude-code-budget"
                 type="number"
