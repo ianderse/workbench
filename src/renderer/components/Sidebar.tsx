@@ -5,7 +5,7 @@ import {
   RefreshCw,
   PanelLeft
 } from 'lucide-react';
-import { AgentsIcon, InsightsIcon, KanbanIcon, MemoryIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
+import { AgentsIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
 import { useMemoryGraphStore } from '../stores/memory-graph-store';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -58,7 +58,7 @@ const navItems: NavItem[] = [
   { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentsIcon },
   { id: 'insights', labelKey: 'navigation:items.insights', icon: InsightsIcon },
   // Only shown when the project has a memory graph (.auto-claude/memory)
-  { id: 'memory', labelKey: 'navigation:items.memory', icon: MemoryIcon },
+  { id: 'memory', labelKey: 'navigation:items.memory', icon: GraphIcon },
 ];
 
 
