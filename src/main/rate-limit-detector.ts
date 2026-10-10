@@ -6,6 +6,9 @@
 import { getClaudeProfileManager } from './claude-profile-manager';
 import { getUsageMonitor } from './claude-profile/usage-monitor';
 import { debugLog } from '../shared/utils/debug-logger';
+import { findStandaloneLimitReset } from './claude-profile/rate-limit-manager';
+
+export { findStandaloneLimitReset };
 
 /**
  * Regex pattern to detect Claude Code rate limit messages
@@ -184,11 +187,11 @@ export function detectRateLimit(
   output: string,
   profileId?: string
 ): RateLimitDetectionResult {
-  // Check for the primary rate limit pattern
-  const match = output.match(RATE_LIMIT_PATTERN);
+  // Check for the primary rate limit pattern. It only counts when the message stands on its own
+  // line: the same words quoted in model output or code must not mark the account as limited.
+  const resetTime = RATE_LIMIT_PATTERN.test(output) ? findStandaloneLimitReset(output) : null;
 
-  if (match) {
-    const resetTime = match[1].trim();
+  if (resetTime) {
     const limitType = classifyLimitType(resetTime);
 
     // Record the rate limit event in the profile manager
@@ -436,6 +439,18 @@ export function getProfileEnv(profileId?: string): Record<string, string> {
 }
 
 /**
+ * Environment for a specific profile, or null when that profile no longer exists or has no
+ * credentials (callers then fall back to the best available profile).
+ */
+export function getUsableProfileEnv(profileId: string): Record<string, string> | null {
+  const profileManager = getClaudeProfileManager();
+  if (!profileManager.getProfile(profileId) || !profileManager.hasValidAuth(profileId)) {
+    return null;
+  }
+  return profileManager.getProfileEnv(profileId);
+}
+
+/**
  * Result of getting the best available profile environment
  */
 export interface BestProfileEnvResult {
@@ -448,7 +463,7 @@ export interface BestProfileEnvResult {
   /** Whether a swap was performed (true if different from active profile) */
   wasSwapped: boolean;
   /** Reason for the swap if one occurred */
-  swapReason?: 'rate_limited' | 'at_capacity' | 'proactive';
+  swapReason?: 'rate_limited' | 'at_capacity' | 'proactive' | 'not_authenticated';
   /** The original active profile if a swap occurred */
   originalProfile?: {
     id: string;
@@ -492,13 +507,20 @@ export function getBestAvailableProfileEnv(): BestProfileEnvResult {
   const isAtCapacity = activeProfile.usage?.weeklyUsagePercent !== undefined &&
                        activeProfile.usage.weeklyUsagePercent >= 100;
 
+  // An account without credentials can't run anything (e.g. an "Add account" sign-in that
+  // never finished): move to one that is signed in
+  // (A profile without a config dir uses the default credentials and is left alone.)
+  const isSignedOut = !!activeProfile.configDir && !profileManager.hasValidAuth(activeProfile.id);
+
   // Determine if we need to find an alternative
-  const needsSwap = rateLimitStatus.limited || isAtCapacity;
-  const swapReason: BestProfileEnvResult['swapReason'] = rateLimitStatus.limited
-    ? 'rate_limited'
-    : isAtCapacity
-      ? 'at_capacity'
-      : undefined;
+  const needsSwap = rateLimitStatus.limited || isAtCapacity || isSignedOut;
+  const swapReason: BestProfileEnvResult['swapReason'] = isSignedOut
+    ? 'not_authenticated'
+    : rateLimitStatus.limited
+      ? 'rate_limited'
+      : isAtCapacity
+        ? 'at_capacity'
+        : undefined;
 
   if (needsSwap) {
     debugLog('[RateLimitDetector] Active profile needs swap:', {
@@ -510,8 +532,10 @@ export function getBestAvailableProfileEnv(): BestProfileEnvResult {
       resetAt: rateLimitStatus.resetAt
     });
 
-    // Try to find a better profile
-    const bestProfile = profileManager.getBestAvailableProfile(activeProfile.id);
+    // Try to find a better profile. Never switch to one without credentials: it would fail
+    // every run and become the active account.
+    const candidate = profileManager.getBestAvailableProfile(activeProfile.id);
+    const bestProfile = candidate && profileManager.hasValidAuth(candidate.id) ? candidate : null;
 
     if (bestProfile) {
       debugLog('[RateLimitDetector] Using alternative profile:', {

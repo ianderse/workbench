@@ -5,7 +5,7 @@
 
 import { homedir } from 'os';
 import { join } from 'path';
-import { existsSync, readFileSync, readdirSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
 import type { ClaudeProfile, APIProfile } from '../../shared/types';
 import { getCredentialsFromKeychain } from './credential-utils';
 
@@ -144,13 +144,14 @@ export function isProfileAuthenticated(profile: ClaudeProfile): boolean {
     }
   }
 
-  // Legacy: Claude stores auth in .claude/credentials or similar files
-  // Check for common auth indicators
+  // Legacy: Claude stores auth in .claude/credentials or similar files.
+  // (settings.json and session transcripts under projects/ are NOT signs of a sign-in: Claude
+  // Code writes them in any config dir it runs with, signed in or not. Counting them made a
+  // never-signed-in account look authenticated, so tasks were switched to it.)
   const possibleAuthFiles = [
     join(configDir, 'credentials'),
     join(configDir, 'credentials.json'),
     join(configDir, '.credentials'),
-    join(configDir, 'settings.json'),  // Often contains auth tokens
   ];
 
   for (const authFile of possibleAuthFiles) {
@@ -167,17 +168,14 @@ export function isProfileAuthenticated(profile: ClaudeProfile): boolean {
     }
   }
 
-  // Also check if there are any session files (indicates authenticated usage)
-  const projectsDir = join(configDir, 'projects');
-  if (existsSync(projectsDir)) {
-    try {
-      const projects = readdirSync(projectsDir);
-      if (projects.length > 0) {
-        return true;
-      }
-    } catch {
-      // Ignore read errors
+  // Last resort: a token in the platform credential store for this config dir
+  try {
+    const expandedConfigDir = configDir.startsWith('~') ? configDir.replace(/^~/, homedir()) : configDir;
+    if (getCredentialsFromKeychain(expandedConfigDir).token) {
+      return true;
     }
+  } catch {
+    // Credential store unavailable
   }
 
   return false;
@@ -316,4 +314,47 @@ export function getEmailFromConfigDir(configDir?: string): string | null {
   }
 
   return null;
+}
+
+/** The Claude account (and organization) a config dir is signed in to */
+export interface ClaudeAccountIdentity {
+  email: string | null;
+  accountUuid: string | null;
+  organizationUuid: string | null;
+}
+
+/**
+ * Read which Claude account a config dir is signed in to, from `.claude.json` → `oauthAccount`.
+ * Returns null when the dir isn't signed in (or the file can't be read).
+ */
+export function getAccountIdentityFromConfigDir(configDir?: string): ClaudeAccountIdentity | null {
+  if (!configDir) return null;
+  const claudeJsonPath = join(expandHomePath(configDir), '.claude.json');
+  if (!existsSync(claudeJsonPath)) return null;
+  try {
+    const account = JSON.parse(readFileSync(claudeJsonPath, 'utf-8'))?.oauthAccount;
+    if (!account || typeof account !== 'object') return null;
+    const str = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value.trim() : null);
+    const identity: ClaudeAccountIdentity = {
+      email: str(account.emailAddress)?.toLowerCase() ?? null,
+      accountUuid: str(account.accountUuid),
+      organizationUuid: str(account.organizationUuid),
+    };
+    return identity.email || identity.accountUuid ? identity : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether two identities are the same Claude subscription: the same account (by account id, or
+ * by email when an id is missing) in the same organization. One email can belong to several
+ * organizations (personal and team plans), which are different subscriptions with their own
+ * limits, so a known, different organization never matches.
+ */
+export function isSameClaudeAccount(a: ClaudeAccountIdentity | null, b: ClaudeAccountIdentity | null): boolean {
+  if (!a || !b) return false;
+  if (a.organizationUuid && b.organizationUuid && a.organizationUuid !== b.organizationUuid) return false;
+  if (a.accountUuid && b.accountUuid) return a.accountUuid === b.accountUuid;
+  return !!a.email && a.email === b.email;
 }

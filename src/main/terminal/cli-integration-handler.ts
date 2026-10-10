@@ -13,6 +13,7 @@ import { getClaudeProfileManager, initializeClaudeProfileManager } from '../clau
 import { getFullCredentialsFromKeychain, clearKeychainCache, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { getEmailFromConfigDir } from '../claude-profile/profile-utils';
+import { findStandaloneLimitReset } from '../claude-profile/rate-limit-manager';
 import * as OutputParser from './output-parser';
 import * as SessionHandler from './session-handler';
 import * as PtyManager from './pty-manager';
@@ -443,7 +444,13 @@ export function handleRateLimit(
   getWindow: WindowGetter,
   switchProfileCallback: (terminalId: string, profileId: string) => Promise<void>
 ): void {
-  const resetTime = OutputParser.extractRateLimitReset(data);
+  if (!OutputParser.extractRateLimitReset(data)) {
+    return;
+  }
+  // Only a limit message on its own line counts. Terminals also show source code, diffs and
+  // chats that quote one (e.g. `"Limit reached · resets Dec 17 at 6am (Europe/Oslo)"`), which
+  // used to flag a working account as rate limited for months.
+  const resetTime = findStandaloneLimitReset(data);
   if (!resetTime) {
     return;
   }
@@ -461,6 +468,10 @@ export function handleRateLimit(
 
   try {
     const rateLimitEvent = profileManager.recordRateLimitEvent(currentProfileId, resetTime);
+    if (!rateLimitEvent) {
+      // Not a real Claude reset time (see recordRateLimitEvent)
+      return;
+    }
     console.warn('[ClaudeIntegration] Recorded rate limit event:', rateLimitEvent.type);
   } catch (err) {
     console.error('[ClaudeIntegration] Failed to record rate limit event:', err);
@@ -675,6 +686,13 @@ export function handleOAuthToken(
         message: 'No active profile found',
         detectedAt: new Date().toISOString()
       } as OAuthTokenEvent);
+      return;
+    }
+
+    // A token-looking string in an ordinary terminal (code, logs, a diff) says nothing about
+    // the active account. Only update it when its config dir really has credentials.
+    if (!profileManager.hasValidAuth(activeProfile.id)) {
+      console.warn('[ClaudeIntegration] Token-like output in a non-profile terminal, but the active profile has no credentials; ignoring');
       return;
     }
 

@@ -141,6 +141,20 @@ export function registerTerminalHandlers(
 
         // If this is a new profile without an ID, generate one
         if (!profile.id) {
+          // Adding an account with the name of an existing one would create `<name>-1`, a
+          // second entry that looks the same. Reuse an unfinished sign-in with that name (left
+          // behind when the app closed mid sign-in), refuse anything else.
+          const abandoned = profileManager.findAbandonedProfileByName(profile.name);
+          if (abandoned) {
+            return { success: true, data: abandoned };
+          }
+          const existing = profileManager.findProfileByName(profile.name);
+          if (existing) {
+            return {
+              success: false,
+              error: `An account named "${existing.name}" already exists. Choose another name, or use Sign in again on that account.`
+            };
+          }
           profile.id = profileManager.generateProfileId(profile.name);
         }
 

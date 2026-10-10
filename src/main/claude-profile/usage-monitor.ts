@@ -2141,7 +2141,8 @@ export class UsageMonitor extends EventEmitter {
     // Add OAuth profiles (sorted by availability)
     const oauthProfiles = profileManager.getProfilesSortedByAvailability();
     for (const profile of oauthProfiles) {
-      if (!excludeIds.has(profile.id)) {
+      // Never swap to an account without credentials (e.g. a sign-in that never finished)
+      if (!excludeIds.has(profile.id) && profileManager.hasValidAuth(profile.id)) {
         const unifiedId = `oauth-${profile.id}`;
         const priorityIndex = priorityOrder.indexOf(unifiedId);
         unifiedAccounts.push({

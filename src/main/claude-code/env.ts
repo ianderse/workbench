@@ -11,7 +11,7 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { getClaudeCliInvocationAsync } from '../cli-utils';
 import { getToolInfo } from '../cli-tool-manager';
-import { getBestAvailableProfileEnv, getProfileEnv } from '../rate-limit-detector';
+import { getBestAvailableProfileEnv, getUsableProfileEnv } from '../rate-limit-detector';
 import { getAPIProfileEnv } from '../services/profile';
 import { isWindows } from '../platform';
 
@@ -80,8 +80,11 @@ export async function resolveClaudeEnv(options: ClaudeEnvOptions = {}): Promise<
   let profileEnv: Record<string, string>;
   let profileId: string | undefined;
   let profileName: string | undefined;
-  if (options.profileId) {
-    profileEnv = getProfileEnv(options.profileId);
+  // A requested profile is used while it exists and is signed in; otherwise (removed, or never
+  // signed in) the best available profile runs instead of a run that can only fail
+  const pinnedEnv = options.profileId ? getUsableProfileEnv(options.profileId) : null;
+  if (options.profileId && pinnedEnv) {
+    profileEnv = pinnedEnv;
     profileId = options.profileId;
   } else {
     const best = getBestAvailableProfileEnv();

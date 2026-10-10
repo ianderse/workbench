@@ -432,9 +432,15 @@ export class AgentManager extends EventEmitter {
       const profileId = entry.profileId ?? profileManager.getActiveProfile()?.id;
       if (!profileId) return undefined;
       const message = typeof payload.message === 'string' ? payload.message : '';
-      const resetText = detectClaudeLimitMessage(message)?.resetText
-        ?? (typeof payload.resetAt === 'string' ? formatResetForProfile(payload.resetAt) : null);
-      if (resetText) profileManager.recordRateLimitEvent(profileId, resetText);
+      const resetText = detectClaudeLimitMessage(message)?.resetText;
+      const resetAt = typeof payload.resetAt === 'string' ? new Date(payload.resetAt) : null;
+      if (resetText) {
+        profileManager.recordRateLimitEvent(profileId, resetText);
+      } else if (resetAt && !Number.isNaN(resetAt.getTime())) {
+        // Only the reset instant is known: record it as is (a formatted date would read as a
+        // weekly limit)
+        profileManager.recordRateLimitEvent(profileId, '', { resetAt });
+      }
       return profileId;
     } catch (error) {
       appLog.warn('[AgentManager] Could not record the rate limit:', error);
@@ -514,10 +520,3 @@ function getActiveProfileIdSafe(): string | undefined {
   }
 }
 
-/** Reset time in a form the profile manager's parser understands ("Oct 10, 15:00", local time) */
-function formatResetForProfile(iso: string): string | null {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[date.getMonth()]} ${date.getDate()}, ${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`;
-}

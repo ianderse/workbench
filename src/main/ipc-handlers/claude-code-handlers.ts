@@ -1409,6 +1409,8 @@ export function registerClaudeCodeHandlers(): void {
 
           // Save profile metadata (email, isAuthenticated, subscriptionType, rateLimitTier) but NOT the OAuth token
           profileManager.saveProfile(profile);
+          // Signing in to an account that is already in the list keeps one entry
+          profileManager.mergeSameAccountProfile(profileId);
 
           // CRITICAL: Clear keychain cache for this profile's configDir
           // This ensures the new token is read from keychain instead of using a stale cached token
@@ -1581,6 +1583,8 @@ export function registerClaudeCodeHandlers(): void {
                 }
                 updateProfileSubscriptionMetadata(profile, expandedConfigDir);
                 profileManager.saveProfile(profile);
+                // Signing in to an account that is already in the list keeps one entry
+                profileManager.mergeSameAccountProfile(profileId);
                 clearKeychainCache(expandedConfigDir);
                 const usageMonitor = getUsageMonitor();
                 usageMonitor.clearProfileUsageCache(profileId);

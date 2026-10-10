@@ -31,7 +31,9 @@ import { parseUsageOutput } from './claude-profile/usage-parser';
 import {
   recordRateLimitEvent as recordRateLimitEventImpl,
   isProfileRateLimited as isProfileRateLimitedImpl,
-  clearRateLimitEvents as clearRateLimitEventsImpl
+  clearRateLimitEvents as clearRateLimitEventsImpl,
+  pruneRateLimitEvents,
+  type RecordRateLimitOptions
 } from './claude-profile/rate-limit-manager';
 import {
   loadProfileStoreAsync,
@@ -54,7 +56,9 @@ import {
   isProfileAuthenticated as isProfileAuthenticatedImpl,
   hasValidToken,
   expandHomePath,
-  getEmailFromConfigDir
+  getEmailFromConfigDir,
+  getAccountIdentityFromConfigDir,
+  isSameClaudeAccount
 } from './claude-profile/profile-utils';
 import { debugLog } from '../shared/utils/debug-logger';
 import { isWindows } from './platform';
@@ -81,6 +85,11 @@ function mergeDuplicateProfile(kept: ClaudeProfile, duplicate: ClaudeProfile): C
     id: kept.id,
     isDefault: kept.isDefault || duplicate.isDefault,
   } as ClaudeProfile;
+}
+
+/** Display names compared the way a person would read them */
+function sameName(a: string | undefined, b: string | undefined): boolean {
+  return !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
 /**
@@ -133,6 +142,15 @@ export class ClaudeProfileManager {
     // Remove duplicate profiles sharing the same configDir
     // Keeps the first (oldest/default) entry per configDir
     this.deduplicateProfiles();
+
+    // Remove leftovers of sign-ins that never finished and that duplicate another account
+    this.removeAbandonedDuplicates();
+
+    // Forget rate limits that were never real (quoted limit messages) or have reset
+    this.pruneStaleRateLimits();
+
+    // Never stay on an account that can't sign in when one that can exists
+    this.ensureUsableActiveProfile();
 
     // Populate missing subscription metadata for existing profiles
     // This reads subscriptionType and rateLimitTier from Keychain credentials
@@ -204,6 +222,17 @@ export class ClaudeProfileManager {
     if (idRemap.size === 0) return;
 
     this.data.profiles = kept;
+    this.remapRemovedProfiles(idRemap);
+
+    debugLog(`[ClaudeProfileManager] Deduplicated profiles: removed ${idRemap.size} duplicates, ${kept.length} remaining`);
+    this.save();
+  }
+
+  /**
+   * Point references to removed profiles (active profile, account priority order) at the
+   * profiles that replaced them. Callers remove the profiles themselves and save.
+   */
+  private remapRemovedProfiles(idRemap: Map<string, string>): void {
     const remapId = (id: string): string => idRemap.get(id) ?? id;
 
     if (this.data.activeProfileId) {
@@ -218,9 +247,135 @@ export class ClaudeProfileManager {
         .filter(id => (seen.has(id) ? false : (seen.add(id), true)));
     }
 
+    if (this.data.migratedProfileIds) {
+      this.data.migratedProfileIds = this.data.migratedProfileIds.filter(id => !idRemap.has(id));
+      if (this.data.migratedProfileIds.length === 0) delete this.data.migratedProfileIds;
+    }
+  }
 
-    debugLog(`[ClaudeProfileManager] Deduplicated profiles: removed ${idRemap.size} duplicates, ${kept.length} remaining`);
+  /**
+   * Whether a profile is the leftover of an "Add account" sign-in that never finished: not the
+   * default account, no email, not signed in (no credentials for its config dir).
+   */
+  private isAbandonedSignIn(profile: ClaudeProfile): boolean {
+    return !profile.isDefault
+      && !profile.email
+      && !hasValidToken(profile)
+      && !this.isProfileAuthenticated(profile)
+      && !getAccountIdentityFromConfigDir(profile.configDir);
+  }
+
+  /**
+   * Remove abandoned sign-ins (see isAbandonedSignIn) that carry the same name as another
+   * account that is signed in or has an email: they are duplicates of that account (for example
+   * "Primary" again, created as `primary-1` by a sign-in that was interrupted) and can never be
+   * used. References to them move to that account. Their config dirs are left on disk.
+   */
+  private removeAbandonedDuplicates(): void {
+    const idRemap = new Map<string, string>();
+    for (const profile of this.data.profiles) {
+      if (!this.isAbandonedSignIn(profile)) continue;
+      const original = this.data.profiles.find(other =>
+        other.id !== profile.id
+        && !idRemap.has(other.id)
+        && sameName(other.name, profile.name)
+        && (!!other.email || this.isProfileAuthenticated(other))
+      );
+      if (original) idRemap.set(profile.id, original.id);
+    }
+    if (idRemap.size === 0) return;
+
+    this.data.profiles = this.data.profiles.filter(p => !idRemap.has(p.id));
+    this.remapRemovedProfiles(idRemap);
+    console.warn('[ClaudeProfileManager] Removed duplicate accounts that were never signed in:', Object.fromEntries(idRemap));
     this.save();
+  }
+
+  /** Drop rate limit events that were never real or whose reset time has passed */
+  private pruneStaleRateLimits(): void {
+    let changed = false;
+    for (const profile of this.data.profiles) {
+      if (pruneRateLimitEvents(profile)) changed = true;
+    }
+    if (changed) {
+      debugLog('[ClaudeProfileManager] Removed stale or implausible rate limit events');
+      this.save();
+    }
+  }
+
+  /**
+   * If the active profile can't sign in (no credentials) but another profile can, switch to
+   * that one (the default account first, then list order).
+   */
+  private ensureUsableActiveProfile(): void {
+    const active = this.data.profiles.find(p => p.id === this.data.activeProfileId);
+    if (active && this.hasValidAuth(active.id)) return;
+
+    const usable = this.data.profiles.filter(p => this.hasValidAuth(p.id));
+    const replacement = usable.find(p => p.isDefault) ?? usable[0];
+    if (!replacement || replacement.id === this.data.activeProfileId) return;
+
+    console.warn('[ClaudeProfileManager] Active account is not signed in, switching to a signed-in account:', {
+      from: this.data.activeProfileId,
+      to: replacement.id
+    });
+    this.data.activeProfileId = replacement.id;
+    this.save();
+  }
+
+  /**
+   * An unfinished sign-in profile with this name (see isAbandonedSignIn), to reuse when an
+   * account with the same name is added again instead of creating `<name>-1`.
+   */
+  findAbandonedProfileByName(name: string): ClaudeProfile | undefined {
+    return this.data.profiles.find(p => sameName(p.name, name) && this.isAbandonedSignIn(p));
+  }
+
+  /** A profile with this display name (case-insensitive) */
+  findProfileByName(name: string): ClaudeProfile | undefined {
+    return this.data.profiles.find(p => sameName(p.name, name));
+  }
+
+  /**
+   * After a profile signed in: if another profile is signed in to the same Claude account (same
+   * account and organization), keep a single entry. The older entry stays (its id, name,
+   * default flag and place in the list); it takes the newly signed-in config dir when its own
+   * has no credentials. Returns the profile that remains, or null when there was no duplicate.
+   */
+  mergeSameAccountProfile(profileId: string): ClaudeProfile | null {
+    const profile = this.getProfile(profileId);
+    if (!profile) return null;
+    const identity = getAccountIdentityFromConfigDir(profile.configDir);
+    if (!identity) return null;
+
+    const twin = this.data.profiles.find(other =>
+      other.id !== profile.id && isSameClaudeAccount(identity, getAccountIdentityFromConfigDir(other.configDir))
+    );
+    if (!twin) return null;
+
+    const profileIndex = this.data.profiles.indexOf(profile);
+    const twinIndex = this.data.profiles.indexOf(twin);
+    const [older, newer] = twinIndex < profileIndex ? [twin, profile] : [profile, twin];
+    const olderSignedIn = this.isProfileAuthenticated(older);
+
+    const merged = mergeDuplicateProfile(
+      {
+        ...older,
+        ...(olderSignedIn ? {} : {
+          configDir: newer.configDir,
+          email: newer.email ?? older.email,
+          subscriptionType: newer.subscriptionType ?? older.subscriptionType,
+          rateLimitTier: newer.rateLimitTier ?? older.rateLimitTier,
+        }),
+      },
+      newer
+    );
+    this.data.profiles[this.data.profiles.indexOf(older)] = merged;
+    this.data.profiles = this.data.profiles.filter(p => p.id !== newer.id);
+    this.remapRemovedProfiles(new Map([[newer.id, older.id]]));
+    console.warn('[ClaudeProfileManager] Account was already added, kept one entry:', { kept: older.id, removed: newer.id });
+    this.save();
+    return merged;
   }
 
   /**
@@ -774,13 +929,22 @@ export class ClaudeProfileManager {
   /**
    * Record a rate limit event for a profile
    */
-  recordRateLimitEvent(profileId: string, resetTimeStr: string): ClaudeRateLimitEvent {
+  recordRateLimitEvent(
+    profileId: string,
+    resetTimeStr: string,
+    options?: RecordRateLimitOptions
+  ): ClaudeRateLimitEvent | null {
     const profile = this.getProfile(profileId);
     if (!profile) {
       throw new Error('Profile not found');
     }
 
-    const event = recordRateLimitEventImpl(profile, resetTimeStr);
+    // Null when the reset string isn't a real Claude reset (e.g. quoted in terminal output)
+    const event = recordRateLimitEventImpl(profile, resetTimeStr, options);
+    if (!event) {
+      debugLog('[ClaudeProfileManager] Ignored implausible rate limit for profile:', profileId, JSON.stringify(resetTimeStr));
+      return null;
+    }
     this.save();
     return event;
   }

@@ -36,6 +36,7 @@ vi.mock('../claude-profile-manager', () => ({
       { id: 'profile-3', name: 'Profile 3' }
     ]),
     setActiveProfile: vi.fn(),
+    hasValidAuth: vi.fn(() => true),
     getProfileToken: vi.fn(() => 'mock-decrypted-token')
   }))
 }));
