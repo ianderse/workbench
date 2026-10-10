@@ -76,6 +76,8 @@ export interface TaskLogEntry {
   phase: TaskLogPhase;
   tool_name?: string;
   tool_input?: string;
+  /** Claude Code tool call id: pairs a tool_start with its tool_end (newer logs only) */
+  tool_use_id?: string;
   subtask_id?: string;
   session?: number;
   // Fields for expandable detail view

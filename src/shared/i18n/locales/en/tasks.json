@@ -282,11 +282,6 @@
   "referenceImages": {
     "preview": "Preview {{filename}}"
   },
-  "detailTabs": {
-    "label": "Task sections",
-    "overview": "Overview",
-    "logs": "Logs"
-  },
   "detail": {
     "resumeFailedTitle": "Cannot resume task",
     "resumeFailedDescription": "Failed to load implementation plan. Please try again or check the task files.",
@@ -298,16 +293,11 @@
     "resume": "Resume task"
   },
   "logs": {
+    "title": "Logs",
     "empty": "No logs yet",
-    "emptyHint": "Logs will appear here when the task runs",
     "stopped": "Stopped",
     "entries_one": "{{count}} entry",
     "entries_other": "{{count}} entries",
-    "phases": {
-      "planning": "Triage and plan",
-      "coding": "Implementation",
-      "validation": "Validation"
-    },
     "tools": {
       "reading": "Reading",
       "searchingFiles": "Searching files",
@@ -316,9 +306,6 @@
       "writing": "Writing",
       "running": "Running"
     },
-    "done": "Done",
-    "showOutput": "Show output",
-    "hideOutput": "Hide output",
     "more": "More",
     "less": "Less"
   },

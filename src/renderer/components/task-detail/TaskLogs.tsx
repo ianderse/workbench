@@ -10,9 +10,7 @@ import {
   Search,
   FolderSearch,
   Wrench,
-  Info,
-  Clock,
-  Pause
+  Info
 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Badge } from '../ui/badge';
@@ -21,7 +19,7 @@ import { cn } from '../../lib/utils';
 import { formatDateTime } from '../../../shared/utils/format-date-time';
 import { useSettingsStore } from '../../stores/settings-store';
 import { summarizeLogPhase, formatCostUsd, formatDurationMs } from '../../../shared/utils/claude-run';
-import type { Task, TaskLogs, TaskLogPhase, TaskPhaseLog, TaskLogEntry, ClaudeRunPhase } from '../../../shared/types';
+import type { Task, TaskLogs, TaskLogPhase, TaskPhaseLog, TaskLogEntry } from '../../../shared/types';
 
 // Neutral chip for tool activity (no per-tool colors)
 const TOOL_CHIP_CLASS = 'text-muted-foreground bg-segment-track';
@@ -30,170 +28,242 @@ interface TaskLogsProps {
   task: Task;
   phaseLogs: TaskLogs | null;
   isLoadingLogs: boolean;
-  expandedPhases: Set<TaskLogPhase>;
-  logsEndRef: React.RefObject<HTMLDivElement | null>;
-  logsContainerRef: React.RefObject<HTMLDivElement | null>;
-  onLogsScroll: (e: React.UIEvent<HTMLDivElement>) => void;
-  onTogglePhase: (phase: TaskLogPhase) => void;
-}
-
-
-export function TaskLogs({
-  task,
-  phaseLogs,
-  isLoadingLogs,
-  expandedPhases,
-  logsEndRef,
-  logsContainerRef,
-  onLogsScroll,
-  onTogglePhase
-}: TaskLogsProps) {
-  const { t } = useTranslation(['tasks']);
-  return (
-    <div
-      ref={logsContainerRef}
-      className="h-full overflow-y-auto scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent"
-      onScroll={onLogsScroll}
-    >
-      <div className="p-4 space-y-2">
-        {isLoadingLogs ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-          </div>
-        ) : phaseLogs ? (
-          <>
-            {/* Phase-based collapsible logs */}
-            {(['planning', 'coding', 'validation'] as TaskLogPhase[]).map((phase) => (
-              <PhaseLogSection
-                key={phase}
-                phase={phase}
-                phaseLog={phaseLogs.phases[phase]}
-                isExpanded={expandedPhases.has(phase)}
-                onToggle={() => onTogglePhase(phase)}
-                runPhases={task.claudeRun?.phases}
-                isTaskSettled={task.status === 'human_review' || task.status === 'done' || task.status === 'pr_created' || task.status === 'error'}
-              />
-            ))}
-            <div ref={logsEndRef} />
-          </>
-        ) : task.logs && task.logs.length > 0 ? (
-          // Fallback to legacy raw logs if no phase logs exist
-          <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all">
-            {task.logs.join('\n')}
-            <div ref={logsEndRef} />
-          </pre>
-        ) : (
-          <div className="text-center text-sm text-muted-foreground py-8">
-            <Terminal className="mx-auto mb-2 h-8 w-8 opacity-50" />
-            <p>{t('tasks:logs.empty')}</p>
-            <p className="text-xs mt-1">{t('tasks:logs.emptyHint')}</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// Phase Log Section Component
-interface PhaseLogSectionProps {
-  phase: TaskLogPhase;
-  phaseLog: TaskPhaseLog | null;
   isExpanded: boolean;
   onToggle: () => void;
-  isTaskSettled?: boolean;
-  /** Claude Code run steps, for the section's duration and cost */
-  runPhases?: ClaudeRunPhase[];
 }
 
-// Same status icons as the subtasks list: none once a phase has finished (failure is labelled)
-function getPhaseStatusIcon(status: string) {
-  switch (status) {
-    case 'completed':
-      return null;
-    case 'failed':
-    case 'stopped':
-      return null;
-    case 'active':
-      return <Clock className="h-4 w-4 text-muted-foreground animate-pulse" />;
-    default:
-      return <Pause className="h-4 w-4 text-muted-foreground" />;
-  }
-}
+const LOG_PHASES: TaskLogPhase[] = ['planning', 'coding', 'validation'];
 
-function PhaseLogSection({ phase, phaseLog, isExpanded, onToggle, isTaskSettled, runPhases }: PhaseLogSectionProps) {
+/**
+ * The task's logs as one collapsible "Logs" section: every step's entries (triage and plan,
+ * implementation, validation) in one list, with the steps' total time and cost in the header.
+ */
+export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle }: TaskLogsProps) {
   const { t } = useTranslation(['tasks']);
-  const logOrder = useSettingsStore(s => s.settings.logOrder);
-  // If the task is in a settled state (human_review, done, etc.), any "active" phase
-  // is actually completed — the log writer may have missed the endPhase() call.
-  let status = phaseLog?.status || 'pending';
-  if (status === 'active' && isTaskSettled) {
-    status = 'completed';
-  }
-  // Logs written before steps could be "stopped" recorded a stopped run as failed
-  if (status === 'failed' && phaseLog?.entries.at(-1)?.type === 'phase_end' && phaseLog.entries.at(-1)?.content === 'Stopped') {
-    status = 'stopped';
-  }
-  const hasEntries = (phaseLog?.entries.length || 0) > 0;
-  const { durationMs, costUsd } = useMemo(() => summarizeLogPhase(runPhases, phase), [runPhases, phase]);
+  const logOrder = useSettingsStore((s) => s.settings.logOrder);
+  // In a settled task an "active" step was never ended by the log writer: it is not running
+  const isTaskSettled = task.status === 'human_review' || task.status === 'done' || task.status === 'pr_created' || task.status === 'error';
+
+  const { items, entryCount, status } = useMemo(() => {
+    const all: LogItem[] = [];
+    let count = 0;
+    let lastStatus: string | undefined;
+    for (const phase of LOG_PHASES) {
+      const phaseLog = phaseLogs?.phases[phase];
+      if (!phaseLog || phaseLog.entries.length === 0) continue;
+      count += phaseLog.entries.length;
+      const phaseStatus = getPhaseStatus(phaseLog, isTaskSettled);
+      lastStatus = phaseStatus;
+      // A failed step ends with a phase_end entry that holds the error: show it as an error
+      const entries = phaseStatus === 'failed'
+        ? phaseLog.entries.map((entry, i) =>
+            i === phaseLog.entries.length - 1 && entry.type === 'phase_end' ? { ...entry, type: 'error' as const } : entry)
+        : phaseLog.entries;
+      for (const item of groupToolCalls(entries)) {
+        all.push(item.kind === 'tool' ? { ...item, running: !item.end && phaseStatus === 'active' } : item);
+      }
+    }
+    // One timeline across the steps (a rerun's steps follow the earlier run's)
+    const time = (item: LogItem) =>
+      Date.parse((item.kind === 'tool' ? (item.start ?? item.end)! : item.entry).timestamp) || 0;
+    all.sort((a, b) => time(a) - time(b));
+    return {
+      items: logOrder === 'reverse-chronological' ? all.reverse() : all,
+      entryCount: count,
+      status: lastStatus
+    };
+  }, [phaseLogs, isTaskSettled, logOrder]);
+
+  // Total time and cost of the run's steps
+  const { durationMs, costUsd } = useMemo(() => {
+    let duration: number | undefined;
+    let cost: number | undefined;
+    for (const phase of LOG_PHASES) {
+      const summary = summarizeLogPhase(task.claudeRun?.phases, phase);
+      if (summary.durationMs !== undefined) duration = (duration ?? 0) + summary.durationMs;
+      if (summary.costUsd !== undefined) cost = (cost ?? 0) + summary.costUsd;
+    }
+    return { durationMs: duration, costUsd: cost };
+  }, [task.claudeRun?.phases]);
+
+  const legacyLogs = !phaseLogs && task.logs && task.logs.length > 0 ? task.logs : null;
   const summaryParts = [
-    hasEntries ? t('tasks:logs.entries', { count: phaseLog?.entries.length ?? 0 }) : null,
+    entryCount > 0 ? t('tasks:logs.entries', { count: entryCount }) : null,
     durationMs !== undefined ? formatDurationMs(durationMs) : null,
     costUsd !== undefined ? formatCostUsd(costUsd) : null
   ].filter((part): part is string => !!part);
 
-  // A failed section ends with a phase_end entry that holds the error: show it as an error
-  const failedEndEntry = useMemo(() => {
-    if (status !== 'failed') return null;
-    const entries = phaseLog?.entries || [];
-    for (let i = entries.length - 1; i >= 0; i--) {
-      if (entries[i].type === 'phase_end') return entries[i];
-    }
-    return null;
-  }, [status, phaseLog?.entries]);
-
-  // Memoize sorted entries to avoid re-calculating on every render
-  // Entries are naturally in chronological order (oldest first from append())
-  const displayedEntries = useMemo(() => {
-    const entries = phaseLog?.entries || [];
-    return logOrder === 'reverse-chronological' ? [...entries].reverse() : entries;
-  }, [phaseLog?.entries, logOrder]);
-
   return (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
       <CollapsibleTrigger asChild>
+        {/* Ghost button with a trailing chevron, like the settings dropdown triggers */}
         <button
           type="button"
-          className="flex w-full items-center gap-2 rounded-xl border border-border p-3 text-left transition-colors hover:bg-nav-hover"
+          className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left outline-none transition-colors hover:bg-nav-hover focus-visible:shadow-(--shadow-focus) data-[state=open]:bg-nav-hover"
         >
-          <span className="shrink-0">{getPhaseStatusIcon(status)}</span>
-          <span className="text-sm text-foreground">{t(`tasks:logs.phases.${phase}`)}</span>
+          <span className="text-sm text-foreground">{t('tasks:logs.title')}</span>
           {status === 'failed' && <span className="text-xs text-destructive">{t('tasks:execution.phases.failed')}</span>}
           {status === 'stopped' && <span className="text-xs text-(--nav-label-color)">{t('tasks:logs.stopped')}</span>}
           {summaryParts.length > 0 && (
-            <span className="text-xs text-(--nav-label-color) tabular-nums">
-              {summaryParts.join(' · ')}
-            </span>
+            <span className="text-xs text-(--nav-label-color) tabular-nums">{summaryParts.join(' · ')}</span>
           )}
-          <ChevronRight
+          {isLoadingLogs && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+          <ChevronDown
             className={cn(
               'ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200',
-              isExpanded && 'rotate-90'
+              isExpanded && 'rotate-180'
             )}
           />
         </button>
       </CollapsibleTrigger>
       <CollapsibleContent>
-        <div className="mt-1 ml-6 border-l-2 border-border pl-4 py-2 space-y-1">
-          {!hasEntries ? (
-            <p className="text-xs text-muted-foreground">{t('tasks:logs.empty')}</p>
+        <div className="space-y-1 py-2">
+          {items.length > 0 ? (
+            items.map((item) =>
+              item.kind === 'tool' ? (
+                <ToolCallRow
+                  key={`${(item.start ?? item.end)!.timestamp}-tool-${(item.start ?? item.end)!.tool_name}`}
+                  start={item.start}
+                  end={item.end}
+                  isRunning={!!item.running}
+                />
+              ) : (
+                <LogEntry key={`${item.entry.timestamp}-${item.entry.type}-${item.entry.content}`} entry={item.entry} />
+              )
+            )
+          ) : legacyLogs ? (
+            // Older tasks without step logs
+            <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{legacyLogs.join('\n')}</pre>
           ) : (
-            displayedEntries.map((entry) => (
-              <LogEntry
-                key={`${entry.timestamp}-${entry.type}-${entry.content}`}
-                entry={entry === failedEndEntry ? { ...entry, type: 'error' } : entry}
-              />
-            ))
+            <p className="text-xs text-muted-foreground">{isLoadingLogs ? '' : t('tasks:logs.empty')}</p>
           )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** A step's log status; logs written before steps could be "stopped" recorded a stop as failed */
+function getPhaseStatus(phaseLog: TaskPhaseLog, isTaskSettled: boolean): string {
+  const last = phaseLog.entries.at(-1);
+  if (phaseLog.status === 'failed' && last?.type === 'phase_end' && last.content === 'Stopped') return 'stopped';
+  if (phaseLog.status === 'active' && isTaskSettled) return 'completed';
+  return phaseLog.status;
+}
+
+type LogItem =
+  | { kind: 'entry'; entry: TaskLogEntry }
+  | { kind: 'tool'; start?: TaskLogEntry; end?: TaskLogEntry; running?: boolean };
+
+/**
+ * Merge each tool call's tool_start and tool_end entries into one item. Newer logs pair them by
+ * tool_use_id; older ones match an end to the oldest open start of the same tool.
+ */
+function groupToolCalls(entries: TaskLogEntry[]): LogItem[] {
+  const items: LogItem[] = [];
+  const openById = new Map<string, Extract<LogItem, { kind: 'tool' }>>();
+  const openByName = new Map<string, Extract<LogItem, { kind: 'tool' }>[]>();
+  for (const entry of entries) {
+    if (entry.type === 'tool_start' && entry.tool_name) {
+      const item: Extract<LogItem, { kind: 'tool' }> = { kind: 'tool', start: entry };
+      items.push(item);
+      if (entry.tool_use_id) openById.set(entry.tool_use_id, item);
+      else openByName.set(entry.tool_name, [...(openByName.get(entry.tool_name) ?? []), item]);
+    } else if (entry.type === 'tool_end' && entry.tool_name) {
+      let item = entry.tool_use_id ? openById.get(entry.tool_use_id) : undefined;
+      if (item) {
+        openById.delete(entry.tool_use_id!);
+      } else {
+        const queue = openByName.get(entry.tool_name);
+        item = queue?.shift();
+      }
+      if (item) item.end = entry;
+      else items.push({ kind: 'tool', end: entry });
+    } else {
+      items.push({ kind: 'entry', entry });
+    }
+  }
+  return items;
+}
+
+function useToolInfo() {
+  const { t } = useTranslation(['tasks']);
+  return (toolName: string) => {
+    switch (toolName) {
+      case 'Read':
+        return { icon: FileText, label: t('tasks:logs.tools.reading') };
+      case 'Glob':
+        return { icon: FolderSearch, label: t('tasks:logs.tools.searchingFiles') };
+      case 'Grep':
+        return { icon: Search, label: t('tasks:logs.tools.searchingCode') };
+      case 'Edit':
+        return { icon: Pencil, label: t('tasks:logs.tools.editing') };
+      case 'Write':
+        return { icon: FileCode, label: t('tasks:logs.tools.writing') };
+      case 'Bash':
+        return { icon: Terminal, label: t('tasks:logs.tools.running') };
+      default:
+        return { icon: Wrench, label: toolName };
+    }
+  };
+}
+
+/** One tool call: a row (tool, input, status) that expands to the call's output when it has one */
+function ToolCallRow({ start, end, isRunning }: { start?: TaskLogEntry; end?: TaskLogEntry; isRunning: boolean }) {
+  const { t } = useTranslation(['tasks']);
+  const getToolInfo = useToolInfo();
+  const [isExpanded, setIsExpanded] = useState(false);
+  const toolName = (start ?? end)!.tool_name!;
+  const { icon: Icon, label } = getToolInfo(toolName);
+  const failed = !!end && end.content.endsWith(' failed');
+  const output = end?.detail;
+  const subphase = start?.subphase ?? end?.subphase;
+
+  const row = (
+    <>
+      {isRunning ? <Loader2 className="h-3 w-3 shrink-0 animate-spin" /> : <Icon className="h-3 w-3 shrink-0" />}
+      <span className="shrink-0 font-medium text-foreground">{label}</span>
+      {start?.tool_input && (
+        <span className="min-w-0 truncate" title={start.tool_input}>
+          {start.tool_input}
+        </span>
+      )}
+      {subphase && (
+        <Badge variant="outline" className="ml-1 border-muted-foreground/30 px-1 py-0 text-[9px] text-muted-foreground">
+          {subphase}
+        </Badge>
+      )}
+      {failed && <span className="shrink-0 text-destructive">{t('tasks:execution.phases.failed')}</span>}
+      {output && (
+        <ChevronDown
+          className={cn('ml-auto h-3.5 w-3.5 shrink-0 transition-transform duration-200', isExpanded && 'rotate-180')}
+        />
+      )}
+    </>
+  );
+  const rowClass = cn('flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-xs', TOOL_CHIP_CLASS);
+
+  if (!output) return <div className={rowClass}>{row}</div>;
+  return (
+    <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+      <CollapsibleTrigger asChild>
+        <button
+          type="button"
+          className={cn(rowClass, 'outline-none transition-colors hover:bg-nav-hover focus-visible:shadow-(--shadow-focus)')}
+        >
+          {row}
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="mt-1 overflow-x-auto rounded-lg border border-border p-2">
+          <pre
+            className={cn(
+              'max-h-[300px] overflow-y-auto whitespace-pre-wrap break-words font-mono text-[10px]',
+              failed ? 'text-destructive/80' : 'text-muted-foreground'
+            )}
+          >
+            {output}
+          </pre>
         </div>
       </CollapsibleContent>
     </Collapsible>
@@ -210,25 +280,6 @@ function LogEntry({ entry }: LogEntryProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasDetail = Boolean(entry.detail);
 
-  const getToolInfo = (toolName: string) => {
-    switch (toolName) {
-      case 'Read':
-        return { icon: FileText, label: t('tasks:logs.tools.reading'), color: TOOL_CHIP_CLASS };
-      case 'Glob':
-        return { icon: FolderSearch, label: t('tasks:logs.tools.searchingFiles'), color: TOOL_CHIP_CLASS };
-      case 'Grep':
-        return { icon: Search, label: t('tasks:logs.tools.searchingCode'), color: TOOL_CHIP_CLASS };
-      case 'Edit':
-        return { icon: Pencil, label: t('tasks:logs.tools.editing'), color: TOOL_CHIP_CLASS };
-      case 'Write':
-        return { icon: FileCode, label: t('tasks:logs.tools.writing'), color: TOOL_CHIP_CLASS };
-      case 'Bash':
-        return { icon: Terminal, label: t('tasks:logs.tools.running'), color: TOOL_CHIP_CLASS };
-      default:
-        return { icon: Wrench, label: toolName, color: TOOL_CHIP_CLASS };
-    }
-  };
-
   const SubphaseBadge = () => {
     if (!entry.subphase) return null;
     return (
@@ -237,67 +288,6 @@ function LogEntry({ entry }: LogEntryProps) {
       </Badge>
     );
   };
-
-  if (entry.type === 'tool_start' && entry.tool_name) {
-    const { icon: Icon, label, color } = getToolInfo(entry.tool_name);
-    return (
-      <div className="flex flex-col">
-        <div className={cn('inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs', color)}>
-          <Icon className="h-3 w-3 animate-pulse" />
-          <span className="font-medium">{label}</span>
-          {entry.tool_input && (
-            <span className="text-muted-foreground truncate max-w-[500px]" title={entry.tool_input}>
-              {entry.tool_input}
-            </span>
-          )}
-          <SubphaseBadge />
-        </div>
-      </div>
-    );
-  }
-
-  if (entry.type === 'tool_end' && entry.tool_name) {
-    const { icon: Icon, color } = getToolInfo(entry.tool_name);
-    return (
-      <div className="flex flex-col">
-        <div className="flex items-center gap-2">
-          <div className={cn('inline-flex items-center gap-2 rounded-md px-2 py-1 text-xs', color, 'opacity-60')}>
-            <Icon className="h-3 w-3" />
-            <span className="text-muted-foreground">{t('tasks:logs.done')}</span>
-          </div>
-          {hasDetail && (
-            <button
-              onClick={() => setIsExpanded(!isExpanded)}
-              className={cn(
-                'flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded',
-                'text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors',
-                isExpanded && 'bg-secondary/50'
-              )}
-            >
-              {isExpanded ? (
-                <>
-                  <ChevronDown className="h-2.5 w-2.5" />
-                  <span>{t('tasks:logs.hideOutput')}</span>
-                </>
-              ) : (
-                <>
-                  <ChevronRight className="h-2.5 w-2.5" />
-                  <span>{t('tasks:logs.showOutput')}</span>
-                </>
-              )}
-            </button>
-          )}
-        </div>
-        {hasDetail && isExpanded && (
-          <div className="mt-1.5 ml-4 p-2 rounded-lg border border-border overflow-x-auto">
-            <pre className="text-[10px] text-muted-foreground whitespace-pre-wrap break-words font-mono max-h-[300px] overflow-y-auto">
-              {entry.detail}
-            </pre>
-          </div>
-        )}
-      </div>
-    );
-  }
 
   if (entry.type === 'error') {
     return (

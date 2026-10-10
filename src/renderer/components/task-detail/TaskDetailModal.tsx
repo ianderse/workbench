@@ -2,9 +2,6 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { useToast } from '../../hooks/use-toast';
-import { Tabs, TabsContent } from '../ui/tabs';
-import { SegmentedControl } from '../settings/SettingsRow';
-import { ScrollArea } from '../ui/scroll-area';
 import { TooltipProvider } from '../ui/tooltip';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -347,26 +344,11 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
               )}
             </div>
 
-            {/* Body - Single Column with Tabs */}
+            {/* Body: one scrolling page (details, review, logs). A plain scroll container: the
+                ScrollArea viewport sizes to its content, so long log rows would widen the page */}
             <div className="flex-1 min-h-0 overflow-hidden">
-              <Tabs value={state.activeTab} onValueChange={state.setActiveTab} className="flex flex-col h-full">
-                {/* Tabs as a segmented control, like the settings dialog */}
-                <div className="shrink-0 px-6 pb-3">
-                  <SegmentedControl
-                    value={state.activeTab}
-                    onValueChange={state.setActiveTab}
-                    ariaLabel={t('tasks:detailTabs.label')}
-                    options={[
-                      { value: 'overview', label: t('tasks:detailTabs.overview') },
-                      { value: 'logs', label: t('tasks:detailTabs.logs') }
-                    ]}
-                  />
-                </div>
-
-                {/* Overview Tab */}
-                <TabsContent value="overview" className="flex-1 min-h-0 overflow-hidden mt-0">
-                  <ScrollArea className="h-full">
-                    <div className="p-6 space-y-5 overflow-x-hidden max-w-full">
+                  <div className="h-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
+                    <div className="px-6 pb-6 pt-2 space-y-5 overflow-x-hidden max-w-full">
                       {/* Metadata */}
                       <TaskMetadata
                         task={task}
@@ -439,25 +421,17 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                           />
                         </>
                       )}
+
+                      {/* Logs of all steps, under Request changes */}
+                      <TaskLogs
+                        task={task}
+                        phaseLogs={state.phaseLogs}
+                        isLoadingLogs={state.isLoadingLogs}
+                        isExpanded={state.isLogsExpanded}
+                        onToggle={state.toggleLogs}
+                      />
                     </div>
-                  </ScrollArea>
-                </TabsContent>
-
-                {/* Logs Tab */}
-                <TabsContent value="logs" className="flex-1 min-h-0 overflow-hidden mt-0">
-                  <TaskLogs
-                    task={task}
-                    phaseLogs={state.phaseLogs}
-                    isLoadingLogs={state.isLoadingLogs}
-                    expandedPhases={state.expandedPhases}
-                    logsEndRef={state.logsEndRef}
-                    logsContainerRef={state.logsContainerRef}
-                    onLogsScroll={state.handleLogsScroll}
-                    onTogglePhase={state.togglePhase}
-                  />
-                </TabsContent>
-
-              </Tabs>
+                  </div>
             </div>
 
             {/* Footer: task actions (the close button stays at the top) */}

@@ -778,6 +778,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
     this.log.add(logPhase, 'tool_start', `${name}${summary ? `: ${summary}` : ''}`, {
       tool_name: name,
       tool_input: summary,
+      tool_use_id: id,
       ...(subphase ? { subphase } : {}),
     });
     if (inSubagent) return;
@@ -828,6 +829,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
     if (inSubagent || !name) return;
     this.log.add(logPhase, 'tool_end', `${name} ${block.is_error ? 'failed' : 'done'}`, {
       tool_name: name,
+      tool_use_id: block.tool_use_id,
       detail: text || undefined,
       collapsed: true,
     });

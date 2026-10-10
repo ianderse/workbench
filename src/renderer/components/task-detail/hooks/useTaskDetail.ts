@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useProjectStore } from '../../../stores/project-store';
-import { useSettingsStore } from '../../../stores/settings-store';
 import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, loadTasks, hasRecentActivity } from '../../../stores/task-store';
 import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, ImageAttachment } from '../../../../shared/types';
 
@@ -49,12 +48,17 @@ export interface UseTaskDetailOptions {
   task: Task;
 }
 
+const LOG_PHASES: TaskLogPhase[] = ['planning', 'coding', 'validation'];
+
+/** Steps whose log ended in failure */
+function failedPhases(logs: TaskLogs): Set<TaskLogPhase> {
+  return new Set(LOG_PHASES.filter((phase) => logs.phases[phase]?.status === 'failed'));
+}
+
 export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [feedback, setFeedback] = useState('');
   const [feedbackImages, setFeedbackImages] = useState<ImageAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [isStuck, setIsStuck] = useState(false);
   const [hasCheckedRunning, setHasCheckedRunning] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -73,10 +77,10 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [suggestedCommitMessage, setSuggestedCommitMessage] = useState<string | undefined>(undefined);
   const [phaseLogs, setPhaseLogs] = useState<TaskLogs | null>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [expandedPhases, setExpandedPhases] = useState<Set<TaskLogPhase>>(new Set());
+  // The Logs section (all steps in one list) opens by itself when a step runs or fails
+  const [isLogsExpanded, setIsLogsExpanded] = useState(false);
+  const failedPhasesRef = useRef<Set<TaskLogPhase>>(new Set());
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
-  const logsEndRef = useRef<HTMLDivElement>(null);
-  const logsContainerRef = useRef<HTMLDivElement>(null);
 
   // Merge preview state
   const [mergePreview, setMergePreview] = useState<{
@@ -96,7 +100,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
       ? state.projects.find((project) => project.id === currentProjectId)
       : undefined;
   });
-  const logOrder = useSettingsStore(s => s.settings.logOrder);
   const isRunning = task.status === 'in_progress';
   // isActiveTask includes ai_review for stuck detection (CHANGELOG documents this feature)
   const isActiveTask = task.status === 'in_progress' || task.status === 'ai_review';
@@ -153,39 +156,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     }
   }, [showDeleteDialog, task]);
 
-  // Handle scroll events in logs to detect if user scrolled away from anchor
-  const handleLogsScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLDivElement;
-    const isReverseOrder = logOrder === 'reverse-chronological';
-
-    // Check distance from top for reverse order, bottom for chronological
-    const isAtAnchor = isReverseOrder
-      ? target.scrollTop < 100
-      : target.scrollHeight - target.scrollTop - target.clientHeight < 100;
-
-    setIsUserScrolledUp(!isAtAnchor);
-  };
-
-  // Auto-scroll logs to anchor (top for reverse, bottom for chronological) only if user hasn't scrolled away
-  useEffect(() => {
-    const isReverseOrder = logOrder === 'reverse-chronological';
-
-    if (activeTab === 'logs' && !isUserScrolledUp) {
-      if (isReverseOrder && logsContainerRef.current) {
-        logsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-      } else if (!isReverseOrder && logsEndRef.current) {
-        logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
-      }
-    }
-  }, [activeTab, isUserScrolledUp, logOrder, phaseLogs]);
-
-  // Reset scroll state when switching to logs tab
-  useEffect(() => {
-    if (activeTab === 'logs') {
-      setIsUserScrolledUp(false);
-    }
-  }, [activeTab]);
-
   // Reset feedback images when task changes to prevent image leakage between tasks
   useEffect(() => {
     setFeedbackImages([]);
@@ -221,13 +191,11 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
         const result = await window.electronAPI.getTaskLogs(currentProject.id, task.specId);
         if (result.success && result.data) {
           setPhaseLogs(result.data);
-          // Auto-expand the active phase and failed phases (so their errors are visible)
+          // Open the logs while a step runs or after one failed (so its error is visible)
           const data = result.data;
-          const openPhases = (['planning', 'coding', 'validation'] as TaskLogPhase[]).filter(
-            phase => data.phases[phase]?.status === 'active' || data.phases[phase]?.status === 'failed'
-          );
-          if (openPhases.length > 0) {
-            setExpandedPhases(new Set(openPhases));
+          failedPhasesRef.current = failedPhases(data);
+          if (failedPhasesRef.current.size > 0 || LOG_PHASES.some((phase) => data.phases[phase]?.status === 'active')) {
+            setIsLogsExpanded(true);
           }
         }
       } catch (err) {
@@ -246,17 +214,12 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     const unsubscribe = window.electronAPI.onTaskLogsChanged((specId, logs) => {
       if (specId === task.specId) {
         setPhaseLogs(logs);
-        // Auto-expand a newly active or failed phase
-        const openPhases = (['planning', 'coding', 'validation'] as TaskLogPhase[]).filter(
-          phase => logs.phases[phase]?.status === 'active' || logs.phases[phase]?.status === 'failed'
-        );
-        if (openPhases.length > 0) {
-          setExpandedPhases(prev => {
-            const next = new Set(prev);
-            for (const phase of openPhases) next.add(phase);
-            return next;
-          });
+        // Open the logs when a step newly fails (a collapsed list stays collapsed otherwise)
+        const failed = failedPhases(logs);
+        if ([...failed].some((phase) => !failedPhasesRef.current.has(phase))) {
+          setIsLogsExpanded(true);
         }
+        failedPhasesRef.current = failed;
       }
     });
 
@@ -266,18 +229,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     };
   }, [currentProject, task.specId]);
 
-  // Toggle phase expansion
-  const togglePhase = useCallback((phase: TaskLogPhase) => {
-    setExpandedPhases(prev => {
-      const next = new Set(prev);
-      if (next.has(phase)) {
-        next.delete(phase);
-      } else {
-        next.add(phase);
-      }
-      return next;
-    });
-  }, []);
+  const toggleLogs = useCallback(() => setIsLogsExpanded((open) => !open), []);
 
   // Add a feedback image
   const addFeedbackImage = useCallback((image: ImageAttachment) => {
@@ -486,8 +438,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     feedback,
     feedbackImages,
     isSubmitting,
-    activeTab,
-    isUserScrolledUp,
     isStuck,
     hasCheckedRunning,
     showDeleteDialog,
@@ -506,9 +456,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     suggestedCommitMessage,
     phaseLogs,
     isLoadingLogs,
-    expandedPhases,
-    logsEndRef,
-    logsContainerRef,
+    isLogsExpanded,
     selectedProject: currentProject,
     isRunning,
     needsReview,
@@ -527,8 +475,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setFeedback,
     setFeedbackImages,
     setIsSubmitting,
-    setActiveTab,
-    setIsUserScrolledUp,
     setIsStuck,
     setHasCheckedRunning,
     setShowDeleteDialog,
@@ -547,7 +493,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setSuggestedCommitMessage,
     setPhaseLogs,
     setIsLoadingLogs,
-    setExpandedPhases,
     setMergePreview,
     setIsLoadingPreview,
     setShowConflictDialog,
@@ -555,8 +500,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setIsCreatingPR,
 
     // Handlers
-    handleLogsScroll,
-    togglePhase,
+    toggleLogs,
     loadMergePreview,
     addFeedbackImage,
     addFeedbackImages,
