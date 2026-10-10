@@ -255,7 +255,7 @@
   --success: #5A7F4A;
   --success-foreground: #FFFFFF;
   --success-light: #EAF0E4;
-  --warning: #A8741F;
+  --warning: #FCA935;
   --warning-foreground: #FFFFFF;
   --warning-light: #F5EDDC;
   --info: #3F6E9C;
@@ -329,7 +329,7 @@
 
   /* Kanban columns */
   --column-bg: none;
-  --column-top-width: 1px;
+  --column-top-width: 2px;
 
   /* Glows, gradients and decorative shadows - flattened */
   --accent-glow-rgb: 198, 97, 63;
@@ -402,7 +402,7 @@
   --success: #8DB07A;
   --success-foreground: #141413;
   --success-light: #1E2620;
-  --warning: #D4A657;
+  --warning: #FCA935;
   --warning-foreground: #141413;
   --warning-light: #2A241A;
   --info: #7FA6CF;
@@ -476,7 +476,7 @@
 
   /* Kanban columns */
   --column-bg: none;
-  --column-top-width: 1px;
+  --column-top-width: 2px;
 
   /* Glows, gradients and decorative shadows - flattened */
   --accent-glow-rgb: 217, 119, 87;
@@ -655,12 +655,12 @@ body {
 
 /* Column status colors for Kanban (also used by the task dialog's status label) */
 :root {
-  --column-backlog: var(--muted-foreground);
-  --column-queue: #22d3ee;
-  --column-in-progress: var(--info);
-  --column-ai-review: var(--warning);
+  --column-backlog: var(--foreground);
+  --column-queue: #FF4081;
+  --column-in-progress: #0088FF;
+  --column-ai-review: #FCA935;
   --column-human-review: #A855F7;
-  --column-done: var(--success);
+  --column-done: #3FB950;
 }
 
 .column-backlog {
