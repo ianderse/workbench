@@ -13,7 +13,6 @@
   "actions": {
     "start": "Start",
     "stop": "Stop",
-    "recover": "Recover",
     "resume": "Resume",
     "archive": "Archive",
     "delete": "Delete",
@@ -34,7 +33,6 @@
     "pending": "Pending",
     "stuck": "Stuck",
     "incomplete": "Incomplete",
-    "recovering": "Recovering...",
     "needsRecovery": "Needs recovery",
     "needsResume": "Needs resume",
     "onHoldUntil": "On hold · resumes {{time}}"
@@ -295,10 +293,6 @@
     "attachments": "Reference images"
   },
   "warnings": {
-    "stuckTitle": "Task appears stuck",
-    "stuckDescription": "This task is marked as running but no active process was found. This can happen if the app crashed or the process was terminated unexpectedly.",
-    "recover": "Recover and restart",
-    "recovering": "Recovering...",
     "incompleteTitle": "Task incomplete",
     "incompleteDescription": "This task stopped before Claude Code finished it ({{completed}}/{{total}} task list items done). The process likely exited early. Resume to continue the same session.",
     "resume": "Resume task"

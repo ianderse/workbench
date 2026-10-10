@@ -22,7 +22,6 @@ import {
 import {
   Trash2,
   Loader2,
-  AlertTriangle,
   Pencil,
   X,
   ArchiveRestore,
@@ -40,7 +39,7 @@ import {
   DIALOG_SURFACE_CLASS,
   DIALOG_TITLE_CLASS
 } from '../ui/dialog-styles';
-import { stopTask, submitReview, recoverStuckTask, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, retryTask } from '../../stores/task-store';
+import { stopTask, submitReview, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, retryTask } from '../../stores/task-store';
 import { useProjectStore } from '../../stores/project-store';
 import { TASK_STATUS_LABELS, getTaskColumn, type TaskStatusColumn } from '../../../shared/constants';
 import { TaskEditDialog } from '../TaskEditDialog';
@@ -141,6 +140,10 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     setIsRetrying(true);
     const result = await retryTask(task.id);
     setIsRetrying(false);
+    if (result.success) {
+      state.setIsStuck(false);
+      state.setHasCheckedRunning(false);
+    }
     if (!result.success) {
       toast({
         title: t('tasks:wizard.errors.startFailed'),
@@ -150,16 +153,6 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     } else if (result.action === 'queued') {
       toast({ title: t('tasks:queue.movedToQueue') });
     }
-  };
-
-  const handleRecover = async () => {
-    state.setIsRecovering(true);
-    const result = await recoverStuckTask(task.id, { autoRestart: true });
-    if (result.success) {
-      state.setIsStuck(false);
-      state.setHasCheckedRunning(false);
-    }
-    state.setIsRecovering(false);
   };
 
   const handleReject = async () => {
@@ -294,16 +287,15 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                           </Badge>
                         </>
                       )}
+                      {/* Status labels share one look: text and border in the color, 10% tint */}
                       {state.isStuck ? (
-                        <Badge variant="warning" className="text-xs flex items-center gap-1 animate-pulse">
-                          <AlertTriangle className="h-3 w-3" />
+                        <Badge variant="outline" className="text-xs border-current bg-warning/10 text-warning">
                           {t('tasks:detailHeader.stuck')}
                         </Badge>
                       ) : state.isIncomplete ? (
-                        <Badge variant="warning" className="text-xs flex items-center gap-1">
-                            <AlertTriangle className="h-3 w-3" />
-                            {t('tasks:detailHeader.incomplete')}
-                          </Badge>
+                        <Badge variant="outline" className="text-xs border-current bg-warning/10 text-warning">
+                          {t('tasks:detailHeader.incomplete')}
+                        </Badge>
                       ) : taskHasErrors(task) ? (
                         <Badge variant="outline" className="text-xs border-current bg-red-500/10 text-red-500">
                           {t('tasks:detailHeader.failed')}
@@ -342,15 +334,13 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
               </div>
 
 
-              {/* Warnings - compact inline */}
-              {(state.isStuck || state.isIncomplete) && (
-                <div className="mt-3">
+              {/* Warnings: as wide as the body content (-mr-8 undoes the header's extra pr-14 room
+                  for the close button, so the box lines up with the description's px-6 edge) */}
+              {/* (A stuck task has no note: its label says Stuck and Retry starts it over) */}
+              {state.isIncomplete && !state.isStuck && (
+                <div className="mt-3 -mr-8">
                   <TaskWarnings
-                    isStuck={state.isStuck}
-                    isIncomplete={state.isIncomplete}
-                    isRecovering={state.isRecovering}
                     taskProgress={state.taskProgress}
-                    onRecover={handleRecover}
                     onResume={handleStartStop}
                   />
                 </div>
@@ -483,7 +473,8 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                 </Button>
               )}
               {/* Retry a task that stopped with an error: starts it over from a clean worktree */}
-              {taskHasErrors(task) && !state.isRunning && (
+              {/* Failed or stuck (marked running without a run): start over from a clean slate */}
+              {(state.isStuck || (taskHasErrors(task) && !state.isRunning)) && (
                 <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRetrying} onClick={() => void handleRetry()}>
                   {isRetrying ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

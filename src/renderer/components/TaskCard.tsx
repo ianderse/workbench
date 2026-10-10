@@ -18,14 +18,13 @@ import {
   JSON_ERROR_PREFIX,
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
-import { stopTask, checkTaskRunning, recoverStuckTask, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors } from '../stores/task-store';
+import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask } from '../stores/task-store';
 import { useToast } from '../hooks/use-toast';
 import type { Task, TaskStatus } from '../../shared/types';
 
-// Catastrophic stuck detection interval (ms).
-// XState handles all normal process-exit transitions via PROCESS_EXITED events.
-// This is a last-resort safety net: if XState somehow fails to transition the task
-// out of in_progress after the process dies, flag it as stuck after 60 seconds.
+// Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
+// catches a task left In Progress or AI Review without a run (e.g. the app quit mid-run),
+// checked when the card mounts and then every 60 seconds.
 const STUCK_CHECK_INTERVAL_MS = 60_000;
 
 // Icon-only buttons, like the settings dialog's (muted icon, nav hover background)
@@ -88,10 +87,12 @@ export const TaskCard = memo(function TaskCard({
   const { t } = useTranslation(['tasks', 'errors']);
   const { toast } = useToast();
   const [isStuck, setIsStuck] = useState(false);
-  const [isRecovering, setIsRecovering] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
   const stuckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const isRunning = task.status === 'in_progress';
+  // Validation (AI Review) also runs Claude Code, so it can be left stuck too (e.g. by an app quit)
+  const isActive = isRunning || task.status === 'ai_review';
 
   // Check if task is in human_review but has no completed subtasks (crashed/incomplete)
   const isIncomplete = isIncompleteHumanReview(task);
@@ -145,7 +146,7 @@ export const TaskCard = memo(function TaskCard({
   // XState handles all normal transitions via PROCESS_EXITED events.
   // This only fires if XState somehow fails to transition after 60s with no activity.
   useEffect(() => {
-    if (!isRunning) {
+    if (!isActive) {
       setIsStuck(false);
       if (stuckIntervalRef.current) {
         clearInterval(stuckIntervalRef.current);
@@ -154,14 +155,14 @@ export const TaskCard = memo(function TaskCard({
       return;
     }
 
-    stuckIntervalRef.current = setInterval(() => {
+    const checkStuck = () => {
       // If any activity (status, progress, logs) was recorded recently, task is alive
       if (hasRecentActivity(task.id)) {
         setIsStuck(false);
         return;
       }
 
-      // No activity for 60s — verify process is actually gone
+      // No recent activity: verify the process is actually gone
       checkTaskRunning(task.id).then((actuallyRunning) => {
         // Re-check activity in case something arrived while the IPC was in flight
         if (hasRecentActivity(task.id)) {
@@ -170,14 +171,17 @@ export const TaskCard = memo(function TaskCard({
           setIsStuck(!actuallyRunning);
         }
       });
-    }, STUCK_CHECK_INTERVAL_MS);
+    };
+    // Check right away (a run stopped by quitting the app is stuck as soon as the app starts)
+    checkStuck();
+    stuckIntervalRef.current = setInterval(checkStuck, STUCK_CHECK_INTERVAL_MS);
 
     return () => {
       if (stuckIntervalRef.current) {
         clearInterval(stuckIntervalRef.current);
       }
     };
-  }, [task.id, isRunning]);
+  }, [task.id, isActive]);
 
   const handleStartStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -199,15 +203,18 @@ export const TaskCard = memo(function TaskCard({
     }
   };
 
-  const handleRecover = async (e: React.MouseEvent) => {
+  // A stuck task (marked running without a run) starts over like Retry on a failed task:
+  // continuing its broken session could pick up where it went wrong
+  const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsRecovering(true);
-    // Auto-restart the task after recovery (no need to click Start again)
-    const result = await recoverStuckTask(task.id, { autoRestart: true });
+    setIsRetrying(true);
+    const result = await retryTask(task.id);
+    setIsRetrying(false);
     if (result.success) {
       setIsStuck(false);
+    } else {
+      toast({ title: t('wizard.errors.startFailed'), description: result.error, variant: 'destructive' });
     }
-    setIsRecovering(false);
   };
 
   const handleArchive = async (e: React.MouseEvent) => {
@@ -226,8 +233,10 @@ export const TaskCard = memo(function TaskCard({
   };
 
   const isArchived = !!task.metadata?.archivedAt;
-  // Failed tasks show the usage badge's "sign in again" alert icon next to the title
+  // Failed tasks show the usage badge's "sign in again" alert icon next to the title; stuck
+  // tasks show it in the color of their "Stuck" label
   const hasErrors = taskHasErrors(task);
+  const alertClass = hasErrors ? 'text-red-500' : isStuck ? 'text-warning' : null;
 
   return (
     <Card
@@ -248,10 +257,10 @@ export const TaskCard = memo(function TaskCard({
               >
                 {displayTitle}
               </h3>
-              {hasErrors && (
+              {alertClass && (
                 <AlertCircle
-                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500"
-                  aria-label={t('reviewReason.hasErrors')}
+                  className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', alertClass)}
+                  aria-label={hasErrors ? t('reviewReason.hasErrors') : t('detailHeader.stuck')}
                 />
               )}
             </div>
@@ -274,12 +283,12 @@ export const TaskCard = memo(function TaskCard({
                 variant="ghost"
                 size="sm"
                 className={ICON_BUTTON_CLASS}
-                onClick={handleRecover}
-                disabled={isRecovering}
-                title={isRecovering ? t('labels.recovering') : t('actions.recover')}
-                aria-label={isRecovering ? t('labels.recovering') : t('actions.recover')}
+                onClick={handleRetry}
+                disabled={isRetrying}
+                title={t('actions.retry')}
+                aria-label={t('actions.retry')}
               >
-                {isRecovering
+                {isRetrying
                   ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
                   : <RotateCcw className="h-4 w-4" strokeWidth={1.75} />}
               </Button>

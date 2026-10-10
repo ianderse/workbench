@@ -56,7 +56,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [activeTab, setActiveTab] = useState('overview');
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [isStuck, setIsStuck] = useState(false);
-  const [isRecovering, setIsRecovering] = useState(false);
   const [hasCheckedRunning, setHasCheckedRunning] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -117,7 +116,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
       return;
     }
 
-    const intervalId = setInterval(() => {
+    const checkStuck = () => {
       if (hasRecentActivity(task.id)) {
         setIsStuck(false);
         return;
@@ -131,7 +130,10 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
         }
         setHasCheckedRunning(true);
       });
-    }, 60_000);
+    };
+    // Check right away (a run stopped by quitting the app is stuck as soon as the app starts)
+    checkStuck();
+    const intervalId = setInterval(checkStuck, 60_000);
 
     return () => clearInterval(intervalId);
   }, [task.id, isActiveTask]);
@@ -487,7 +489,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     activeTab,
     isUserScrolledUp,
     isStuck,
-    isRecovering,
     hasCheckedRunning,
     showDeleteDialog,
     isDeleting,
@@ -529,7 +530,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setActiveTab,
     setIsUserScrolledUp,
     setIsStuck,
-    setIsRecovering,
     setHasCheckedRunning,
     setShowDeleteDialog,
     setIsDeleting,
