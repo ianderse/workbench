@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical } from 'lucide-react';
+import { AlertCircle, Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import {
@@ -18,7 +18,7 @@ import {
   JSON_ERROR_PREFIX,
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
-import { stopTask, checkTaskRunning, recoverStuckTask, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue } from '../stores/task-store';
+import { stopTask, checkTaskRunning, recoverStuckTask, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors } from '../stores/task-store';
 import { useToast } from '../hooks/use-toast';
 import type { Task, TaskStatus } from '../../shared/types';
 
@@ -226,6 +226,8 @@ export const TaskCard = memo(function TaskCard({
   };
 
   const isArchived = !!task.metadata?.archivedAt;
+  // Failed tasks show the usage badge's "sign in again" alert icon next to the title
+  const hasErrors = taskHasErrors(task);
 
   return (
     <Card
@@ -238,13 +240,21 @@ export const TaskCard = memo(function TaskCard({
       <CardContent className="p-4">
         <div>
           <div>
-            {/* Title - full width, no wrapper */}
-            <h3
-              className="font-medium text-sm text-foreground line-clamp-2 leading-snug"
-              title={displayTitle}
-            >
-              {displayTitle}
-            </h3>
+            {/* Title, with an alert icon at the right when the task failed */}
+            <div className="flex items-start gap-2">
+              <h3
+                className="min-w-0 flex-1 font-bold text-sm text-foreground line-clamp-2 leading-snug"
+                title={displayTitle}
+              >
+                {displayTitle}
+              </h3>
+              {hasErrors && (
+                <AlertCircle
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-500"
+                  aria-label={t('reviewReason.hasErrors')}
+                />
+              )}
+            </div>
 
         {/* Description - sanitized to handle markdown content (memoized) */}
         {sanitizedDescription && (
