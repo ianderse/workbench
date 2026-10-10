@@ -15,6 +15,8 @@ import { cleanupWorktree } from '../../utils/worktree-cleanup';
 import { getToolPath } from '../../cli-tool-manager';
 import { getIsolatedGitEnv } from '../../utils/git-isolation';
 import { taskStateManager } from '../../task-state-manager';
+import { buildInitialPlan } from './plan-file-utils';
+import { taskQueue } from '../../services/task-queue';
 
 const execFileAsync = promisify(execFile);
 
@@ -209,15 +211,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       }
 
       // Create initial implementation_plan.json (task is created but not started)
-      const now = new Date().toISOString();
-      const implementationPlan = {
-        feature: finalTitle,
-        description: description,
-        created_at: now,
-        updated_at: now,
-        status: 'pending',
-        phases: []
-      };
+      const implementationPlan = buildInitialPlan(finalTitle, description);
 
       const planPath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
       writeFileSync(planPath, JSON.stringify(implementationPlan, null, 2), 'utf-8');

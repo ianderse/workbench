@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir, resolveMaxParallelTasks } from '../../../shared/constants';
-import type { IPCResult, TaskStartOptions, TaskStatus, ImageAttachment, Task, Project } from '../../../shared/types';
+import type { IPCResult, TaskStartOptions, TaskStatus, ImageAttachment, Task, Project, TaskLogs, TaskLogPhase, TaskPhaseLog } from '../../../shared/types';
 import path from 'path';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
@@ -16,8 +16,11 @@ import {
   getPlanPath,
   persistPlanStatus,
   createPlanIfNotExists,
-  hasStartedImplementation
+  hasStartedImplementation,
+  resetTaskToInitialState
 } from './plan-file-utils';
+import { discardTaskWorktree } from '../../utils/worktree-cleanup';
+import { taskLogService } from '../../task-log-service';
 import { writeFileAtomicSync } from '../../utils/atomic-file';
 import { findTaskWorktree } from '../../worktree-paths';
 import { projectStore } from '../../project-store';
@@ -91,6 +94,24 @@ function getMainSpecDir(project: Project, task: Task): string {
 function hasImplementationRun(project: Project, task: Task): boolean {
   const info = loadClaudeRunInfo(getMainSpecDir(project, task));
   return !!info?.phases.some((phase) => phase.name === 'implement' || phase.name === 'revise');
+}
+
+/** Empty phase logs, sent to the renderer when a retry deletes task_logs.json */
+function emptyTaskLogs(specId: string): TaskLogs {
+  const now = new Date().toISOString();
+  const phase = (name: TaskLogPhase): TaskPhaseLog => ({
+    phase: name,
+    status: 'pending',
+    started_at: null,
+    completed_at: null,
+    entries: []
+  });
+  return {
+    spec_id: specId,
+    created_at: now,
+    updated_at: now,
+    phases: { planning: phase('planning'), coding: phase('coding'), validation: phase('validation') }
+  };
 }
 
 /**
@@ -285,6 +306,87 @@ export function registerTaskExecutionHandlers(
     }
   );
 
+  /** Whether the project already runs as many tasks as it may in parallel (not counting `taskId`) */
+  const isAtParallelLimit = (project: Project, taskId: string): boolean => {
+    const appMaxParallel = (readSettingsFile() as { maxParallelTasks?: number } | undefined)?.maxParallelTasks;
+    const maxParallel = resolveMaxParallelTasks(appMaxParallel, project.settings?.maxParallelTasks);
+    const inProgressCount = projectStore.getTasks(project.id).filter(
+      (t) => t.id !== taskId && t.status === 'in_progress' && !t.metadata?.archivedAt
+    ).length;
+    return inProgressCount >= maxParallel;
+  };
+
+  /**
+   * Retry a task from a clean slate: discard its worktree and branch (all commits and
+   * uncommitted changes), reset its spec dir to what TASK_CREATE wrote (task_metadata.json,
+   * attachments/, a fresh implementation_plan.json), forget its state machine, then start
+   * it like TASK_START does, or queue it when the parallel task limit is reached.
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_RETRY,
+    async (_, taskId: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> => {
+      const { task, project: foundProject } = findTaskAndProject(taskId);
+      if (!task || !foundProject) {
+        return { success: false, error: 'Task not found' };
+      }
+      const project = (task.projectId && task.projectId !== foundProject.id)
+        ? (projectStore.getProject(task.projectId) ?? foundProject)
+        : foundProject;
+
+      if (agentManager.isRunning(taskId)) {
+        return { success: false, error: 'The task is still running. Stop it before retrying.' };
+      }
+
+      // Check that the task can start before throwing its work away
+      const gitStatus = checkGitStatus(project.path);
+      if (!gitStatus.isGitRepo || !gitStatus.hasCommits) {
+        return { success: false, error: gitStatus.error || 'Git repository with commits required to run tasks.' };
+      }
+      const auth = await checkClaudeCodeAuth();
+      if (!auth.ok) {
+        return { success: false, error: auth.error };
+      }
+
+      try {
+        cancelFallbackTimer(taskId);
+        await fileWatcher.unwatch(taskId).catch(() => undefined);
+        clearRateLimitHold(project, task, getMainWindow);
+
+        // 1. Revert the code: remove the worktree and its branch. Tasks that run in the
+        //    project folder itself (useWorktree: false) keep their changes there.
+        if (task.metadata?.useWorktree !== false) {
+          const removed = await discardTaskWorktree(project.path, task.specId, '[TASK_RETRY]');
+          if (!removed.success) {
+            return { success: false, error: `Failed to remove the task's worktree: ${removed.warnings.join('; ')}` };
+          }
+        }
+
+        // 2. Forget the run: the state machine is rebuilt from the reset plan file
+        taskStateManager.clearTask(taskId);
+        const queue = isAtParallelLimit(project, taskId);
+        await resetTaskToInitialState(project, task, { status: queue ? 'queue' : 'backlog' });
+
+        const specDir = getMainSpecDir(project, task);
+        taskLogService.clearCache(specDir);
+        const mainWindow = getMainWindow();
+        mainWindow?.webContents.send(IPC_CHANNELS.TASK_LOGS_CHANGED, task.specId, emptyTaskLogs(task.specId));
+
+        // 3. Start over (or wait in the queue for a free slot)
+        if (queue) {
+          console.warn(`[TASK_RETRY] Parallel task limit reached; ${taskId} reset and queued`);
+          mainWindow?.webContents.send(IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', project.id);
+          return { success: true, data: { action: 'queued' } };
+        }
+        console.warn(`[TASK_RETRY] ${taskId} reset; starting it again`);
+        await startTask(taskId);
+        return { success: true, data: { action: 'started' } };
+      } catch (error) {
+        console.error('[TASK_RETRY] Failed to retry task:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to retry task' };
+      }
+    }
+  );
+
   /**
    * Resume a task whose rate-limit hold expired (called by the main-process scheduler).
    * Respects the project's parallel task limit: when full, the hold is cleared and
@@ -302,13 +404,8 @@ export function registerTaskExecutionHandlers(
       return;
     }
 
-    const appMaxParallel = (readSettingsFile() as { maxParallelTasks?: number } | undefined)?.maxParallelTasks;
-    const maxParallel = resolveMaxParallelTasks(appMaxParallel, project.settings?.maxParallelTasks);
-    const inProgressCount = projectStore.getTasks(project.id).filter(
-      (t) => t.id !== taskId && t.status === 'in_progress' && !t.metadata?.archivedAt
-    ).length;
-    if (inProgressCount >= maxParallel) {
-      console.warn(`[RateLimitResume] Hold expired for ${taskId} but ${inProgressCount}/${maxParallel} tasks are running; leaving it queued`);
+    if (isAtParallelLimit(project, taskId)) {
+      console.warn(`[RateLimitResume] Hold expired for ${taskId} but the parallel task limit is reached; leaving it queued`);
       clearRateLimitHold(project, task, getMainWindow);
       return;
     }

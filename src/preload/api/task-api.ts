@@ -37,6 +37,7 @@ export interface TaskAPI {
   ) => Promise<IPCResult<Task>>;
   startTask: (taskId: string, options?: TaskStartOptions) => void;
   stopTask: (taskId: string) => void;
+  retryTask: (taskId: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
   submitReview: (
     taskId: string,
     approved: boolean,
@@ -126,6 +127,9 @@ export const createTaskAPI = (): TaskAPI => ({
 
   stopTask: (taskId: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_STOP, taskId),
+
+  retryTask: (taskId: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_RETRY, taskId),
 
   submitReview: (
     taskId: string,

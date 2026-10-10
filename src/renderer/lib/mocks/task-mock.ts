@@ -53,6 +53,8 @@ export const taskMock = {
     console.warn('[Browser Mock] stopTask called');
   },
 
+  retryTask: async () => ({ success: true, data: { action: 'started' as const } }),
+
   submitReview: async () => ({ success: true }),
 
   // Task archive operations

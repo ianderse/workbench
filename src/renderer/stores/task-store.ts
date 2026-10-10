@@ -910,6 +910,38 @@ export async function startTaskOrQueue(taskId: string): Promise<StartTaskOrQueue
 }
 
 /**
+ * Retry a task from a clean slate: the main process discards its worktree changes, resets
+ * its spec files and starts it again (or queues it when the parallel limit is reached).
+ * Clears the previous run's state (run steps, subtasks, logs) from the store.
+ */
+export async function retryTask(taskId: string): Promise<StartTaskOrQueueResult> {
+  try {
+    const result = await window.electronAPI.retryTask(taskId);
+    if (!result.success || !result.data) {
+      return { action: 'started', success: false, error: result.error };
+    }
+    const { action } = result.data;
+    const store = useTaskStore.getState();
+    store.updateTask(taskId, {
+      claudeRun: undefined,
+      subtasks: [],
+      logs: [],
+      qaReport: undefined,
+      reviewReason: undefined,
+      rateLimitHold: undefined,
+      stagedInMainProject: undefined,
+      stagedAt: undefined,
+      executionProgress: { phase: action === 'started' ? 'planning' : 'idle', phaseProgress: 0, overallProgress: 0 }
+    });
+    store.updateTaskStatus(taskId, action === 'started' ? 'in_progress' : 'queue');
+    return { action, success: true };
+  } catch (error) {
+    console.error('Error retrying task:', error);
+    return { action: 'started', success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * Update task title/description/metadata and persist to file
  */
 export async function persistUpdateTask(
