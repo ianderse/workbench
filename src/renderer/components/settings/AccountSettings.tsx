@@ -183,11 +183,13 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
 
   return (
     <>
-      {/* Claude subscriptions Claude Code signs in with */}
-      <ClaudeAccountsSection />
-
-      {/* Anthropic-compatible endpoints */}
-      <ProfileList />
+      {/* Claude subscriptions and API profiles (Anthropic-compatible endpoints) Claude Code signs in with */}
+      <SettingsSection title={t('accounts.title')}>
+        <SettingsRows>
+          <ClaudeAccountsSection />
+          <ProfileList />
+        </SettingsRows>
+      </SettingsSection>
 
       {/* Automatic account switching */}
       {totalAccounts > 1 && (

@@ -6,7 +6,6 @@ import { FileAPI, createFileAPI } from './file-api';
 import { AgentAPI, createAgentAPI } from './agent-api';
 import type { InsightsAPI } from './modules/insights-api';
 import { AppUpdateAPI, createAppUpdateAPI } from './app-update-api';
-import { DebugAPI, createDebugAPI } from './modules/debug-api';
 import { ClaudeCodeAPI, createClaudeCodeAPI } from './modules/claude-code-api';
 import { GraphifyAPI, createGraphifyAPI } from './modules/graphify-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
@@ -22,7 +21,6 @@ export interface ElectronAPI extends
   AgentAPI,
   InsightsAPI,
   AppUpdateAPI,
-  DebugAPI,
   ClaudeCodeAPI,
   GraphifyAPI,
   McpAPI,
@@ -39,7 +37,6 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createFileAPI(),
   ...createAgentAPI(),  // Includes: Insights, Shell
   ...createAppUpdateAPI(),
-  ...createDebugAPI(),
   ...createClaudeCodeAPI(),
   ...createGraphifyAPI(),
   ...createMcpAPI(),
@@ -58,7 +55,6 @@ export {
   createAgentAPI,
   createAppUpdateAPI,
   createProfileAPI,
-  createDebugAPI,
   createClaudeCodeAPI,
   createGraphifyAPI,
   createMcpAPI,
@@ -75,7 +71,6 @@ export type {
   InsightsAPI,
   AppUpdateAPI,
   ProfileAPI,
-  DebugAPI,
   ClaudeCodeAPI,
   GraphifyAPI,
   McpAPI,

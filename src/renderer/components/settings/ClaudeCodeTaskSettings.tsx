@@ -1,5 +1,5 @@
 /**
- * Claude Code page (app settings): how tasks run in the Claude Code CLI. A short triage run picks
+ * Agents page (app settings): how tasks run in the Claude Code CLI. A short triage run picks
  * each task's model, effort and whether to plan (or a fixed model and effort are used), then
  * Claude Code plans, implements and validates in the task's worktree.
  */
@@ -8,7 +8,6 @@ import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
-import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { SettingsSection } from './SettingsSection';
 import { SegmentedControl, SettingsRow, SettingsRows } from './SettingsRow';
@@ -40,7 +39,7 @@ interface ClaudeCodeTaskSettingsProps {
 /** Fallback model choices (`--fallback-model`); 'none' leaves it unset */
 const FALLBACK_OPTIONS = ['none', 'sonnet', 'haiku', 'opus'] as const;
 
-/** Task execution, permissions and limits sections of the Claude Code page */
+/** Task execution, permissions, agent windows and limits sections of the Agents page */
 export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCodeTaskSettingsProps) {
   const { t } = useTranslation('settings');
   const stored = settings.claudeCodeTasks ?? {};
@@ -236,30 +235,21 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             </Select>
           </SettingsRow>
 
-          <SettingsRow
-            label={t('claudeCode.execution.extraInstructions')}
-            description={t('claudeCode.execution.extraInstructionsDescription')}
-            htmlFor="claude-code-extra-instructions"
-            stacked
-          >
-            <Textarea
-              id="claude-code-extra-instructions"
-              rows={4}
-              placeholder={t('claudeCode.execution.extraInstructionsPlaceholder')}
-              value={current.extraInstructions ?? ''}
-              onChange={(e) => update({ extraInstructions: e.target.value === '' ? undefined : e.target.value })}
-            />
-          </SettingsRow>
         </SettingsRows>
       </SettingsSection>
 
-      <SettingsSection title={t('claudeCode.permissions.title')}>
+      {/* Agent windows (terminals) start Claude Code with or without permission prompts */}
+      <SettingsSection title={t('claudeCode.agentWindows.title')}>
         <SettingsRows>
           <SettingsRow
-            label={t('claudeCode.permissions.label')}
-            description={t('claudeCode.permissions.description')}
+            label={t('claudeCode.agentWindows.skipPermissions')}
+            description={t('claudeCode.agentWindows.skipPermissionsDescription')}
           >
-            <span className="text-sm text-(--nav-label-color)">{t('claudeCode.permissions.value')}</span>
+            <Switch
+              checked={settings.dangerouslySkipPermissions === true}
+              onCheckedChange={(dangerouslySkipPermissions) => onSettingsChange({ ...settings, dangerouslySkipPermissions })}
+              aria-label={t('claudeCode.agentWindows.skipPermissions')}
+            />
           </SettingsRow>
         </SettingsRows>
       </SettingsSection>

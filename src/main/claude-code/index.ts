@@ -33,6 +33,5 @@ export type {
   TaskRunStatus,
   TaskRunSubtask,
 } from './task-runner';
-export { getClaudeCodeInventory, getUserClaudeDir } from './inventory';
 export { detectClaudeLimitMessage, parseLimitResetTime, isValidTimeZone } from './limit';
 export { resolveClaudeCodeTaskSettings } from './settings';

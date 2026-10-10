@@ -322,7 +322,6 @@ export interface ElectronAPI {
   // Spell check
   setSpellCheckLanguages: (language: string) => Promise<IPCResult<{ success: boolean }>>;
 
-
   getCliToolsInfo: () => Promise<IPCResult<{
     python: import('./cli').ToolDetectionResult;
     git: import('./cli').ToolDetectionResult;
@@ -529,7 +528,6 @@ export interface ElectronAPI {
 
   // Claude Code CLI operations
   checkClaudeCodeVersion: (forceRefresh?: boolean) => Promise<IPCResult<import('./cli').ClaudeCodeVersionInfo>>;
-  getClaudeCodeInventory: (projectPath: string) => Promise<IPCResult<import('./claude-code').ClaudeCodeInventory>>;
   installClaudeCode: () => Promise<IPCResult<{ command: string }>>;
   getClaudeCodeVersions: () => Promise<IPCResult<import('./cli').ClaudeCodeVersionList>>;
   installClaudeCodeVersion: (version: string) => Promise<IPCResult<{ command: string; version: string }>>;
@@ -545,23 +543,6 @@ export interface ElectronAPI {
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyGraph | null>>;
   onGraphifyIndexUpdated: (callback: (projectId: string, info: import('./cli').GraphifyIndexInfo) => void) => () => void;
-
-  // Debug operations
-  getDebugInfo: () => Promise<{
-    systemInfo: Record<string, string>;
-    recentErrors: string[];
-    logsPath: string;
-    debugReport: string;
-  }>;
-  openLogsFolder: () => Promise<{ success: boolean; error?: string }>;
-  copyDebugInfo: () => Promise<{ success: boolean; error?: string }>;
-  getRecentErrors: (maxCount?: number) => Promise<string[]>;
-  listLogFiles: () => Promise<Array<{
-    name: string;
-    path: string;
-    size: number;
-    modified: string;
-  }>>;
 
   // MCP Server health check operations
   checkMcpHealth: (server: CustomMcpServer) => Promise<IPCResult<McpHealthCheckResult>>;

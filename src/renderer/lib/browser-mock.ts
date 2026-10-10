@@ -136,11 +136,6 @@ const browserMockAPI: ElectronAPI = {
   getGraphifyGraph: async () => ({ success: true, data: null }),
   onGraphifyIndexUpdated: () => () => {},
 
-  getClaudeCodeInventory: async () => ({
-    success: true,
-    data: { agents: [], skills: [], commands: [], hooks: [], mcpServers: [], memoryFiles: [], settingsFiles: [] }
-  }),
-
   checkClaudeCodeVersion: async () => ({
     success: true,
     data: {
@@ -231,23 +226,7 @@ const browserMockAPI: ElectronAPI = {
       success: false,
       message: 'Connection test not available in browser mode'
     }
-  }),
-
-  // Debug Operations
-  getDebugInfo: async () => ({
-    systemInfo: {
-      appVersion: '0.0.0-browser-mock',
-      platform: 'browser',
-      isPackaged: 'false'
-    },
-    recentErrors: [],
-    logsPath: '/mock/logs',
-    debugReport: '[Browser Mock] Debug report not available in browser mode'
-  }),
-  openLogsFolder: async () => ({ success: false, error: 'Not available in browser mode' }),
-  copyDebugInfo: async () => ({ success: false, error: 'Not available in browser mode' }),
-  getRecentErrors: async () => [],
-  listLogFiles: async () => []
+  })
 };
 
 /**

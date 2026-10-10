@@ -23,10 +23,10 @@
     },
     "devtools": {
       "title": "Developer",
-      "description": "IDE and terminal preferences"
+      "description": "CLI tools and framework paths"
     },
-    "claude-code": {
-      "title": "Claude Code",
+    "agents": {
+      "title": "Agents",
       "description": "How tasks run in Claude Code"
     },
     "paths": {
@@ -45,10 +45,6 @@
       "title": "Notifications",
       "description": "Alert preferences"
     },
-    "debug": {
-      "title": "Debug & logs",
-      "description": "Troubleshooting tools"
-    },
     "terminal-fonts": {
       "title": "Terminal",
       "description": "Customize terminal font appearance"
@@ -59,7 +55,6 @@
     }
   },
   "apiProfiles": {
-    "title": "API profiles",
     "description": "Anthropic-compatible endpoints (base URL and API key) Claude Code can use instead of a Claude account",
     "addButton": "Add API profile",
     "presets": {
@@ -258,44 +253,6 @@
       "large": "Large"
     }
   },
-  "devtools": {
-    "title": "Developer tools",
-    "description": "Configure your preferred IDE, terminal, and terminal font settings",
-    "detecting": "Detecting installed tools...",
-    "detectAgain": "Detect again",
-    "tabTools": "Tools",
-    "tabTerminalFonts": "Terminal fonts",
-    "ide": {
-      "label": "Preferred IDE",
-      "description": "Auto Claude will open worktrees in this editor",
-      "placeholder": "Select IDE...",
-      "customPath": "Custom IDE path",
-      "customPathPlaceholder": "/path/to/your/ide"
-    },
-    "terminal": {
-      "label": "Preferred terminal",
-      "description": "Auto Claude will open terminal sessions here",
-      "placeholder": "Select terminal...",
-      "customPath": "Custom terminal path",
-      "customPathPlaceholder": "/path/to/your/terminal"
-    },
-    "cli": {
-      "label": "Preferred CLI",
-      "description": "CLI tool used for AI-powered terminal sessions",
-      "placeholder": "Select CLI...",
-      "customPath": "Custom CLI path",
-      "customPathPlaceholder": "/path/to/your/cli"
-    },
-    "detected": "Detected on your system",
-    "notInstalled": "Not installed",
-    "detectedSummary": "Detected on your system:",
-    "noToolsDetected": "No additional tools detected (VS Code and system terminal will be used)",
-    "yoloMode": {
-      "label": "YOLO mode",
-      "description": "Start Claude with --dangerously-skip-permissions flag, bypassing all safety prompts. Use with extreme caution",
-      "warning": "This mode bypasses Claude's permission system. Only enable if you fully trust the code being executed"
-    }
-  },
   "updates": {
     "title": "Auto Claude Desktop",
     "description": "Manage Auto Claude updates",
@@ -433,19 +390,6 @@
       "settingsUpdateFailed": "Failed to Update Settings",
       "tryAgain": "Please try again."
     }
-  },
-  "debug": {
-    "title": "Debug & logs",
-    "description": "Access logs and debug information for troubleshooting",
-    "openLogsFolder": "Open logs folder",
-    "copyDebugInfo": "Copy debug info",
-    "copied": "Copied!",
-    "loadInfo": "Load debug info",
-    "systemInfo": "System information",
-    "logsLocation": "Logs location",
-    "recentErrors": "Recent errors",
-    "noRecentErrors": "No recent errors",
-    "helpTitle": "Reporting issues"
   },
   "projectSettings": {
     "noProjectSelected": {
@@ -696,47 +640,15 @@
       "budgetPlaceholder": "No limit",
       "fallbackModel": "Fallback model",
       "fallbackModelDescription": "Model Claude Code switches to when the chosen one is overloaded",
-      "fallbackNone": "None",
-      "extraInstructions": "Extra instructions",
-      "extraInstructionsDescription": "Added to the system prompt of every task",
-      "extraInstructionsPlaceholder": "For example: run the tests with npm test before you finish"
+      "fallbackNone": "None"
     },
-    "permissions": {
-      "title": "Permissions",
-      "label": "Permission checks",
-      "value": "Off",
-      "description": "Tasks run Claude Code with permission checks off (--dangerously-skip-permissions) because each task works in its own git worktree"
-    },
-    "inventory": {
-      "title": "Loaded for this project",
-      "configuration": "Your Claude Code configuration",
-      "description": "What Claude Code loads when it runs tasks in {{project}}",
-      "lastChecked": "Last checked {{time}}",
-      "loading": "Looking for Claude Code configuration...",
-      "error": "Couldn't read the Claude Code configuration: {{error}}",
-      "errorGeneric": "Couldn't read the Claude Code configuration",
-      "refresh": "Refresh",
-      "nothingFound": "No subagents, skills, commands, hooks, MCP servers, CLAUDE.md or settings files found",
-      "noneFound": "Not found: {{groups}}",
-      "groups": {
-        "agents": "Subagents",
-        "skills": "Skills",
-        "commands": "Slash commands",
-        "hooks": "Hooks",
-        "mcpServers": "MCP servers",
-        "memoryFiles": "CLAUDE.md files",
-        "settingsFiles": "Settings files"
-      },
-      "scopes": {
-        "user": "User",
-        "project": "Project",
-        "plugin": "Plugin",
-        "managed": "Managed"
-      }
+    "agentWindows": {
+      "title": "Agent windows",
+      "skipPermissions": "Skip permission prompts in agent windows",
+      "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions, so it runs commands and edits files without asking"
     }
   },
   "claudeAccounts": {
-    "title": "Claude accounts",
     "inUse": "In use",
     "use": "Use this account",
     "signInAgain": "Sign in again",

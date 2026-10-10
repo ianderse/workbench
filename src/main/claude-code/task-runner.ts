@@ -216,9 +216,6 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string): stri
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
   if (config.graphifyPrompt) sections.push(config.graphifyPrompt);
-  if (config.settings.extraInstructions?.trim()) {
-    sections.push(`## Additional instructions\n${config.settings.extraInstructions.trim()}`);
-  }
   return sections.join('\n\n');
 }
 

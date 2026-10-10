@@ -253,16 +253,9 @@ export const IPC_CHANNELS = {
   APP_UPDATE_READONLY_VOLUME: 'app-update:readonly-volume',  // App running from read-only volume (DMG), needs to be moved
 
   // Debug operations
-  DEBUG_GET_INFO: 'debug:getInfo',
-  DEBUG_OPEN_LOGS_FOLDER: 'debug:openLogsFolder',
-  DEBUG_COPY_DEBUG_INFO: 'debug:copyDebugInfo',
-  DEBUG_GET_RECENT_ERRORS: 'debug:getRecentErrors',
-  DEBUG_LIST_LOG_FILES: 'debug:listLogFiles',
-  DEBUG_SIMULATE_RATE_LIMIT: 'debug:simulateRateLimit',  // Simulate rate limit for testing auto-swap
 
   // Claude Code CLI operations
   CLAUDE_CODE_CHECK_VERSION: 'claudeCode:checkVersion',
-  CLAUDE_CODE_GET_INVENTORY: 'claudeCode:getInventory',  // Agents, skills, hooks, MCP servers, CLAUDE.md files Claude Code loads for a project
   CLAUDE_CODE_INSTALL: 'claudeCode:install',
   CLAUDE_CODE_GET_VERSIONS: 'claudeCode:getVersions',
   CLAUDE_CODE_INSTALL_VERSION: 'claudeCode:installVersion',

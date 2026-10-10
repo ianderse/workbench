@@ -27,8 +27,7 @@ import {
 } from '../ui/alert-dialog';
 import { cn } from '../../lib/utils';
 import { useToast } from '../../hooks/use-toast';
-import { SettingsSection } from './SettingsSection';
-import { SettingsRow, SettingsRows } from './SettingsRow';
+import { SettingsRow } from './SettingsRow';
 import { ClaudeAccountDialog } from './ClaudeAccountDialog';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
 import type { ClaudeProfile } from '../../../shared/types';
@@ -117,74 +116,70 @@ export function ClaudeAccountsSection() {
 
   return (
     <>
-      <SettingsSection title={t('claudeAccounts.title')}>
-        <SettingsRows>
-          {profiles.map((profile) => {
-            const isActive = profile.id === activeProfileId;
-            const isBusy = busyId === profile.id;
-            return (
-              <SettingsRow
-                key={profile.id}
-                label={
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="truncate">{profile.name}</span>
-                    {isActive && <span className="shrink-0 text-(--nav-label-color)">{t('claudeAccounts.inUse')}</span>}
-                  </span>
-                }
-                description={describe(profile) || undefined}
-              >
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className={cn('h-8 w-8 text-muted-foreground', isBusy && 'pointer-events-none opacity-50')}
-                      aria-label={t('claudeAccounts.menu', { name: profile.name })}
-                    >
-                      <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem className="cursor-pointer" disabled={isActive} onSelect={() => void handleUse(profile)}>
-                      <Check className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                      {isActive ? t('claudeAccounts.inUse') : t('claudeAccounts.use')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="cursor-pointer" onSelect={() => void handleSignInAgain(profile)}>
-                      <RefreshCw className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                      {t('claudeAccounts.signInAgain')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="cursor-pointer" onSelect={() => setDialog({ open: true, profile })}>
-                      <Pencil className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                      {t('claudeAccounts.rename')}
-                    </DropdownMenuItem>
-                    {!profile.isDefault && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          className="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive"
-                          onSelect={() => setRemoveTarget(profile)}
-                        >
-                          <Trash2 className="h-4 w-4" strokeWidth={1.75} />
-                          {t('claudeAccounts.remove')}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </SettingsRow>
-            );
-          })}
+      {profiles.map((profile) => {
+        const isActive = profile.id === activeProfileId;
+        const isBusy = busyId === profile.id;
+        return (
           <SettingsRow
-            label={t('claudeAccounts.add')}
-            description={profiles.length > 1 ? t('claudeAccounts.addDescriptionMore') : t('claudeAccounts.addDescription')}
+            key={profile.id}
+            label={
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate">{profile.name}</span>
+                {isActive && <span className="shrink-0 text-(--nav-label-color)">{t('claudeAccounts.inUse')}</span>}
+              </span>
+            }
+            description={describe(profile) || undefined}
           >
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDialog({ open: true })}>
-              <Plus className="h-4 w-4" strokeWidth={1.75} />
-              {t('claudeAccounts.addButton')}
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn('h-8 w-8 text-muted-foreground', isBusy && 'pointer-events-none opacity-50')}
+                  aria-label={t('claudeAccounts.menu', { name: profile.name })}
+                >
+                  <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuItem className="cursor-pointer" disabled={isActive} onSelect={() => void handleUse(profile)}>
+                  <Check className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                  {isActive ? t('claudeAccounts.inUse') : t('claudeAccounts.use')}
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer" onSelect={() => void handleSignInAgain(profile)}>
+                  <RefreshCw className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                  {t('claudeAccounts.signInAgain')}
+                </DropdownMenuItem>
+                <DropdownMenuItem className="cursor-pointer" onSelect={() => setDialog({ open: true, profile })}>
+                  <Pencil className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                  {t('claudeAccounts.rename')}
+                </DropdownMenuItem>
+                {!profile.isDefault && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive"
+                      onSelect={() => setRemoveTarget(profile)}
+                    >
+                      <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+                      {t('claudeAccounts.remove')}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
           </SettingsRow>
-        </SettingsRows>
-      </SettingsSection>
+        );
+      })}
+      <SettingsRow
+        label={t('claudeAccounts.add')}
+        description={profiles.length > 1 ? t('claudeAccounts.addDescriptionMore') : t('claudeAccounts.addDescription')}
+      >
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDialog({ open: true })}>
+          <Plus className="h-4 w-4" strokeWidth={1.75} />
+          {t('claudeAccounts.addButton')}
+        </Button>
+      </SettingsRow>
 
       <ClaudeAccountDialog
         open={dialog.open}

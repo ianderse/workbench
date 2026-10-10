@@ -10,8 +10,6 @@
 
 import { IPC_CHANNELS } from '../../../shared/constants';
 import type { ClaudeCodeVersionInfo, ClaudeCodeVersionList, ClaudeInstallationList } from '../../../shared/types/cli';
-import type { IPCResult } from '../../../shared/types';
-import type { ClaudeCodeInventory } from '../../../shared/types/claude-code';
 import { invokeIpc } from './ipc-utils';
 
 /**
@@ -86,11 +84,6 @@ export interface ClaudeCodeAPI {
   checkClaudeCodeVersion: (forceRefresh?: boolean) => Promise<ClaudeCodeVersionResult>;
 
   /**
-   * Agents, skills, commands, hooks, MCP servers and CLAUDE.md files Claude Code loads for a project
-   */
-  getClaudeCodeInventory: (projectPath: string) => Promise<IPCResult<ClaudeCodeInventory>>;
-
-  /**
    * Install or update Claude Code CLI
    * Opens the user's terminal with the install command
    */
@@ -127,9 +120,6 @@ export interface ClaudeCodeAPI {
 export const createClaudeCodeAPI = (): ClaudeCodeAPI => ({
   checkClaudeCodeVersion: (forceRefresh?: boolean): Promise<ClaudeCodeVersionResult> =>
     invokeIpc(IPC_CHANNELS.CLAUDE_CODE_CHECK_VERSION, forceRefresh),
-
-  getClaudeCodeInventory: (projectPath: string): Promise<IPCResult<ClaudeCodeInventory>> =>
-    invokeIpc(IPC_CHANNELS.CLAUDE_CODE_GET_INVENTORY, projectPath),
 
   installClaudeCode: (): Promise<ClaudeCodeInstallResult> =>
     invokeIpc(IPC_CHANNELS.CLAUDE_CODE_INSTALL),

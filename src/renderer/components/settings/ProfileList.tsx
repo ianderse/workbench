@@ -10,8 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { Button, buttonVariants } from '../ui/button';
 import { useSettingsStore } from '../../stores/settings-store';
 import { ProfileEditDialog } from './ProfileEditDialog';
-import { SettingsSection } from './SettingsSection';
-import { SettingsRow, SettingsRows } from './SettingsRow';
+import { SettingsRow } from './SettingsRow';
 import { maskApiKey } from '../../lib/profile-utils';
 import { useToast } from '../../hooks/use-toast';
 import type { APIProfile } from '@shared/types/profile';
@@ -121,102 +120,98 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
 
   return (
     <>
-      <SettingsSection title={t('settings:apiProfiles.title')}>
-        <SettingsRows>
-          {profiles.map((profile) => {
-            const isActive = activeProfileId === profile.id;
-            const customModels = profile.models ? Object.keys(profile.models).filter((k) => profile.models?.[k as keyof typeof profile.models]) : [];
-            return (
-              <SettingsRow
-                key={profile.id}
-                className="group"
-                label={
-                  <span className="flex min-w-0 items-baseline gap-2">
-                    <span className="truncate">{profile.name}</span>
-                    {isActive && (
-                      <span className="shrink-0 text-(--nav-label-color)">{t('settings:apiProfiles.activeBadge')}</span>
-                    )}
-                  </span>
-                }
-                description={
-                  <span className="block truncate" title={profile.baseUrl}>
-                    {[
-                      getHostFromUrl(profile.baseUrl),
-                      maskApiKey(profile.apiKey),
-                      customModels.length > 0
-                        ? t('settings:apiProfiles.customModels', { models: customModels.join(', ') })
-                        : null
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </span>
-                }
-              >
-                <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setEditProfile(profile)}
-                    className="h-8 w-8 text-muted-foreground"
-                    title={t('settings:apiProfiles.tooltips.edit')}
-                    aria-label={t('settings:apiProfiles.tooltips.edit')}
-                  >
-                    <Pencil className="h-4 w-4" strokeWidth={1.75} />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setDeleteConfirmProfile(profile)}
-                    disabled={isActive}
-                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                    data-testid={`profile-delete-button-${profile.id}`}
-                    title={
-                      isActive
-                        ? t('settings:apiProfiles.tooltips.deleteActive')
-                        : t('settings:apiProfiles.tooltips.deleteInactive')
-                    }
-                    aria-label={t('settings:apiProfiles.deleteAriaLabel', { name: profile.name })}
-                  >
-                    <Trash2 className="h-4 w-4" strokeWidth={1.75} />
-                  </Button>
-                </div>
-                {isActive ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleSetActiveProfile(null)}
-                    disabled={isSettingActive}
-                  >
-                    {isSettingActive
-                      ? t('settings:apiProfiles.switchToOauth.loading')
-                      : t('settings:apiProfiles.switchToOauth.label')}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleSetActiveProfile(profile.id)}
-                    disabled={isSettingActive}
-                  >
-                    {isSettingActive
-                      ? t('settings:apiProfiles.setActive.loading')
-                      : t('settings:apiProfiles.setActive.label')}
-                  </Button>
-                )}
-              </SettingsRow>
-            );
-          })}
+      {profiles.map((profile) => {
+        const isActive = activeProfileId === profile.id;
+        const customModels = profile.models ? Object.keys(profile.models).filter((k) => profile.models?.[k as keyof typeof profile.models]) : [];
+        return (
           <SettingsRow
-            label={t('settings:apiProfiles.addButton')}
-            description={profiles.length === 0 ? t('settings:apiProfiles.empty.description') : t('settings:apiProfiles.description')}
+            key={profile.id}
+            className="group"
+            label={
+              <span className="flex min-w-0 items-baseline gap-2">
+                <span className="truncate">{profile.name}</span>
+                {isActive && (
+                  <span className="shrink-0 text-(--nav-label-color)">{t('settings:apiProfiles.activeBadge')}</span>
+                )}
+              </span>
+            }
+            description={
+              <span className="block truncate" title={profile.baseUrl}>
+                {[
+                  getHostFromUrl(profile.baseUrl),
+                  maskApiKey(profile.apiKey),
+                  customModels.length > 0
+                    ? t('settings:apiProfiles.customModels', { models: customModels.join(', ') })
+                    : null
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
+            }
           >
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setIsAddDialogOpen(true)}>
-              <Plus className="h-4 w-4" strokeWidth={1.75} />
-              {t('settings:apiProfiles.add')}
-            </Button>
+            <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setEditProfile(profile)}
+                className="h-8 w-8 text-muted-foreground"
+                title={t('settings:apiProfiles.tooltips.edit')}
+                aria-label={t('settings:apiProfiles.tooltips.edit')}
+              >
+                <Pencil className="h-4 w-4" strokeWidth={1.75} />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setDeleteConfirmProfile(profile)}
+                disabled={isActive}
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                data-testid={`profile-delete-button-${profile.id}`}
+                title={
+                  isActive
+                    ? t('settings:apiProfiles.tooltips.deleteActive')
+                    : t('settings:apiProfiles.tooltips.deleteInactive')
+                }
+                aria-label={t('settings:apiProfiles.deleteAriaLabel', { name: profile.name })}
+              >
+                <Trash2 className="h-4 w-4" strokeWidth={1.75} />
+              </Button>
+            </div>
+            {isActive ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleSetActiveProfile(null)}
+                disabled={isSettingActive}
+              >
+                {isSettingActive
+                  ? t('settings:apiProfiles.switchToOauth.loading')
+                  : t('settings:apiProfiles.switchToOauth.label')}
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleSetActiveProfile(profile.id)}
+                disabled={isSettingActive}
+              >
+                {isSettingActive
+                  ? t('settings:apiProfiles.setActive.loading')
+                  : t('settings:apiProfiles.setActive.label')}
+              </Button>
+            )}
           </SettingsRow>
-        </SettingsRows>
-      </SettingsSection>
+        );
+      })}
+      <SettingsRow
+        label={t('settings:apiProfiles.addButton')}
+        description={profiles.length === 0 ? t('settings:apiProfiles.empty.description') : t('settings:apiProfiles.description')}
+      >
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setIsAddDialogOpen(true)}>
+          <Plus className="h-4 w-4" strokeWidth={1.75} />
+          {t('settings:apiProfiles.add')}
+        </Button>
+      </SettingsRow>
 
       {/* Add/Edit Dialog */}
       <ProfileEditDialog

@@ -41,8 +41,6 @@ export interface ClaudeCodeTaskSettings {
   maxBudgetUsd?: number;
   /** Fallback model chain when the chosen model is overloaded (`--fallback-model`) */
   fallbackModel?: string;
-  /** Extra instructions appended to every task's system prompt */
-  extraInstructions?: string;
 }
 
 export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
@@ -164,24 +162,3 @@ export interface ClaudeRunInfo {
   updatedAt: string;
 }
 
-/** A Claude Code customization found on disk (Settings > Claude Code inventory) */
-export interface ClaudeCodeInventoryItem {
-  name: string;
-  description?: string;
-  scope: 'user' | 'project' | 'plugin' | 'managed';
-  path: string;
-}
-
-/** What Claude Code will load when it runs in a project */
-export interface ClaudeCodeInventory {
-  agents: ClaudeCodeInventoryItem[];
-  skills: ClaudeCodeInventoryItem[];
-  commands: ClaudeCodeInventoryItem[];
-  /** Hook events configured in settings files, e.g. "PreToolUse (Bash)" */
-  hooks: ClaudeCodeInventoryItem[];
-  mcpServers: ClaudeCodeInventoryItem[];
-  /** CLAUDE.md memory files */
-  memoryFiles: ClaudeCodeInventoryItem[];
-  /** Settings files that exist */
-  settingsFiles: ClaudeCodeInventoryItem[];
-}

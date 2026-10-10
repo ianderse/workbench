@@ -7,4 +7,3 @@
 export * from './ipc-utils';
 export * from './insights-api';
 export * from './shell-api';
-export * from './debug-api';
