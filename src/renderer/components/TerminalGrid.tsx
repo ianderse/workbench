@@ -290,14 +290,14 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
+              className="h-6 w-6 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
               onClick={() => {
                 window.dispatchEvent(new CustomEvent('open-app-settings', { detail: { section: 'agent', focusId: 'maxTerminals' } }));
               }}
               aria-label={t('terminal:grid.settingsAriaLabel')}
               title={t('terminal:grid.settingsAriaLabel')}
             >
-              <Settings className="h-4 w-4" />
+              <Settings className="h-3 w-3" />
             </Button>
           </div>
           <div className="flex items-center gap-0.5">
