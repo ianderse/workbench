@@ -273,6 +273,8 @@ export interface ElectronAPI {
   verifyClaudeProfileAuth: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
   /** Run `claude auth login` as a subprocess (no terminal needed) */
   claudeAuthLoginSubprocess: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
+  /** Stop a running `claude auth login` (sign-in cancelled or its dialog closed) */
+  cancelClaudeAuthLogin: (profileId: string) => Promise<IPCResult>;
   /** Listen for OAuth subprocess progress events */
   onClaudeAuthLoginProgress: (callback: (data: { status: string; message?: string }) => void) => () => void;
   /** Get auto-switch settings */

@@ -3,7 +3,7 @@
  * Each account is a Claude Code profile with its own config dir, so several subscriptions can
  * be used side by side and swapped when one hits a limit.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2 } from 'lucide-react';
 import {
@@ -40,6 +40,10 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
   const [error, setError] = useState<string | null>(null);
   // Profile created by the first sign-in attempt, reused when retrying
   const [createdProfileId, setCreatedProfileId] = useState<string | null>(null);
+  // The account the running sign-in is for, and whether the user cancelled it (its late result
+  // is then ignored)
+  const signInProfileRef = useRef<string | null>(null);
+  const cancelledRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -72,6 +76,7 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
     if (!trimmed) return;
     setStatus('authenticating');
     setError(null);
+    cancelledRef.current = false;
     try {
       let profileId = createdProfileId;
       if (!profileId) {
@@ -91,7 +96,9 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
         profileId = created.data.id;
         setCreatedProfileId(profileId);
       }
+      signInProfileRef.current = profileId;
       const result = await window.electronAPI.claudeAuthLoginSubprocess(profileId);
+      if (cancelledRef.current) return;
       if (result.success && result.data?.authenticated) {
         setStatus('success');
         setEmail(result.data.email ?? null);
@@ -101,8 +108,11 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
         setError(result.error ?? null);
       }
     } catch (err) {
+      if (cancelledRef.current) return;
       setStatus('error');
       setError(err instanceof Error ? err.message : null);
+    } finally {
+      signInProfileRef.current = null;
     }
   };
 
@@ -126,8 +136,14 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
   };
 
   const handleOpenChange = (next: boolean) => {
-    // Keep the dialog open while the browser sign-in is running
-    if (isSigningIn) return;
+    // Closing (Cancel, the close button, Escape) stops a sign-in that is still waiting for the
+    // browser: one that fails there never ends on its own
+    if (!next && isSigningIn) {
+      cancelledRef.current = true;
+      const profileId = signInProfileRef.current;
+      if (profileId) void window.electronAPI.cancelClaudeAuthLogin(profileId);
+      setStatus('idle');
+    }
     // A profile created for a sign-in that never finished is removed again
     if (!next && createdProfileId && status !== 'success') {
       void window.electronAPI.deleteClaudeProfile(createdProfileId).then(() => onSaved?.());
@@ -193,7 +209,7 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
             </Button>
           ) : (
             <>
-              <Button variant="ghost" size="sm" onClick={() => handleOpenChange(false)} disabled={isSigningIn || isSaving}>
+              <Button variant="ghost" size="sm" onClick={() => handleOpenChange(false)} disabled={isSaving}>
                 {t('claudeAccounts.dialog.cancel')}
               </Button>
               {isRename ? (

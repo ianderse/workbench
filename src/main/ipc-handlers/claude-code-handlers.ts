@@ -8,7 +8,7 @@
  */
 
 import { ipcMain } from 'electron';
-import { execFileSync, spawn, execFile } from 'child_process';
+import { execFileSync, spawn, execFile, type ChildProcess } from 'child_process';
 import { existsSync, readFileSync, promises as fsPromises } from 'fs';
 import { mkdir, rename, unlink } from 'fs/promises';
 import path from 'path';
@@ -20,12 +20,15 @@ import type { ClaudeCodeVersionInfo, ClaudeInstallationList, ClaudeInstallationI
 import { getToolInfo, configureTools, sortNvmVersionDirs, getClaudeDetectionPaths, type ExecFileAsyncOptionsWithVerbatim } from '../cli-tool-manager';
 import { readSettingsFile, writeSettingsFile } from '../settings-utils';
 import { isSecurePath, getWhereExePath, getTaskkillExePath } from '../utils/windows-paths';
-import { isWindows, isMacOS, isLinux } from '../platform';
+import { isWindows, isMacOS, isLinux, killProcessGracefully } from '../platform';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { isValidConfigDir } from '../utils/config-path-validator';
 import { clearKeychainCache, getCredentialsFromKeychain, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import semver from 'semver';
+
+/** Running `claude auth login` processes by profile id, so a sign-in can be cancelled */
+const authLogins = new Map<string, { child: ChildProcess; cancelled: boolean }>();
 
 const execFileAsync = promisify(execFile);
 
@@ -1427,6 +1430,20 @@ export function registerClaudeCodeHandlers(): void {
     }
   );
 
+  // Stop a running `claude auth login` (the user cancelled or closed the sign-in dialog). A
+  // sign-in that fails in the browser never ends on its own, so this is the way out of it.
+  ipcMain.handle(
+    IPC_CHANNELS.CLAUDE_AUTH_LOGIN_CANCEL,
+    async (_event, profileId: string): Promise<IPCResult> => {
+      const login = authLogins.get(profileId);
+      if (login) {
+        login.cancelled = true;
+        killProcessGracefully(login.child, { debugPrefix: '[Claude Code] auth login' });
+      }
+      return { success: true };
+    }
+  );
+
   // Run `claude auth login` as a subprocess (no terminal needed)
   // Same OAuth flow (opens browser → Anthropic consent → token saved to Keychain)
   // but without spawning a full PTY/xterm.js terminal
@@ -1497,12 +1514,23 @@ export function registerClaudeCodeHandlers(): void {
           delete env.ELECTRON_RUN_AS_NODE;
 
           const args = ['auth', 'login'];
+          // A sign-in still running for this account (e.g. Try again) is replaced
+          const previous = authLogins.get(profileId);
+          if (previous) {
+            previous.cancelled = true;
+            killProcessGracefully(previous.child, { debugPrefix: '[Claude Code] auth login' });
+          }
           const child = spawn(claudePath, args, {
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
             // On Windows, .cmd files need shell: true
             shell: isWindows() && claudePath.endsWith('.cmd'),
           });
+          const login = { child, cancelled: false };
+          authLogins.set(profileId, login);
+          const forget = () => {
+            if (authLogins.get(profileId) === login) authLogins.delete(profileId);
+          };
 
           let stdout = '';
           let stderr = '';
@@ -1542,6 +1570,7 @@ export function registerClaudeCodeHandlers(): void {
 
           child.on('close', async (code) => {
             clearTimeout(timeout);
+            forget();
 
             if (code === 0) {
               // Verify authentication
@@ -1598,6 +1627,10 @@ export function registerClaudeCodeHandlers(): void {
                 } catch { /* non-fatal */ }
               }
 
+              if (login.cancelled) {
+                resolve({ success: false, error: 'Sign-in cancelled' });
+                return;
+              }
               const errorMsg = stderr.trim() || `Process exited with code ${code}`;
               sender.send(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_PROGRESS, {
                 status: 'error',
@@ -1612,6 +1645,7 @@ export function registerClaudeCodeHandlers(): void {
 
           child.on('error', (err) => {
             clearTimeout(timeout);
+            forget();
             sender.send(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_PROGRESS, {
               status: 'error',
               message: err.message

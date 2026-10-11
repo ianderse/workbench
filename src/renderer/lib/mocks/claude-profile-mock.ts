@@ -91,5 +91,6 @@ export const claudeProfileMock = {
   }),
 
   claudeAuthLoginSubprocess: async () => ({ success: true, data: { authenticated: false } }),
+  cancelClaudeAuthLogin: async () => ({ success: true }),
   onClaudeAuthLoginProgress: () => () => {},
 };

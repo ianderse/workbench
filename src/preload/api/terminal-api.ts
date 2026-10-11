@@ -104,6 +104,7 @@ export interface TerminalAPI {
   authenticateClaudeProfile: (profileId: string) => Promise<IPCResult<{ terminalId: string; configDir: string }>>;
   verifyClaudeProfileAuth: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
   claudeAuthLoginSubprocess: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
+  cancelClaudeAuthLogin: (profileId: string) => Promise<IPCResult>;
   onClaudeAuthLoginProgress: (callback: (data: { status: string; message?: string }) => void) => () => void;
   getAutoSwitchSettings: () => Promise<IPCResult<import('../../shared/types').ClaudeAutoSwitchSettings>>;
   updateAutoSwitchSettings: (settings: Partial<import('../../shared/types').ClaudeAutoSwitchSettings>) => Promise<IPCResult>;
@@ -415,6 +416,9 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   claudeAuthLoginSubprocess: (profileId: string): Promise<IPCResult<{ authenticated: boolean; email?: string }>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_SUBPROCESS, profileId),
+
+  cancelClaudeAuthLogin: (profileId: string): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_CANCEL, profileId),
 
   onClaudeAuthLoginProgress: (
     callback: (data: { status: string; message?: string }) => void
