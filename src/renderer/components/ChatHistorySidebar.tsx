@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Trash2,
@@ -13,7 +13,6 @@ import {
 import { Button, buttonVariants } from './ui/button';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
-import { Checkbox } from './ui/checkbox';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -42,8 +41,6 @@ interface ChatHistorySidebarProps {
   onDeleteSession: (sessionId: string) => Promise<boolean>;
   onRenameSession: (sessionId: string, newTitle: string) => Promise<boolean>;
   onUnarchiveSession?: (sessionId: string) => Promise<void>;
-  onDeleteSessions?: (sessionIds: string[]) => Promise<void>;
-  onArchiveSessions?: (sessionIds: string[]) => Promise<void>;
   showArchived?: boolean;
   onToggleShowArchived?: () => void;
 }
@@ -57,8 +54,6 @@ export function ChatHistorySidebar({
   onDeleteSession,
   onRenameSession,
   onUnarchiveSession,
-  onDeleteSessions,
-  onArchiveSessions,
   showArchived = false,
   onToggleShowArchived
 }: ChatHistorySidebarProps) {
@@ -66,42 +61,7 @@ export function ChatHistorySidebar({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null);
-  const [isSelectionMode, setIsSelectionMode] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [bulkArchiveOpen, setBulkArchiveOpen] = useState(false);
 
-
-  // Prune selectedIds when sessions change - removes IDs for sessions no longer displayed
-  // Also resets when showArchived toggles
-  useEffect(() => {
-    setSelectedIds((prev) => {
-      if (prev.size === 0) return prev;
-      const validIds = new Set(sessions.map((s) => s.id));
-      const pruned = new Set([...prev].filter((id) => validIds.has(id)));
-      return pruned.size === prev.size ? prev : pruned;
-    });
-  }, [sessions, showArchived]);
-
-  const handleToggleSelect = useCallback((sessionId: string) => {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(sessionId)) {
-        next.delete(sessionId);
-      } else {
-        next.add(sessionId);
-      }
-      return next;
-    });
-  }, []);
-
-  const handleSelectAll = useCallback(() => {
-    setSelectedIds(new Set(sessions.map((s) => s.id)));
-  }, [sessions]);
-
-  const handleClearSelection = useCallback(() => {
-    setSelectedIds(new Set());
-  }, []);
 
   const handleStartEdit = (session: InsightsSessionSummary) => {
     setEditingId(session.id);
@@ -125,38 +85,6 @@ export function ChatHistorySidebar({
     if (deleteSessionId) {
       await onDeleteSession(deleteSessionId);
       setDeleteSessionId(null);
-    }
-  };
-
-  const handleBulkDelete = async () => {
-    if (selectedIds.size > 0 && onDeleteSessions) {
-      try {
-        await onDeleteSessions(Array.from(selectedIds));
-        setSelectedIds(new Set());
-      } catch (error) {
-        console.error('Failed to delete sessions:', error);
-      } finally {
-        setBulkDeleteOpen(false);
-      }
-    }
-  };
-
-  const handleBulkArchive = () => {
-    if (selectedIds.size > 0 && onArchiveSessions) {
-      setBulkArchiveOpen(true);
-    }
-  };
-
-  const handleBulkArchiveConfirmed = async () => {
-    if (selectedIds.size > 0 && onArchiveSessions) {
-      try {
-        await onArchiveSessions(Array.from(selectedIds));
-        setSelectedIds(new Set());
-      } catch (error) {
-        console.error('Failed to archive sessions:', error);
-      } finally {
-        setBulkArchiveOpen(false);
-      }
     }
   };
 
@@ -187,33 +115,10 @@ export function ChatHistorySidebar({
     return groups;
   }, {} as Record<string, InsightsSessionSummary[]>);
 
-  // Sessions selected for bulk delete preview
-  const sessionsToDelete = sessions.filter((s) => selectedIds.has(s.id));
-
   return (
     <div className="relative flex h-full w-64 shrink-0 flex-col border-r border-border bg-sidebar">
       {/* Window drag band over the top padding; the first row below sits level with the app sidebar's header row */}
       <div className="electron-drag absolute inset-x-0 top-0 z-10 h-6" />
-      {/* Select All / Clear links */}
-      {isSelectionMode && sessions.length > 0 && (
-        <div className="flex items-center justify-between px-4 pb-1.5">
-          <button
-            type="button"
-            className="text-xs text-primary hover:underline"
-            onClick={handleSelectAll}
-          >
-            {t('accessibility.selectAllAriaLabel')}
-          </button>
-          <button
-            type="button"
-            className="text-xs text-muted-foreground hover:underline"
-            onClick={handleClearSelection}
-          >
-            {t('accessibility.clearSelectionAriaLabel')}
-          </button>
-        </div>
-      )}
-
       {/* Session list */}
       {/* Radix wraps the content in a display:table div that grows with it; make it a block so long
           titles truncate instead of pushing the item past the sidebar */}
@@ -250,9 +155,6 @@ export function ChatHistorySidebar({
                       onUnarchiveSession ? () => onUnarchiveSession(session.id) : undefined
                     }
                     isArchived={!!session.archivedAt}
-                    isSelectionMode={isSelectionMode}
-                    isSelected={selectedIds.has(session.id)}
-                    onToggleSelect={() => handleToggleSelect(session.id)}
                   />
                 ))}
               </div>
@@ -260,32 +162,6 @@ export function ChatHistorySidebar({
           </div>
         )}
       </ScrollArea>
-
-      {/* Bulk action toolbar */}
-      {isSelectionMode && selectedIds.size > 0 && (
-        <div className="flex items-center gap-2 overflow-hidden min-w-0 border-t border-border px-2 py-2">
-          <Button
-            variant="destructive"
-            size="sm"
-            className="min-w-0 flex-1 text-xs"
-            onClick={() => setBulkDeleteOpen(true)}
-          >
-            <Trash2 className="shrink-0 mr-1.5 h-3.5 w-3.5" />
-            <span className="truncate">{t('selection.deleteSelected')} ({selectedIds.size})</span>
-          </Button>
-          {onArchiveSessions && (
-            <Button
-              variant="secondary"
-              size="sm"
-              className="min-w-0 flex-1 text-xs"
-              onClick={handleBulkArchive}
-            >
-              <Archive className="shrink-0 mr-1.5 h-3.5 w-3.5" />
-              <span className="truncate">{t('insights.archiveSelected')} ({selectedIds.size})</span>
-            </Button>
-          )}
-        </div>
-      )}
 
       {/* Single delete confirmation dialog */}
       <AlertDialog open={!!deleteSessionId} onOpenChange={() => setDeleteSessionId(null)}>
@@ -303,55 +179,6 @@ export function ChatHistorySidebar({
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Bulk delete confirmation dialog */}
-      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('insights.bulkDeleteTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('insights.bulkDeleteDescription', { count: selectedIds.size })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {sessionsToDelete.length > 0 && (
-            <div className="mt-4 max-h-32 overflow-y-auto rounded-xl bg-segment-track px-4 py-3">
-              <p className="mb-1 text-xs font-medium text-muted-foreground">
-                {t('insights.conversationsToDelete')}:
-              </p>
-              <ul className="space-y-0.5">
-                {sessionsToDelete.map((s) => (
-                  <li key={s.id} className="truncate text-xs text-foreground/80">
-                    {s.title}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('buttons.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBulkDelete} className={buttonVariants({ variant: 'destructive', size: 'sm' })}>
-              {t('insights.bulkDeleteConfirm', { count: selectedIds.size })}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Bulk archive confirmation dialog */}
-      <AlertDialog open={bulkArchiveOpen} onOpenChange={setBulkArchiveOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('insights.archiveConfirmTitle')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('insights.archiveConfirmDescription')}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('buttons.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleBulkArchiveConfirmed}>
-              {t('insights.archiveConfirmButton', { count: selectedIds.size })}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }
@@ -369,9 +196,6 @@ interface SessionItemProps {
   onDelete: () => void;
   onUnarchive?: () => Promise<void>;
   isArchived: boolean;
-  isSelectionMode: boolean;
-  isSelected: boolean;
-  onToggleSelect: () => void;
 }
 
 function SessionItem({
@@ -386,10 +210,7 @@ function SessionItem({
   onEditTitleChange,
   onDelete,
   onUnarchive,
-  isArchived,
-  isSelectionMode,
-  isSelected,
-  onToggleSelect
+  isArchived
 }: SessionItemProps) {
   const { t } = useTranslation('common');
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -440,8 +261,7 @@ function SessionItem({
 
   return (
     <div
-      role={isSelectionMode ? 'checkbox' : 'button'}
-      aria-checked={isSelectionMode ? isSelected : undefined}
+      role="button"
       tabIndex={0}
       title={`${session.title} · ${t('insights.messageCount', { count: session.messageCount })}`}
       className={cn(
@@ -452,26 +272,16 @@ function SessionItem({
         isActive && 'bg-nav-active text-nav-active-foreground hover:bg-nav-active hover:text-nav-active-foreground',
         isArchived && 'opacity-50'
       )}
-      onClick={isSelectionMode ? onToggleSelect : onSelect}
+      onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          isSelectionMode ? onToggleSelect() : onSelect();
+          onSelect();
         }
       }}
     >
       {/* Content with reserved space for the menu button */}
-      <div className={cn('flex min-w-0 flex-1 items-center gap-2', !isSelectionMode && 'group-hover:pr-6 group-focus-within:pr-6')}>
-        {isSelectionMode && (
-          <div className="flex shrink-0 items-center">
-            <Checkbox
-              checked={isSelected}
-              className="h-4 w-4"
-              aria-hidden
-              tabIndex={-1}
-            />
-          </div>
-        )}
+      <div className="flex min-w-0 flex-1 items-center gap-2 group-hover:pr-6 group-focus-within:pr-6">
         <span className="min-w-0 flex-1 truncate">{session.title}</span>
         {isArchived && (
           <span className="inline-flex shrink-0 items-center gap-0.5 text-[0.6875rem] text-(--nav-label-color)">
@@ -481,8 +291,7 @@ function SessionItem({
         )}
       </div>
 
-      {/* Absolutely positioned menu button - hidden in selection mode */}
-      {!isSelectionMode && (
+      {/* Absolutely positioned menu button */}
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
             <Button
@@ -514,7 +323,6 @@ function SessionItem({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
     </div>
   );
 }

@@ -30,9 +30,7 @@ import {
   newSession,
   switchSession,
   deleteSession,
-  deleteSessions,
   renameSession,
-  archiveSessions,
   unarchiveSession,
   updateModelConfig,
   createTaskFromSuggestion,
@@ -258,38 +256,6 @@ export function Insights({ projectId }: InsightsProps) {
       await loadInsightsSession(projectId, showArchived);
     } catch (error) {
       console.error(`Failed to unarchive session ${sessionId}:`, error);
-    }
-  };
-
-  const handleDeleteSessions = async (sessionIds: string[]) => {
-    try {
-      const result = await deleteSessions(projectId, sessionIds);
-      await loadInsightsSessions(projectId, showArchived);
-      // Reload current session in case backend switched to a different one
-      await loadInsightsSession(projectId, showArchived);
-
-      // Log partial failures for debugging
-      if (result.failedIds && result.failedIds.length > 0) {
-        console.warn(`Failed to delete ${result.failedIds.length} session(s):`, result.failedIds);
-      }
-    } catch (error) {
-      console.error(`Failed to delete sessions ${sessionIds.join(', ')}:`, error);
-    }
-  };
-
-  const handleArchiveSessions = async (sessionIds: string[]) => {
-    try {
-      const result = await archiveSessions(projectId, sessionIds);
-      await loadInsightsSessions(projectId, showArchived);
-      // Reload current session in case backend switched to a different one
-      await loadInsightsSession(projectId, showArchived);
-
-      // Log partial failures for debugging
-      if (result.failedIds && result.failedIds.length > 0) {
-        console.warn(`Failed to archive ${result.failedIds.length} session(s):`, result.failedIds);
-      }
-    } catch (error) {
-      console.error(`Failed to archive sessions ${sessionIds.join(', ')}:`, error);
     }
   };
 
@@ -548,8 +514,6 @@ export function Insights({ projectId }: InsightsProps) {
           onDeleteSession={handleDeleteSession}
           onRenameSession={handleRenameSession}
           onUnarchiveSession={handleUnarchiveSession}
-          onDeleteSessions={handleDeleteSessions}
-          onArchiveSessions={handleArchiveSessions}
           showArchived={showArchived}
           onToggleShowArchived={handleToggleShowArchived}
         />
