@@ -88,7 +88,13 @@ export class AgentManager extends EventEmitter {
     return this.launch(taskId, options, false);
   }
 
-  private async launch(taskId: string, options: StartTaskOptions, isRestart: boolean): Promise<void> {
+  private async launch(taskId: string, startOptions: StartTaskOptions, isRestart: boolean): Promise<void> {
+    // The project's Claude account (Settings > Project) unless the run is pinned to another one
+    // (e.g. a restart after an account swap); none: the account in use
+    const options: StartTaskOptions = {
+      ...startOptions,
+      profileId: startOptions.profileId ?? startOptions.project.settings?.claudeProfileId,
+    };
     const { project } = options;
     const projectId = project.id;
 
@@ -363,6 +369,7 @@ export class AgentManager extends EventEmitter {
       connectorIds: Array.isArray(task.metadata?.mcpConnectors) ? task.metadata.mcpConnectors : undefined,
       connectorSettings: settings.mcpConnectors,
       settings: taskSettings,
+      maxBudgetUsd: project.settings?.maxBudgetUsd,
       mode,
       ...(mode === 'revise' ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
       profileId: options.profileId,

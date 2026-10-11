@@ -2,6 +2,7 @@ import { useTranslation } from 'react-i18next';
 import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig } from '../../../../shared/types';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
 import { KnowledgeSettings } from '../../project-settings/KnowledgeSettings';
+import { ProjectTaskSettings } from '../../project-settings/ProjectTaskSettings';
 import { BranchSettings } from '../../project-settings/BranchSettings';
 import { InitializationGuard } from '../common/InitializationGuard';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
@@ -54,14 +55,18 @@ export function SectionRouter({
             isUpdating={isUpdating}
             handleInitialize={handleInitialize}
           />
+          {/* Kept in the project's .auto-claude folder, so they need an initialized project */}
           {project.autoBuildPath && (
-            <BranchSettings
-              projectPath={project.path}
-              settings={settings}
-              setSettings={setSettings}
-              envConfig={envConfig}
-              updateEnvConfig={updateEnvConfig}
-            />
+            <>
+              <ProjectTaskSettings settings={settings} setSettings={setSettings} />
+              <BranchSettings
+                projectPath={project.path}
+                settings={settings}
+                setSettings={setSettings}
+                envConfig={envConfig}
+                updateEnvConfig={updateEnvConfig}
+              />
+            </>
           )}
         </>
       );

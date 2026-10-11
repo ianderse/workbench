@@ -37,8 +37,6 @@ export interface ClaudeCodeTaskSettings {
   validation: boolean;
   /** Let triage pick Fable for the hardest tasks (Fable may bill to usage credits) */
   allowFable: boolean;
-  /** Stop a task once its estimated spend reaches this amount (`--max-budget-usd`); unset = no cap */
-  maxBudgetUsd?: number;
   /** Fallback model chain when the chosen model is overloaded (`--fallback-model`) */
   fallbackModel?: string;
 }

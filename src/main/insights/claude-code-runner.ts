@@ -56,6 +56,8 @@ export interface InsightsRunConfig {
   attachments?: ImageAttachment[];
   /** The project's memory graph, when its "Use Graphify" setting is on */
   graphify?: GraphifyAgentContext;
+  /** The project's Claude account (Settings > Project); unset = the account in use */
+  profileId?: string;
 }
 
 /** Info about a tool call made during the turn */
@@ -248,7 +250,7 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
       throw new Error(formatInsightsError(INSIGHTS_ERROR_CODES.claudeCodeMissing, cliInfo.message || 'Claude Code CLI not found'));
     }
 
-    const { command, env } = await resolveClaudeEnv();
+    const { command, env } = await resolveClaudeEnv({ profileId: config.profileId });
     if (graphify) {
       // graphify commands find the project's graph (GRAPHIFY_OUT) and run without a full path
       env.GRAPHIFY_OUT = dirname(graphify.graph);

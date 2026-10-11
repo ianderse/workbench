@@ -12,6 +12,8 @@ let TEST_DIR: string;
 let USER_DATA_PATH: string;
 let TEST_PROJECT_PATH: string;
 
+vi.mock('../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+
 // Mock Electron before importing the store
 vi.mock('electron', () => ({
   app: {
@@ -260,6 +262,58 @@ describe('ProjectStore', () => {
       const storePath = path.join(USER_DATA_PATH, 'store', 'projects.json');
       const content = JSON.parse(readFileSync(storePath, 'utf-8'));
       expect(content.projects[0].settings.model).toBe('sonnet');
+    });
+  });
+
+  describe("settings kept in the project's .auto-claude/settings.json", () => {
+    const initializeProject = () => mkdirSync(path.join(TEST_PROJECT_PATH, '.auto-claude'), { recursive: true });
+    const projectFile = () => path.join(TEST_PROJECT_PATH, '.auto-claude', 'settings.json');
+    const storeFile = () => path.join(USER_DATA_PATH, 'store', 'projects.json');
+
+    it('writes budget and account to the project and keeps them out of the app list', async () => {
+      initializeProject();
+      const { ProjectStore } = await import('../project-store');
+      const store = new ProjectStore();
+      const project = store.addProject(TEST_PROJECT_PATH);
+
+      store.updateProjectSettings(project.id, { maxBudgetUsd: 2.5, claudeProfileId: 'work', model: 'sonnet' });
+
+      expect(JSON.parse(readFileSync(projectFile(), 'utf-8'))).toEqual({ maxBudgetUsd: 2.5, claudeProfileId: 'work' });
+      const listed = JSON.parse(readFileSync(storeFile(), 'utf-8')).projects[0].settings;
+      expect(listed.model).toBe('sonnet');
+      for (const key of ['maxBudgetUsd', 'claudeProfileId']) expect(listed).not.toHaveProperty(key);
+    });
+
+    it('loads them back from the project, and clearing one removes it from the file', async () => {
+      initializeProject();
+      const { ProjectStore } = await import('../project-store');
+      const store = new ProjectStore();
+      const project = store.addProject(TEST_PROJECT_PATH);
+      store.updateProjectSettings(project.id, { maxBudgetUsd: 3, claudeProfileId: 'work' });
+      store.updateProjectSettings(project.id, { maxBudgetUsd: undefined });
+
+      vi.resetModules();
+      const { ProjectStore: ReloadedStore } = await import('../project-store');
+      const reloaded = new ReloadedStore().getProject(project.id);
+      expect(reloaded?.settings.claudeProfileId).toBe('work');
+      expect(reloaded?.settings.maxBudgetUsd).toBeUndefined();
+      const saved = JSON.parse(readFileSync(projectFile(), 'utf-8'));
+      expect(saved.claudeProfileId).toBe('work');
+      expect(saved).not.toHaveProperty('maxBudgetUsd');
+    });
+
+    it('keeps older values from the app list until the project has its own file', async () => {
+      initializeProject();
+      writeFileSync(storeFile(), JSON.stringify({
+        projects: [{ id: 'p1', name: 'test-project', path: TEST_PROJECT_PATH, autoBuildPath: '.auto-claude', settings: { model: 'opus', maxBudgetUsd: 4 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+        settings: {}
+      }));
+      const { ProjectStore } = await import('../project-store');
+      const store = new ProjectStore();
+      expect(store.getProject('p1')?.settings.maxBudgetUsd).toBe(4);
+
+      store.updateProjectSettings('p1', { model: 'sonnet' });
+      expect(JSON.parse(readFileSync(projectFile(), 'utf-8')).maxBudgetUsd).toBe(4);
     });
   });
 

@@ -12,8 +12,31 @@ import { writeFileAtomicSync } from './utils/atomic-file';
 import { safeParseJson } from './utils/json-repair';
 import { parseRateLimitHold } from '../shared/utils/rate-limit-hold';
 import { loadClaudeRunInfo } from './claude-code/task-runner';
+import { appLog } from './app-logger';
 
+/**
+ * Project settings kept in the project's own `.auto-claude/settings.json` (next to its tasks)
+ * instead of the app's project list
+ */
+const PROJECT_FILE_SETTING_KEYS = ['maxBudgetUsd', 'claudeProfileId'] as const;
+const PROJECT_SETTINGS_FILE = 'settings.json';
 
+/** The project's settings file, or null while the project isn't initialized (no `.auto-claude`) */
+function projectSettingsFile(project: Project): string | null {
+  return project.autoBuildPath ? path.join(project.path, project.autoBuildPath, PROJECT_SETTINGS_FILE) : null;
+}
+
+/** Settings from the project's settings file (empty when it doesn't exist or can't be read) */
+function readProjectFileSettings(project: Project): Partial<ProjectSettings> {
+  const file = projectSettingsFile(project);
+  if (!file || !existsSync(file)) return {};
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf-8')) as Record<string, unknown>;
+    return Object.fromEntries(PROJECT_FILE_SETTING_KEYS.filter((key) => key in data).map((key) => [key, data[key]]));
+  } catch {
+    return {};
+  }
+}
 
 interface TabState {
   openProjectIds: string[];
@@ -72,6 +95,10 @@ export class ProjectStore {
           createdAt: new Date(p.createdAt),
           updatedAt: new Date(p.updatedAt)
         }));
+        // Settings kept in the project's own settings file win over older copies in this list
+        for (const project of data.projects as Project[]) {
+          project.settings = { ...project.settings, ...readProjectFileSettings(project) };
+        }
         return data;
       } catch {
         return { projects: [], settings: {} };
@@ -84,7 +111,32 @@ export class ProjectStore {
    * Save store to disk
    */
   private save(): void {
-    writeFileAtomicSync(this.storePath, JSON.stringify(this.data, null, 2));
+    // Settings that live in a project's settings file aren't duplicated here
+    const projects = this.data.projects.map((project) => {
+      const file = projectSettingsFile(project);
+      if (!file || !existsSync(file)) return project;
+      const settings: Record<string, unknown> = { ...project.settings };
+      for (const key of PROJECT_FILE_SETTING_KEYS) delete settings[key];
+      return { ...project, settings };
+    });
+    writeFileAtomicSync(this.storePath, JSON.stringify({ ...this.data, projects }, null, 2));
+  }
+
+  /** Write the project's file-kept settings to `.auto-claude/settings.json` (initialized projects) */
+  private saveProjectFileSettings(project: Project): void {
+    const file = projectSettingsFile(project);
+    if (!file) return;
+    const values = Object.fromEntries(
+      PROJECT_FILE_SETTING_KEYS
+        .filter((key) => project.settings[key] !== undefined)
+        .map((key) => [key, project.settings[key]])
+    );
+    try {
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileAtomicSync(file, JSON.stringify(values, null, 2));
+    } catch (error) {
+      appLog.error('[ProjectStore] Failed to write the project settings file:', file, error);
+    }
   }
 
   /**
@@ -272,6 +324,7 @@ export class ProjectStore {
     if (project) {
       project.settings = { ...project.settings, ...settings };
       project.updatedAt = new Date();
+      this.saveProjectFileSettings(project);
       this.save();
     }
     return project;

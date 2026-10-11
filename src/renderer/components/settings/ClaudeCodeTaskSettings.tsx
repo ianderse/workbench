@@ -4,7 +4,6 @@
  * Claude Code plans, implements and validates in the task's worktree.
  */
 
-import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
@@ -47,25 +46,6 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
 
   const update = (patch: Partial<TaskSettings>) => {
     onSettingsChange({ ...settings, claudeCodeTasks: { ...stored, ...patch } });
-  };
-
-  // The budget is typed as text so partial values ("1.") survive; saved when it parses
-  const [budgetDraft, setBudgetDraft] = useState(current.maxBudgetUsd?.toString() ?? '');
-  useEffect(() => {
-    setBudgetDraft((draft) => {
-      const parsed = draft.trim() === '' ? undefined : Number(draft);
-      return parsed === current.maxBudgetUsd ? draft : current.maxBudgetUsd?.toString() ?? '';
-    });
-  }, [current.maxBudgetUsd]);
-
-  const handleBudgetChange = (value: string) => {
-    setBudgetDraft(value);
-    if (value.trim() === '') {
-      update({ maxBudgetUsd: undefined });
-      return;
-    }
-    const parsed = Number(value);
-    if (Number.isFinite(parsed) && parsed > 0) update({ maxBudgetUsd: parsed });
   };
 
   const modelLabel = (model: ClaudeModelAlias) => t(`claudeCode.models.${model}`);
@@ -186,26 +166,6 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
               onCheckedChange={(validation) => update({ validation })}
               aria-label={t('claudeCode.execution.validation')}
             />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t('claudeCode.execution.budget')}
-            description={t('claudeCode.execution.budgetDescription')}
-            htmlFor="claude-code-budget"
-          >
-            <div className="flex items-center gap-1.5">
-              <Input
-                id="claude-code-budget"
-                type="number"
-                inputMode="decimal"
-                min={0}
-                step={0.5}
-                className="w-24"
-                placeholder={t('claudeCode.execution.budgetPlaceholder')}
-                value={budgetDraft}
-                onChange={(e) => handleBudgetChange(e.target.value)}
-              />
-            </div>
           </SettingsRow>
 
           <SettingsRow

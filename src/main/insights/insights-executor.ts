@@ -91,8 +91,9 @@ export class InsightsExecutor extends EventEmitter {
       }));
 
     try {
+      const projectSettings = projectStore.getProject(projectId)?.settings;
       // The project's memory graph, searchable from the chat when its "Use Graphify" setting is on
-      const graphify = projectStore.getProject(projectId)?.settings?.useGraphify
+      const graphify = projectSettings?.useGraphify
         ? (await getGraphifyPromptContext(projectPath)) ?? undefined
         : undefined;
       const result = await runInsights(
@@ -105,6 +106,7 @@ export class InsightsExecutor extends EventEmitter {
           abortSignal: controller.signal,
           attachments: images,
           graphify,
+          profileId: projectSettings?.claudeProfileId,
         },
         (event) => {
           switch (event.type) {

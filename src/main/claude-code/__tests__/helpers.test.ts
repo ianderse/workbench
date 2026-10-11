@@ -26,10 +26,10 @@ describe('buildMcpConfig', () => {
 describe('resolveClaudeCodeTaskSettings', () => {
   it('fills defaults and drops invalid values', () => {
     expect(resolveClaudeCodeTaskSettings(undefined)).toEqual(DEFAULT_CLAUDE_CODE_TASK_SETTINGS);
-    const resolved = resolveClaudeCodeTaskSettings({ fixedModel: 'gpt' as never, planning: 'sometimes' as never, maxBudgetUsd: 3 });
+    const resolved = resolveClaudeCodeTaskSettings({ fixedModel: 'gpt' as never, planning: 'sometimes' as never, validation: false });
     expect(resolved.fixedModel).toBe('sonnet');
     expect(resolved.planning).toBe('auto');
-    expect(resolved.maxBudgetUsd).toBe(3);
+    expect(resolved.validation).toBe(false);
   });
 });
 

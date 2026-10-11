@@ -98,6 +98,8 @@ export interface TaskRunConfig {
   connectorIds?: string[];
   connectorSettings?: McpConnectorSettings;
   settings: ClaudeCodeTaskSettings;
+  /** The project's budget per task (`--max-budget-usd`, Settings > Project); unset = no cap */
+  maxBudgetUsd?: number;
   /** Prompt section pointing Claude Code at the project's Graphify memory graph */
   graphifyPrompt?: string;
   /** Extra environment (e.g. GRAPHIFY_OUT, PATH with the graphify CLI) */
@@ -467,7 +469,7 @@ export class ClaudeTaskRun {
     if (!result || result.is_error || result.subtype !== 'success') {
       const error = outcome.error
         || result?.errors?.join('; ')
-        || (result?.subtype === 'error_max_budget_usd' ? 'The task reached its budget limit (Settings > Agents)' : '')
+        || (result?.subtype === 'error_max_budget_usd' ? 'The task reached its budget limit (Settings > Project)' : '')
         || result?.result
         || 'Claude Code stopped with an error';
       this.endPhase(phase, { isError: true, error }, result);
@@ -638,7 +640,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       args.push('--session-id', params.sessionId);
     }
     if (params.jsonSchema) args.push('--json-schema', JSON.stringify(params.jsonSchema));
-    if (settings.maxBudgetUsd && settings.maxBudgetUsd > 0) args.push('--max-budget-usd', String(settings.maxBudgetUsd));
+    if (this.config.maxBudgetUsd && this.config.maxBudgetUsd > 0) args.push('--max-budget-usd', String(this.config.maxBudgetUsd));
     if (settings.fallbackModel?.trim()) args.push('--fallback-model', settings.fallbackModel.trim());
     const mcpConfig = buildMcpConfig(this.config.connectorIds, this.config.connectorSettings);
     if (Object.keys(mcpConfig.mcpServers).length > 0) args.push('--mcp-config', JSON.stringify(mcpConfig));

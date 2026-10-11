@@ -34,6 +34,10 @@ export interface ProjectSettings {
   useClaudeMd?: boolean;
   /** Point agents at the project's Graphify memory graph (default: false; needs Graphify installed) */
   useGraphify?: boolean;
+  /** Stop a task once its estimated spend reaches this amount (`--max-budget-usd`); unset = no cap */
+  maxBudgetUsd?: number;
+  /** Claude account (profile id) the project's tasks and chats run on; unset = the account in use */
+  claudeProfileId?: string;
   /** Maximum parallel tasks allowed (default: 3) */
   maxParallelTasks?: number;
 }

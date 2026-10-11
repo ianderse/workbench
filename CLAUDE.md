@@ -231,7 +231,9 @@ loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "A
 (optional interface font). Settings > General > Appearance picks the interface and command line fonts.
 
 **Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Agents,
-Project, Connectors, Knowledge, Developer, Updates (Project and Knowledge are the selected project's pages). Build pages from `SettingsSection` +
+Project, Connectors, Knowledge, Developer, Updates (Project and Knowledge are the selected project's pages; Project has
+index, Tasks and Branches). The project's `maxBudgetUsd` (budget per task) and `claudeProfileId` (its Claude account;
+unset = the account in use) are kept in the project's own `.auto-claude/settings.json` (`src/main/project-store.ts`). Build pages from `SettingsSection` +
 `SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
 `SETTINGS_MENU_TRIGGER_CLASS` (no collapsible rows). UI copy conventions: sentence case, no em dashes, no trailing
 period in setting descriptions, and no green check / red x status icons (state the status in text).
