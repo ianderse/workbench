@@ -4,7 +4,7 @@
  * Tasks copy these defaults when created and can change them per task.
  */
 
-import { ListChecks, Loader2, Lock, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Loader2, Lock, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '../ui/switch';
@@ -231,13 +231,6 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
               </ConnectorRow>
             );
           })}
-          <ConnectorRow
-            icon={ListChecks}
-            name={t('settings:mcp.servers.autoClaude.name')}
-            description={`${t('settings:mcp.servers.autoClaude.description')} (${t('settings:mcp.alwaysEnabled')})`}
-          >
-            <Switch checked={true} disabled aria-label={t('settings:mcp.servers.autoClaude.name')} />
-          </ConnectorRow>
         </SettingsRows>
       </SettingsSection>
 

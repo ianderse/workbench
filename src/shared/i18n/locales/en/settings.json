@@ -360,7 +360,6 @@
   "mcp": {
     "serversEnabled": "{{count}} servers enabled",
     "defaultsHint": "Defaults for new tasks; each task can change them",
-    "alwaysEnabled": "always enabled",
     "addServer": "Add server",
     "servers": {
       "context7": {
@@ -374,10 +373,6 @@
       "puppeteer": {
         "name": "Puppeteer",
         "description": "Web browser automation for testing"
-      },
-      "autoClaude": {
-        "name": "Auto Claude tools",
-        "description": "Build progress tracking"
       }
     },
     "customServers": "Custom servers",
