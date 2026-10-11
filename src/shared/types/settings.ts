@@ -2,7 +2,7 @@
  * Application settings types
  */
 
-import type { NotificationSettings, MemoryEmbeddingProvider, CustomMcpServer } from './project';
+import type { NotificationSettings, CustomMcpServer } from './project';
 import type { ClaudeCodeTaskSettings } from './claude-code';
 
 // Color theme types for multi-theme support
@@ -227,24 +227,6 @@ export interface AppSettings {
   // Maximum agent terminals per project (MIN_TERMINALS..MAX_TERMINALS_LIMIT)
   maxTerminals?: number;
   notifications: NotificationSettings;
-  // API keys for memory embeddings (OpenAI, Google), used as defaults for all projects
-  globalOpenAIApiKey?: string;
-  globalGoogleApiKey?: string;
-  // Ollama server for memory embeddings
-  ollamaBaseUrl?: string;
-  // Memory configuration (app-wide, set during onboarding)
-  memoryEnabled?: boolean;
-  memoryEmbeddingProvider?: MemoryEmbeddingProvider;
-  memoryOllamaEmbeddingModel?: string;
-  memoryOllamaEmbeddingDim?: number;
-  memoryVoyageApiKey?: string;
-  memoryVoyageEmbeddingModel?: string;
-  memoryAzureApiKey?: string;
-  memoryAzureBaseUrl?: string;
-  memoryAzureEmbeddingDeployment?: string;
-  memoryGoogleApiKey?: string;
-  memoryOpenaiEmbeddingModel?: string;
-  memoryGoogleEmbeddingModel?: string;
   // Interface font (default Anthropic Sans)
   interfaceFont?: InterfaceFont;
   // Maximum tasks in progress at once per project; others wait in the Queue (Settings > Claude Code)

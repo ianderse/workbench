@@ -27,10 +27,7 @@ import type {
   FileNode,
   ProjectContextData,
   ProjectIndex,
-  MemorySystemStatus,
   ProjectEnvConfig,
-  InfrastructureStatus,
-  MemoryValidationResult,
   GitStatus,
   CustomMcpServer,
   McpHealthCheckResult,
@@ -352,16 +349,10 @@ export interface ElectronAPI {
   // Context operations
   getProjectContext: (projectId: string) => Promise<IPCResult<ProjectContextData>>;
   refreshProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndex>>;
-  getMemoryStatus: (projectId: string) => Promise<IPCResult<MemorySystemStatus>>;
 
   // Environment configuration operations
   getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
   updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
-
-  // Memory Infrastructure operations (libSQL - no Docker required)
-  getMemoryInfrastructureStatus: (dbPath?: string) => Promise<IPCResult<InfrastructureStatus>>;
-  listMemoryDatabases: (dbPath?: string) => Promise<IPCResult<string[]>>;
-  testMemoryConnection: (dbPath?: string, database?: string) => Promise<IPCResult<MemoryValidationResult>>;
 
   // Electron app update operations
   checkAppUpdate: () => Promise<IPCResult<AppUpdateCheckResult>>;
@@ -465,58 +456,6 @@ export interface ElectronAPI {
   detectMainBranch: (projectPath: string) => Promise<IPCResult<string | null>>;
   checkGitStatus: (projectPath: string) => Promise<IPCResult<GitStatus>>;
   initializeGit: (projectPath: string) => Promise<IPCResult<InitializationResult>>;
-
-  // Ollama model detection operations
-  checkOllamaStatus: (baseUrl?: string) => Promise<IPCResult<{
-    running: boolean;
-    url: string;
-    version?: string;
-    message?: string;
-  }>>;
-  checkOllamaInstalled: () => Promise<IPCResult<{
-    installed: boolean;
-    path?: string;
-    version?: string;
-  }>>;
-  installOllama: () => Promise<IPCResult<{ command: string }>>;
-  listOllamaModels: (baseUrl?: string) => Promise<IPCResult<{
-    models: Array<{
-      name: string;
-      size_bytes: number;
-      size_gb: number;
-      modified_at: string;
-      is_embedding: boolean;
-      embedding_dim?: number | null;
-      description?: string;
-    }>;
-    count: number;
-  }>>;
-  listOllamaEmbeddingModels: (baseUrl?: string) => Promise<IPCResult<{
-    embedding_models: Array<{
-      name: string;
-      embedding_dim: number | null;
-      description: string;
-      size_bytes: number;
-      size_gb: number;
-    }>;
-    count: number;
-  }>>;
-  pullOllamaModel: (modelName: string, baseUrl?: string) => Promise<IPCResult<{
-    model: string;
-    status: 'completed' | 'failed';
-    output: string[];
-  }>>;
-
-  // Ollama download progress listener
-  onDownloadProgress: (
-    callback: (data: {
-      modelName: string;
-      status: string;
-      completed: number;
-      total: number;
-      percentage: number;
-    }) => void
-  ) => () => void;
 
   // Claude Code CLI operations
   checkClaudeCodeVersion: (forceRefresh?: boolean) => Promise<IPCResult<import('./cli').ClaudeCodeVersionInfo>>;

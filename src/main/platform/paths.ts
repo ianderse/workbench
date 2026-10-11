@@ -6,9 +6,7 @@
  */
 
 import * as path from 'path';
-import * as os from 'os';
-import { isWindows, isMacOS, joinPaths } from './index';
-import { getWhereExePath } from '../utils/windows-paths';
+import { isWindows } from './index';
 
 /**
  * Get all Windows shell paths for terminal selection
@@ -50,72 +48,4 @@ export function getWindowsShellPaths(): Record<string, string[]> {
       path.join(systemRoot, 'System32', 'wsl.exe')
     ]
   };
-}
-
-/**
- * Resolve Ollama executable paths
- *
- * Returns platform-specific paths where Ollama may be installed:
- * - Windows: LocalAppData, Program Files
- * - macOS: Homebrew paths, /usr/local/bin
- * - Linux: /usr/local/bin, /usr/bin, ~/.local/bin
- */
-export function getOllamaExecutablePaths(): string[] {
-  const homeDir = os.homedir();
-  const paths: string[] = [];
-
-  if (isWindows()) {
-    const localAppData = process.env.LOCALAPPDATA || joinPaths(homeDir, 'AppData', 'Local');
-    paths.push(
-      joinPaths(localAppData, 'Programs', 'Ollama', 'ollama.exe'),
-      joinPaths(localAppData, 'Ollama', 'ollama.exe'),
-      joinPaths('C:\\Program Files', 'Ollama', 'ollama.exe'),
-      joinPaths('C:\\Program Files (x86)', 'Ollama', 'ollama.exe')
-    );
-  } else if (isMacOS()) {
-    paths.push(
-      '/usr/local/bin/ollama',
-      '/opt/homebrew/bin/ollama',
-      joinPaths(homeDir, '.local', 'bin', 'ollama')
-    );
-  } else {
-    // Linux
-    paths.push(
-      '/usr/local/bin/ollama',
-      '/usr/bin/ollama',
-      joinPaths(homeDir, '.local', 'bin', 'ollama')
-    );
-  }
-
-  return paths;
-}
-
-/**
- * Get the platform-specific install command for Ollama
- *
- * Windows: Uses winget (Windows Package Manager)
- * macOS: Uses Homebrew
- * Linux: Uses official install script
- */
-export function getOllamaInstallCommand(): string {
-  if (isWindows()) {
-    return 'winget install --id Ollama.Ollama --accept-source-agreements';
-  } else if (isMacOS()) {
-    return 'brew install ollama';
-  } else {
-    return 'curl -fsSL https://ollama.com/install.sh | sh';
-  }
-}
-
-/**
- * Get the command to find executables in PATH
- *
- * Windows: Full path to where.exe (C:\Windows\System32\where.exe)
- *          Using full path ensures it works even when System32 isn't in PATH,
- *          which can happen in restricted environments or when Electron doesn't
- *          inherit the full system PATH.
- * Unix: which
- */
-export function getWhichCommand(): string {
-  return isWindows() ? getWhereExePath() : 'which';
 }

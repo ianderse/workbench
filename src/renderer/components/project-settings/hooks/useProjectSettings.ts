@@ -36,8 +36,6 @@ export interface UseProjectSettingsReturn {
   // Password visibility toggles
   showClaudeToken: boolean;
   setShowClaudeToken: React.Dispatch<React.SetStateAction<boolean>>;
-  showOpenAIKey: boolean;
-  setShowOpenAIKey: React.Dispatch<React.SetStateAction<boolean>>;
 
   // Collapsible sections
   expandedSections: Record<string, boolean>;
@@ -74,7 +72,6 @@ export function useProjectSettings(
 
   // Password visibility toggles
   const [showClaudeToken, setShowClaudeToken] = useState(false);
-  const [showOpenAIKey, setShowOpenAIKey] = useState(false);
 
   // Collapsible sections
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
@@ -238,8 +235,6 @@ export function useProjectSettings(
     updateEnvConfig,
     showClaudeToken,
     setShowClaudeToken,
-    showOpenAIKey,
-    setShowOpenAIKey,
     expandedSections,
     toggleSection,
     handleInitialize,

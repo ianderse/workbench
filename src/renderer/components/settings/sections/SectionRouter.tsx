@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
 import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig } from '../../../../shared/types';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
-import { SecuritySettings } from '../../project-settings/SecuritySettings';
+import { KnowledgeSettings } from '../../project-settings/KnowledgeSettings';
 import { BranchSettings } from '../../project-settings/BranchSettings';
 import { InitializationGuard } from '../common/InitializationGuard';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
@@ -18,8 +18,6 @@ interface SectionRouterProps {
   isLoadingEnv: boolean;
   envError: string | null;
   updateEnvConfig: (updates: Partial<ProjectEnvConfig>) => void;
-  showOpenAIKey: boolean;
-  setShowOpenAIKey: React.Dispatch<React.SetStateAction<boolean>>;
   handleInitialize: () => Promise<void>;
 }
 
@@ -39,8 +37,6 @@ export function SectionRouter({
   isLoadingEnv,
   envError,
   updateEnvConfig,
-  showOpenAIKey,
-  setShowOpenAIKey,
   handleInitialize
 }: SectionRouterProps) {
   const { t } = useTranslation('settings');
@@ -70,23 +66,14 @@ export function SectionRouter({
         </>
       );
 
-    case 'memory':
+    case 'knowledge':
       return (
         <InitializationGuard
           initialized={!!project.autoBuildPath}
-          title={t('projectSections.memory.title')}
-          description={t('projectSections.memory.syncDescription')}
+          title={t('projectSections.knowledge.title')}
+          description={t('projectSections.knowledge.description')}
         >
-          <SecuritySettings
-            envConfig={envConfig}
-            settings={settings}
-            setSettings={setSettings}
-            updateEnvConfig={updateEnvConfig}
-            showOpenAIKey={showOpenAIKey}
-            setShowOpenAIKey={setShowOpenAIKey}
-            expanded={true}
-            onToggle={() => {}}
-          />
+          <KnowledgeSettings settings={settings} setSettings={setSettings} />
         </InitializationGuard>
       );
 

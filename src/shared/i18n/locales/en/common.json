@@ -111,19 +111,6 @@
     "swapTo": "to",
     "swapReason": "({{reason}} swap)"
   },
-  "downloads": {
-    "toggleExpand": "Toggle download details",
-    "downloading": "Downloading {{count}} model",
-    "downloading_plural": "Downloading {{count}} models",
-    "complete": "{{count}} download complete",
-    "complete_plural": "{{count}} downloads complete",
-    "failed": "{{count}} download failed",
-    "failed_plural": "{{count}} downloads failed",
-    "clearAll": "Clear all completed downloads",
-    "done": "Done",
-    "failedLabel": "Failed",
-    "starting": "Starting..."
-  },
   "insights": {
     "suggestedTask": "Suggested Task",
     "creating": "Creating...",

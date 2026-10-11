@@ -594,7 +594,6 @@ describe('ProjectStore', () => {
             autoBuildPath: '',
             settings: {
               model: 'sonnet',
-              memoryBackend: 'memory',
               notifications: {
                 onTaskComplete: true,
                 onTaskFailed: true,

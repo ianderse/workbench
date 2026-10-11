@@ -23,7 +23,7 @@ interface GeneralSettingsProps {
 
 /**
  * Project page: initialize Auto Claude for the project, then its project index and Graphify memory
- * graph, laid out as claude.ai settings sections (CLAUDE.md and Graphify usage live on the Memory page).
+ * graph, laid out as claude.ai settings sections (CLAUDE.md and Graphify usage live on the Knowledge page).
  */
 export function GeneralSettings({
   project,

@@ -29,7 +29,6 @@ function project(id: string, name: string, updatedAt: string): Project {
     autoBuildPath: `/work/${name.toLowerCase()}/.auto-claude`,
     settings: {
       model: 'sonnet',
-      memoryBackend: 'file',
       notifications: { onTaskComplete: true, onTaskFailed: true, onReviewNeeded: true, sound: false }
     },
     createdAt: new Date(updatedAt),

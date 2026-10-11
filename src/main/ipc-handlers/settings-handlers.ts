@@ -13,7 +13,6 @@ import { AgentManager } from '../agent';
 import type { BrowserWindow } from 'electron';
 import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
-import { resetMemoryService } from './context/memory-service-factory';
 import { taskQueue } from '../services/task-queue';
 import { configureTools, getToolPath, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache } from '../cli-tool-manager';
 
@@ -154,22 +153,6 @@ export function registerSettingsHandlers(
         // A higher parallel task limit frees slots for queued tasks
         if (settings.maxParallelTasks !== undefined) {
           taskQueue.request();
-        }
-
-        // Reset memory service singleton when memory-related settings change
-        // (embedding API keys and the Ollama URL are read by the memory service factory)
-        const memoryKeys = [
-          'memoryEmbeddingProvider',
-          'memoryEnabled',
-          'globalOpenAIApiKey',
-          'globalGoogleApiKey',
-          'memoryVoyageApiKey',
-          'memoryAzureApiKey',
-          'ollamaBaseUrl',
-          'memoryOllamaEmbeddingModel',
-        ];
-        if (memoryKeys.some((key) => (settings as Record<string, unknown>)[key] !== undefined)) {
-          resetMemoryService();
         }
 
         // Update auto-updater channel if betaUpdates setting changed

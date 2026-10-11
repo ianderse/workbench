@@ -4,7 +4,7 @@ import { OS } from './types';
 import { getTaskkillExePath } from '../utils/windows-paths';
 
 // Re-export from paths.ts for backward compatibility
-export { getWindowsShellPaths, getOllamaExecutablePaths, getOllamaInstallCommand, getWhichCommand } from './paths';
+export { getWindowsShellPaths } from './paths';
 
 /**
  * Check if running on Windows

@@ -32,8 +32,6 @@ import { useTaskStore, loadTasks } from './stores/task-store';
 import { useSettingsStore, loadSettings, loadProfiles } from './stores/settings-store';
 import { loadClaudeProfiles } from './stores/claude-profile-store';
 import { useTerminalStore, restoreTerminalSessions } from './stores/terminal-store';
-import { initDownloadProgressListener } from './stores/download-store';
-import { GlobalDownloadIndicator } from './components/GlobalDownloadIndicator';
 import { useIpcListeners } from './hooks/useIpc';
 import { useTitleBarColors } from './hooks/useTitleBarColors';
 import { useGlobalTerminalListeners } from './hooks/useGlobalTerminalListeners';
@@ -133,12 +131,6 @@ export function App() {
     loadSettings();
     loadProfiles();
     loadClaudeProfiles();
-    // Initialize global download progress listener for Ollama model downloads
-    const cleanupDownloadListener = initDownloadProgressListener();
-
-    return () => {
-      cleanupDownloadListener();
-    };
   }, []);
 
   // Restore tab state and open tabs for loaded projects
@@ -812,9 +804,6 @@ export function App() {
 
         {/* App Update Notification - shows when new app version is available */}
         <AppUpdateNotification />
-
-        {/* Global Download Indicator - shows Ollama model download progress */}
-        <GlobalDownloadIndicator />
       </div>
       </TooltipProvider>
     </ViewStateProvider>

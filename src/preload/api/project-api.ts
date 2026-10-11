@@ -44,7 +44,6 @@ export interface ProjectAPI {
   // Context Operations
   getProjectContext: (projectId: string) => Promise<IPCResult<unknown>>;
   refreshProjectIndex: (projectId: string) => Promise<IPCResult<unknown>>;
-  getMemoryStatus: (projectId: string) => Promise<IPCResult<unknown>>;
 
   // Environment Configuration
   getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
@@ -59,25 +58,7 @@ export interface ProjectAPI {
   ) => Promise<IPCResult<import('../../shared/types').CreateProjectFolderResult>>;
   getDefaultProjectLocation: () => Promise<string | null>;
 
-   // Ollama Model Management
-   scanOllamaModels: (baseUrl: string) => Promise<IPCResult<{
-     models: Array<{
-       name: string;
-       size: number;
-       modified_at: string;
-       digest: string;
-     }>;
-   }>>;
-   downloadOllamaModel: (baseUrl: string, modelName: string) => Promise<IPCResult<{ message: string }>>;
-   onDownloadProgress: (callback: (data: {
-     modelName: string;
-     status: string;
-     completed: number;
-     total: number;
-     percentage: number;
-   }) => void) => () => void;
-
-   // Git Operations
+  // Git Operations
   /** @deprecated Use getGitBranchesWithInfo for structured branch data with type indicators */
   getGitBranches: (projectPath: string) => Promise<IPCResult<string[]>>;
   /** Get branches with structured type information (local vs remote) */
@@ -87,47 +68,6 @@ export interface ProjectAPI {
   detectMainBranch: (projectPath: string) => Promise<IPCResult<string | null>>;
   checkGitStatus: (projectPath: string) => Promise<IPCResult<GitStatus>>;
   initializeGit: (projectPath: string) => Promise<IPCResult<InitializationResult>>;
-
-  // Ollama Model Detection
-  checkOllamaStatus: (baseUrl?: string) => Promise<IPCResult<{
-    running: boolean;
-    url: string;
-    version?: string;
-    message?: string;
-  }>>;
-  checkOllamaInstalled: () => Promise<IPCResult<{
-    installed: boolean;
-    path?: string;
-    version?: string;
-  }>>;
-  installOllama: () => Promise<IPCResult<{ command: string }>>;
-  listOllamaModels: (baseUrl?: string) => Promise<IPCResult<{
-    models: Array<{
-      name: string;
-      size_bytes: number;
-      size_gb: number;
-      modified_at: string;
-      is_embedding: boolean;
-      embedding_dim?: number | null;
-      description?: string;
-    }>;
-    count: number;
-  }>>;
-  listOllamaEmbeddingModels: (baseUrl?: string) => Promise<IPCResult<{
-    embedding_models: Array<{
-      name: string;
-      embedding_dim: number | null;
-      description: string;
-      size_bytes: number;
-      size_gb: number;
-    }>;
-    count: number;
-  }>>;
-  pullOllamaModel: (modelName: string, baseUrl?: string) => Promise<IPCResult<{
-    model: string;
-    status: 'completed' | 'failed';
-    output: string[];
-  }>>;
 }
 
 export const createProjectAPI = (): ProjectAPI => ({
@@ -177,9 +117,6 @@ export const createProjectAPI = (): ProjectAPI => ({
   refreshProjectIndex: (projectId: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_REFRESH_INDEX, projectId),
 
-  getMemoryStatus: (projectId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_MEMORY_STATUS, projectId),
-
 
   // Environment Configuration
   getProjectEnv: (projectId: string): Promise<IPCResult<ProjectEnvConfig>> =>
@@ -202,32 +139,6 @@ export const createProjectAPI = (): ProjectAPI => ({
   getDefaultProjectLocation: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_GET_DEFAULT_PROJECT_LOCATION),
 
-  // Ollama Model Management
-  scanOllamaModels: (baseUrl: string): Promise<IPCResult<{
-    models: Array<{
-      name: string;
-      size: number;
-      modified_at: string;
-      digest: string;
-    }>;
-  }>> =>
-    ipcRenderer.invoke('scan-ollama-models', baseUrl),
-
-  downloadOllamaModel: (baseUrl: string, modelName: string): Promise<IPCResult<{ message: string }>> =>
-    ipcRenderer.invoke('download-ollama-model', baseUrl, modelName),
-
-  onDownloadProgress: (callback: (data: {
-    modelName: string;
-    status: string;
-    completed: number;
-    total: number;
-    percentage: number;
-  }) => void) => {
-    const listener = (_: any, data: any) => callback(data);
-    ipcRenderer.on(IPC_CHANNELS.OLLAMA_PULL_PROGRESS, listener);
-    return () => ipcRenderer.off(IPC_CHANNELS.OLLAMA_PULL_PROGRESS, listener);
-  },
-
   // Git Operations
   getGitBranches: (projectPath: string): Promise<IPCResult<string[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.GIT_GET_BRANCHES, projectPath),
@@ -245,24 +156,5 @@ export const createProjectAPI = (): ProjectAPI => ({
     ipcRenderer.invoke(IPC_CHANNELS.GIT_CHECK_STATUS, projectPath),
 
   initializeGit: (projectPath: string): Promise<IPCResult<InitializationResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.GIT_INITIALIZE, projectPath),
-
-  // Ollama Model Detection
-  checkOllamaStatus: (baseUrl?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_CHECK_STATUS, baseUrl),
-
-  checkOllamaInstalled: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_CHECK_INSTALLED),
-
-  installOllama: () =>
-    ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_INSTALL),
-
-  listOllamaModels: (baseUrl?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_LIST_MODELS, baseUrl),
-
-  listOllamaEmbeddingModels: (baseUrl?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_LIST_EMBEDDING_MODELS, baseUrl),
-
-  pullOllamaModel: (modelName: string, baseUrl?: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.OLLAMA_PULL_MODEL, modelName, baseUrl)
+    ipcRenderer.invoke(IPC_CHANNELS.GIT_INITIALIZE, projectPath)
 });

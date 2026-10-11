@@ -9,7 +9,6 @@ import type {
   ProjectIndex,
 } from '../../../shared/types';
 import { projectStore } from '../../project-store';
-import { buildMemoryStatus } from './memory-status-handlers';
 import { runProjectIndexer } from '../../ai/project/project-indexer';
 
 // ============================================================
@@ -53,18 +52,10 @@ export function registerProjectContextHandlers(
       }
 
       try {
-        // Load project index
-        const projectIndex = loadProjectIndex(project.path);
-
-        // Build memory status (libSQL-based)
-        const memoryStatus = await buildMemoryStatus();
-
         return {
           success: true,
           data: {
-            projectIndex,
-            memoryStatus,
-            memoryState: null,
+            projectIndex: loadProjectIndex(project.path),
             isLoading: false
           }
         };

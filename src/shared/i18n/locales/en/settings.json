@@ -301,12 +301,9 @@
       "maxParallelTasks": "Maximum parallel tasks",
       "maxParallelTasksDescription": "Tasks beyond this limit wait in the Queue before moving to In Progress ({{min}}–{{max}})"
     },
-    "memory": {
-      "title": "Memory",
-      "description": "Persistent memory for agents",
-      "integrationTitle": "Memory",
-      "integrationDescription": "Configure persistent cross-session memory for agents",
-      "syncDescription": "Configure persistent memory"
+    "knowledge": {
+      "title": "Knowledge",
+      "description": "What agents know about this project"
     }
   },
   "workspace": {
@@ -516,37 +513,6 @@
         "pushNewBranchesDescription": "Push new task and worktree branches to origin and set upstream tracking"
       }
     },
-    "memory": {
-      "enable": "Enable memory",
-      "enableDescription": "Persistent cross-session memory in a local database",
-      "fileBasedDescription": "Enable persistent cross-session context with semantic search (stored locally in JSON files)",
-      "embeddingsTitle": "Embeddings",
-      "provider": "Embedding provider",
-      "providerDescription": "Used for semantic search; keyword search works without it",
-      "providerPlaceholder": "Select embedding provider",
-      "providers": {
-        "ollama": "Ollama (local, free)"
-      },
-      "apiKey": "{{name}} API key",
-      "openaiKey": "OpenAI API key",
-      "openaiKeyOverride": "OpenAI API key (override)",
-      "usingGlobalKey": "Using the key from app settings. Enter a project key to override it",
-      "requiredFor": "Required for {{name}} embeddings",
-      "getKey": "Get a key from {{name}}",
-      "overridePlaceholder": "Enter to override global key...",
-      "showKey": "Show {{name}} API key",
-      "hideKey": "Hide {{name}} API key",
-      "embeddingModel": "Embedding model",
-      "embeddingModelOptional": "Embedding model (optional)",
-      "baseUrl": "Base URL",
-      "azureKeyPlaceholder": "Azure API key",
-      "azureDeployment": "Embedding deployment name",
-      "storageTitle": "Storage",
-      "databaseName": "Database name",
-      "databaseNameDescription": "Stored in ~/.auto-claude/memories/",
-      "databasePath": "Database path",
-      "databasePathDescription": "Optional custom storage location. Default: ~/.auto-claude/memories/"
-    },
     "context": {
       "index": "Project index",
       "indexDescription": "AI-discovered knowledge about your codebase",
@@ -559,7 +525,7 @@
       "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
       "noMemoryIndex": "Map the project's code into a Graphify graph in .auto-claude/knowledge",
       "memoryIndexNotInstalled": "Install Graphify on the Updates page to build a memory graph",
-      "memoryIndexNotEnabled": "Turn on Use Graphify on the Memory page to build a memory graph",
+      "memoryIndexNotEnabled": "Turn on Use Graphify on the Knowledge page to build a memory graph",
       "buildMemoryIndex": "Build",
       "rebuildMemoryIndex": "Rebuild",
       "buildingMemoryIndex": "Building the memory graph...",

@@ -178,20 +178,10 @@ export const IPC_CHANNELS = {
   // Context operations
   CONTEXT_GET: 'context:get',
   CONTEXT_REFRESH_INDEX: 'context:refreshIndex',
-  CONTEXT_MEMORY_STATUS: 'context:memoryStatus',
 
   // Environment configuration
   ENV_GET: 'env:get',
   ENV_UPDATE: 'env:update',
-
-  // Ollama model detection and management
-  OLLAMA_CHECK_STATUS: 'ollama:checkStatus',
-  OLLAMA_CHECK_INSTALLED: 'ollama:checkInstalled',
-  OLLAMA_INSTALL: 'ollama:install',
-  OLLAMA_LIST_MODELS: 'ollama:listModels',
-  OLLAMA_LIST_EMBEDDING_MODELS: 'ollama:listEmbeddingModels',
-  OLLAMA_PULL_MODEL: 'ollama:pullModel',
-  OLLAMA_PULL_PROGRESS: 'ollama:pullProgress',
 
   // Insights operations
   INSIGHTS_GET_SESSION: 'insights:getSession',

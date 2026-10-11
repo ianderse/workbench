@@ -1,16 +1,11 @@
 import { ipcMain } from 'electron';
 import type { BrowserWindow } from 'electron';
-import { IPC_CHANNELS, DEFAULT_APP_SETTINGS } from '../../shared/constants';
-import type { IPCResult, ProjectEnvConfig, AppSettings } from '../../shared/types';
+import { IPC_CHANNELS } from '../../shared/constants';
+import type { IPCResult, ProjectEnvConfig } from '../../shared/types';
 import path from 'path';
-import { app } from 'electron';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { projectStore } from '../project-store';
 import { parseEnvFile } from './utils';
-import { readMemoryEnvVar } from './context/utils';
-
-/** Memory settings in a project's .env, stored as MEMORY_<name> */
-const MEMORY_ENV_NAMES = ['ENABLED', 'EMBEDDER_PROVIDER', 'DATABASE', 'DB_PATH'] as const;
 
 /**
  * Register all env-related IPC handlers
@@ -22,9 +17,6 @@ export function registerEnvHandlers(
   // Environment Configuration Operations
   // ============================================
 
-  // Get settings file path
-  const settingsPath = path.join(app.getPath('userData'), 'settings.json');
-
   /**
    * Generate .env file content from config
    */
@@ -34,11 +26,6 @@ export function registerEnvHandlers(
   ): string => {
     // Parse existing content to preserve comments and structure
     const existingVars = existingContent ? parseEnvFile(existingContent) : {};
-    // Carry memory settings saved under the old GRAPHITI_* names over to MEMORY_*
-    for (const name of MEMORY_ENV_NAMES) {
-      const value = readMemoryEnvVar(existingVars, name);
-      if (value !== undefined) existingVars[`MEMORY_${name}`] = value;
-    }
 
     // Update with new values
     if (config.autoBuildModel !== undefined) {
@@ -47,45 +34,6 @@ export function registerEnvHandlers(
     // Git/Worktree Settings
     if (config.defaultBranch !== undefined) {
       existingVars['DEFAULT_BRANCH'] = config.defaultBranch;
-    }
-    if (config.memoryEnabled !== undefined) {
-      existingVars['MEMORY_ENABLED'] = config.memoryEnabled ? 'true' : 'false';
-    }
-    // Memory Provider Configuration (embeddings only - LLM uses Claude SDK)
-    if (config.memoryProviderConfig) {
-      const pc = config.memoryProviderConfig;
-      // Embedding provider only (LLM provider removed - Claude SDK handles RAG)
-      if (pc.embeddingProvider) existingVars['MEMORY_EMBEDDER_PROVIDER'] = pc.embeddingProvider;
-      // OpenAI Embeddings
-      if (pc.openaiApiKey) existingVars['OPENAI_API_KEY'] = pc.openaiApiKey;
-      if (pc.openaiEmbeddingModel) existingVars['OPENAI_EMBEDDING_MODEL'] = pc.openaiEmbeddingModel;
-      // Azure OpenAI Embeddings
-      if (pc.azureOpenaiApiKey) existingVars['AZURE_OPENAI_API_KEY'] = pc.azureOpenaiApiKey;
-      if (pc.azureOpenaiBaseUrl) existingVars['AZURE_OPENAI_BASE_URL'] = pc.azureOpenaiBaseUrl;
-      if (pc.azureOpenaiEmbeddingDeployment) existingVars['AZURE_OPENAI_EMBEDDING_DEPLOYMENT'] = pc.azureOpenaiEmbeddingDeployment;
-      // Voyage Embeddings
-      if (pc.voyageApiKey) existingVars['VOYAGE_API_KEY'] = pc.voyageApiKey;
-      if (pc.voyageEmbeddingModel) existingVars['VOYAGE_EMBEDDING_MODEL'] = pc.voyageEmbeddingModel;
-      // Google Embeddings
-      if (pc.googleApiKey) existingVars['GOOGLE_API_KEY'] = pc.googleApiKey;
-      if (pc.googleEmbeddingModel) existingVars['GOOGLE_EMBEDDING_MODEL'] = pc.googleEmbeddingModel;
-      // Ollama Embeddings
-      if (pc.ollamaBaseUrl) existingVars['OLLAMA_BASE_URL'] = pc.ollamaBaseUrl;
-      if (pc.ollamaEmbeddingModel) existingVars['OLLAMA_EMBEDDING_MODEL'] = pc.ollamaEmbeddingModel;
-      if (pc.ollamaEmbeddingDim) existingVars['OLLAMA_EMBEDDING_DIM'] = String(pc.ollamaEmbeddingDim);
-      // Memory database
-      if (pc.dbPath) existingVars['MEMORY_DB_PATH'] = pc.dbPath;
-      if (pc.database) existingVars['MEMORY_DATABASE'] = pc.database;
-    }
-    // Legacy fields (still supported)
-    if (config.openaiApiKey !== undefined) {
-      existingVars['OPENAI_API_KEY'] = config.openaiApiKey;
-    }
-    if (config.memoryDatabase !== undefined) {
-      existingVars['MEMORY_DATABASE'] = config.memoryDatabase;
-    }
-    if (config.memoryDbPath !== undefined) {
-      existingVars['MEMORY_DB_PATH'] = config.memoryDbPath;
     }
     if (config.enableFancyUi !== undefined) {
       existingVars['ENABLE_FANCY_UI'] = config.enableFancyUi ? 'true' : 'false';
@@ -179,41 +127,6 @@ ${Object.entries(existingVars)
 # JSON format: [{"id":"...","name":"...","type":"command|http",...}]
 # =============================================================================
 ${existingVars['CUSTOM_MCP_SERVERS'] ? `CUSTOM_MCP_SERVERS=${existingVars['CUSTOM_MCP_SERVERS']}` : '# CUSTOM_MCP_SERVERS=[]'}
-
-# =============================================================================
-# MEMORY INTEGRATION
-# Embedding providers: OpenAI, Google AI, Azure OpenAI, Ollama, Voyage
-# =============================================================================
-${existingVars['MEMORY_ENABLED'] ? `MEMORY_ENABLED=${existingVars['MEMORY_ENABLED']}` : '# MEMORY_ENABLED=true'}
-
-# Embedding Provider (for semantic search - optional, keyword search works without)
-${existingVars['MEMORY_EMBEDDER_PROVIDER'] ? `MEMORY_EMBEDDER_PROVIDER=${existingVars['MEMORY_EMBEDDER_PROVIDER']}` : '# MEMORY_EMBEDDER_PROVIDER=ollama'}
-
-# OpenAI Embeddings
-${existingVars['OPENAI_API_KEY'] ? `OPENAI_API_KEY=${existingVars['OPENAI_API_KEY']}` : '# OPENAI_API_KEY='}
-${existingVars['OPENAI_EMBEDDING_MODEL'] ? `OPENAI_EMBEDDING_MODEL=${existingVars['OPENAI_EMBEDDING_MODEL']}` : '# OPENAI_EMBEDDING_MODEL=text-embedding-3-small'}
-
-# Azure OpenAI Embeddings
-${existingVars['AZURE_OPENAI_API_KEY'] ? `AZURE_OPENAI_API_KEY=${existingVars['AZURE_OPENAI_API_KEY']}` : '# AZURE_OPENAI_API_KEY='}
-${existingVars['AZURE_OPENAI_BASE_URL'] ? `AZURE_OPENAI_BASE_URL=${existingVars['AZURE_OPENAI_BASE_URL']}` : '# AZURE_OPENAI_BASE_URL='}
-${existingVars['AZURE_OPENAI_EMBEDDING_DEPLOYMENT'] ? `AZURE_OPENAI_EMBEDDING_DEPLOYMENT=${existingVars['AZURE_OPENAI_EMBEDDING_DEPLOYMENT']}` : '# AZURE_OPENAI_EMBEDDING_DEPLOYMENT='}
-
-# Voyage AI Embeddings
-${existingVars['VOYAGE_API_KEY'] ? `VOYAGE_API_KEY=${existingVars['VOYAGE_API_KEY']}` : '# VOYAGE_API_KEY='}
-${existingVars['VOYAGE_EMBEDDING_MODEL'] ? `VOYAGE_EMBEDDING_MODEL=${existingVars['VOYAGE_EMBEDDING_MODEL']}` : '# VOYAGE_EMBEDDING_MODEL=voyage-3'}
-
-# Google AI Embeddings
-${existingVars['GOOGLE_API_KEY'] ? `GOOGLE_API_KEY=${existingVars['GOOGLE_API_KEY']}` : '# GOOGLE_API_KEY='}
-${existingVars['GOOGLE_EMBEDDING_MODEL'] ? `GOOGLE_EMBEDDING_MODEL=${existingVars['GOOGLE_EMBEDDING_MODEL']}` : '# GOOGLE_EMBEDDING_MODEL=text-embedding-004'}
-
-# Ollama Embeddings (Local - free)
-${existingVars['OLLAMA_BASE_URL'] ? `OLLAMA_BASE_URL=${existingVars['OLLAMA_BASE_URL']}` : '# OLLAMA_BASE_URL=http://localhost:11434'}
-${existingVars['OLLAMA_EMBEDDING_MODEL'] ? `OLLAMA_EMBEDDING_MODEL=${existingVars['OLLAMA_EMBEDDING_MODEL']}` : '# OLLAMA_EMBEDDING_MODEL=embeddinggemma'}
-${existingVars['OLLAMA_EMBEDDING_DIM'] ? `OLLAMA_EMBEDDING_DIM=${existingVars['OLLAMA_EMBEDDING_DIM']}` : '# OLLAMA_EMBEDDING_DIM=768'}
-
-# Memory database
-${existingVars['MEMORY_DATABASE'] ? `MEMORY_DATABASE=${existingVars['MEMORY_DATABASE']}` : '# MEMORY_DATABASE=auto_claude_memory'}
-${existingVars['MEMORY_DB_PATH'] ? `MEMORY_DB_PATH=${existingVars['MEMORY_DB_PATH']}` : '# MEMORY_DB_PATH=~/.auto-claude/memories'}
 `;
 
     return content;
@@ -233,22 +146,9 @@ ${existingVars['MEMORY_DB_PATH'] ? `MEMORY_DB_PATH=${existingVars['MEMORY_DB_PAT
 
       const envPath = path.join(project.path, project.autoBuildPath, '.env');
 
-      // Load global settings for fallbacks
-      let globalSettings: AppSettings = { ...DEFAULT_APP_SETTINGS };
-      if (existsSync(settingsPath)) {
-        try {
-          const content = readFileSync(settingsPath, 'utf-8');
-          globalSettings = { ...globalSettings, ...JSON.parse(content) };
-        } catch {
-          // Use defaults
-        }
-      }
-
       // Default config
       const config: ProjectEnvConfig = {
-        memoryEnabled: false,
-        enableFancyUi: true,
-        openaiKeyIsGlobal: false
+        enableFancyUi: true
       };
 
       // Parse project-specific .env if it exists
@@ -271,53 +171,8 @@ ${existingVars['MEMORY_DB_PATH'] ? `MEMORY_DB_PATH=${existingVars['MEMORY_DB_PAT
         config.defaultBranch = vars['DEFAULT_BRANCH'];
       }
 
-      if (readMemoryEnvVar(vars, 'ENABLED')?.toLowerCase() === 'true') {
-        config.memoryEnabled = true;
-      }
-
-      // OpenAI API Key: project-specific takes precedence, then global
-      if (vars['OPENAI_API_KEY']) {
-        config.openaiApiKey = vars['OPENAI_API_KEY'];
-        config.openaiKeyIsGlobal = false;
-      } else if (globalSettings.globalOpenAIApiKey) {
-        config.openaiApiKey = globalSettings.globalOpenAIApiKey;
-        config.openaiKeyIsGlobal = true;
-      }
-
-      config.memoryDatabase = readMemoryEnvVar(vars, 'DATABASE') ?? config.memoryDatabase;
-      config.memoryDbPath = readMemoryEnvVar(vars, 'DB_PATH') ?? config.memoryDbPath;
-
       if (vars['ENABLE_FANCY_UI']?.toLowerCase() === 'false') {
         config.enableFancyUi = false;
-      }
-
-      // Populate memoryProviderConfig from .env file (embeddings only - no LLM provider)
-      const embeddingProvider = readMemoryEnvVar(vars, 'EMBEDDER_PROVIDER');
-      if (embeddingProvider || vars['AZURE_OPENAI_API_KEY'] ||
-          vars['VOYAGE_API_KEY'] || vars['GOOGLE_API_KEY'] || vars['OLLAMA_BASE_URL']) {
-        config.memoryProviderConfig = {
-          embeddingProvider: (embeddingProvider as 'openai' | 'voyage' | 'azure_openai' | 'ollama' | 'google') || 'ollama',
-          // OpenAI Embeddings
-          openaiApiKey: vars['OPENAI_API_KEY'],
-          openaiEmbeddingModel: vars['OPENAI_EMBEDDING_MODEL'],
-          // Azure OpenAI Embeddings
-          azureOpenaiApiKey: vars['AZURE_OPENAI_API_KEY'],
-          azureOpenaiBaseUrl: vars['AZURE_OPENAI_BASE_URL'],
-          azureOpenaiEmbeddingDeployment: vars['AZURE_OPENAI_EMBEDDING_DEPLOYMENT'],
-          // Voyage Embeddings
-          voyageApiKey: vars['VOYAGE_API_KEY'],
-          voyageEmbeddingModel: vars['VOYAGE_EMBEDDING_MODEL'],
-          // Google Embeddings
-          googleApiKey: vars['GOOGLE_API_KEY'],
-          googleEmbeddingModel: vars['GOOGLE_EMBEDDING_MODEL'],
-          // Ollama Embeddings
-          ollamaBaseUrl: vars['OLLAMA_BASE_URL'],
-          ollamaEmbeddingModel: vars['OLLAMA_EMBEDDING_MODEL'],
-          ollamaEmbeddingDim: vars['OLLAMA_EMBEDDING_DIM'] ? parseInt(vars['OLLAMA_EMBEDDING_DIM'], 10) : undefined,
-          // Memory database
-          database: readMemoryEnvVar(vars, 'DATABASE'),
-          dbPath: readMemoryEnvVar(vars, 'DB_PATH'),
-        };
       }
 
       // MCP Server Configuration (per-project overrides)

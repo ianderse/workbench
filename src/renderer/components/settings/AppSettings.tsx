@@ -6,9 +6,10 @@ import {
   CircleUserRound,
   CodeXml,
   Download,
-  Blocks
+  Blocks,
+  GraduationCap
 } from 'lucide-react';
-import { AgentOutlineIcon, GearIcon, MemoryChipIcon, ProjectOutlineIcon } from '../icons/app-icons';
+import { AgentOutlineIcon, GearIcon, ProjectOutlineIcon } from '../icons/app-icons';
 
 import {
   FullScreenDialog,
@@ -79,7 +80,7 @@ interface NavItemConfig<T extends string> {
   iconStrokeWidth?: number;
 }
 
-// One list: app pages, then the selected project's pages (Project, Memory) above Updates
+// One list: app pages, then the selected project's pages (Project, Knowledge) above Updates
 type TopNavItem =
   | ({ kind: 'app' } & NavItemConfig<AppPage>)
   | ({ kind: 'project' } & NavItemConfig<ProjectSettingsSection>);
@@ -92,7 +93,7 @@ const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'app', id: 'devtools', icon: CodeXml },
   { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
-  { kind: 'project', id: 'memory', icon: MemoryChipIcon },
+  { kind: 'project', id: 'knowledge', icon: GraduationCap },
   { kind: 'app', id: 'updates', icon: Download }
 ];
 

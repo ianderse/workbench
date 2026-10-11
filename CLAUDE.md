@@ -20,7 +20,6 @@ reviews, requests changes (same session continues) or merges.
 - **Agent Terminals** — Parallel AI-powered terminals (12 by default, up to 24) with task context injection
 - **Insights** — Chat for exploring a codebase (runs through Claude Code, read-only tools)
 - **Pull Requests** — Create a GitHub pull request from a task's worktree (via the `gh` CLI)
-- **Memory** — Local knowledge store that retains insights across sessions
 - **Connectors** — MCP servers added to a task's Claude Code session (`--mcp-config`: Context7, Electron, Puppeteer,
   user-added servers) with app-wide defaults in Settings and per-task choices in the task dialog
 - **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
@@ -35,8 +34,7 @@ reviews, requests changes (same session continues) or merges.
 
 **Claude Code CLI only** — All AI work (tasks, triage, Insights, titles, PR text, commit messages, merge conflict help)
 runs through the locally installed Claude Code CLI via `src/main/claude-code/`. Use `ClaudeTaskRun` for tasks and
-`runClaudeText()` for one-shot calls; never call the Anthropic API or an AI SDK directly for these. (The `ai` package
-remains only for the Memory feature's embeddings in `src/main/ai/memory/`.)
+`runClaudeText()` for one-shot calls; never call the Anthropic API or an AI SDK directly for these.
 
 **i18n required** — All user-facing text uses `react-i18next` translation keys (see [i18n](#i18n)).
 
@@ -57,7 +55,7 @@ whole app every time a dialog opened.
 
 **Don't re-fetch on open** — Pages and dialogs show stored values (Zustand stores, settings, or
 `src/renderer/lib/refresh-cache.ts` for results of slow checks) and only fetch when the user presses a refresh
-button, or once when nothing was fetched before. Shared hooks: `useProjectBranches()`, `useOllamaLlmModels()`.
+button, or once when nothing was fetched before. Shared hook: `useProjectBranches()`.
 
 ## Work Approach: Orchestrator-First
 
@@ -138,7 +136,7 @@ auto-claude/
 ├── src/
 │   ├── main/                # Electron main process
 │   │   ├── claude-code/     # Claude Code CLI integration (task runner, triage, one-shot calls, inventory)
-│   │   ├── ai/              # Remaining helpers: runners (PR, commit, merge help), merge/, memory/ (libSQL), project/
+│   │   ├── ai/              # Remaining helpers: runners (PR, commit, merge help), merge/, project/
 │   │   ├── worktree/        # Task worktree creation
 │   │   ├── insights/        # Insights chat through Claude Code
 │   │   ├── agent/           # AgentManager: starts/stops Claude Code task runs, relays events
@@ -199,12 +197,11 @@ session, on top of the user's own Claude Code MCP configuration. Helpers live in
 `src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
 Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
 .auto-claude/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
-`index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Memory page) is on,
+`index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Knowledge page) is on,
 task runs and the Claude page (Insights) get `GRAPHIFY_OUT`, the graphify CLI on `PATH` and a prompt section about
 graphify's search commands (Insights limits Bash to those commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
 `~/.claude` and each Claude profile's config dir, after an install or update), and agent windows
-get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/knowledge`. Project memory
-settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
+get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/knowledge`.
 
 ### Electron MCP (testing the app from a task)
 
@@ -234,7 +231,7 @@ loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "A
 (optional interface font). Settings > General > Appearance picks the interface and command line fonts.
 
 **Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Claude Code,
-Connectors, Developer, then the selected project's pages (Project, Memory), then Updates. Build pages from `SettingsSection` +
+Connectors, Developer, then the selected project's pages (Project, Knowledge), then Updates. Build pages from `SettingsSection` +
 `SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
 `SETTINGS_MENU_TRIGGER_CLASS` (no collapsible rows). UI copy conventions: sentence case, no em dashes, no trailing
 period in setting descriptions, and no green check / red x status icons (state the status in text).
@@ -256,7 +253,7 @@ refresh), `usage-monitor.ts` (usage and rate limits), `profile-scorer.ts` (profi
 English is the only supported language. Translation files: `src/shared/i18n/locales/en/*.json`.
 
 **Namespaces:** `common`, `navigation`, `settings`, `dialogs`, `tasks`, `taskReview`, `terminal`, `errors`,
-`onboarding`, `welcome`.
+`welcome`.
 
 ```tsx
 import { useTranslation } from 'react-i18next';

@@ -2,23 +2,10 @@
 // This MUST be at the very top, before any imports that load CommonJS native
 // modules. Without this, node-pty native module loading fails with
 // "ReferenceError: require is not defined".
-import Module, { createRequire } from 'module';
+import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 // Make require globally available to dependencies that expect it
 globalThis.require = require;
-
-// In packaged Electron apps, native modules (e.g. @libsql/client) are placed in
-// Resources/node_modules/ via extraResources. Add that path to CJS resolution so
-// globalThis.require() can find them at runtime.
-if (process.resourcesPath) {
-  const nativeModulesPath = require('path').join(process.resourcesPath, 'node_modules');
-  // Module.globalPaths is an undocumented but stable Node.js internal used for
-  // CJS module resolution. It's not in @types/node, hence the cast.
-  const globalPaths = (Module as unknown as { globalPaths: string[] }).globalPaths;
-  if (!globalPaths.includes(nativeModulesPath)) {
-    globalPaths.push(nativeModulesPath);
-  }
-}
 
 // Load .env file FIRST before any other imports that might use process.env
 import { config } from 'dotenv';

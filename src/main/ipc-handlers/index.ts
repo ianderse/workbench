@@ -19,7 +19,6 @@ import { registerFileHandlers } from './file-handlers';
 import { registerContextHandlers } from './context-handlers';
 import { registerEnvHandlers } from './env-handlers';
 import { registerInsightsHandlers } from './insights-handlers';
-import { registerMemoryHandlers } from './memory-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
 import { registerGraphifyHandlers } from './graphify-handlers';
@@ -68,7 +67,7 @@ export function setupIpcHandlers(
   // File explorer handlers
   registerFileHandlers();
 
-  // Context and memory handlers
+  // Project context handlers (project index)
   registerContextHandlers(getMainWindow);
 
   // Environment configuration handlers
@@ -76,9 +75,6 @@ export function setupIpcHandlers(
 
   // Insights handlers
   registerInsightsHandlers(getMainWindow);
-
-  // Memory & infrastructure handlers (local libSQL memory store)
-  registerMemoryHandlers();
 
   // App auto-update handlers
   registerAppUpdateHandlers();

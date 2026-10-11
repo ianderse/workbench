@@ -7,7 +7,6 @@ import enNavigation from './locales/en/navigation.json';
 import enSettings from './locales/en/settings.json';
 import enTasks from './locales/en/tasks.json';
 import enWelcome from './locales/en/welcome.json';
-import enOnboarding from './locales/en/onboarding.json';
 import enDialogs from './locales/en/dialogs.json';
 import enTaskReview from './locales/en/taskReview.json';
 import enTerminal from './locales/en/terminal.json';
@@ -23,7 +22,6 @@ const resources = {
     settings: enSettings,
     tasks: enTasks,
     welcome: enWelcome,
-    onboarding: enOnboarding,
     dialogs: enDialogs,
     taskReview: enTaskReview,
     terminal: enTerminal,
@@ -38,7 +36,7 @@ i18n
     lng: 'en',
     fallbackLng: 'en',
     defaultNS,
-    ns: ['common', 'navigation', 'settings', 'tasks', 'welcome', 'onboarding', 'dialogs', 'taskReview', 'terminal', 'errors'],
+    ns: ['common', 'navigation', 'settings', 'tasks', 'welcome', 'dialogs', 'taskReview', 'terminal', 'errors'],
     interpolation: {
       escapeValue: false // React already escapes values
     },

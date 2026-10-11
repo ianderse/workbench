@@ -25,7 +25,6 @@ export interface ProjectCostMetrics {
 
 export interface ProjectSettings {
   model: string;
-  memoryBackend: 'memory' | 'file';
   notifications: NotificationSettings;
   /** Main branch name for worktree creation (default: auto-detected or 'main') */
   mainBranch?: string;
@@ -152,95 +151,8 @@ export interface ConventionsInfo {
   git_hooks?: string;
 }
 
-export interface MemorySystemStatus {
-  enabled: boolean;
-  available: boolean;
-  database?: string;
-  dbPath?: string;
-  embeddingProvider?: string;
-  reason?: string;
-}
-
-// Memory Infrastructure Types
-interface MemoryDatabaseStatus {
-  databasePath: string;
-  databaseExists: boolean;
-  databases: string[];
-  error?: string;
-}
-
-export interface InfrastructureStatus {
-  memory: MemoryDatabaseStatus;
-  ready: boolean; // True if memory database is available
-}
-
-// Memory Validation Types
-export interface MemoryValidationResult {
-  success: boolean;
-  message: string;
-  details?: {
-    provider?: string;
-    model?: string;
-    latencyMs?: number;
-  };
-}
-
-// Memory Provider Types
-// Embedding Providers: OpenAI, Voyage AI, Azure OpenAI, Ollama (local), Google, OpenRouter
-// Note: LLM provider removed - Claude SDK handles RAG queries
-export type MemoryEmbeddingProvider = 'openai' | 'voyage' | 'azure_openai' | 'ollama' | 'google' | 'openrouter';
-
-interface MemoryProviderConfig {
-  // Embedding Provider (LLM provider removed - Claude SDK handles RAG)
-  embeddingProvider: MemoryEmbeddingProvider;
-  embeddingModel?: string;  // Embedding model, uses provider default if not specified
-
-  // OpenAI Embeddings
-  openaiApiKey?: string;
-  openaiEmbeddingModel?: string;
-
-  // Azure OpenAI Embeddings
-  azureOpenaiApiKey?: string;
-  azureOpenaiBaseUrl?: string;
-  azureOpenaiEmbeddingDeployment?: string;
-
-  // Voyage AI Embeddings
-  voyageApiKey?: string;
-  voyageEmbeddingModel?: string;
-
-  // Google AI Embeddings
-  googleApiKey?: string;
-  googleEmbeddingModel?: string;
-
-  // OpenRouter (multi-provider aggregator)
-  openrouterApiKey?: string;
-  openrouterBaseUrl?: string;  // Default: https://openrouter.ai/api/v1
-  openrouterLlmModel?: string;  // LLM model selection (e.g., 'anthropic/claude-sonnet-4')
-  openrouterEmbeddingModel?: string;
-
-  // Ollama Embeddings (local, no API key required)
-  ollamaBaseUrl?: string;  // Default: http://localhost:11434
-  ollamaEmbeddingModel?: string;
-  ollamaEmbeddingDim?: number;
-
-  // Memory database settings (embedded libSQL - no Docker required)
-  database?: string;  // Database name (default: auto_claude_memory)
-  dbPath?: string;    // Database storage path (default: ~/.auto-claude/memories)
-}
-
-export interface MemorySystemState {
-  initialized: boolean;
-  database?: string;
-  episodeCount: number;
-  lastSessionAt?: string;
-  createdAt?: string;
-  errorLog: Array<{ timestamp: string; error: string }>;
-}
-
 export interface ProjectContextData {
   projectIndex: ProjectIndex | null;
-  memoryStatus: MemorySystemStatus | null;
-  memoryState: MemorySystemState | null;
   isLoading: boolean;
   error?: string;
 }
@@ -252,17 +164,6 @@ export interface ProjectEnvConfig {
 
   // Git/Worktree Settings
   defaultBranch?: string; // Base branch for worktree creation (e.g., 'main', 'develop')
-
-  // Memory Integration (V2 - Multi-provider support)
-  // Uses the embedded libSQL memory database (no Docker required)
-  memoryEnabled: boolean;
-  memoryProviderConfig?: MemoryProviderConfig;  // Provider configuration
-  // Legacy fields (still supported for backward compatibility)
-  openaiApiKey?: string;
-  // Indicates if the OpenAI key is from global settings (not project-specific)
-  openaiKeyIsGlobal?: boolean;
-  memoryDatabase?: string;
-  memoryDbPath?: string;
 
   // UI Settings
   enableFancyUi: boolean;

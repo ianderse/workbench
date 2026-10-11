@@ -63,14 +63,6 @@ export default defineConfig({
         'minimatch',
         // XState for task state machine
         'xstate',
-        // Vercel AI SDK packages used by the Memory feature's embeddings
-        'ai',
-        '@ai-sdk/openai',
-        '@ai-sdk/google',
-        '@ai-sdk/azure',
-        '@ai-sdk/openai-compatible',
-        '@ai-sdk/provider',
-        '@ai-sdk/provider-utils',
       ]
     })],
     build: {
@@ -78,9 +70,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, 'src/main/index.ts'),
         },
-        // Native modules that must remain external (loaded from disk, not bundled).
-        // @libsql/client is loaded lazily via globalThis.require() and resolved
-        // from extraResources/node_modules via Module.globalPaths (see index.ts).
+        // Native modules that must remain external (loaded from disk, not bundled)
         external: ['@lydell/node-pty']
       }
     }

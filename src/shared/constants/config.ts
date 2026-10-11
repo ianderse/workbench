@@ -73,7 +73,6 @@ export const DEFAULT_APP_SETTINGS = {
 
 export const DEFAULT_PROJECT_SETTINGS = {
   model: 'opus',
-  memoryBackend: 'file' as const,
   notifications: {
     onTaskComplete: true,
     onTaskFailed: true,
@@ -118,8 +117,7 @@ export const AUTO_BUILD_PATHS = {
   BUILD_PROGRESS: 'build-progress.txt',
   CONTEXT: 'context.json',
   REQUIREMENTS: 'requirements.json',
-  PROJECT_INDEX: '.auto-claude/project_index.json',
-  MEMORY_STATE: '.memory_state.json'
+  PROJECT_INDEX: '.auto-claude/project_index.json'
 } as const;
 
 /**
