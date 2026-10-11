@@ -388,16 +388,6 @@ export interface MergeProgress {
   };
 }
 
-// Merge log entry (for conflict resolution logging)
-export type MergeLogEntryType = 'info' | 'success' | 'warning' | 'error';
-
-export interface MergeLogEntry {
-  timestamp: string;
-  type: MergeLogEntryType;
-  message: string;
-  details?: string;
-}
-
 export interface WorktreeMergeResult {
   success: boolean;
   message: string;

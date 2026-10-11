@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useProjectStore } from '../../../stores/project-store';
-import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, loadTasks, hasRecentActivity } from '../../../stores/task-store';
-import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, MergeConflict, MergeStats, GitConflictInfo, ImageAttachment } from '../../../../shared/types';
+import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, hasRecentActivity } from '../../../stores/task-store';
+import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, ImageAttachment } from '../../../../shared/types';
 
 /**
  * Validates task subtasks structure to prevent infinite loops during resume.
@@ -68,13 +68,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [isCheckingChanges, setIsCheckingChanges] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [worktreeStatus, setWorktreeStatus] = useState<WorktreeStatus | null>(null);
-  const [isLoadingWorktree, setIsLoadingWorktree] = useState(false);
-  const [isMerging, setIsMerging] = useState(false);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [stageOnly, setStageOnly] = useState(false); // Default to full merge for proper cleanup (fixes #243)
-  const [stagedSuccess, setStagedSuccess] = useState<string | null>(null);
-  const [stagedProjectPath, setStagedProjectPath] = useState<string | undefined>(undefined);
-  const [suggestedCommitMessage, setSuggestedCommitMessage] = useState<string | undefined>(undefined);
   const [phaseLogs, setPhaseLogs] = useState<TaskLogs | null>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   // The Logs section (all steps in one list) opens by itself when a step runs or fails
@@ -82,15 +75,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const failedPhasesRef = useRef<Set<TaskLogPhase>>(new Set());
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
 
-  // Merge preview state
-  const [mergePreview, setMergePreview] = useState<{
-    files: string[];
-    conflicts: MergeConflict[];
-    summary: MergeStats;
-    gitConflicts?: GitConflictInfo;
-  } | null>(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
-  const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [isCreatingPR, setIsCreatingPR] = useState(false);
 
@@ -161,20 +145,15 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setFeedbackImages([]);
   }, []);
 
-  // Load worktree status when task is in human_review
+  // Load worktree status when task is in human_review (change summary and Create PR)
   useEffect(() => {
     if (needsReview) {
-      setIsLoadingWorktree(true);
-      setWorkspaceError(null);
-
       window.electronAPI.getWorktreeStatus(task.id).then((statusResult) => {
         if (statusResult.success && statusResult.data) {
           setWorktreeStatus(statusResult.data);
         }
       }).catch((err) => {
         console.error('Failed to load worktree info:', err);
-      }).finally(() => {
-        setIsLoadingWorktree(false);
       });
     } else {
       setWorktreeStatus(null);
@@ -250,113 +229,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const clearFeedbackImages = useCallback(() => {
     setFeedbackImages([]);
   }, []);
-
-  // Track if we've already loaded preview for this task to prevent infinite loops
-  const hasLoadedPreviewRef = useRef<string | null>(null);
-
-  // Clear merge preview state when switching to a different task
-  useEffect(() => {
-    if (hasLoadedPreviewRef.current !== task.id) {
-      setMergePreview(null);
-      hasLoadedPreviewRef.current = null;
-    }
-  }, [task.id]);
-
-  // Load merge preview (conflict detection) and refresh worktree status
-  const loadMergePreview = useCallback(async () => {
-    setIsLoadingPreview(true);
-    // Clear any previous workspace error before loading
-    setWorkspaceError(null);
-
-    try {
-      // Fetch both merge preview and updated worktree status in parallel
-      // This ensures the branch information (currentProjectBranch) is refreshed
-      // when the user clicks the refresh button after switching branches locally
-      // Use Promise.allSettled to handle partial failures - if one API call fails,
-      // the other's result is still processed rather than being discarded
-      const [previewResult, statusResult] = await Promise.allSettled([
-        window.electronAPI.mergeWorktreePreview(task.id),
-        window.electronAPI.getWorktreeStatus(task.id)
-      ]);
-
-      const errors: string[] = [];
-
-      // Process merge preview result if fulfilled
-      if (previewResult.status === 'fulfilled') {
-        const result = previewResult.value;
-        if (result.success && result.data?.preview) {
-          setMergePreview(result.data.preview);
-        } else if (!result.success && result.error) {
-          errors.push(`Merge preview: ${result.error}`);
-        }
-      } else {
-        console.error('[useTaskDetail] Failed to load merge preview:', previewResult.reason);
-        errors.push('Failed to load merge preview');
-      }
-
-      // Update worktree status with fresh branch information if fulfilled
-      if (statusResult.status === 'fulfilled') {
-        const result = statusResult.value;
-        if (result.success && result.data) {
-          setWorktreeStatus(result.data);
-        } else if (!result.success && result.error) {
-          errors.push(`Worktree status: ${result.error}`);
-        }
-      } else {
-        console.error('[useTaskDetail] Failed to load worktree status:', statusResult.reason);
-        errors.push('Failed to load worktree status');
-      }
-
-      // Set workspace error if any API calls failed
-      if (errors.length > 0) {
-        setWorkspaceError(errors.join('; '));
-      }
-    } catch (err) {
-      console.error('[useTaskDetail] Unexpected error in loadMergePreview:', err);
-      setWorkspaceError('An unexpected error occurred while loading workspace information');
-    } finally {
-      hasLoadedPreviewRef.current = task.id;
-      setIsLoadingPreview(false);
-    }
-  }, [task.id]);
-
-  // Handle "Review Again" - clears staged state and reloads worktree info
-  const handleReviewAgain = useCallback(async () => {
-    // Clear staged success state if it was set in this session
-    setStagedSuccess(null);
-    setStagedProjectPath(undefined);
-    setSuggestedCommitMessage(undefined);
-
-    // Reset merge preview to force re-check
-    setMergePreview(null);
-    hasLoadedPreviewRef.current = null;
-
-    // Reset workspace error state
-    setWorkspaceError(null);
-
-    // Reload worktree status
-    setIsLoadingWorktree(true);
-    try {
-      const statusResult = await window.electronAPI.getWorktreeStatus(task.id);
-      if (statusResult.success && statusResult.data) {
-        setWorktreeStatus(statusResult.data);
-      }
-
-      // Reload task data from store to reflect cleared staged state
-      // (clearStagedState IPC already invalidated the cache)
-      if (currentProject) {
-        await loadTasks(currentProject.id);
-      }
-    } catch (err) {
-      console.error('Failed to reload worktree info:', err);
-    } finally {
-      setIsLoadingWorktree(false);
-    }
-  }, [task.id, currentProject]);
-
-  // NOTE: Merge preview is NO LONGER auto-loaded on modal open.
-  // User must click "Check for Conflicts" button to trigger the expensive preview operation.
-  // This improves modal open performance significantly (avoids 1-30+ second Python subprocess).
 
   /**
    * Reloads implementation plan for an incomplete task to ensure subtasks are properly loaded.
@@ -447,13 +319,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     isCheckingChanges,
     isEditDialogOpen,
     worktreeStatus,
-    isLoadingWorktree,
-    isMerging,
-    workspaceError,
-    stageOnly,
-    stagedSuccess,
-    stagedProjectPath,
-    suggestedCommitMessage,
     phaseLogs,
     isLoadingLogs,
     isLogsExpanded,
@@ -464,9 +329,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     hasActiveExecution,
     isIncomplete,
     taskProgress,
-    mergePreview,
-    isLoadingPreview,
-    showConflictDialog,
     showPRDialog,
     isCreatingPR,
     isLoadingPlan,
@@ -484,29 +346,17 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setIsCheckingChanges,
     setIsEditDialogOpen,
     setWorktreeStatus,
-    setIsLoadingWorktree,
-    setIsMerging,
-    setWorkspaceError,
-    setStageOnly,
-    setStagedSuccess,
-    setStagedProjectPath,
-    setSuggestedCommitMessage,
     setPhaseLogs,
     setIsLoadingLogs,
-    setMergePreview,
-    setIsLoadingPreview,
-    setShowConflictDialog,
     setShowPRDialog,
     setIsCreatingPR,
 
     // Handlers
     toggleLogs,
-    loadMergePreview,
     addFeedbackImage,
     addFeedbackImages,
     removeFeedbackImage,
     clearFeedbackImages,
-    handleReviewAgain,
     reloadPlanForIncompleteTask,
   };
 }

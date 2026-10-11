@@ -45,7 +45,8 @@ import { TaskMetadata } from './TaskMetadata';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
 import { TaskWarnings } from './TaskWarnings';
 import { TaskLogs } from './TaskLogs';
-import { TaskReview } from './TaskReview';
+import { QAFeedbackSection } from './task-review/QAFeedbackSection';
+import { CreatePRDialog } from './task-review/CreatePRDialog';
 import type { Task, WorktreeCreatePROptions } from '../../../shared/types';
 
 // Status label colors: the top line color of each Kanban column (globals.css `--column-*`)
@@ -157,30 +158,6 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     state.setIsDeleting(false);
   };
 
-  const handleMerge = async () => {
-    state.setIsMerging(true);
-    state.setWorkspaceError(null);
-    try {
-      const result = await window.electronAPI.mergeWorktree(task.id, { noCommit: state.stageOnly });
-      if (result.success && result.data?.success) {
-        if (state.stageOnly && result.data.staged) {
-          state.setWorkspaceError(null);
-          state.setStagedSuccess(result.data.message || 'Changes staged in main project');
-          state.setStagedProjectPath(result.data.projectPath);
-          state.setSuggestedCommitMessage(result.data.suggestedCommitMessage);
-        } else {
-          onOpenChange(false);
-        }
-      } else {
-        state.setWorkspaceError(result.data?.message || result.error || 'Failed to merge changes');
-      }
-    } catch (error) {
-      state.setWorkspaceError(error instanceof Error ? error.message : 'Unknown error during merge');
-    } finally {
-      state.setIsMerging(false);
-    }
-  };
-
   const handleCreatePR = async (options: WorktreeCreatePROptions) => {
     state.setIsCreatingPR(true);
     try {
@@ -204,13 +181,6 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
       state.setIsCreatingPR(false);
     }
   };
-
-  const handleClose = () => {
-    onOpenChange(false);
-  };
-
-
-
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -344,7 +314,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                                 size="sm"
                                 className="gap-1.5"
                                 onClick={() => state.setShowPRDialog(true)}
-                                disabled={state.isMerging || state.isCreatingPR}
+                                disabled={state.isCreatingPR}
                               >
                                 {state.isCreatingPR ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
@@ -358,41 +328,26 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         ) : undefined}
                       />
 
-                      {/* Human Review Section */}
+                      {/* Human Review: request changes (Claude Code continues the same session) */}
                       {state.needsReview && (
-                        <>
-                          <TaskReview
-                            task={task}
-                            feedback={state.feedback}
-                            isSubmitting={state.isSubmitting}
-                            worktreeStatus={state.worktreeStatus}
-                            isLoadingWorktree={state.isLoadingWorktree}
-                            isMerging={state.isMerging}
-                            workspaceError={state.workspaceError}
-                            stageOnly={state.stageOnly}
-                            stagedSuccess={state.stagedSuccess}
-                            stagedProjectPath={state.stagedProjectPath}
-                            suggestedCommitMessage={state.suggestedCommitMessage}
-                            mergePreview={state.mergePreview}
-                            isLoadingPreview={state.isLoadingPreview}
-                            showConflictDialog={state.showConflictDialog}
-                            onFeedbackChange={state.setFeedback}
-                            onReject={handleReject}
-                            images={state.feedbackImages}
-                            onImagesChange={state.setFeedbackImages}
-                            onMerge={handleMerge}
-                            onStageOnlyChange={state.setStageOnly}
-                            onShowConflictDialog={state.setShowConflictDialog}
-                            onLoadMergePreview={state.loadMergePreview}
-                            onClose={handleClose}
-                            onReviewAgain={state.handleReviewAgain}
-                            showPRDialog={state.showPRDialog}
-                            isCreatingPR={state.isCreatingPR}
-                            onShowPRDialog={state.setShowPRDialog}
-                            onCreatePR={handleCreatePR}
-                          />
-                        </>
+                        <QAFeedbackSection
+                          feedback={state.feedback}
+                          isSubmitting={state.isSubmitting}
+                          onFeedbackChange={state.setFeedback}
+                          onReject={handleReject}
+                          images={state.feedbackImages}
+                          onImagesChange={state.setFeedbackImages}
+                        />
                       )}
+
+                      {/* Opened by the Create PR button next to the worktree changes */}
+                      <CreatePRDialog
+                        open={state.showPRDialog}
+                        task={task}
+                        worktreeStatus={state.worktreeStatus}
+                        onOpenChange={state.setShowPRDialog}
+                        onCreatePR={handleCreatePR}
+                      />
 
                       {/* Logs of all steps, under Request changes */}
                       <TaskLogs

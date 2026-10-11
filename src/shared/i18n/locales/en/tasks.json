@@ -216,9 +216,6 @@
     "dropImages": "Drop images to attach",
     "send": "Request changes"
   },
-  "review": {
-    "mergeTooltip": "Merges changes from the task's worktree branch back to your base branch. AI will resolve any conflicts. You can then choose whether to keep or remove the worktree."
-  },
   "edit": {
     "title": "Edit task",
     "description": "Update the title, description, reference images and connectors. Changes are saved to the task files.",
