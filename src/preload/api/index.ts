@@ -2,7 +2,6 @@ import { ProjectAPI, createProjectAPI } from './project-api';
 import { TerminalAPI, createTerminalAPI } from './terminal-api';
 import { TaskAPI, createTaskAPI } from './task-api';
 import { SettingsAPI, createSettingsAPI } from './settings-api';
-import { FileAPI, createFileAPI } from './file-api';
 import { AgentAPI, createAgentAPI } from './agent-api';
 import type { InsightsAPI } from './modules/insights-api';
 import { AppUpdateAPI, createAppUpdateAPI } from './app-update-api';
@@ -17,7 +16,6 @@ export interface ElectronAPI extends
   TerminalAPI,
   TaskAPI,
   SettingsAPI,
-  FileAPI,
   AgentAPI,
   InsightsAPI,
   AppUpdateAPI,
@@ -34,7 +32,6 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createTerminalAPI(),
   ...createTaskAPI(),
   ...createSettingsAPI(),
-  ...createFileAPI(),
   ...createAgentAPI(),  // Includes: Insights, Shell
   ...createAppUpdateAPI(),
   ...createClaudeCodeAPI(),

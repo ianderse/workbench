@@ -18,12 +18,6 @@ import { cn } from '../../lib/utils';
 import { TaskConnectorRows } from './TaskConnectorRows';
 import type { ImageAttachment } from '../../../shared/types';
 
-/**
- * Padding and font of the description text. The creation dialog's @ mention overlay uses it too,
- * so the highlighted text lines up with the textarea's.
- */
-export const DESCRIPTION_TEXT_CLASS = 'px-4 pt-4 pb-1 text-[0.9375rem] leading-relaxed';
-
 interface TaskFormFieldsProps {
   // Project context (for loading image thumbnails from disk)
   projectPath?: string;
@@ -33,10 +27,6 @@ interface TaskFormFieldsProps {
   description: string;
   onDescriptionChange: (value: string) => void;
   descriptionPlaceholder?: string;
-  /** Optional custom content to render inside the description field (e.g., autocomplete popup) */
-  descriptionOverlay?: ReactNode;
-  /** Optional ref for the description textarea (used for @ mention autocomplete positioning) */
-  descriptionRef?: React.RefObject<HTMLTextAreaElement | null>;
 
   // Images
   images: ImageAttachment[];
@@ -54,9 +44,6 @@ interface TaskFormFieldsProps {
   // ID prefix for accessibility
   idPrefix?: string;
 
-  /** Optional children to render after description (e.g., @ mention highlight overlay) */
-  children?: ReactNode;
-
   /** Optional extra sections rendered after the built-in ones, before the error (e.g., Git options) */
   extraSections?: ReactNode;
 }
@@ -67,8 +54,6 @@ export function TaskFormFields({
   description,
   onDescriptionChange,
   descriptionPlaceholder,
-  descriptionOverlay,
-  descriptionRef: externalDescriptionRef,
   images,
   onImagesChange,
   mcpConnectors = [],
@@ -77,13 +62,10 @@ export function TaskFormFields({
   error,
   onError,
   idPrefix = '',
-  children,
   extraSections
 }: TaskFormFieldsProps) {
   const { t } = useTranslation(['tasks', 'common']);
-  // Use external ref if provided (for @ mention autocomplete), otherwise use internal ref
-  const internalDescriptionRef = useRef<HTMLTextAreaElement>(null);
-  const descriptionRef = externalDescriptionRef || internalDescriptionRef;
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const prefix = idPrefix ? `${idPrefix}-` : '';
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -234,8 +216,6 @@ export function TaskFormFields({
               )}
 
               <div className="relative">
-                {/* Optional overlay (e.g., @ mention highlighting) */}
-                {descriptionOverlay}
                 <textarea
                   ref={descriptionRef}
                   id={`${prefix}description`}
@@ -249,11 +229,10 @@ export function TaskFormFields({
                   aria-label={t('tasks:form.description')}
                   className={cn(
                     'relative block max-h-96 min-h-[7.5rem] w-full resize-none overflow-y-auto border-0 bg-transparent',
-                    DESCRIPTION_TEXT_CLASS,
+                    'px-4 pt-4 pb-1 text-[0.9375rem] leading-relaxed',
                     'text-foreground placeholder:text-muted-foreground',
                     'focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60'
                   )}
-                  style={descriptionOverlay ? { caretColor: 'auto' } : undefined}
                 />
               </div>
 
@@ -292,9 +271,6 @@ export function TaskFormFields({
                 </div>
               )}
             </div>
-
-            {/* Optional children (e.g., @ mention autocomplete) */}
-            {children}
           </div>
 
           {/* Paste Success Indicator */}

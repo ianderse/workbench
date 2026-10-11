@@ -180,7 +180,7 @@
   "wizard": {
     "createTitle": "Create new task",
     "createDescription": "Claude Code plans and builds it in an isolated worktree",
-    "descriptionPlaceholder": "What should Claude Code do? Type @ to reference files",
+    "descriptionPlaceholder": "What should Claude Code do?",
     "draftRestored": "Draft restored",
     "startFresh": "Start fresh",
     "creating": "Creating...",
@@ -261,10 +261,6 @@
     "deletePermanently": "Delete permanently",
     "deleting": "Deleting...",
     "failed": "Failed to delete task"
-  },
-  "fileAutocomplete": {
-    "noFiles": "No files found",
-    "keyboardHint": "↑↓ to navigate · Enter to select · Esc to close"
   },
   "referenceImages": {
     "preview": "Preview {{filename}}"

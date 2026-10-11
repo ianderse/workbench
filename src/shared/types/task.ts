@@ -130,22 +130,12 @@ export interface ImageAttachment {
   thumbnail?: string;   // Base64 thumbnail for preview
 }
 
-// Referenced file types for task creation (files/folders from project)
-export interface ReferencedFile {
-  id: string;           // Unique identifier (UUID)
-  path: string;         // Relative path from project root
-  name: string;         // File or folder name
-  isDirectory: boolean; // True if this is a directory
-  addedAt: Date;        // When the file was added as reference
-}
-
 // Draft state for task creation (auto-saved when dialog closes)
 export interface TaskDraft {
   projectId: string;
   title: string;
   description: string;
   images: ImageAttachment[];
-  referencedFiles: ReferencedFile[];
   mcpConnectors?: string[];
   pushNewBranches?: boolean;
   savedAt: Date;
@@ -186,9 +176,6 @@ export interface TaskMetadata {
 
   // Image attachments (screenshots, mockups, diagrams)
   attachedImages?: ImageAttachment[];
-
-  // Referenced files (files/folders from project for context)
-  referencedFiles?: ReferencedFile[];
 
   // MCP connectors enabled for this task (ids: context7, memory, electron, puppeteer, custom ids).
   // Copied from the Connectors defaults when the task is created; unset means use the defaults

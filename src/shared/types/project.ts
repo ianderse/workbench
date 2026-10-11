@@ -295,10 +295,3 @@ export interface CreateProjectFolderResult {
   name: string;
   gitInitialized: boolean;
 }
-
-// File Explorer Types
-export interface FileNode {
-  path: string;
-  name: string;
-  isDirectory: boolean;
-}

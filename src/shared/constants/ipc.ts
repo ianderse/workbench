@@ -203,10 +203,6 @@ export const IPC_CHANNELS = {
   INSIGHTS_ERROR: 'insights:error',
   INSIGHTS_SESSION_UPDATED: 'insights:sessionUpdated',  // Event: session updated (main -> renderer)
 
-  // File explorer operations
-  FILE_EXPLORER_LIST: 'fileExplorer:list',
-  FILE_EXPLORER_READ: 'fileExplorer:read',
-
   // Git operations
   GIT_GET_BRANCHES: 'git:getBranches',
   GIT_GET_BRANCHES_WITH_INFO: 'git:getBranchesWithInfo',

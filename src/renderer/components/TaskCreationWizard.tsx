@@ -6,11 +6,10 @@
  *
  * Features unique to creation (not in TaskEditDialog):
  * - Draft persistence (auto-save to localStorage)
- * - @ mention autocomplete for file references
  * - File explorer drawer sidebar
  * - Git branch selection options
  */
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, RotateCcw } from 'lucide-react';
 import { Button } from './ui/button';
@@ -19,13 +18,11 @@ import { SettingsRow, SettingsRows } from './settings/SettingsRow';
 import { SettingsSection } from './settings/SettingsSection';
 import { Combobox } from './ui/combobox';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
-import { TaskFormFields, DESCRIPTION_TEXT_CLASS } from './task-form/TaskFormFields';
-import { FileAutocomplete } from './FileAutocomplete';
+import { TaskFormFields } from './task-form/TaskFormFields';
 import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty, type TaskCreationDraft } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
 import { buildBranchOptions } from '../lib/branch-utils';
-import { cn } from '../lib/utils';
-import type { TaskMetadata, ImageAttachment, ReferencedFile } from '../../shared/types';
+import type { TaskMetadata, ImageAttachment } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useProjectBranches } from '../hooks/useProjectBranches';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
@@ -112,9 +109,8 @@ export function TaskCreationWizard({
     return selectedGitBranchDetail?.type === 'local';
   }, [baseBranch, branches]);
 
-  // Images and files
+  // Images
   const [images, setImages] = useState<ImageAttachment[]>([]);
-  const [referencedFiles, setReferencedFiles] = useState<ReferencedFile[]>([]);
 
   // MCP connectors start from the Connectors defaults; changes stay with this task
   const defaultConnectors = useMemo(() => getDefaultMcpConnectorIds(settings.mcpConnectors), [settings.mcpConnectors]);
@@ -123,15 +119,6 @@ export function TaskCreationWizard({
   // Draft state
   const [isDraftRestored, setIsDraftRestored] = useState(false);
 
-  // @ autocomplete state
-  const descriptionRef = useRef<HTMLTextAreaElement>(null);
-  const [autocomplete, setAutocomplete] = useState<{
-    show: boolean;
-    query: string;
-    startPos: number;
-    position: { top: number; left: number };
-  } | null>(null);
-
   // Load draft when dialog opens
   useEffect(() => {
     if (open && projectId) {
@@ -139,7 +126,6 @@ export function TaskCreationWizard({
       if (draft && !isDraftEmpty(draft)) {
         setDescription(draft.description);
         setImages(draft.images);
-        setReferencedFiles(draft.referencedFiles ?? []);
         setMcpConnectors(draft.mcpConnectors ?? defaultConnectors);
         setPushNewBranches(draft.pushNewBranches ?? projectPushNewBranches);
         setIsDraftRestored(true);
@@ -148,7 +134,6 @@ export function TaskCreationWizard({
         // This ensures no stale data from previous task creation persists
         setDescription('');
         setImages([]);
-        setReferencedFiles([]);
         setMcpConnectors(defaultConnectors);
         setBaseBranch(PROJECT_DEFAULT_BRANCH);
         setUseWorktree(true);
@@ -166,111 +151,10 @@ export function TaskCreationWizard({
     projectId,
     description,
     images,
-    referencedFiles,
     mcpConnectors,
     pushNewBranches,
     savedAt: new Date()
-  }), [projectId, description, images, referencedFiles, mcpConnectors, pushNewBranches]);
-
-  /**
-   * Detect @ mention being typed and show autocomplete
-   */
-  const detectAtMention = useCallback((text: string, cursorPos: number) => {
-    const beforeCursor = text.slice(0, cursorPos);
-    const match = beforeCursor.match(/@([\w\-./\\]*)$/);
-    if (match) {
-      return { query: match[1], startPos: cursorPos - match[0].length };
-    }
-    return null;
-  }, []);
-
-  /**
-   * Handle description change and check for @ mentions
-   */
-  const handleDescriptionChange = useCallback((newValue: string) => {
-    const textarea = descriptionRef.current;
-    const cursorPos = textarea?.selectionStart || 0;
-
-    setDescription(newValue);
-
-    const mention = detectAtMention(newValue, cursorPos);
-    if (mention && textarea) {
-      const rect = textarea.getBoundingClientRect();
-      const textareaStyle = window.getComputedStyle(textarea);
-      const lineHeight = parseFloat(textareaStyle.lineHeight) || 20;
-      const paddingTop = parseFloat(textareaStyle.paddingTop) || 8;
-      const paddingLeft = parseFloat(textareaStyle.paddingLeft) || 12;
-
-      const textBeforeCursor = newValue.slice(0, cursorPos);
-      const lines = textBeforeCursor.split('\n');
-      const currentLineIndex = lines.length - 1;
-      const currentLineLength = lines[currentLineIndex].length;
-
-      const charWidth = 8;
-      const top = paddingTop + (currentLineIndex + 1) * lineHeight + 4;
-      const left = paddingLeft + Math.min(currentLineLength * charWidth, rect.width - 300);
-
-      setAutocomplete({
-        show: true,
-        query: mention.query,
-        startPos: mention.startPos,
-        position: { top, left: Math.max(0, left) }
-      });
-    } else if (autocomplete?.show) {
-      setAutocomplete(null);
-    }
-  }, [detectAtMention, autocomplete?.show]);
-
-  /**
-   * Handle autocomplete selection
-   */
-  const handleAutocompleteSelect = useCallback((filename: string, _fullPath?: string) => {
-    if (!autocomplete) return;
-    const textarea = descriptionRef.current;
-    if (!textarea) return;
-
-    const beforeMention = description.slice(0, autocomplete.startPos);
-    const afterMention = description.slice(autocomplete.startPos + 1 + autocomplete.query.length);
-    const newDescription = beforeMention + '@' + filename + afterMention;
-
-    setDescription(newDescription);
-    setAutocomplete(null);
-
-    // Use queueMicrotask instead of setTimeout - doesn't need cleanup on unmount
-    queueMicrotask(() => {
-      const newCursorPos = autocomplete.startPos + 1 + filename.length;
-      textarea.focus();
-      textarea.setSelectionRange(newCursorPos, newCursorPos);
-    });
-  }, [autocomplete, description]);
-
-  /**
-   * Parse @mentions from description
-   */
-  const parseFileMentions = useCallback((text: string, existingFiles: ReferencedFile[]): ReferencedFile[] => {
-    const mentionRegex = /@([\w\-./\\]+\.\w+)/g;
-    const matches = Array.from(text.matchAll(mentionRegex));
-    if (matches.length === 0) return existingFiles;
-
-    const existingNames = new Set(existingFiles.map(f => f.name));
-    const newFiles: ReferencedFile[] = [];
-
-    matches.forEach(match => {
-      const fileName = match[1];
-      if (!existingNames.has(fileName)) {
-        newFiles.push({
-          id: crypto.randomUUID(),
-          path: fileName,
-          name: fileName,
-          isDirectory: false,
-          addedAt: new Date()
-        });
-        existingNames.add(fileName);
-      }
-    });
-
-    return [...existingFiles, ...newFiles];
-  }, []);
+  }), [projectId, description, images, mcpConnectors, pushNewBranches]);
 
   const handleCreate = async () => {
     if (!description.trim()) {
@@ -282,11 +166,8 @@ export function TaskCreationWizard({
     setError(null);
 
     try {
-      const allReferencedFiles = parseFileMentions(description, referencedFiles);
-
       const metadata: TaskMetadata = { sourceType: 'manual' };
       if (images.length > 0) metadata.attachedImages = images;
-      if (allReferencedFiles.length > 0) metadata.referencedFiles = allReferencedFiles;
       // Always include baseBranch - resolve PROJECT_DEFAULT_BRANCH to actual branch name
       // This ensures the backend always knows which branch to use for worktree creation
       if (baseBranch === PROJECT_DEFAULT_BRANCH) {
@@ -322,7 +203,6 @@ export function TaskCreationWizard({
   const resetForm = () => {
     setDescription('');
     setImages([]);
-    setReferencedFiles([]);
     setMcpConnectors(defaultConnectors);
     setBaseBranch(PROJECT_DEFAULT_BRANCH);
     setUseWorktree(true);
@@ -350,31 +230,6 @@ export function TaskCreationWizard({
     resetForm();
     setError(null);
   };
-
-  // Render @ mention highlight overlay for the description textarea
-  const descriptionOverlay = (
-    <div
-      className={cn(
-        'pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words text-transparent',
-        DESCRIPTION_TEXT_CLASS
-      )}
-    >
-      {description.split(/(@[\w\-./\\]+\.\w+)/g).map((part, i) => {
-        if (part.match(/^@[\w\-./\\]+\.\w+$/)) {
-          return (
-            <span
-              key={i}
-              className="bg-info/20 text-info-foreground rounded px-0.5"
-              style={{ color: 'hsl(var(--info))' }}
-            >
-              {part}
-            </span>
-          );
-        }
-        return <span key={i}>{part}</span>;
-      })}
-    </div>
-  );
 
   // Git options - unique to creation; rendered as the last section of the form
   const gitOptionsSection = (
@@ -466,10 +321,8 @@ export function TaskCreationWizard({
       {/* Main form fields (Git options are appended as an extra section) */}
       <TaskFormFields
         description={description}
-        onDescriptionChange={handleDescriptionChange}
+        onDescriptionChange={setDescription}
         descriptionPlaceholder={t('tasks:wizard.descriptionPlaceholder')}
-        descriptionOverlay={descriptionOverlay}
-        descriptionRef={descriptionRef}
         images={images}
         onImagesChange={setImages}
         mcpConnectors={mcpConnectors}
@@ -479,18 +332,7 @@ export function TaskCreationWizard({
         onError={setError}
         idPrefix="create"
         extraSections={gitOptionsSection}
-      >
-        {/* File autocomplete popup - positioned relative to TaskFormFields */}
-        {autocomplete?.show && projectPath && (
-          <FileAutocomplete
-            query={autocomplete.query}
-            projectPath={projectPath}
-            position={autocomplete.position}
-            onSelect={handleAutocompleteSelect}
-            onClose={() => setAutocomplete(null)}
-          />
-        )}
-      </TaskFormFields>
+      />
     </TaskModalLayout>
   );
 }

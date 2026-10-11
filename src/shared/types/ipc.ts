@@ -24,7 +24,6 @@ import type {
   AutoBuildVersionInfo,
   InitializationResult,
   CreateProjectFolderResult,
-  FileNode,
   ProjectContextData,
   ProjectIndex,
   ProjectEnvConfig,
@@ -440,10 +439,6 @@ export interface ElectronAPI {
   onMergeProgress: (
     callback: (taskId: string, progress: MergeProgress) => void
   ) => () => void;
-
-  // File explorer operations
-  listDirectory: (dirPath: string) => Promise<IPCResult<FileNode[]>>;
-  readFile: (filePath: string) => Promise<IPCResult<string>>;
 
   // Git operations
   /** @deprecated Will return GitBranchDetail[] in future - see getGitBranchesWithInfo */

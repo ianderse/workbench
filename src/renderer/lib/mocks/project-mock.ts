@@ -86,17 +86,6 @@ export const projectMock = {
 
   getDefaultProjectLocation: async () => '/Users/demo/projects',
 
-  // File explorer operations
-  listDirectory: async () => ({
-    success: true,
-    data: []
-  }),
-
-  readFile: async () => ({
-    success: true,
-    data: ''
-  }),
-
   // Git operations
   getGitBranches: async () => ({
     success: true,

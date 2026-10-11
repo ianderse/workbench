@@ -1081,7 +1081,7 @@ const DRAFT_KEY_PREFIX = 'task-creation-draft';
  */
 export type TaskCreationDraft = Pick<
   TaskDraft,
-  'projectId' | 'description' | 'images' | 'referencedFiles' | 'mcpConnectors' | 'pushNewBranches' | 'savedAt'
+  'projectId' | 'description' | 'images' | 'mcpConnectors' | 'pushNewBranches' | 'savedAt'
 >;
 
 /**
@@ -1128,7 +1128,6 @@ export function loadDraft(projectId: string): TaskCreationDraft | null {
       projectId: typeof raw.projectId === 'string' ? raw.projectId : projectId,
       description: typeof raw.description === 'string' ? raw.description : '',
       images: Array.isArray(raw.images) ? (raw.images as ImageAttachment[]) : [],
-      referencedFiles: Array.isArray(raw.referencedFiles) ? (raw.referencedFiles as TaskCreationDraft['referencedFiles']) : [],
       mcpConnectors: Array.isArray(raw.mcpConnectors) ? (raw.mcpConnectors as string[]) : undefined,
       pushNewBranches: typeof raw.pushNewBranches === 'boolean' ? raw.pushNewBranches : undefined,
       // Convert savedAt back to Date
