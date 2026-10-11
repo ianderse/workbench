@@ -8,6 +8,7 @@ import { IPC_CHANNELS } from '../shared/constants';
 import { safeSendToRenderer } from './ipc-handlers/utils';
 import { getPlanPath, persistPlanStatusAndReasonSync } from './ipc-handlers/task/plan-file-utils';
 import { findTaskWorktree } from './worktree-paths';
+import { taskHooks } from './task-hooks';
 import { getSpecsDir, AUTO_BUILD_PATHS } from '../shared/constants';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -158,6 +159,7 @@ export class TaskStateManager {
         // Already in human_review (e.g., stage-only merge keeps task in review).
         // Emit status directly since there's no XState transition needed.
         this.emitStatus(taskId, 'human_review', task.reviewReason ?? 'completed', project.id);
+        taskHooks.emit('state', { project, task, status: 'human_review', state: 'human_review' });
         return true;
       default:
         return false;
@@ -299,6 +301,7 @@ export class TaskStateManager {
 
       this.persistStatus(task, project, status, reviewReason, stateValue, executionPhase);
       this.emitStatus(taskId, status, reviewReason, project.id);
+      taskHooks.emit('state', { project, task, status, state: stateValue });
 
       // Only transitions seen while the app runs (not tasks restored in that state)
       const completed = (stateValue === 'human_review' && reviewReason === 'completed') || stateValue === 'done';

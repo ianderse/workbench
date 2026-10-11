@@ -184,6 +184,16 @@ permission modes, worktrees, hooks, skills).
 Each task's `.auto-claude/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and
 mirrored task list), `claude_run.json`, `task_logs.json`, `plan.md` (when planned) and `attachments/`.
 
+### Task Changelog (parallel tasks)
+
+Task hooks (`src/main/task-hooks.ts`, `taskHooks.on('state' | 'files-edited', ...)`) run on every state a task
+enters (state machine transitions and manual moves) and on the files its Claude Code session edits (Edit, Write,
+MultiEdit, NotebookEdit tool calls). `src/main/task-changelog-writer.ts` turns them into the project's
+`.auto-claude/changelog.jsonl` (one JSON entry per line; state entries carry every file the task's branch changes).
+At every phase, `buildParallelTasksPrompt()` (`src/main/task-changelog.ts`) adds a "Parallel tasks" section to the
+task's system prompt: the other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
+them and avoid merge conflicts.
+
 ### MCP Connectors
 
 Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and

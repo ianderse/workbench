@@ -26,6 +26,8 @@ import { getAPIProfileEnv } from '../services/profile';
 import { getSpecsDir } from '../../shared/constants';
 import type { AppSettings } from '../../shared/types/settings';
 import { appLog } from '../app-logger';
+import { taskHooks } from '../task-hooks';
+import { getTaskChangelogPath } from '../task-changelog';
 
 const execFileAsync = promisify(execFile);
 
@@ -176,6 +178,9 @@ export class AgentManager extends EventEmitter {
       },
       onSubtasks: (subtasks) => {
         if (!entry.killed) this.emit('subtasks', taskId, subtasks, projectId);
+      },
+      onFilesEdited: (files) => {
+        if (!entry.killed) taskHooks.emit('files-edited', { project: options.project, task: options.task, files });
       },
     });
     entry.run = run;
@@ -370,6 +375,7 @@ export class AgentManager extends EventEmitter {
       connectorSettings: settings.mcpConnectors,
       settings: taskSettings,
       maxBudgetUsd: project.settings?.maxBudgetUsd,
+      changelogPath: project.autoBuildPath ? getTaskChangelogPath(project.path, project.autoBuildPath) : undefined,
       mode,
       ...(mode === 'revise' ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
       profileId: options.profileId,

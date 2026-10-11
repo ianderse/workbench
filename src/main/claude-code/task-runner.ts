@@ -31,6 +31,7 @@ import { startClaudeProcess, type ClaudeProcessHandle } from './process';
 import { buildMcpConfig } from './mcp-config';
 import { triageTask, fixedTriage, applyPlanningPolicy } from './triage';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
+import { buildParallelTasksPrompt } from '../task-changelog';
 import { detectClaudeLimitMessage, parseLimitResetTime } from './limit';
 import {
   isApiRetry,
@@ -64,6 +65,8 @@ const execFileAsync = promisify(execFile);
 
 export const CLAUDE_RUN_FILE = 'claude_run.json';
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Tools whose file edits go to the task hooks (and so the project's task changelog) */
+const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 // =============================================================================
 // Public types
@@ -102,6 +105,8 @@ export interface TaskRunConfig {
   maxBudgetUsd?: number;
   /** Prompt section pointing Claude Code at the project's Graphify memory graph */
   graphifyPrompt?: string;
+  /** The project's task changelog; each phase's prompt lists what the other tasks are changing */
+  changelogPath?: string;
   /** Extra environment (e.g. GRAPHIFY_OUT, PATH with the graphify CLI) */
   extraEnv?: Record<string, string>;
   /** start: new or continued run; revise: apply reviewer feedback */
@@ -136,6 +141,8 @@ export interface TaskRunCallbacks {
   onRunInfo?: (info: ClaudeRunInfo) => void;
   /** Claude Code's task list (TaskCreate/TaskUpdate), mirrored as the task's subtasks */
   onSubtasks?: (subtasks: TaskRunSubtask[]) => void;
+  /** Files the session edits (relative to the worktree, forward slashes), for the task hooks */
+  onFilesEdited?: (files: string[]) => void;
 }
 
 type TaskRunStatus = 'completed' | 'failed' | 'rate_limited' | 'auth_failed' | 'stopped';
@@ -197,7 +204,7 @@ const VALIDATION_SCHEMA = {
   required: ['status', 'summary', 'checks', 'findings'],
 };
 
-function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string): string {
+function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string): string {
   const sections = [
     `You are running autonomously inside Auto Claude, a desktop app that hands coding tasks to Claude Code. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
     config.isolated === false
@@ -219,6 +226,7 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string): stri
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
   if (config.graphifyPrompt) sections.push(config.graphifyPrompt);
+  if (parallelTasksPrompt) sections.push(parallelTasksPrompt);
   return sections.join('\n\n');
 }
 
@@ -615,6 +623,10 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       this.saveInfo();
     }
     const specDirRelative = path.join('.auto-claude', DATA_DIR_NAMES.tasks, this.config.specId);
+    // Read at every phase, so a resumed session learns what the other tasks changed meanwhile
+    const parallelTasksPrompt = this.config.changelogPath
+      ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir))
+      : undefined;
     const args = [
       '-p',
       '--input-format', 'stream-json',
@@ -623,7 +635,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       '--model', params.model,
       '--effort', params.effort,
       '--permission-prompts', 'none',
-      '--append-system-prompt', buildSystemPrompt(this.config, specDirRelative),
+      '--append-system-prompt', buildSystemPrompt(this.config, specDirRelative, parallelTasksPrompt),
       '--name', `${this.config.specId}: ${this.info.triage?.title || this.config.title}`.slice(0, 120),
     ];
     if (params.name === 'plan') {
@@ -784,6 +796,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       tool_use_id: id,
       ...(subphase ? { subphase } : {}),
     });
+    this.reportEditedFile(name, input);
     if (inSubagent) return;
     this.toolNames.set(id, name);
     this.emitLog(`${name}${summary ? ` ${summary}` : ''}`);
@@ -822,6 +835,16 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
         this.emitSubtasks();
       }
     }
+  }
+
+  /** Report a file the session (or one of its subagents) is editing inside the worktree */
+  private reportEditedFile(name: string, input: Record<string, unknown>): void {
+    if (!FILE_EDIT_TOOLS.has(name)) return;
+    const target = input.file_path ?? input.notebook_path;
+    if (typeof target !== 'string' || !target) return;
+    const relative = path.relative(this.config.worktreePath, path.resolve(this.config.worktreePath, target));
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
+    this.callbacks.onFilesEdited?.([relative.split(path.sep).join('/')]);
   }
 
   private onToolResult(block: ClaudeToolResultBlock, logPhase: TaskLogPhase, inSubagent: boolean): void {

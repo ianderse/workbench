@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import type { ClaudeProcessOptions } from '../process';
@@ -286,5 +286,42 @@ describe('ClaudeTaskRun', () => {
     expect(updates.at(-1)).toEqual([expect.objectContaining({ id: '1', title: 'Write code', status: 'completed' })]);
     const log = JSON.parse(readFileSync(path.join(specDir, 'task_logs.json'), 'utf-8'));
     expect(log.phases.coding.entries.some((e: { tool_name?: string }) => e.tool_name === 'TaskCreate')).toBe(true);
+  });
+
+  it('reports the files its session and subagents edit inside the worktree', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    const edit = (id: string, name: string, input: Record<string, unknown>, parent: string | null = null) =>
+      ({ type: 'assistant', session_id: 's10', parent_tool_use_id: parent, message: { content: [{ type: 'tool_use', id, name, input }] } }) as ClaudeStreamMessage;
+    scripts.push({ messages: [
+      edit('e1', 'Edit', { file_path: path.join(worktree, 'src', 'a.ts') }),
+      edit('e2', 'Write', { file_path: 'docs/notes.md' }, 'agent-1'),
+      edit('e3', 'Read', { file_path: path.join(worktree, 'src', 'b.ts') }),
+      edit('e4', 'Write', { file_path: path.join(tmpdir(), 'outside.txt') }),
+      result('s10'),
+    ] });
+    const edited: string[][] = [];
+    await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }, { onFilesEdited: (files: string[]) => edited.push(files) }).run();
+    expect(edited).toEqual([['src/a.ts'], ['docs/notes.md']]);
+  });
+
+  it("lists the other tasks' unmerged changes in each phase's system prompt", async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    const tasksDir = path.dirname(specDir);
+    const otherSpec = mkdtempSync(path.join(tasksDir, 'other-'));
+    const changelogPath = path.join(worktree, 'changelog.jsonl');
+    writeFileSync(changelogPath, [
+      { at: '2026-10-11T10:00:00Z', task: path.basename(otherSpec), title: 'Other', event: 'state', status: 'in_progress', state: 'coding', files: [] },
+      { at: '2026-10-11T10:01:00Z', task: path.basename(otherSpec), event: 'edit', files: ['src/shared.ts'] },
+    ].map((entry) => JSON.stringify(entry)).join('\n'));
+    scripts.push({ messages: [result('s11')] });
+    try {
+      await makeRun({ changelogPath, settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+      const prompt = argValue(spawned[0].args, '--append-system-prompt') ?? '';
+      expect(prompt).toContain('## Parallel tasks');
+      expect(prompt).toContain(changelogPath);
+      expect(prompt).toContain('"Other", In Progress (coding): `src/shared.ts`');
+    } finally {
+      rmSync(otherSpec, { recursive: true, force: true });
+    }
   });
 });

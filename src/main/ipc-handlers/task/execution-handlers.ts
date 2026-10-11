@@ -33,6 +33,7 @@ import { rateLimitResumeScheduler, type HeldTaskRef } from '../../services/rate-
 import { clearRateLimitHold } from './rate-limit-hold';
 import { taskQueue } from '../../services/task-queue';
 import { taskQueueOrder } from '../../services/task-queue-order';
+import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
 
 const execFileAsync = promisify(execFile);
@@ -375,6 +376,7 @@ export function registerTaskExecutionHandlers(
         if (queue) {
           console.warn(`[TASK_RETRY] Parallel task limit reached; ${taskId} reset and queued`);
           mainWindow?.webContents.send(IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', project.id);
+          taskHooks.emit('state', { project, task, status: 'queue' });
           return { success: true, data: { action: 'queued' } };
         }
         console.warn(`[TASK_RETRY] ${taskId} reset; starting it again`);
@@ -635,6 +637,7 @@ export function registerTaskExecutionHandlers(
             await createPlanIfNotExists(planPath, task, status);
             projectStore.invalidateTasksCache(project.id);
           }
+          taskHooks.emit('state', { project, task, status });
         }
 
         // Auto-start the task when it is moved to In Progress and isn't running
