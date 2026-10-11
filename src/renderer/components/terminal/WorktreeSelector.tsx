@@ -1,5 +1,5 @@
 import { useId, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Plus, ChevronDown, ListTree, Loader2, Trash2, Search } from 'lucide-react';
+import { Plus, ChevronDown, FolderTree, Loader2, Trash2, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TerminalWorktreeConfig, WorktreeListItem, OtherWorktreeInfo } from '../../../shared/types';
 import {
@@ -400,7 +400,7 @@ export function WorktreeSelector({
           )}
           onClick={(e) => e.stopPropagation()}
         >
-          <ListTree className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+          <FolderTree className="h-4 w-4 shrink-0" strokeWidth={1.75} />
           <span className={cn('truncate', labelClassName)} title={currentWorktree?.name}>
             {currentWorktree?.name ?? t('terminal:worktree.create')}
           </span>
