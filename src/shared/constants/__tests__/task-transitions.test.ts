@@ -14,8 +14,8 @@ describe('getAllowedTaskMoves', () => {
     expect(getAllowedTaskMoves('backlog')).toEqual(['queue', 'in_progress']);
     expect(getAllowedTaskMoves('queue')).toEqual(['backlog', 'in_progress']);
     expect(getAllowedTaskMoves('in_progress')).toEqual([]);
-    expect(getAllowedTaskMoves('ai_review')).toEqual(['human_review']);
-    expect(getAllowedTaskMoves('human_review')).toEqual(['queue', 'in_progress', 'done']);
+    expect(getAllowedTaskMoves('ai_review')).toEqual(['backlog', 'human_review']);
+    expect(getAllowedTaskMoves('human_review')).toEqual(['backlog', 'queue', 'in_progress', 'done']);
     expect(getAllowedTaskMoves('done')).toEqual([]);
   });
 
@@ -35,7 +35,10 @@ describe('canMoveTask', () => {
   it('allows only listed moves', () => {
     expect(canMoveTask('backlog', 'in_progress')).toBe(true);
     expect(canMoveTask('backlog', 'done')).toBe(false);
-    expect(canMoveTask('human_review', 'backlog')).toBe(false);
+    expect(canMoveTask('human_review', 'backlog')).toBe(true);
+    expect(canMoveTask('ai_review', 'backlog')).toBe(true);
+    expect(canMoveTask('error', 'backlog')).toBe(true);
+    expect(canMoveTask('ai_review', 'queue')).toBe(false);
     expect(canMoveTask('error', 'in_progress')).toBe(true);
     expect(canMoveTask('in_progress', 'backlog')).toBe(false);
     expect(canMoveTask('done', 'human_review')).toBe(false);

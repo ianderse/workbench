@@ -151,7 +151,8 @@ export class TaskStateManager {
         return true;
       }
       case 'backlog':
-        this.handleUiEvent(taskId, { type: 'USER_STOPPED', hasPlan: false }, task, project);
+        // Back to Planning from any column it may be moved from (Queue, AI Review, Human Review)
+        this.handleUiEvent(taskId, { type: 'MOVED_TO_BACKLOG' }, task, project);
         return true;
       case 'human_review':
         // Already in human_review (e.g., stage-only merge keeps task in review).

@@ -52,16 +52,16 @@ export function getTaskColumn(status: TaskStatus): TaskStatusColumn {
  * - Backlog: queue it or start it
  * - Queue: send it back to the backlog or start it
  * - In Progress: none (the task is running; stop it first)
- * - AI Review: stop validation and review it now
- * - Human Review (also failed tasks): queue it, resume it or mark it done
+ * - AI Review: back to Planning, or stop validation and review it now
+ * - Human Review (also failed tasks): back to Planning, queue it, resume it or mark it done
  * - Done: none (final)
  */
 const TASK_COLUMN_TRANSITIONS: Record<TaskStatusColumn, readonly TaskStatusColumn[]> = {
   backlog: ['queue', 'in_progress'],
   queue: ['backlog', 'in_progress'],
   in_progress: [],
-  ai_review: ['human_review'],
-  human_review: ['queue', 'in_progress', 'done'],
+  ai_review: ['backlog', 'human_review'],
+  human_review: ['backlog', 'queue', 'in_progress', 'done'],
   done: []
 };
 

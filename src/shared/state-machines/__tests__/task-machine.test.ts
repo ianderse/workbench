@@ -252,6 +252,29 @@ describe('taskMachine', () => {
     });
   });
 
+  describe('moving back to Planning (MOVED_TO_BACKLOG)', () => {
+    it.each(['qa_review', 'human_review', 'error', 'queued'])('goes from %s to backlog and clears the review reason', (state) => {
+      const snapshot = runEvents([{ type: 'MOVED_TO_BACKLOG' }], state);
+      expect(snapshot.value).toBe('backlog');
+      expect(snapshot.context.reviewReason).toBeUndefined();
+    });
+
+    it('moves a stopped task in human review back to backlog', () => {
+      const snapshot = runEvents([
+        { type: 'PLANNING_STARTED' },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
+        { type: 'USER_STOPPED' },
+        { type: 'MOVED_TO_BACKLOG' }
+      ]);
+      expect(snapshot.value).toBe('backlog');
+      expect(snapshot.context.reviewReason).toBeUndefined();
+    });
+
+    it('is ignored once the task is done', () => {
+      expect(runEvents([{ type: 'MOVED_TO_BACKLOG' }], 'done').value).toBe('done');
+    });
+  });
+
   describe('PR flow', () => {
     it('should transition to creating_pr on CREATE_PR', () => {
       const events: TaskEvent[] = [

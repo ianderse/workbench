@@ -22,6 +22,8 @@ export type TaskEvent =
   | { type: 'QA_AGENT_ERROR'; iteration: number; consecutiveErrors: number; error?: string }
   | { type: 'PROCESS_EXITED'; exitCode: number; signal?: string; unexpected?: boolean }
   | { type: 'USER_STOPPED'; hasPlan?: boolean }
+  // The user moved the task back to Planning (Backlog); any run was stopped first
+  | { type: 'MOVED_TO_BACKLOG' }
   | { type: 'RATE_LIMIT_HOLD'; resetAt: string; message: string; phase?: string }
   | { type: 'USER_RESUMED' }
   | { type: 'MARK_DONE' }
@@ -69,6 +71,7 @@ export const taskMachine = createMachine(
             { target: 'backlog', guard: 'noPlanYet', actions: 'clearReviewReason' },
             { target: 'human_review', actions: 'setReviewReasonStopped' }
           ],
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' },
           PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
         }
       },
@@ -87,6 +90,7 @@ export const taskMachine = createMachine(
           QA_AGENT_ERROR: { target: 'error', actions: 'setReviewReasonErrors' },
           RATE_LIMIT_HOLD: { target: 'queued', actions: 'clearReviewReason' },
           USER_STOPPED: { target: 'human_review', actions: 'setReviewReasonStopped' },
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' },
           PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
         }
       },
@@ -100,6 +104,7 @@ export const taskMachine = createMachine(
           QA_AGENT_ERROR: { target: 'error', actions: 'setReviewReasonErrors' },
           RATE_LIMIT_HOLD: { target: 'queued', actions: 'clearReviewReason' },
           USER_STOPPED: { target: 'human_review', actions: 'setReviewReasonStopped' },
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' },
           PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
         }
       },
@@ -113,6 +118,7 @@ export const taskMachine = createMachine(
           QA_AGENT_ERROR: { target: 'error', actions: 'setReviewReasonErrors' },
           RATE_LIMIT_HOLD: { target: 'queued', actions: 'clearReviewReason' },
           USER_STOPPED: { target: 'human_review', actions: 'setReviewReasonStopped' },
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' },
           PROCESS_EXITED: { target: 'error', guard: 'unexpectedExit', actions: 'setReviewReasonErrors' }
         }
       },
@@ -129,6 +135,7 @@ export const taskMachine = createMachine(
             { target: 'backlog', guard: 'noPlanYet', actions: 'clearReviewReason' },
             { target: 'human_review', actions: 'setReviewReasonStopped' }
           ],
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' },
           MARK_DONE: 'done'
         }
       },
@@ -138,7 +145,8 @@ export const taskMachine = createMachine(
           MARK_DONE: 'done',
           USER_RESUMED: { target: 'coding', actions: 'clearReviewReason' },
           // Allow restarting planning from human_review (e.g., incomplete task with no subtasks)
-          PLANNING_STARTED: { target: 'planning', actions: 'clearReviewReason' }
+          PLANNING_STARTED: { target: 'planning', actions: 'clearReviewReason' },
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' }
         }
       },
       error: {
@@ -146,7 +154,8 @@ export const taskMachine = createMachine(
           USER_RESUMED: { target: 'coding', actions: 'clearReviewReason' },
           // Allow restarting from error back to planning (e.g., triage failed)
           PLANNING_STARTED: { target: 'planning', actions: 'clearReviewReason' },
-          MARK_DONE: 'done'
+          MARK_DONE: 'done',
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' }
         }
       },
       creating_pr: {

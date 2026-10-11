@@ -35,7 +35,7 @@ import {
   DIALOG_SURFACE_CLASS,
   DIALOG_TITLE_CLASS
 } from '../ui/dialog-styles';
-import { stopTask, submitReview, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, retryTask } from '../../stores/task-store';
+import { stopTask, submitReview, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, taskWasStopped, retryTask } from '../../stores/task-store';
 import { useProjectStore } from '../../stores/project-store';
 import { TASK_STATUS_LABELS, getTaskColumn, type TaskStatusColumn } from '../../../shared/constants';
 import { TaskEditDialog } from '../TaskEditDialog';
@@ -423,9 +423,9 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                   {t('tasks:actions.unarchive')}
                 </Button>
               )}
-              {/* Retry a task that stopped with an error: starts it over from a clean worktree */}
-              {/* Failed or stuck (marked running without a run): start over from a clean slate */}
-              {(state.isStuck || (taskHasErrors(task) && !state.isRunning)) && (
+              {/* Failed, stopped or stuck (marked running without a run): start over from a clean
+                  worktree, discarding the previous run */}
+              {(state.isStuck || ((taskHasErrors(task) || taskWasStopped(task)) && !state.isRunning)) && (
                 <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRetrying} onClick={() => void handleRetry()}>
                   {isRetrying ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

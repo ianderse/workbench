@@ -1194,6 +1194,15 @@ export function taskHasErrors(task: Task): boolean {
 }
 
 /**
+ * Whether the task's run was stopped before it finished: stopped by the user (waits in Human
+ * Review), or back in Planning with a previous run (stopped early or moved back)
+ */
+export function taskWasStopped(task: Task): boolean {
+  return (task.status === 'human_review' && task.reviewReason === 'stopped')
+    || (task.status === 'backlog' && !!task.claudeRun?.sessionId);
+}
+
+/**
  * Get task progress info
  */
 export function getTaskProgress(task: Task): { completed: number; total: number; percentage: number } {
