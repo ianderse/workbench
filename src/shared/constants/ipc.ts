@@ -260,7 +260,6 @@ export const IPC_CHANNELS = {
   // Graphify CLI (memory graph)
   GRAPHIFY_CHECK_VERSION: 'graphify:checkVersion',
   GRAPHIFY_INSTALL: 'graphify:install',
-  GRAPHIFY_INSTALL_CLAUDE_COMMAND: 'graphify:installClaudeCommand',
   GRAPHIFY_GET_INDEX: 'graphify:getIndex',
   GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
   GRAPHIFY_HAS_GRAPH: 'graphify:hasGraph',

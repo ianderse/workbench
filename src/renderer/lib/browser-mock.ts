@@ -126,10 +126,9 @@ const browserMockAPI: ElectronAPI = {
   // Graphify CLI (memory graph)
   checkGraphifyVersion: async () => ({
     success: true,
-    data: { installed: null, latest: null, isOutdated: false, claudeCommand: null }
+    data: { installed: null, latest: null, isOutdated: false }
   }),
   installGraphify: async () => ({ success: true, data: { command: 'uv tool install graphifyy' } }),
-  installGraphifyClaudeCommand: async () => ({ success: true, data: { configDirs: 1, missing: 0 } }),
   getGraphifyIndex: async () => ({ success: true, data: null }),
   buildGraphifyIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
   hasGraphifyGraph: async () => ({ success: true, data: false }),

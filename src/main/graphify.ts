@@ -103,8 +103,7 @@ export async function checkGraphifyVersion(forceRefresh = false): Promise<Graphi
   const [installation, latest] = await Promise.all([detectGraphify(forceRefresh), latestVersion]);
   const installed = installation ? installation.version ?? 'unknown' : null;
   const isOutdated = !!(installed && latest && semver.valid(installed) && semver.valid(latest) && semver.lt(installed, latest));
-  const claudeCommand = installation ? await getGraphifyClaudeCommandStatus() : null;
-  return { installed, latest, isOutdated, claudeCommand };
+  return { installed, latest, isOutdated };
 }
 
 /**
@@ -137,17 +136,11 @@ async function getConfigDirsMissingCommand(): Promise<{ dirs: string[]; missing:
   return { dirs, missing: dirs.filter((_, i) => !present[i]) };
 }
 
-/** Whether Claude Code offers /graphify, counted over its config directories */
-async function getGraphifyClaudeCommandStatus(): Promise<{ configDirs: number; missing: number }> {
-  const { dirs, missing } = await getConfigDirsMissingCommand();
-  return { configDirs: dirs.length, missing: missing.length };
-}
-
 /**
  * Make /graphify available in Claude Code: `graphify install` copies Graphify's skill into each
  * config directory that lacks it (and registers it in that directory's CLAUDE.md)
  */
-export async function installGraphifyClaudeCommand(): Promise<{ configDirs: number; missing: number }> {
+async function installGraphifyClaudeCommand(): Promise<{ configDirs: number; missing: number }> {
   const installation = await detectGraphify();
   if (!installation) throw new Error('Graphify is not installed');
   const defaultDir = path.join(os.homedir(), '.claude');

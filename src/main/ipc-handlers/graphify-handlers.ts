@@ -1,6 +1,5 @@
 /**
- * Graphify IPC handlers: CLI version check and install, and its /graphify command in Claude Code
- * (Settings > Updates), and each project's memory graph (Settings > Project > Knowledge index)
+ * Graphify IPC handlers: CLI version check and install (Settings > Updates), and each project's memory graph (Settings > Project > Knowledge index)
  */
 
 import { ipcMain } from 'electron';
@@ -15,7 +14,6 @@ import {
   detectGraphify,
   getGraphifyInstallCommand,
   hasGraphifyGraph,
-  installGraphifyClaudeCommand,
   readGraphifyGraph,
   readGraphifyIndex,
   setUpClaudeCommandAfterInstall,
@@ -51,18 +49,6 @@ export function registerGraphifyHandlers(): void {
       return { success: false, error: errorMessage(error) };
     }
   });
-
-  ipcMain.handle(
-    IPC_CHANNELS.GRAPHIFY_INSTALL_CLAUDE_COMMAND,
-    async (): Promise<IPCResult<{ configDirs: number; missing: number }>> => {
-      try {
-        return { success: true, data: await installGraphifyClaudeCommand() };
-      } catch (error) {
-        appLog.error('[Graphify] Adding /graphify to Claude Code failed:', error);
-        return { success: false, error: errorMessage(error) };
-      }
-    }
-  );
 
   ipcMain.handle(
     IPC_CHANNELS.GRAPHIFY_GET_INDEX,

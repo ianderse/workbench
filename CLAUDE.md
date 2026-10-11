@@ -202,7 +202,7 @@ Settings > Updates) and builds a project's graph with `graphify extract <project
 `index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Memory page) is on,
 task runs and the Claude page (Insights) get `GRAPHIFY_OUT`, the graphify CLI on `PATH` and a prompt section about
 graphify's search commands (Insights limits Bash to those commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
-`~/.claude` and each Claude profile's config dir; "Claude Code command" row on Settings > Updates), and agent windows
+`~/.claude` and each Claude profile's config dir, after an install or update), and agent windows
 get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/knowledge`. Project memory
 settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
 

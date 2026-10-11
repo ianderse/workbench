@@ -529,7 +529,6 @@ export interface ElectronAPI {
   // Graphify CLI (memory graph)
   checkGraphifyVersion: (forceRefresh?: boolean) => Promise<IPCResult<import('./cli').GraphifyVersionInfo>>;
   installGraphify: () => Promise<IPCResult<{ command: string }>>;
-  installGraphifyClaudeCommand: () => Promise<IPCResult<{ configDirs: number; missing: number }>>;
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo | null>>;
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
