@@ -179,12 +179,6 @@ export const IPC_CHANNELS = {
   CONTEXT_GET: 'context:get',
   CONTEXT_REFRESH_INDEX: 'context:refreshIndex',
   CONTEXT_MEMORY_STATUS: 'context:memoryStatus',
-  CONTEXT_SEARCH_MEMORIES: 'context:searchMemories',
-  CONTEXT_GET_MEMORIES: 'context:getMemories',
-  CONTEXT_MEMORY_VERIFY: 'context:memory:verify',
-  CONTEXT_MEMORY_PIN: 'context:memory:pin',
-  CONTEXT_MEMORY_DEPRECATE: 'context:memory:deprecate',
-  CONTEXT_MEMORY_DELETE: 'context:memory:delete',
 
   // Environment configuration
   ENV_GET: 'env:get',

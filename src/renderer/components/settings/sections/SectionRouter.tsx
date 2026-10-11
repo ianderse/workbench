@@ -2,7 +2,6 @@ import { useTranslation } from 'react-i18next';
 import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig } from '../../../../shared/types';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
 import { SecuritySettings } from '../../project-settings/SecuritySettings';
-import { ProjectMemorySections } from '../../context/ProjectMemorySections';
 import { BranchSettings } from '../../project-settings/BranchSettings';
 import { InitializationGuard } from '../common/InitializationGuard';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
@@ -88,7 +87,6 @@ export function SectionRouter({
             expanded={true}
             onToggle={() => {}}
           />
-          <ProjectMemorySections projectId={project.id} />
         </InitializationGuard>
       );
 

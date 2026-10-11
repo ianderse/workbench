@@ -237,58 +237,10 @@ export interface MemorySystemState {
   errorLog: Array<{ timestamp: string; error: string }>;
 }
 
-export type MemoryType =
-  | 'gotcha'
-  | 'decision'
-  | 'preference'
-  | 'pattern'
-  | 'requirement'
-  | 'error_pattern'
-  | 'module_insight'
-  | 'prefetch_pattern'
-  | 'work_state'
-  | 'causal_dependency'
-  | 'task_calibration'
-  | 'e2e_observation'
-  | 'dead_end'
-  | 'work_unit_outcome'
-  | 'workflow_recipe'
-  | 'context_cost';
-
-export interface RendererMemory {
-  id: string;
-  type: MemoryType;
-  content: string;
-  confidence: number;
-  tags: string[];
-  relatedFiles: string[];
-  relatedModules: string[];
-  createdAt: string;
-  lastAccessedAt: string;
-  accessCount: number;
-  scope: 'global' | 'module' | 'work_unit' | 'session';
-  source: 'agent_explicit' | 'observer_inferred' | 'qa_auto' | 'mcp_auto' | 'commit_auto' | 'user_taught';
-  needsReview?: boolean;
-  userVerified?: boolean;
-  citationText?: string;
-  pinned?: boolean;
-  methodology?: string;
-  deprecated?: boolean;
-  // Search score (added by search results)
-  score?: number;
-}
-
-export interface ContextSearchResult {
-  content: string;
-  score: number;
-  type: string;
-}
-
 export interface ProjectContextData {
   projectIndex: ProjectIndex | null;
   memoryStatus: MemorySystemStatus | null;
   memoryState: MemorySystemState | null;
-  recentMemories: RendererMemory[];
   isLoading: boolean;
   error?: string;
 }

@@ -28,8 +28,6 @@ import type {
   ProjectContextData,
   ProjectIndex,
   MemorySystemStatus,
-  ContextSearchResult,
-  RendererMemory,
   ProjectEnvConfig,
   InfrastructureStatus,
   MemoryValidationResult,
@@ -355,14 +353,6 @@ export interface ElectronAPI {
   getProjectContext: (projectId: string) => Promise<IPCResult<ProjectContextData>>;
   refreshProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndex>>;
   getMemoryStatus: (projectId: string) => Promise<IPCResult<MemorySystemStatus>>;
-  searchMemories: (projectId: string, query: string) => Promise<IPCResult<ContextSearchResult[]>>;
-  getRecentMemories: (projectId: string, limit?: number) => Promise<IPCResult<RendererMemory[]>>;
-
-  // Memory Management
-  verifyMemory: (memoryId: string) => Promise<IPCResult<void>>;
-  pinMemory: (memoryId: string, pinned: boolean) => Promise<IPCResult<void>>;
-  deprecateMemory: (memoryId: string) => Promise<IPCResult<void>>;
-  deleteMemory: (memoryId: string) => Promise<IPCResult<void>>;
 
   // Environment configuration operations
   getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;

@@ -7,41 +7,14 @@ import type {
   IPCResult,
   ProjectContextData,
   ProjectIndex,
-  RendererMemory,
-  MemoryType,
 } from '../../../shared/types';
 import { projectStore } from '../../project-store';
 import { buildMemoryStatus } from './memory-status-handlers';
-import { getMemoryService } from './memory-service-factory';
 import { runProjectIndexer } from '../../ai/project/project-indexer';
-import type { Memory } from '../../ai/memory/types';
 
 // ============================================================
 // HELPERS
 // ============================================================
-
-function toRendererMemory(m: Memory): RendererMemory {
-  return {
-    id: m.id,
-    type: m.type as MemoryType,
-    content: m.content,
-    confidence: m.confidence,
-    tags: m.tags,
-    relatedFiles: m.relatedFiles,
-    relatedModules: m.relatedModules,
-    createdAt: m.createdAt,
-    lastAccessedAt: m.lastAccessedAt,
-    accessCount: m.accessCount,
-    scope: m.scope as RendererMemory['scope'],
-    source: m.source as RendererMemory['source'],
-    needsReview: m.needsReview,
-    userVerified: m.userVerified,
-    citationText: m.citationText,
-    pinned: m.pinned,
-    methodology: m.methodology,
-    deprecated: m.deprecated,
-  };
-}
 
 /**
  * Load project index from file
@@ -57,25 +30,6 @@ function loadProjectIndex(projectPath: string): ProjectIndex | null {
     return JSON.parse(content);
   } catch {
     return null;
-  }
-}
-
-/**
- * Load recent memories from the MemoryService with graceful degradation.
- */
-async function loadRecentMemories(projectId: string): Promise<RendererMemory[]> {
-  try {
-    const service = await getMemoryService();
-    const memories = await service.search({
-      projectId,
-      limit: 20,
-      sort: 'recency',
-      excludeDeprecated: true,
-    });
-    return memories.map(toRendererMemory);
-  } catch {
-    // Memory service unavailable — return empty list
-    return [];
   }
 }
 
@@ -105,16 +59,12 @@ export function registerProjectContextHandlers(
         // Build memory status (libSQL-based)
         const memoryStatus = await buildMemoryStatus();
 
-        // Load recent memories from memory service
-        const recentMemories = await loadRecentMemories(projectId);
-
         return {
           success: true,
           data: {
             projectIndex,
             memoryStatus,
             memoryState: null,
-            recentMemories,
             isLoading: false
           }
         };
