@@ -80,8 +80,13 @@ export function DetectedAccountDialog({ open, profile, onOpenChange, onSaved }: 
             <SettingsRow label={t('claudeAccounts.detected.provider')}>
               <span className="text-sm text-foreground">{t(`claudeAccounts.providers.${detected.provider}`)}</span>
             </SettingsRow>
-            <SettingsRow label={t('claudeAccounts.detected.profileDir')}>
-              <span className="break-all text-right font-mono text-xs text-(--nav-label-color)">{profile.configDir}</span>
+            {/* Where the account's credentials are defined */}
+            <SettingsRow label={t('claudeAccounts.detected.profile')}>
+              <span className="break-all text-right font-mono text-xs text-(--nav-label-color)">
+                {detected.credentials === 'environment'
+                  ? t('claudeAccounts.detected.fromEnvironment')
+                  : detected.credentials ?? profile.configDir}
+              </span>
             </SettingsRow>
             {detected.values.map((value) => (
               <SettingsRow

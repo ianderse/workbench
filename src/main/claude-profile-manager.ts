@@ -14,6 +14,7 @@
 import { app } from 'electron';
 import { join, resolve } from 'path';
 import { mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import { homedir } from 'os';
 import type {
   ClaudeProfile,
@@ -47,7 +48,7 @@ import {
   getProfilesSortedByAvailability as getProfilesSortedByAvailabilityImpl,
   getBestAvailableUnifiedAccount
 } from './claude-profile/profile-scorer';
-import { getCredentialsFromKeychain, normalizeWindowsPath, updateProfileSubscriptionMetadata } from './claude-profile/credential-utils';
+import { getCredentialsFromKeychain, getKeychainServiceName, normalizeWindowsPath, updateProfileSubscriptionMetadata } from './claude-profile/credential-utils';
 import { loadProfilesFile } from './services/profile/profile-manager';
 import {
   CLAUDE_PROFILES_DIR,
@@ -63,6 +64,7 @@ import {
 import { debugLog } from '../shared/utils/debug-logger';
 import { isWindows } from './platform';
 import { detectClaudeCodeSetups, detectedAccountName, type DetectedSetup } from './claude-profile/claude-code-detection';
+import { getDefaultClaudeConfigDir } from './claude-profile/config-dir-paths';
 
 /** Normalize a profile configDir for comparison (~ expansion, resolution, Windows case). */
 function normalizeConfigDir(configDir: string): string {
@@ -136,8 +138,9 @@ export class ClaudeProfileManager {
       debugLog('[ClaudeProfileManager] No existing profile store found, using defaults');
     }
 
-    // Claude Code's own setups (~/.claude, CLAUDE_CONFIG_DIR, ~/.claude-*) are listed as accounts
+    // Claude Code's own setups (~/.claude, CLAUDE_CONFIG_DIR, ~/.claude-*) are the accounts
     this.syncDetectedAccounts();
+    this.keepOnlyDetectedAccounts();
 
     // Run one-time migration to fix corrupted emails
     // This repairs emails that were truncated due to ANSI escape codes in terminal output
@@ -175,6 +178,7 @@ export class ClaudeProfileManager {
       setups = detectClaudeCodeSetups({
         excludeUnder: [CLAUDE_PROFILES_DIR],
         hasSubscriptionCredentials: (dir) => !!getCredentialsFromKeychain(dir).token,
+        keychainEntry: (dir) => getKeychainServiceName(dir),
       });
     } catch (error) {
       console.warn('[ClaudeProfileManager] Could not detect Claude Code accounts:', error);
@@ -221,6 +225,68 @@ export class ClaudeProfileManager {
     }
 
     if (changed) this.save();
+  }
+
+  /**
+   * Only Claude Code's own setups are accounts. Accounts added the old way (each in its own
+   * folder under ~/.claude-profiles) leave the list once a setup is detected; their folders stay.
+   * References to a removed account move to the detected account of the same Claude account, or
+   * to the one on Claude Code's default ~/.claude.
+   */
+  private keepOnlyDetectedAccounts(): void {
+    const detected = this.data.profiles.filter((profile) => profile.detected);
+    if (this.data.profiles.length === 0) {
+      // Every setup is gone: the default account until a sign-in adds one
+      const { profiles, activeProfileId } = this.createDefaultData();
+      this.data.profiles = profiles;
+      this.data.activeProfileId = activeProfileId;
+      this.save();
+      return;
+    }
+    if (detected.length === 0 || detected.length === this.data.profiles.length) return;
+
+    const fallback = detected.find((profile) => profile.detected?.isDefaultDir) ?? detected[0];
+    const idRemap = new Map<string, string>();
+    for (const profile of this.data.profiles) {
+      if (profile.detected) continue;
+      const email = profile.email?.toLowerCase();
+      const same = email ? detected.find((candidate) => candidate.email?.toLowerCase() === email) : undefined;
+      idRemap.set(profile.id, (same ?? fallback).id);
+    }
+
+    this.data.profiles = detected;
+    if (!detected.some((profile) => profile.isDefault)) fallback.isDefault = true;
+    this.remapRemovedProfiles(idRemap);
+    this.save();
+  }
+
+  /**
+   * Config dir that Claude Code's own sign-in (`claude auth login`) writes an account to: the
+   * account's own (to sign it in again); for a new account Claude Code's default ~/.claude while
+   * no setup uses it, then ~/.claude-2, ~/.claude-3, ... (Claude Code's way of keeping several
+   * accounts). Detection lists it afterwards.
+   */
+  getLoginConfigDir(profileId?: string): string {
+    const profile = profileId ? this.getProfile(profileId) : undefined;
+    if (profile?.detected && profile.configDir) return expandHomePath(profile.configDir);
+
+    const used = new Set(
+      this.data.profiles.filter((p) => p.detected && p.configDir).map((p) => normalizeConfigDir(p.configDir!))
+    );
+    const defaultDir = getDefaultClaudeConfigDir();
+    if (!used.has(normalizeConfigDir(defaultDir))) return defaultDir;
+    for (let n = 2; ; n++) {
+      const dir = join(homedir(), `.claude-${n}`);
+      if (!used.has(normalizeConfigDir(dir)) && !existsSync(dir)) return dir;
+    }
+  }
+
+  /** Detect Claude Code's setups again (after a sign-in) and return the accounts */
+  redetectAccounts(): ClaudeProfileSettings {
+    this.syncDetectedAccounts();
+    this.keepOnlyDetectedAccounts();
+    this.ensureUsableActiveProfile();
+    return this.getSettings();
   }
 
   /**

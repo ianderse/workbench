@@ -96,6 +96,7 @@ export interface TerminalAPI {
   getClaudeProfiles: () => Promise<IPCResult<ClaudeProfileSettings>>;
   saveClaudeProfile: (profile: ClaudeProfile) => Promise<IPCResult<ClaudeProfile>>;
   deleteClaudeProfile: (profileId: string) => Promise<IPCResult>;
+  redetectClaudeAccounts: () => Promise<IPCResult<ClaudeProfileSettings>>;
   renameClaudeProfile: (profileId: string, newName: string) => Promise<IPCResult>;
   setActiveClaudeProfile: (profileId: string) => Promise<IPCResult>;
   switchClaudeProfile: (terminalId: string, profileId: string) => Promise<IPCResult>;
@@ -392,6 +393,9 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   deleteClaudeProfile: (profileId: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_DELETE, profileId),
+
+  redetectClaudeAccounts: (): Promise<IPCResult<ClaudeProfileSettings>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_REDETECT),
 
   renameClaudeProfile: (profileId: string, newName: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_RENAME, profileId, newName),

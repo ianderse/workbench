@@ -320,7 +320,6 @@
     "title": "Accounts",
     "description": "Manage Claude accounts and API endpoints",
     "autoSwitching": {
-      "title": "Automatic account switching",
       "description": "Switch to another Claude account before or when the one in use hits a limit",
       "enableAutoSwitching": "Enable automatic switching",
       "masterSwitch": "Master switch for all auto-swap features",
@@ -550,9 +549,7 @@
     "inUse": "In use",
     "use": "Use this account",
     "signInAgain": "Sign in again",
-    "rename": "Rename",
     "details": "Details",
-    "remove": "Remove",
     "menu": "Actions for {{name}}",
     "notSignedIn": "Not signed in",
     "needsSignIn": "Needs to sign in again",
@@ -560,36 +557,16 @@
     "usage": "Session {{session}}% · Weekly {{weekly}}%",
     "add": "Add Claude account",
     "addButton": "Add",
-    "addDescription": "Sign in with another Claude subscription to switch to it when one hits a limit",
+    "addDescription": "Sign in with Claude Code's own login in a terminal",
     "addDescriptionMore": "Tasks switch to the next account when the one in use hits a limit",
     "dialog": {
-      "addTitle": "Add Claude account",
-      "addDescription": "Name the account, then sign in with Claude in your browser",
-      "renameTitle": "Rename account",
-      "renameDescription": "The name is only shown in Auto Claude",
       "name": "Account name",
-      "namePlaceholder": "Work, Personal...",
-      "signIn": "Sign in with Claude",
-      "tryAgain": "Try again",
-      "opening": "Opening your browser...",
-      "waiting": "Waiting for you to sign in...",
-      "signedIn": "Signed in",
-      "signedInAs": "Signed in as {{email}}",
-      "error": "Sign-in failed: {{error}}",
-      "errorGeneric": "Sign-in failed",
       "save": "Save",
-      "cancel": "Cancel",
-      "done": "Done"
-    },
-    "removeDialog": {
-      "title": "Remove account?",
-      "description": "\"{{name}}\" and its sign-in are removed from Auto Claude"
+      "cancel": "Cancel"
     },
     "toast": {
-      "removeFailed": "Couldn't remove the account",
       "renameFailed": "Couldn't rename the account",
-      "switchFailed": "Couldn't switch accounts",
-      "signInFailed": "Sign-in failed"
+      "switchFailed": "Couldn't switch accounts"
     },
     "providers": {
       "subscription": "Claude subscription",
@@ -606,8 +583,19 @@
     "detected": {
       "description": "Found in Claude Code's configuration",
       "provider": "Signs in with",
-      "profileDir": "Profile folder",
+      "profile": "Profile",
       "fromEnvironment": "Environment variable"
+    },
+    "login": {
+      "title": "Add Claude account",
+      "signInAgainTitle": "Sign in to {{name}} again",
+      "description": "Claude Code signs in and saves the credentials itself. Follow the steps below",
+      "checking": "Looking for the account...",
+      "signedInAs": "Signed in as {{email}}",
+      "signedIn": "Signed in",
+      "notSignedIn": "No new sign-in was found",
+      "failedToStart": "Couldn't start Claude Code's sign-in",
+      "close": "Close"
     }
   }
 }

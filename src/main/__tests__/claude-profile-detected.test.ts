@@ -1,6 +1,7 @@
 /**
  * Accounts found in Claude Code's configuration, synced on every start:
- * - each setup becomes an account listed with the others (usable, not removable, renamable)
+ * - each setup becomes an account (usable, not removable, renamable)
+ * - accounts added the old way leave the list once a setup is detected
  * - a later start updates its values and keeps its name; a setup that's gone drops its account
  * - a cloud provider setup counts as signed in (Claude Code authenticates it)
  */
@@ -65,7 +66,7 @@ describe('accounts found in Claude Code configuration', () => {
 
     const manager = await start();
     const account = manager.getSettings().profiles.find((profile) => profile.detected);
-    expect(account).toMatchObject({ name: 'Claude Code (work)', configDir: workDir, isDefault: false, detected: { provider: 'bedrock' } });
+    expect(account).toMatchObject({ name: 'Claude Code (work)', configDir: workDir, isDefault: true, detected: { provider: 'bedrock' } });
 
     // Claude Code authenticates a cloud provider: usable like a signed-in account
     expect(manager.hasValidAuth(account!.id)).toBe(true);
@@ -81,17 +82,19 @@ describe('accounts found in Claude Code configuration', () => {
     expect(again?.detected?.values.find((value) => value.key === 'AWS_REGION')?.value).toBe('eu-west-1');
   });
 
-  it('drops an account whose setup is gone, and keeps the accounts the user added', async () => {
+  it('keeps only the detected setups, and drops an account whose setup is gone', async () => {
     const workDir = join(root, 'home', '.claude-work');
     mkdirSync(workDir, { recursive: true });
     setupsRef.setups = [bedrock(workDir, 'us-east-1')];
     const first = await start();
-    const before = first.getSettings().profiles.map((profile) => profile.id);
-    expect(before).toHaveLength(2);
+    // The default account added the old way leaves the list
+    expect(first.getSettings().profiles.map((profile) => profile.name)).toEqual(['Claude Code (work)']);
+    expect(first.getSettings().activeProfileId).toBe('claude-code-work');
 
     setupsRef.setups = [];
     const restarted = await start();
     const profiles = restarted.getSettings().profiles;
+    // With no setup left, the default account comes back until a sign-in adds one
     expect(profiles.some((profile) => profile.detected)).toBe(false);
     expect(profiles.map((profile) => profile.name)).toEqual(['Primary']);
   });

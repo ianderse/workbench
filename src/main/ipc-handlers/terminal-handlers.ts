@@ -228,6 +228,18 @@ export function registerTerminalHandlers(
     }
   );
 
+  // After Claude Code's own sign-in in a terminal: list the account it signed in
+  ipcMain.handle(
+    IPC_CHANNELS.CLAUDE_ACCOUNTS_REDETECT,
+    async (): Promise<IPCResult<ClaudeProfileSettings>> => {
+      try {
+        return { success: true, data: getClaudeProfileManager().redetectAccounts() };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to detect accounts' };
+      }
+    }
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.CLAUDE_PROFILE_DELETE,
     async (_, profileId: string): Promise<IPCResult> => {

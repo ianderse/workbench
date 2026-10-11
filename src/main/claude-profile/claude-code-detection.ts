@@ -85,6 +85,14 @@ export interface DetectionOptions {
   excludeUnder?: string[];
   /** Whether a config dir holds a subscription sign-in's credentials (keychain or file) */
   hasSubscriptionCredentials: (configDir: string) => boolean;
+  /** macOS Keychain entry of a config dir's sign-in (when it has no credentials file) */
+  keychainEntry?: (configDir: string) => string;
+}
+
+/** A path with the home dir shortened to `~` */
+function tildify(file: string): string {
+  const home = homedir();
+  return file === home || file.startsWith(home + path.sep) ? `~${file.slice(home.length)}` : file;
 }
 
 interface Source {
@@ -170,11 +178,21 @@ export function readClaudeCodeSetup(configDir: string, options: DetectionOptions
 
   // Claude Code's authentication precedence
   const set = (name: string) => effective.get(name)?.value;
-  let provider: ClaudeCodeProvider | null = PROVIDER_SWITCHES.find(([name]) => isOn(set(name)))?.[1] ?? null;
-  if (!provider && set('ANTHROPIC_AUTH_TOKEN')) provider = 'auth-token';
-  if (!provider && set('ANTHROPIC_API_KEY')) provider = 'api-key';
-  if (!provider && set('apiKeyHelper')) provider = 'api-key-helper';
-  if (!provider && set('CLAUDE_CODE_OAUTH_TOKEN')) provider = 'oauth-token';
+  const providerSwitch = PROVIDER_SWITCHES.find(([name]) => isOn(set(name)));
+  let provider: ClaudeCodeProvider | null = providerSwitch?.[1] ?? null;
+  // The value that selects the provider (where its credentials are defined)
+  let decidingKey: string | undefined = providerSwitch?.[0];
+  for (const [key, keyProvider] of [
+    ['ANTHROPIC_AUTH_TOKEN', 'auth-token'],
+    ['ANTHROPIC_API_KEY', 'api-key'],
+    ['apiKeyHelper', 'api-key-helper'],
+    ['CLAUDE_CODE_OAUTH_TOKEN', 'oauth-token'],
+  ] as const) {
+    if (!provider && set(key)) {
+      provider = keyProvider;
+      decidingKey = key;
+    }
+  }
   if (!provider && signedIn) provider = 'subscription';
   if (!provider) return null;
 
@@ -185,10 +203,24 @@ export function readClaudeCodeSetup(configDir: string, options: DetectionOptions
     if (!signedIn && !ownValues) return null;
   }
 
+  // Where the credentials are defined: the sign-in's credentials file (or its macOS Keychain
+  // entry), or the file (or environment) that configures the provider
+  let credentials: string;
+  if (provider === 'subscription') {
+    const file = path.join(configDir, '.credentials.json');
+    credentials = existsSync(file) || !isMacOS()
+      ? tildify(file)
+      : `Keychain: ${options.keychainEntry?.(configDir) ?? 'Claude Code-credentials'}`;
+  } else {
+    const source = decidingKey ? effective.get(decidingKey)?.source.label : undefined;
+    credentials = !source || source === 'environment' ? 'environment' : tildify(source);
+  }
+
   return {
     configDir,
     provider,
     isDefaultDir,
+    credentials,
     ...(provider === 'subscription' || signedIn ? { email, organization: str(account?.organizationName), plan } : {}),
     values,
   };

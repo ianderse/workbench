@@ -60,7 +60,7 @@ describe('config dir paths', () => {
 describe('detectClaudeCodeSetups', () => {
   it('finds a subscription sign-in and a cloud provider setup, and masks secrets', () => {
     const defaultDir = path.join(homeRef.dir, '.claude');
-    mkdirSync(defaultDir);
+    write(path.join(defaultDir, '.credentials.json'), { claudeAiOauth: { accessToken: 'x' } });
     write(path.join(homeRef.dir, '.claude.json'), {
       oauthAccount: { emailAddress: 'me@example.com', organizationName: 'Me', organizationType: 'claude_max' },
     });
@@ -80,6 +80,9 @@ describe('detectClaudeCodeSetups', () => {
       ['.claude-work', 'bedrock'],
     ]);
     expect(setups[0]).toMatchObject({ isDefaultDir: true, email: 'me@example.com', organization: 'Me', plan: 'max' });
+    // Where each account's credentials are defined
+    expect(setups[0].credentials).toBe(path.join('~', '.claude', '.credentials.json'));
+    expect(setups[1].credentials).toBe(path.join('~', '.claude-work', 'settings.json'));
     expect(detectedAccountName(setups[0])).toBe('Claude Code');
     expect(detectedAccountName(setups[1])).toBe('Claude Code (work)');
 

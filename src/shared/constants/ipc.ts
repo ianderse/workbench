@@ -118,6 +118,7 @@ export const IPC_CHANNELS = {
   CLAUDE_PROFILES_GET: 'claude:profilesGet',
   CLAUDE_PROFILE_SAVE: 'claude:profileSave',
   CLAUDE_PROFILE_DELETE: 'claude:profileDelete',
+  CLAUDE_ACCOUNTS_REDETECT: 'claude:accountsRedetect',  // Detect Claude Code's setups again after a sign-in
   CLAUDE_PROFILE_RENAME: 'claude:profileRename',
   CLAUDE_PROFILE_SET_ACTIVE: 'claude:profileSetActive',
   CLAUDE_PROFILE_SWITCH: 'claude:profileSwitch',

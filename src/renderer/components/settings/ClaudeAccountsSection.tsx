@@ -1,97 +1,53 @@
 /**
- * Claude accounts (Accounts page): the Claude subscriptions Claude Code signs in
- * with. One account is in use; with automatic switching on, tasks move to the next account when
- * it hits a limit. Each row shows the account's email and usage; its menu switches to it, signs
- * in again, renames or removes it.
+ * Claude accounts (Accounts page): the Claude Code setups found in its own configuration (see
+ * claude-code-detection). One account is in use; with automatic switching on, tasks move to the
+ * next account when it hits a limit. Each row shows the account's email and usage (or its
+ * provider); its menu switches to it, signs it in again and shows its details. Adding an account
+ * runs Claude Code's own sign-in in a terminal.
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, Info, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
-import { Button, buttonVariants } from '../ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger
-} from '../ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle
-} from '../ui/alert-dialog';
+import { Check, Info, MoreHorizontal, Plus, RefreshCw } from 'lucide-react';
+import { Button } from '../ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { cn } from '../../lib/utils';
 import { SettingsRow } from './SettingsRow';
-import { ClaudeAccountDialog } from './ClaudeAccountDialog';
+import { ClaudeLoginDialog } from './ClaudeLoginDialog';
 import { DetectedAccountDialog } from './DetectedAccountDialog';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
 import type { ClaudeProfile } from '../../../shared/types';
 
 export function ClaudeAccountsSection() {
   const { t } = useTranslation('settings');
-  const { profiles, activeProfileId, usage, reload } = useClaudeAccounts();
+  const { profiles: allProfiles, activeProfileId, usage, reload } = useClaudeAccounts();
+  // Only Claude Code's own setups are accounts
+  const profiles = allProfiles.filter((profile) => profile.detected);
 
-  const [dialog, setDialog] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
-  // Details (and name) of an account found in Claude Code's configuration
+  // Claude Code's sign-in in a terminal: a new account, or one to sign in again
+  const [login, setLogin] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
+  // Details (and name) of an account
   const [details, setDetails] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
-  const [removeTarget, setRemoveTarget] = useState<ClaudeProfile | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   // The last failed action on an account, shown in its row instead of the description
   const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
-  const fail = (id: string, title: string, detail?: string) =>
-    setRowError({ id, message: detail ? `${title}: ${detail}` : title });
 
   const handleUse = async (profile: ClaudeProfile) => {
     setBusyId(profile.id);
     setRowError(null);
     try {
       const result = await window.electronAPI.setActiveClaudeProfile(profile.id);
-      if (!result.success) fail(profile.id, t('claudeAccounts.toast.switchFailed'), result.error);
-      await reload();
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleSignInAgain = async (profile: ClaudeProfile) => {
-    setBusyId(profile.id);
-    setRowError(null);
-    try {
-      // The row shows the signed-in account once it reloads
-      const result = await window.electronAPI.claudeAuthLoginSubprocess(profile.id);
-      if (!(result.success && result.data?.authenticated)) {
-        fail(profile.id, t('claudeAccounts.toast.signInFailed'), result.error);
+      if (!result.success) {
+        const title = t('claudeAccounts.toast.switchFailed');
+        setRowError({ id: profile.id, message: result.error ? `${title}: ${result.error}` : title });
       }
       await reload();
-    } catch (err) {
-      fail(profile.id, t('claudeAccounts.toast.signInFailed'), err instanceof Error ? err.message : undefined);
     } finally {
       setBusyId(null);
-    }
-  };
-
-  const confirmRemove = async () => {
-    if (!removeTarget) return;
-    const target = removeTarget;
-    setBusyId(target.id);
-    setRowError(null);
-    try {
-      const result = await window.electronAPI.deleteClaudeProfile(target.id);
-      if (!result.success) fail(target.id, t('claudeAccounts.toast.removeFailed'), result.error);
-      await reload();
-    } finally {
-      setBusyId(null);
-      setRemoveTarget(null);
     }
   };
 
   const describe = (profile: ClaudeProfile): string => {
-    // A detected setup on a cloud provider, an API key or a gateway: what it reaches Claude through
+    // A setup on a cloud provider, an API key or a gateway: what it reaches Claude through
     const detected = profile.detected;
     if (detected && detected.provider !== 'subscription') {
       const where = ['AWS_REGION', 'CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID', 'ANTHROPIC_FOUNDRY_RESOURCE', 'ANTHROPIC_BASE_URL']
@@ -156,36 +112,17 @@ export function ClaudeAccountsSection() {
                   <Check className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
                   {isActive ? t('claudeAccounts.inUse') : t('claudeAccounts.use')}
                 </DropdownMenuItem>
-                {profile.detected ? (
-                  // Found in Claude Code's configuration: its details (and name), never removed
-                  <DropdownMenuItem className="cursor-pointer" onSelect={() => setDetails({ open: true, profile })}>
-                    <Info className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                    {t('claudeAccounts.details')}
+                {/* A subscription sign-in signs in again with Claude Code's own login */}
+                {profile.detected?.provider === 'subscription' && (
+                  <DropdownMenuItem className="cursor-pointer" onSelect={() => setLogin({ open: true, profile })}>
+                    <RefreshCw className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                    {t('claudeAccounts.signInAgain')}
                   </DropdownMenuItem>
-                ) : (
-                  <>
-                    <DropdownMenuItem className="cursor-pointer" onSelect={() => void handleSignInAgain(profile)}>
-                      <RefreshCw className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                      {t('claudeAccounts.signInAgain')}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="cursor-pointer" onSelect={() => setDialog({ open: true, profile })}>
-                      <Pencil className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                      {t('claudeAccounts.rename')}
-                    </DropdownMenuItem>
-                  </>
                 )}
-                {!profile.isDefault && !profile.detected && (
-                  <>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      className="cursor-pointer text-destructive focus:bg-destructive/10 focus:text-destructive"
-                      onSelect={() => setRemoveTarget(profile)}
-                    >
-                      <Trash2 className="h-4 w-4" strokeWidth={1.75} />
-                      {t('claudeAccounts.remove')}
-                    </DropdownMenuItem>
-                  </>
-                )}
+                <DropdownMenuItem className="cursor-pointer" onSelect={() => setDetails({ open: true, profile })}>
+                  <Info className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                  {t('claudeAccounts.details')}
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SettingsRow>
@@ -195,11 +132,18 @@ export function ClaudeAccountsSection() {
         label={t('claudeAccounts.add')}
         description={profiles.length > 1 ? t('claudeAccounts.addDescriptionMore') : t('claudeAccounts.addDescription')}
       >
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setDialog({ open: true })}>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setLogin({ open: true })}>
           <Plus className="h-4 w-4" strokeWidth={1.75} />
           {t('claudeAccounts.addButton')}
         </Button>
       </SettingsRow>
+
+      <ClaudeLoginDialog
+        open={login.open}
+        profile={login.profile}
+        onOpenChange={(open) => setLogin((current) => ({ ...current, open }))}
+        onDetected={() => void reload()}
+      />
 
       <DetectedAccountDialog
         open={details.open}
@@ -207,34 +151,6 @@ export function ClaudeAccountsSection() {
         onOpenChange={(open) => setDetails((current) => ({ ...current, open }))}
         onSaved={() => void reload()}
       />
-
-      <ClaudeAccountDialog
-        open={dialog.open}
-        profile={dialog.profile}
-        onOpenChange={(open) => setDialog((current) => ({ ...current, open }))}
-        onSaved={() => void reload()}
-      />
-
-      <AlertDialog open={removeTarget !== null} onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('claudeAccounts.removeDialog.title')}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t('claudeAccounts.removeDialog.description', { name: removeTarget?.name ?? '' })}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busyId !== null}>{t('claudeAccounts.dialog.cancel')}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmRemove}
-              disabled={busyId !== null}
-              className={buttonVariants({ variant: 'destructive', size: 'sm' })}
-            >
-              {t('claudeAccounts.remove')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </>
   );
 }

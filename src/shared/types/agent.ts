@@ -228,6 +228,12 @@ export interface DetectedClaudeCodeAccount {
   provider: ClaudeCodeProvider;
   /** The config dir is Claude Code's default `~/.claude` (runs without CLAUDE_CONFIG_DIR) */
   isDefaultDir: boolean;
+  /**
+   * Where its credentials are defined: the sign-in's `.credentials.json` (`~`-shortened), a
+   * "Keychain: <entry>" on macOS, the settings file that configures the provider, or
+   * "environment"
+   */
+  credentials?: string;
   /** Claude account (subscription sign-ins) */
   email?: string;
   organization?: string;

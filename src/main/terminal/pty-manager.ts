@@ -7,7 +7,7 @@ import * as pty from '@lydell/node-pty';
 import * as os from 'os';
 import { existsSync } from 'fs';
 import type { TerminalProcess, WindowGetter, WindowsShellType } from './types';
-import { isWindows, getWindowsShellPaths } from '../platform';
+import { isWindows, getWindowsShellPaths, requiresShell } from '../platform';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeProfileManager } from '../claude-profile-manager';
@@ -149,7 +149,9 @@ export function spawnPtyProcess(
   cwd: string,
   cols: number,
   rows: number,
-  profileEnv?: Record<string, string>
+  profileEnv?: Record<string, string>,
+  /** A program to run instead of the user's shell */
+  command?: { file: string; args: string[] }
 ): SpawnPtyResult {
   // Read user's preferred terminal setting
   const settings = readSettingsFile();
@@ -167,7 +169,17 @@ export function spawnPtyProcess(
     shellType = undefined; // Not applicable on Unix
   }
 
-  const shellArgs = isWindows() ? [] : ['-l'];
+  let shellArgs = isWindows() ? [] : ['-l'];
+  if (command) {
+    // Windows .cmd/.bat launchers run through cmd.exe
+    if (isWindows() && requiresShell(command.file)) {
+      shell = process.env.COMSPEC || 'cmd.exe';
+      shellArgs = ['/c', command.file, ...command.args];
+    } else {
+      shell = command.file;
+      shellArgs = command.args;
+    }
+  }
 
   debugLog('[PtyManager] Spawning shell:', shell, shellArgs, '(preferred:', preferredTerminal || 'system', ', shellType:', shellType, ')');
   debugLog('[PtyManager] PTY dimensions requested - cols:', cols, 'rows:', rows, 'cwd:', cwd || os.homedir());

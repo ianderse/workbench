@@ -2,8 +2,8 @@
  * AccountSettings - how Claude Code signs in
  *
  * claude.ai settings layout: Claude accounts (subscriptions, with usage), API profiles
- * (Anthropic-compatible endpoints), spending per project (Metrics) and automatic account
- * switching.
+ * (Anthropic-compatible endpoints) and automatic account switching, then spending per project
+ * (Metrics).
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -30,7 +30,7 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
 
   const [autoSwitchSettings, setAutoSwitchSettings] = useState<ClaudeAutoSwitchSettings | null>(null);
   const [isLoadingAutoSwitch, setIsLoadingAutoSwitch] = useState(false);
-  // A failed settings change, shown at the top of the switching section
+  // A failed settings change, shown in place of the switching setting's description
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const showUpdateFailed = useCallback((description?: string) => {
     setSettingsError(`${t('accounts.toast.settingsUpdateFailed')}: ${description || t('accounts.toast.tryAgain')}`);
@@ -109,22 +109,18 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
         <SettingsRows>
           <ClaudeAccountsSection />
           <ProfileList />
-        </SettingsRows>
-      </SettingsSection>
 
-      {/* Spending per project (all tasks' Claude Code run costs) */}
-      <ProjectMetricsSection />
-
-      {/* Automatic account switching */}
-      {totalAccounts > 1 && (
-        <SettingsSection title={t('accounts.autoSwitching.title')}>
-          {settingsError && (
-            <p role="alert" className="mb-3 text-sm text-destructive">{settingsError}</p>
-          )}
-          <SettingsRows>
+          {/* Automatic account switching: once there's another account to switch to */}
+          {totalAccounts > 1 && (
             <SettingsRow
               label={t('accounts.autoSwitching.enableAutoSwitching')}
-              description={t('accounts.autoSwitching.description')}
+              description={
+                settingsError ? (
+                  <span role="alert" className="text-destructive">{settingsError}</span>
+                ) : (
+                  t('accounts.autoSwitching.description')
+                )
+              }
             >
               <Switch
                 checked={autoSwitchSettings?.enabled ?? false}
@@ -133,89 +129,92 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
                 aria-label={t('accounts.autoSwitching.enableAutoSwitching')}
               />
             </SettingsRow>
+          )}
 
-            {autoSwitchSettings?.enabled && (
-              <SettingsRow
-                label={t('accounts.autoSwitching.proactiveMonitoring')}
-                description={t('accounts.autoSwitching.proactiveDescription')}
-              >
-                <Switch
-                  checked={autoSwitchSettings?.proactiveSwapEnabled ?? true}
-                  onCheckedChange={(value) => handleUpdateAutoSwitch({ proactiveSwapEnabled: value })}
-                  disabled={isLoadingAutoSwitch}
-                  aria-label={t('accounts.autoSwitching.proactiveMonitoring')}
-                />
-              </SettingsRow>
-            )}
+          {totalAccounts > 1 && autoSwitchSettings?.enabled && (
+            <SettingsRow
+              label={t('accounts.autoSwitching.proactiveMonitoring')}
+              description={t('accounts.autoSwitching.proactiveDescription')}
+            >
+              <Switch
+                checked={autoSwitchSettings?.proactiveSwapEnabled ?? true}
+                onCheckedChange={(value) => handleUpdateAutoSwitch({ proactiveSwapEnabled: value })}
+                disabled={isLoadingAutoSwitch}
+                aria-label={t('accounts.autoSwitching.proactiveMonitoring')}
+              />
+            </SettingsRow>
+          )}
 
-            {autoSwitchSettings?.enabled && autoSwitchSettings?.proactiveSwapEnabled && (
-              <SettingsRow
-                label={t('accounts.autoSwitching.sessionThreshold')}
-                htmlFor="session-threshold"
-                description={
-                  <span id="session-threshold-description">
-                    {t('accounts.autoSwitching.sessionThresholdDescription')}
-                  </span>
-                }
-              >
-                {thresholdSlider(
-                  'session-threshold',
-                  autoSwitchSettings?.sessionThreshold ?? 95,
-                  (value) => handleUpdateAutoSwitch({ sessionThreshold: value }),
-                  'session-threshold-description'
-                )}
-              </SettingsRow>
-            )}
+          {totalAccounts > 1 && autoSwitchSettings?.enabled && autoSwitchSettings?.proactiveSwapEnabled && (
+            <SettingsRow
+              label={t('accounts.autoSwitching.sessionThreshold')}
+              htmlFor="session-threshold"
+              description={
+                <span id="session-threshold-description">
+                  {t('accounts.autoSwitching.sessionThresholdDescription')}
+                </span>
+              }
+            >
+              {thresholdSlider(
+                'session-threshold',
+                autoSwitchSettings?.sessionThreshold ?? 95,
+                (value) => handleUpdateAutoSwitch({ sessionThreshold: value }),
+                'session-threshold-description'
+              )}
+            </SettingsRow>
+          )}
 
-            {autoSwitchSettings?.enabled && autoSwitchSettings?.proactiveSwapEnabled && (
-              <SettingsRow
-                label={t('accounts.autoSwitching.weeklyThreshold')}
-                htmlFor="weekly-threshold"
-                description={
-                  <span id="weekly-threshold-description">
-                    {t('accounts.autoSwitching.weeklyThresholdDescription')}
-                  </span>
-                }
-              >
-                {thresholdSlider(
-                  'weekly-threshold',
-                  autoSwitchSettings?.weeklyThreshold ?? 99,
-                  (value) => handleUpdateAutoSwitch({ weeklyThreshold: value }),
-                  'weekly-threshold-description'
-                )}
-              </SettingsRow>
-            )}
+          {totalAccounts > 1 && autoSwitchSettings?.enabled && autoSwitchSettings?.proactiveSwapEnabled && (
+            <SettingsRow
+              label={t('accounts.autoSwitching.weeklyThreshold')}
+              htmlFor="weekly-threshold"
+              description={
+                <span id="weekly-threshold-description">
+                  {t('accounts.autoSwitching.weeklyThresholdDescription')}
+                </span>
+              }
+            >
+              {thresholdSlider(
+                'weekly-threshold',
+                autoSwitchSettings?.weeklyThreshold ?? 99,
+                (value) => handleUpdateAutoSwitch({ weeklyThreshold: value }),
+                'weekly-threshold-description'
+              )}
+            </SettingsRow>
+          )}
 
-            {autoSwitchSettings?.enabled && (
-              <SettingsRow
-                label={t('accounts.autoSwitching.reactiveRecovery')}
-                description={t('accounts.autoSwitching.reactiveDescription')}
-              >
-                <Switch
-                  checked={autoSwitchSettings?.autoSwitchOnRateLimit ?? false}
-                  onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnRateLimit: value })}
-                  disabled={isLoadingAutoSwitch}
-                  aria-label={t('accounts.autoSwitching.reactiveRecovery')}
-                />
-              </SettingsRow>
-            )}
+          {totalAccounts > 1 && autoSwitchSettings?.enabled && (
+            <SettingsRow
+              label={t('accounts.autoSwitching.reactiveRecovery')}
+              description={t('accounts.autoSwitching.reactiveDescription')}
+            >
+              <Switch
+                checked={autoSwitchSettings?.autoSwitchOnRateLimit ?? false}
+                onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnRateLimit: value })}
+                disabled={isLoadingAutoSwitch}
+                aria-label={t('accounts.autoSwitching.reactiveRecovery')}
+              />
+            </SettingsRow>
+          )}
 
-            {autoSwitchSettings?.enabled && (
-              <SettingsRow
-                label={t('accounts.autoSwitching.autoSwitchOnAuthFailure')}
-                description={t('accounts.autoSwitching.autoSwitchOnAuthFailureDescription')}
-              >
-                <Switch
-                  checked={autoSwitchSettings?.autoSwitchOnAuthFailure ?? false}
-                  onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnAuthFailure: value })}
-                  disabled={isLoadingAutoSwitch}
-                  aria-label={t('accounts.autoSwitching.autoSwitchOnAuthFailure')}
-                />
-              </SettingsRow>
-            )}
-          </SettingsRows>
-        </SettingsSection>
-      )}
+          {totalAccounts > 1 && autoSwitchSettings?.enabled && (
+            <SettingsRow
+              label={t('accounts.autoSwitching.autoSwitchOnAuthFailure')}
+              description={t('accounts.autoSwitching.autoSwitchOnAuthFailureDescription')}
+            >
+              <Switch
+                checked={autoSwitchSettings?.autoSwitchOnAuthFailure ?? false}
+                onCheckedChange={(value) => handleUpdateAutoSwitch({ autoSwitchOnAuthFailure: value })}
+                disabled={isLoadingAutoSwitch}
+                aria-label={t('accounts.autoSwitching.autoSwitchOnAuthFailure')}
+              />
+            </SettingsRow>
+          )}
+        </SettingsRows>
+      </SettingsSection>
+
+      {/* Spending per project (all tasks' Claude Code run costs) */}
+      <ProjectMetricsSection />
     </>
   );
 }
