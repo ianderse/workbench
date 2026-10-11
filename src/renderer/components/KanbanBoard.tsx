@@ -21,7 +21,7 @@ import {
   sortableKeyboardCoordinates,
   verticalListSortingStrategy
 } from '@dnd-kit/sortable';
-import { Plus, Inbox, Loader2, Eye, CheckCircle2, Archive, RefreshCw, ListPlus } from 'lucide-react';
+import { Plus, Inbox, Loader2, Eye, CheckCircle2, Archive, RefreshCw } from 'lucide-react';
 import { SettingsIcon as Settings } from './icons/app-icons';
 import { ScrollArea } from './ui/scroll-area';
 import { Button } from './ui/button';
@@ -74,7 +74,6 @@ interface DroppableColumnProps {
   isOver: boolean;
   onAddClick?: () => void;
   onArchiveAll?: () => void;
-  onQueueAll?: () => void;
   maxParallelTasks?: number;
   archivedCount?: number;
   showArchived?: boolean;
@@ -119,7 +118,6 @@ function droppableColumnPropsAreEqual(
   if (prevProps.onStatusChange !== nextProps.onStatusChange) return false;
   if (prevProps.onAddClick !== nextProps.onAddClick) return false;
   if (prevProps.onArchiveAll !== nextProps.onArchiveAll) return false;
-  if (prevProps.onQueueAll !== nextProps.onQueueAll) return false;
   if (prevProps.maxParallelTasks !== nextProps.maxParallelTasks) return false;
   if (prevProps.archivedCount !== nextProps.archivedCount) return false;
   if (prevProps.showArchived !== nextProps.showArchived) return false;
@@ -183,7 +181,7 @@ const getEmptyStateContent = (status: TaskStatus, t: (key: string) => string): {
   }
 };
 
-const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskClick, onStatusChange, isOver, onAddClick, onArchiveAll, onQueueAll, maxParallelTasks, archivedCount, showArchived, onToggleArchived }: DroppableColumnProps) {
+const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskClick, onStatusChange, isOver, onAddClick, onArchiveAll, maxParallelTasks, archivedCount, showArchived, onToggleArchived }: DroppableColumnProps) {
   const { t } = useTranslation(['tasks', 'common']);
   const { setNodeRef } = useDroppable({
     id: status
@@ -275,31 +273,16 @@ const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskCli
           )}
         </div>
         <div className="flex items-center gap-1">
-          {status === 'backlog' && (
-            <>
-              {onQueueAll && tasks.length > 0 && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
-                  onClick={onQueueAll}
-                  title={t('queue.queueAll')}
-                >
-                  <ListPlus className="h-4 w-4" />
-                </Button>
-              )}
-              {onAddClick && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
-                  onClick={onAddClick}
-                  aria-label={t('kanban.addTaskAriaLabel')}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              )}
-            </>
+          {status === 'backlog' && onAddClick && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
+              onClick={onAddClick}
+              aria-label={t('kanban.addTaskAriaLabel')}
+            >
+              <Plus className="h-4 w-4" />
+            </Button>
           )}
           {status === 'done' && onArchiveAll && tasks.length > 0 && !showArchived && (
             <Button
@@ -617,24 +600,6 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
     }
   };
 
-  /**
-   * Move all backlog tasks to queue
-   */
-  const handleQueueAll = async () => {
-    const backlogTasks = tasksByStatus.backlog;
-    if (backlogTasks.length === 0) return;
-
-    for (const task of backlogTasks) {
-      const result = await persistTaskStatus(task.id, 'queue');
-      if (!result.success) {
-        console.error(`[Queue] Failed to move task ${task.id} to queue:`, result.error);
-      }
-    }
-
-    // The main process starts queued tasks that fit the parallel task limit; the moved tasks
-    // show up in the Queue column
-  };
-
   // Get task order actions from store
   const reorderTasksInColumn = useTaskStore((state) => state.reorderTasksInColumn);
   const moveTaskToColumnTop = useTaskStore((state) => state.moveTaskToColumnTop);
@@ -828,7 +793,6 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
               onStatusChange={handleStatusChange}
               isOver={overColumnId === status}
               onAddClick={status === 'backlog' ? onNewTaskClick : undefined}
-              onQueueAll={status === 'backlog' ? handleQueueAll : undefined}
               onArchiveAll={status === 'done' ? handleArchiveAll : undefined}
               maxParallelTasks={status === 'in_progress' ? maxParallelTasks : undefined}
               archivedCount={status === 'done' ? archivedCount : undefined}
