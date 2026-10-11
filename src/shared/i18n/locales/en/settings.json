@@ -548,8 +548,7 @@
       "fallbackNone": "None"
     },
     "agentWindows": {
-      "title": "Agent windows",
-      "skipPermissions": "Skip permission prompts in agent windows",
+      "skipPermissions": "Skip permission prompts",
       "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions, so it runs commands and edits files without asking"
     }
   },

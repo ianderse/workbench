@@ -194,12 +194,7 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             </Select>
           </SettingsRow>
 
-        </SettingsRows>
-      </SettingsSection>
-
-      {/* Agent windows (terminals) start Claude Code with or without permission prompts */}
-      <SettingsSection title={t('claudeCode.agentWindows.title')}>
-        <SettingsRows>
+          {/* Agent windows (terminals) start Claude Code with or without permission prompts */}
           <SettingsRow
             label={t('claudeCode.agentWindows.skipPermissions')}
             description={t('claudeCode.agentWindows.skipPermissionsDescription')}
