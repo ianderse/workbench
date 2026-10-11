@@ -420,9 +420,6 @@
     "title": "Terminal Fonts",
     "description": "Customize terminal font appearance and behavior",
     "configActions": "Configuration:",
-    "export": "Export JSON",
-    "import": "Import JSON",
-    "copy": "Copy to clipboard",
     "cursorConfig": {
       "cursorStyle": "Cursor style",
       "cursorStyleDescription": "Choose the appearance of the terminal cursor",
@@ -434,17 +431,6 @@
       "scrollback": "Scrollback limit",
       "scrollbackDescription": "Maximum number of lines to keep in terminal history",
       "kValue": "{{value}}K"
-    },
-    "importExport": {
-      "exportFailed": "Failed to export settings",
-      "importFailed": "Failed to import settings: Invalid JSON format",
-      "importFailedRange": "Failed to import settings: Values out of valid range",
-      "copyFailed": "Failed to copy to clipboard",
-      "fileTooLarge": "Import file too large (max 10KB)",
-      "readError": "Failed to read file",
-      "title": "Configuration",
-      "label": "Import and export",
-      "description": "Save, load or copy your terminal settings as JSON"
     },
     "slider": {
       "decrease": "Decrease {{label}} by {{step}}",

@@ -160,10 +160,6 @@ interface TerminalFontSettingsStore extends TerminalFontSettings {
   applyPreset: (presetName: string) => boolean;
   resetToDefaults: () => void;
   applySettings: (settings: Partial<TerminalFontSettings>) => boolean;
-
-  // Import/Export
-  exportSettings: () => string;
-  importSettings: (json: string) => boolean;
 }
 
 /**
@@ -278,109 +274,6 @@ export const useTerminalFontSettingsStore = create<TerminalFontSettingsStore>()(
         return true;
       },
 
-      // Import/Export
-      exportSettings: (): string => {
-        const state = get();
-        return JSON.stringify({
-          fontFamily: state.fontFamily,
-          fontSize: state.fontSize,
-          fontWeight: state.fontWeight,
-          lineHeight: state.lineHeight,
-          letterSpacing: state.letterSpacing,
-          cursorStyle: state.cursorStyle,
-          cursorBlink: state.cursorBlink,
-          cursorAccentColor: state.cursorAccentColor,
-          scrollback: state.scrollback,
-        }, null, 2);
-      },
-
-      importSettings: (json: string) => {
-        try {
-          const parsed = JSON.parse(json);
-
-          // Validate parsed object is an object
-          if (typeof parsed !== 'object' || parsed === null) {
-            return false;
-          }
-
-          // Build a validated settings object
-          const validatedSettings: Partial<TerminalFontSettings> = {};
-
-          // Validate fontFamily array
-          if (parsed.fontFamily !== undefined) {
-            if (!isValidFontFamily(parsed.fontFamily)) {
-              return false;
-            }
-            validatedSettings.fontFamily = parsed.fontFamily;
-          }
-
-          // Validate numeric ranges
-          if (parsed.fontSize !== undefined) {
-            if (typeof parsed.fontSize !== 'number' || !isValidFontSize(parsed.fontSize)) {
-              return false;
-            }
-            validatedSettings.fontSize = parsed.fontSize;
-          }
-
-          if (parsed.fontWeight !== undefined) {
-            if (typeof parsed.fontWeight !== 'number' || !isValidFontWeight(parsed.fontWeight)) {
-              return false;
-            }
-            validatedSettings.fontWeight = parsed.fontWeight;
-          }
-
-          if (parsed.lineHeight !== undefined) {
-            if (typeof parsed.lineHeight !== 'number' || !isValidLineHeight(parsed.lineHeight)) {
-              return false;
-            }
-            validatedSettings.lineHeight = parsed.lineHeight;
-          }
-
-          if (parsed.letterSpacing !== undefined) {
-            if (typeof parsed.letterSpacing !== 'number' || !isValidLetterSpacing(parsed.letterSpacing)) {
-              return false;
-            }
-            validatedSettings.letterSpacing = parsed.letterSpacing;
-          }
-
-          if (parsed.scrollback !== undefined) {
-            if (typeof parsed.scrollback !== 'number' || !isValidScrollback(parsed.scrollback)) {
-              return false;
-            }
-            validatedSettings.scrollback = parsed.scrollback;
-          }
-
-          // Validate cursor style enum
-          if (parsed.cursorStyle !== undefined) {
-            if (!isValidCursorStyle(parsed.cursorStyle)) {
-              return false;
-            }
-            validatedSettings.cursorStyle = parsed.cursorStyle;
-          }
-
-          // Validate boolean
-          if (parsed.cursorBlink !== undefined) {
-            if (typeof parsed.cursorBlink !== 'boolean') {
-              return false;
-            }
-            validatedSettings.cursorBlink = parsed.cursorBlink;
-          }
-
-          // Validate hex color
-          if (parsed.cursorAccentColor !== undefined) {
-            if (typeof parsed.cursorAccentColor !== 'string' || !isValidHexColor(parsed.cursorAccentColor)) {
-              return false;
-            }
-            validatedSettings.cursorAccentColor = parsed.cursorAccentColor;
-          }
-
-          // Apply imported settings (now properly typed)
-          set(validatedSettings);
-          return true;
-        } catch {
-          return false;
-        }
-      },
     }),
     {
       name: 'terminal-font-settings',

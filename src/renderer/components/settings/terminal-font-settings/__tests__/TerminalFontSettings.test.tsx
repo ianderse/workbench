@@ -87,17 +87,12 @@ describe('TerminalFontSettings - Infinite Re-render Loop Fix', () => {
     it('should render all expected sections', () => {
       renderWithI18n(<TerminalFontSettings />);
 
-      // Import/Export buttons
-      expect(screen.getAllByText(/export json/i).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/import json/i).length).toBeGreaterThan(0);
-      expect(screen.getAllByText(/copy to clipboard/i).length).toBeGreaterThan(0);
-
       // Rows (no sections: they sit in General > Appearance)
       expect(screen.getByText('Cursor style')).toBeInTheDocument();
       expect(screen.getByText('Scrollback limit')).toBeInTheDocument();
       expect(screen.queryByText('Cursor blink')).not.toBeInTheDocument();
       expect(screen.queryByText('Quick presets')).not.toBeInTheDocument();
-      expect(screen.getAllByText(/import and export/i).length).toBeGreaterThan(0);
+      expect(screen.queryByText(/import and export/i)).not.toBeInTheDocument();
     });
 
     it('should complete render cycle without hanging', async () => {
@@ -107,7 +102,7 @@ describe('TerminalFontSettings - Infinite Re-render Loop Fix', () => {
       // The waitFor timeout provides the safety net for catching hangs/infinite loops
       await waitFor(
         () => {
-          expect(screen.getByText(/import and export/i)).toBeInTheDocument();
+          expect(screen.getByText('Scrollback limit')).toBeInTheDocument();
         },
         { timeout: 2000 }
       );
@@ -230,48 +225,6 @@ describe('TerminalFontSettings - Infinite Re-render Loop Fix', () => {
     });
   });
 
-  describe('Import/Export Operations', () => {
-    it('should export settings without errors', () => {
-      renderWithI18n(<TerminalFontSettings />);
-
-      const exported = useTerminalFontSettingsStore.getState().exportSettings();
-
-      expect(exported).toBeTruthy();
-      expect(typeof exported).toBe('string');
-
-      // Verify it's valid JSON
-      expect(() => JSON.parse(exported)).not.toThrow();
-
-      const parsed = JSON.parse(exported);
-      expect(parsed.fontFamily).toBeDefined();
-      expect(parsed.fontSize).toBeDefined();
-    });
-
-    it('should import settings and update store state', () => {
-      renderWithI18n(<TerminalFontSettings />);
-
-      const json = JSON.stringify({
-        fontFamily: ['Fira Code', 'monospace'],
-        fontSize: 16,
-        fontWeight: 500,
-        lineHeight: 1.5,
-        letterSpacing: 0.5,
-        cursorStyle: 'underline',
-        cursorBlink: false,
-        cursorAccentColor: '#ff0000',
-        scrollback: 50000,
-      });
-
-      const success = useTerminalFontSettingsStore.getState().importSettings(json);
-
-      expect(success).toBe(true);
-
-      // Verify store state reflects imported settings
-      expect(useTerminalFontSettingsStore.getState().fontSize).toBe(16);
-      expect(useTerminalFontSettingsStore.getState().fontFamily).toEqual(['Fira Code', 'monospace']);
-    });
-  });
-
   describe('Regression Prevention', () => {
     afterEach(() => {
       vi.restoreAllMocks();
@@ -324,7 +277,7 @@ describe('TerminalFontSettings - Infinite Re-render Loop Fix', () => {
       }
 
       // Verify component still renders correctly after multiple re-renders
-      expect(screen.getAllByText(/import and export/i).length).toBeGreaterThan(0);
+      expect(screen.getByText('Scrollback limit')).toBeInTheDocument();
     });
   });
 });

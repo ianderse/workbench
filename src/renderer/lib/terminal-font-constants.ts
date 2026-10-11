@@ -23,9 +23,6 @@ const SCROLLBACK_MAX = 100000;
 // Maximum font array length to prevent DoS
 const MAX_FONT_FAMILY_LENGTH = 10;
 
-// Maximum file size for import (10KB)
-export const MAX_IMPORT_FILE_SIZE = 10 * 1024;
-
 // Valid cursor styles
 const VALID_CURSOR_STYLES = ['block', 'underline', 'bar'] as const;
 export type CursorStyle = typeof VALID_CURSOR_STYLES[number];
