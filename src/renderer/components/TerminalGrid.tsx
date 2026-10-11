@@ -23,6 +23,7 @@ import { Button } from './ui/button';
 import { useTerminalStore } from '../stores/terminal-store';
 import { useTaskStore } from '../stores/task-store';
 import { TERMINAL_DOM_UPDATE_DELAY_MS, PANEL_CLEANUP_GRACE_PERIOD_MS } from '../../shared/constants';
+import { computeTerminalGridLayout } from '../lib/terminal-grid-layout';
 
 interface TerminalGridProps {
   projectPath?: string;
@@ -232,15 +233,8 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
     }
   }, [reorderTerminals, terminals, projectPath]);
 
-  // Calculate grid layout based on number of terminals
-  const gridLayout = useMemo(() => {
-    const count = terminals.length;
-    if (count === 0) return { rows: 0, cols: 0 };
-    if (count === 2) return { rows: 1, cols: 2 };
-    // Near-square grid: 1x1, 2x2, 3x2, 3x3, 4x3, 4x4, 5x4, 5x5 (up to MAX_TERMINALS_LIMIT)
-    const cols = Math.ceil(Math.sqrt(count));
-    return { rows: Math.ceil(count / cols), cols };
-  }, [terminals.length]);
+  // Near-square grid without empty cells: the newest row or column is shared by its windows
+  const gridLayout = useMemo(() => computeTerminalGridLayout(terminals.length), [terminals.length]);
 
   // Terminal IDs for SortableContext
   const terminalIds = useMemo(() => terminals.map(t => t.id), [terminals]);
@@ -362,12 +356,19 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
                 <div
                   className="h-full grid"
                   style={{
-                    gridTemplateColumns: `repeat(${gridLayout.cols}, 1fr)`,
+                    gridTemplateColumns: `repeat(${gridLayout.columns}, 1fr)`,
                     gridTemplateRows: `repeat(${gridLayout.rows}, 1fr)`,
                   }}
                 >
-                  {terminals.map((terminal) => (
-                    <div key={terminal.id} className="p-1 min-h-0 min-w-0">
+                  {terminals.map((terminal, index) => (
+                    <div
+                      key={terminal.id}
+                      className="p-1 min-h-0 min-w-0"
+                      style={{
+                        gridRow: `${gridLayout.cells[index].row} / span ${gridLayout.cells[index].rowSpan}`,
+                        gridColumn: `${gridLayout.cells[index].column} / span ${gridLayout.cells[index].columnSpan}`,
+                      }}
+                    >
                       <SortableTerminalWrapper
                         id={terminal.id}
                         cwd={terminal.cwd || projectPath}
