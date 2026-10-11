@@ -91,12 +91,6 @@
     "deleteSelected": "Delete Selected",
     "archiveSelected": "Archive Selected"
   },
-  "time": {
-    "justNow": "Just now",
-    "minutesAgo": "{{count}}m ago",
-    "hoursAgo": "{{count}}h ago",
-    "daysAgo": "{{count}}d ago"
-  },
   "errors": {
     "generic": "An error occurred",
     "unknownError": "An unknown error occurred",

@@ -661,12 +661,8 @@ export function App() {
               </>
             ) : (
               <WelcomeScreen
-                projects={projects}
                 onNewProject={handleNewProject}
                 onOpenProject={handleOpenExistingProject}
-                onSelectProject={(projectId) => {
-                  openProjectTab(projectId);
-                }}
               />
             )}
           </main>
