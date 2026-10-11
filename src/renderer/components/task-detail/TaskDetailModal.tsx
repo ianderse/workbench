@@ -22,6 +22,7 @@ import {
   X,
   ArchiveRestore,
   GitPullRequest,
+  GitPullRequestCreate,
   Play,
   RotateCcw
 } from 'lucide-react';
@@ -348,7 +349,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                                 {state.isCreatingPR ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
                                 ) : (
-                                  <GitPullRequest className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                  <GitPullRequestCreate className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
                                 )}
                                 {state.isCreatingPR ? t('taskReview:pr.actions.creating') : t('common:buttons.createPR')}
                               </Button>
