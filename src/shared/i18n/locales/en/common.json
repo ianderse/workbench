@@ -65,8 +65,7 @@
   "actions": {
     "save": "Save",
     "apply": "Apply",
-    "delete": "Delete",
-    "settings": "Settings"
+    "delete": "Delete"
   },
   "os": {
     "windows": "Windows",

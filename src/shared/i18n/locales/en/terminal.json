@@ -53,6 +53,7 @@
     "emptyDescription": "Run Claude agents side by side, each in its own terminal.",
     "newTerminal": "New terminal",
     "count": "{{count}} / {{max}} windows",
+    "settingsAriaLabel": "Agent window limit settings",
     "newAgent": "New agent"
   },
   "taskSelector": {

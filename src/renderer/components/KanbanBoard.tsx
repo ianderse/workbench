@@ -66,6 +66,11 @@ interface KanbanBoardProps {
   isRefreshing?: boolean;
 }
 
+/** Settings > Agents at the parallel task limit, which decides how long tasks wait in the Queue */
+function openQueueSettings() {
+  window.dispatchEvent(new CustomEvent('open-app-settings', { detail: { section: 'agent', focusId: 'maxParallelTasks' } }));
+}
+
 interface DroppableColumnProps {
   status: TaskStatus;
   tasks: Task[];
@@ -74,6 +79,8 @@ interface DroppableColumnProps {
   isOver: boolean;
   onAddClick?: () => void;
   onArchiveAll?: () => void;
+  /** Opens the parallel task limit setting (Queue column) */
+  onOpenSettings?: () => void;
   maxParallelTasks?: number;
   archivedCount?: number;
   showArchived?: boolean;
@@ -118,6 +125,7 @@ function droppableColumnPropsAreEqual(
   if (prevProps.onStatusChange !== nextProps.onStatusChange) return false;
   if (prevProps.onAddClick !== nextProps.onAddClick) return false;
   if (prevProps.onArchiveAll !== nextProps.onArchiveAll) return false;
+  if (prevProps.onOpenSettings !== nextProps.onOpenSettings) return false;
   if (prevProps.maxParallelTasks !== nextProps.maxParallelTasks) return false;
   if (prevProps.archivedCount !== nextProps.archivedCount) return false;
   if (prevProps.showArchived !== nextProps.showArchived) return false;
@@ -181,7 +189,7 @@ const getEmptyStateContent = (status: TaskStatus, t: (key: string) => string): {
   }
 };
 
-const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskClick, onStatusChange, isOver, onAddClick, onArchiveAll, maxParallelTasks, archivedCount, showArchived, onToggleArchived }: DroppableColumnProps) {
+const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskClick, onStatusChange, isOver, onAddClick, onArchiveAll, onOpenSettings, maxParallelTasks, archivedCount, showArchived, onToggleArchived }: DroppableColumnProps) {
   const { t } = useTranslation(['tasks', 'common']);
   const { setNodeRef } = useDroppable({
     id: status
@@ -282,6 +290,18 @@ const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskCli
               aria-label={t('kanban.addTaskAriaLabel')}
             >
               <Plus className="h-4 w-4" />
+            </Button>
+          )}
+          {status === 'queue' && onOpenSettings && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
+              onClick={onOpenSettings}
+              aria-label={t('kanban.queueSettingsAriaLabel')}
+              title={t('kanban.queueSettingsAriaLabel')}
+            >
+              <Settings className="h-4 w-4" />
             </Button>
           )}
           {status === 'done' && onArchiveAll && tasks.length > 0 && !showArchived && (
@@ -744,7 +764,7 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
 
   return (
     <div className="flex h-full flex-col">
-      {/* Kanban header: the last board action's failure, then refresh and queue settings */}
+      {/* Kanban header: the last board action's failure, then refresh */}
       <div className="flex items-center justify-end gap-4 px-6 pt-2">
           {boardError && (
             <p role="alert" className="mr-auto min-w-0 truncate text-sm text-destructive" title={boardError}>
@@ -752,15 +772,6 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
             </p>
           )}
           <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 gap-1.5 text-[0.8125rem] text-muted-foreground hover:bg-nav-hover hover:text-foreground"
-              onClick={() => window.dispatchEvent(new CustomEvent('open-app-settings', { detail: { section: 'agent', focusId: 'maxParallelTasks' } }))}
-            >
-              <Settings className="h-3.5 w-3.5" />
-              {t('common:actions.settings')}
-            </Button>
             {onRefresh && (
               <Button
                 variant="ghost"
@@ -794,6 +805,7 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
               isOver={overColumnId === status}
               onAddClick={status === 'backlog' ? onNewTaskClick : undefined}
               onArchiveAll={status === 'done' ? handleArchiveAll : undefined}
+              onOpenSettings={status === 'queue' ? openQueueSettings : undefined}
               maxParallelTasks={status === 'in_progress' ? maxParallelTasks : undefined}
               archivedCount={status === 'done' ? archivedCount : undefined}
               showArchived={status === 'done' ? showArchived : undefined}

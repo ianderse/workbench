@@ -84,6 +84,7 @@
     "dropHere": "Drop here",
     "showArchived": "Show archived",
     "addTaskAriaLabel": "Add new task to backlog",
+    "queueSettingsAriaLabel": "Parallel task limit settings",
     "closeTaskDetailsAriaLabel": "Close task details",
     "editTask": "Edit task",
     "worktreeCleanupTitle": "Worktree Cleanup",

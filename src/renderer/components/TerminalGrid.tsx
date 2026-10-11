@@ -282,23 +282,25 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
       <div className="flex h-full flex-col">
         {/* Toolbar */}
         <div className="flex h-12 shrink-0 items-center justify-between px-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <span className="px-1 text-[0.8125rem] text-muted-foreground">
               {t('terminal:grid.count', { count: terminals.length, max: maxTerminals })}
             </span>
-          </div>
-          <div className="flex items-center gap-0.5">
+            {/* Settings > Agents at the window limit */}
             <Button
               variant="ghost"
-              size="sm"
-              className="h-8 gap-1.5 text-[0.8125rem] text-muted-foreground hover:bg-nav-hover hover:text-foreground"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
               onClick={() => {
                 window.dispatchEvent(new CustomEvent('open-app-settings', { detail: { section: 'agent', focusId: 'maxTerminals' } }));
               }}
+              aria-label={t('terminal:grid.settingsAriaLabel')}
+              title={t('terminal:grid.settingsAriaLabel')}
             >
-              <Settings className="h-3.5 w-3.5" />
-              {t('actions.settings')}
+              <Settings className="h-4 w-4" />
             </Button>
+          </div>
+          <div className="flex items-center gap-0.5">
             <Button
               variant="ghost"
               size="sm"
