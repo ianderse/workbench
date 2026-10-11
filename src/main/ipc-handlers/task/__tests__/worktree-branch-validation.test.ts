@@ -8,8 +8,11 @@
  * These tests verify the validation logic that prevents this.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { GIT_BRANCH_REGEX } from '../worktree-handlers';
+
+// The handlers load the project store, whose logger needs the Electron binary
+vi.mock('../../../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 describe('GIT_BRANCH_REGEX', () => {
   it('should accept valid auto-claude branch names', () => {
