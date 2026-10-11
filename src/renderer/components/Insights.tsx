@@ -7,8 +7,8 @@ import {
   Search,
   FileText,
   FolderSearch,
-  Network,
-  SquareTerminal,
+  Terminal,
+  Wrench,
   PanelLeft,
   SquarePen,
   ArrowUp,
@@ -23,6 +23,7 @@ import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn } from '../lib/utils';
+import { GraphIcon } from './icons/app-icons';
 import {
   useInsightsStore,
   loadInsightsSession,
@@ -812,11 +813,11 @@ const getToolIcon = (toolName: string) => {
     case 'Grep':
       return Search;
     case 'CodebaseGraph':
-      return Network;
+      return GraphIcon;
     case 'Bash':
-      return SquareTerminal;
+      return Terminal;
     default:
-      return FileText;
+      return Wrench;
   }
 };
 
@@ -908,11 +909,11 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
       case 'Grep':
         return { icon: Search, label: t('insights.tools.searchingCode') };
       case 'CodebaseGraph':
-        return { icon: Network, label: t('insights.tools.searchingGraph') };
+        return { icon: GraphIcon, label: t('insights.tools.searchingGraph') };
       case 'Bash':
-        return { icon: SquareTerminal, label: t('insights.tools.runningCommand') };
+        return { icon: Terminal, label: t('insights.tools.runningCommand') };
       default:
-        return { icon: Loader2, label: toolName };
+        return { icon: Wrench, label: toolName };
     }
   };
 
