@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 import {
   Loader2,
   Plus,
+  Check,
   CheckCircle2,
+  Copy,
   Search,
   FileText,
   FolderSearch,
@@ -748,10 +750,12 @@ function MessageBubble({
         </div>
       )}
 
-      {/* Tool usage history for assistant messages */}
-      {message.toolsUsed && message.toolsUsed.length > 0 && (
-        <ToolUsageHistory tools={message.toolsUsed} />
-      )}
+      {/* A button that copies the reply's markdown, then the tools used */}
+      {message.toolsUsed && message.toolsUsed.length > 0 ? (
+        <ToolUsageHistory tools={message.toolsUsed} actions={message.content ? <CopyMessageButton text={message.content} /> : undefined} />
+      ) : message.content ? (
+        <CopyMessageButton text={message.content} />
+      ) : null}
 
       {/* Task suggestion cards */}
       {message.suggestedTasks && message.suggestedTasks.length > 0 && (
@@ -828,9 +832,43 @@ interface ToolUsageHistoryProps {
     input?: string;
     timestamp: Date;
   }>;
+  /** Shown before the toggle (e.g., the copy button) */
+  actions?: React.ReactNode;
 }
 
-function ToolUsageHistory({ tools }: ToolUsageHistoryProps) {
+// How long the copy button shows that the reply was copied
+const COPIED_RESET_MS = 1500;
+
+/** Copies an assistant reply's original markdown */
+function CopyMessageButton({ text }: { text: string }) {
+  const { t } = useTranslation('common');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_RESET_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const label = copied ? t('insights.copied') : t('insights.copyResponse');
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => setCopied(true), (err) => {
+          console.error('Failed to copy the reply:', err);
+        });
+      }}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
+      aria-label={label}
+      title={label}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
   const { t } = useTranslation('common');
   const [expanded, setExpanded] = useState(false);
 
@@ -838,15 +876,18 @@ function ToolUsageHistory({ tools }: ToolUsageHistoryProps) {
 
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-        className="inline-flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span>{t('insights.tools.toolsUsed', { count: tools.length })}</span>
-        <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
-      </button>
+      <div className="flex items-center gap-2">
+        {actions}
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          className="inline-flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span>{t('insights.tools.toolsUsed', { count: tools.length })}</span>
+          <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
+        </button>
+      </div>
 
       {expanded && (
         <div className="mt-2 space-y-1 rounded-xl border border-border p-3">

@@ -150,6 +150,8 @@
     "sending": "Sending…",
     "thinking": "Thinking…",
     "disclaimer": "Claude is AI and can make mistakes.",
+    "copyResponse": "Copy response",
+    "copied": "Copied",
     "tools": {
       "readingFile": "Reading file",
       "searchingFiles": "Searching files",
