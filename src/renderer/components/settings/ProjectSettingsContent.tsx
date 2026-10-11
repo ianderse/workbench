@@ -9,7 +9,7 @@ import { SectionRouter } from './sections/SectionRouter';
 import { createHookProxy } from './utils/hookProxyFactory';
 import type { Project } from '../../../shared/types';
 
-export type ProjectSettingsSection = 'general' | 'knowledge';
+export type ProjectSettingsSection = 'general';
 
 
 interface ProjectSettingsContentProps {

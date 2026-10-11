@@ -6,8 +6,7 @@ import {
   CircleUserRound,
   CodeXml,
   Download,
-  Blocks,
-  GraduationCap
+  Blocks
 } from 'lucide-react';
 import { AgentOutlineIcon, GearIcon, ProjectOutlineIcon } from '../icons/app-icons';
 
@@ -92,7 +91,6 @@ const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'agents', icon: AgentOutlineIcon, iconClassName: '-mx-px h-5 w-5', iconStrokeWidth: 1.35 },
   { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
   { kind: 'app', id: 'connectors', icon: Blocks },
-  { kind: 'project', id: 'knowledge', icon: GraduationCap },
   { kind: 'app', id: 'devtools', icon: CodeXml },
   { kind: 'app', id: 'updates', icon: Download }
 ];
@@ -328,9 +326,7 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
                           >
                             {renderNavIcon(item.icon, item.iconClassName, item.iconStrokeWidth)}
                             <span className="min-w-0 flex-1 truncate">
-                              {isProject
-                                ? item.id === 'general' ? t('nav.project') : t(`projectSections.${item.id}.title`)
-                                : t(`sections.${item.id}.title`)}
+                              {isProject ? t('nav.project') : t(`sections.${item.id}.title`)}
                             </span>
                           </button>
                         </li>

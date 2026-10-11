@@ -11,8 +11,8 @@ interface KnowledgeSettingsProps {
 }
 
 /**
- * Project "Knowledge" page: what agents get to know about the project (the Graphify knowledge
- * graph and CLAUDE.md), as a claude.ai section.
+ * Project page "Knowledge" section: what agents get to know about the project (the Graphify
+ * knowledge graph and CLAUDE.md). Saved in the project's `.auto-claude/settings.json`.
  */
 export function KnowledgeSettings({ settings, setSettings }: KnowledgeSettingsProps) {
   const { t } = useTranslation('settings');

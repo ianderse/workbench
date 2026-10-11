@@ -1,10 +1,8 @@
-import { useTranslation } from 'react-i18next';
 import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig } from '../../../../shared/types';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
 import { KnowledgeSettings } from '../../project-settings/KnowledgeSettings';
 import { ProjectTaskSettings } from '../../project-settings/ProjectTaskSettings';
 import { BranchSettings } from '../../project-settings/BranchSettings';
-import { InitializationGuard } from '../common/InitializationGuard';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
 
 interface SectionRouterProps {
@@ -40,8 +38,6 @@ export function SectionRouter({
   updateEnvConfig,
   handleInitialize
 }: SectionRouterProps) {
-  const { t } = useTranslation('settings');
-
   switch (activeSection) {
     case 'general':
       return (
@@ -58,6 +54,7 @@ export function SectionRouter({
           {/* Kept in the project's .auto-claude folder, so they need an initialized project */}
           {project.autoBuildPath && (
             <>
+              <KnowledgeSettings settings={settings} setSettings={setSettings} />
               <ProjectTaskSettings settings={settings} setSettings={setSettings} />
               <BranchSettings
                 projectPath={project.path}
@@ -69,17 +66,6 @@ export function SectionRouter({
             </>
           )}
         </>
-      );
-
-    case 'knowledge':
-      return (
-        <InitializationGuard
-          initialized={!!project.autoBuildPath}
-          title={t('projectSections.knowledge.title')}
-          description={t('projectSections.knowledge.description')}
-        >
-          <KnowledgeSettings settings={settings} setSettings={setSettings} />
-        </InitializationGuard>
       );
 
     default:
