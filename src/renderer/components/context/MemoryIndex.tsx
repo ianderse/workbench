@@ -99,12 +99,6 @@ export function MemoryIndexRows({ projectId, useGraphify }: { projectId: string;
           description={error || undefined}
         />
       )}
-
-      {isBuilding && (
-        <SettingsRow
-          label={<StatusIndicator state="loading">{t('projectPages.context.buildingMemoryIndex')}</StatusIndicator>}
-        />
-      )}
     </>
   );
 }

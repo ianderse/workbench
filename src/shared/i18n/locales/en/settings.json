@@ -490,7 +490,6 @@
       "memoryIndexNotEnabled": "Turn on Use Graphify in the Knowledge section to build a memory graph",
       "buildMemoryIndex": "Build",
       "rebuildMemoryIndex": "Rebuild",
-      "buildingMemoryIndex": "Building the memory graph...",
       "memoryIndexFailed": "Couldn't build the memory graph"
     },
     "mcp": {
