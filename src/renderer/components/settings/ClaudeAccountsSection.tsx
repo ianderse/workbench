@@ -6,7 +6,7 @@
  */
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Check, Info, MoreHorizontal, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { Button, buttonVariants } from '../ui/button';
 import {
   DropdownMenu,
@@ -28,6 +28,7 @@ import {
 import { cn } from '../../lib/utils';
 import { SettingsRow } from './SettingsRow';
 import { ClaudeAccountDialog } from './ClaudeAccountDialog';
+import { DetectedAccountDialog } from './DetectedAccountDialog';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
 import type { ClaudeProfile } from '../../../shared/types';
 
@@ -36,6 +37,8 @@ export function ClaudeAccountsSection() {
   const { profiles, activeProfileId, usage, reload } = useClaudeAccounts();
 
   const [dialog, setDialog] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
+  // Details (and name) of an account found in Claude Code's configuration
+  const [details, setDetails] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
   const [removeTarget, setRemoveTarget] = useState<ClaudeProfile | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   // The last failed action on an account, shown in its row instead of the description
@@ -88,6 +91,14 @@ export function ClaudeAccountsSection() {
   };
 
   const describe = (profile: ClaudeProfile): string => {
+    // A detected setup on a cloud provider, an API key or a gateway: what it reaches Claude through
+    const detected = profile.detected;
+    if (detected && detected.provider !== 'subscription') {
+      const where = ['AWS_REGION', 'CLOUD_ML_REGION', 'ANTHROPIC_VERTEX_PROJECT_ID', 'ANTHROPIC_FOUNDRY_RESOURCE', 'ANTHROPIC_BASE_URL']
+        .map((key) => detected.values.find((value) => value.key === key)?.value)
+        .find(Boolean);
+      return [t(`claudeAccounts.providers.${detected.provider}`), where].filter(Boolean).join(' · ');
+    }
     const summary = usage.get(profile.id);
     const email = summary?.profileEmail || profile.email;
     const parts: string[] = [];
@@ -145,15 +156,25 @@ export function ClaudeAccountsSection() {
                   <Check className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
                   {isActive ? t('claudeAccounts.inUse') : t('claudeAccounts.use')}
                 </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer" onSelect={() => void handleSignInAgain(profile)}>
-                  <RefreshCw className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                  {t('claudeAccounts.signInAgain')}
-                </DropdownMenuItem>
-                <DropdownMenuItem className="cursor-pointer" onSelect={() => setDialog({ open: true, profile })}>
-                  <Pencil className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
-                  {t('claudeAccounts.rename')}
-                </DropdownMenuItem>
-                {!profile.isDefault && (
+                {profile.detected ? (
+                  // Found in Claude Code's configuration: its details (and name), never removed
+                  <DropdownMenuItem className="cursor-pointer" onSelect={() => setDetails({ open: true, profile })}>
+                    <Info className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                    {t('claudeAccounts.details')}
+                  </DropdownMenuItem>
+                ) : (
+                  <>
+                    <DropdownMenuItem className="cursor-pointer" onSelect={() => void handleSignInAgain(profile)}>
+                      <RefreshCw className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                      {t('claudeAccounts.signInAgain')}
+                    </DropdownMenuItem>
+                    <DropdownMenuItem className="cursor-pointer" onSelect={() => setDialog({ open: true, profile })}>
+                      <Pencil className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
+                      {t('claudeAccounts.rename')}
+                    </DropdownMenuItem>
+                  </>
+                )}
+                {!profile.isDefault && !profile.detected && (
                   <>
                     <DropdownMenuSeparator />
                     <DropdownMenuItem
@@ -179,6 +200,13 @@ export function ClaudeAccountsSection() {
           {t('claudeAccounts.addButton')}
         </Button>
       </SettingsRow>
+
+      <DetectedAccountDialog
+        open={details.open}
+        profile={details.profile}
+        onOpenChange={(open) => setDetails((current) => ({ ...current, open }))}
+        onSaved={() => void reload()}
+      />
 
       <ClaudeAccountDialog
         open={dialog.open}

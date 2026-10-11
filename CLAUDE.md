@@ -262,7 +262,12 @@ period in setting descriptions, and no green check / red x status icons (state t
 relays their events), `agent-state.ts` (profile/session assignment for account swapping).
 
 **Claude profiles** (`src/main/claude-profile/`) — `credential-utils.ts` (OS keychain), `token-refresh.ts` (OAuth
-refresh), `usage-monitor.ts` (usage and rate limits), `profile-scorer.ts` (profile selection).
+refresh), `usage-monitor.ts` (usage and rate limits), `profile-scorer.ts` (profile selection). On every start,
+`claude-code-detection.ts` finds Claude Code's own setups (`~/.claude`, `CLAUDE_CONFIG_DIR`, `~/.claude-*`: subscription
+sign-in, cloud provider, API key or gateway, from managed settings, the dir's `settings.json` and the environment) and
+lists them as accounts (`ClaudeProfile.detected`): usable and renamable, never removed. Claude Code's default `~/.claude`
+runs without `CLAUDE_CONFIG_DIR`, keeps its sign-in in `~/.claude.json` and its plain keychain entry
+(`config-dir-paths.ts`).
 
 **Terminals** (`src/main/terminal/`) — `pty-daemon.ts` / `pty-manager.ts` (PTY processes), `terminal-lifecycle.ts`,
 `cli-integration-handler.ts`. Renderer uses xterm.js 6 with WebGL, fit, web-links, and serialize addons.

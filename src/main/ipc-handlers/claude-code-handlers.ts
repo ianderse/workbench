@@ -26,6 +26,7 @@ import { isValidConfigDir } from '../utils/config-path-validator';
 import { clearKeychainCache, getCredentialsFromKeychain, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import semver from 'semver';
+import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
 
 /** Running `claude auth login` processes by profile id, so a sign-in can be cancelled */
 const authLogins = new Map<string, { child: ChildProcess; cancelled: boolean }>();
@@ -866,7 +867,7 @@ function checkProfileAuthentication(configDir: string): AuthCheckResult {
     ? path.join(os.homedir(), configDir.slice(1))
     : configDir;
 
-  const claudeJsonPath = path.join(expandedConfigDir, '.claude.json');
+  const claudeJsonPath = getClaudeGlobalConfigPath(expandedConfigDir);
   const credentialsJsonPath = path.join(expandedConfigDir, '.credentials.json');
 
   try {

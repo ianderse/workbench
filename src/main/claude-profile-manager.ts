@@ -62,6 +62,7 @@ import {
 } from './claude-profile/profile-utils';
 import { debugLog } from '../shared/utils/debug-logger';
 import { isWindows } from './platform';
+import { detectClaudeCodeSetups, detectedAccountName, type DetectedSetup } from './claude-profile/claude-code-detection';
 
 /** Normalize a profile configDir for comparison (~ expansion, resolution, Windows case). */
 function normalizeConfigDir(configDir: string): string {
@@ -135,6 +136,9 @@ export class ClaudeProfileManager {
       debugLog('[ClaudeProfileManager] No existing profile store found, using defaults');
     }
 
+    // Claude Code's own setups (~/.claude, CLAUDE_CONFIG_DIR, ~/.claude-*) are listed as accounts
+    this.syncDetectedAccounts();
+
     // Run one-time migration to fix corrupted emails
     // This repairs emails that were truncated due to ANSI escape codes in terminal output
     this.migrateCorruptedEmails();
@@ -158,6 +162,65 @@ export class ClaudeProfileManager {
 
     this.initialized = true;
     console.log('[ClaudeProfileManager] Initialization complete');
+  }
+
+  /**
+   * List the Claude Code setups found on this machine as accounts (on every start): new ones are
+   * added, known ones get their current values, and accounts whose setup is gone are dropped.
+   * An account the user added for the same config dir becomes the detected one.
+   */
+  private syncDetectedAccounts(): void {
+    let setups: DetectedSetup[];
+    try {
+      setups = detectClaudeCodeSetups({
+        excludeUnder: [CLAUDE_PROFILES_DIR],
+        hasSubscriptionCredentials: (dir) => !!getCredentialsFromKeychain(dir).token,
+      });
+    } catch (error) {
+      console.warn('[ClaudeProfileManager] Could not detect Claude Code accounts:', error);
+      return;
+    }
+
+    const pending = new Map(setups.map((setup) => [normalizeConfigDir(setup.configDir), setup]));
+    const toDetected = ({ configDir: _, ...detected }: DetectedSetup) => detected;
+    let changed = false;
+
+    this.data.profiles = this.data.profiles.filter((profile) => {
+      const key = profile.configDir ? normalizeConfigDir(profile.configDir) : undefined;
+      const setup = key ? pending.get(key) : undefined;
+      if (setup && key) {
+        pending.delete(key);
+        profile.detected = toDetected(setup);
+        if (setup.email) profile.email = setup.email;
+        changed = true;
+        return true;
+      }
+      if (profile.detected) {
+        // Its setup no longer reaches Claude
+        changed = true;
+        return false;
+      }
+      return true;
+    });
+
+    for (const setup of pending.values()) {
+      const taken = new Set(this.data.profiles.map((p) => p.name));
+      const base = detectedAccountName(setup);
+      let name = base;
+      for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+      this.data.profiles.push({
+        id: generateProfileIdImpl(name, this.data.profiles),
+        name,
+        configDir: setup.configDir,
+        isDefault: false,
+        createdAt: new Date(),
+        ...(setup.email ? { email: setup.email } : {}),
+        detected: toDetected(setup),
+      });
+      changed = true;
+    }
+
+    if (changed) this.save();
   }
 
   /**
@@ -250,6 +313,7 @@ export class ClaudeProfileManager {
    */
   private isAbandonedSignIn(profile: ClaudeProfile): boolean {
     return !profile.isDefault
+      && !profile.detected
       && !profile.email
       && !hasValidToken(profile)
       && !this.isProfileAuthenticated(profile)
@@ -622,8 +686,8 @@ export class ClaudeProfileManager {
       return false;
     }
 
-    // Cannot delete default profile
-    if (profile.isDefault) {
+    // Cannot delete default profile, nor an account found in Claude Code's configuration
+    if (profile.isDefault || profile.detected) {
       return false;
     }
 

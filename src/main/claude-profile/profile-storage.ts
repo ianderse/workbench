@@ -50,7 +50,8 @@ export interface ProfileStoreData {
  * Check if a profile uses the legacy shared ~/.claude directory
  */
 function usesLegacySharedDirectory(profile: ClaudeProfile): boolean {
-  if (!profile.configDir) return false;
+  // A detected Claude Code setup is Claude Code's own dir, used as it is
+  if (!profile.configDir || profile.detected) return false;
 
   // Normalize paths for comparison
   const normalizedConfigDir = profile.configDir.startsWith('~')

@@ -11,9 +11,10 @@ import path from 'path';
 import { existsSync } from 'fs';
 import { getClaudeCliInvocationAsync } from '../cli-utils';
 import { getToolInfo } from '../cli-tool-manager';
-import { getBestAvailableProfileEnv, getUsableProfileEnv } from '../rate-limit-detector';
+import { getBestAvailableProfileEnv, getUsableProfileEnv, isDetectedClaudeCodeProfile } from '../rate-limit-detector';
 import { getAPIProfileEnv } from '../services/profile';
 import { isWindows } from '../platform';
+import { withClaudeConfigDir } from '../claude-profile/config-dir-paths';
 
 /** Variables that would make Claude Code use an API key instead of the profile's sign-in */
 const API_AUTH_VARS = [
@@ -93,12 +94,16 @@ export async function resolveClaudeEnv(options: ClaudeEnvOptions = {}): Promise<
     profileName = best.profileName;
   }
 
-  // Subscription sign-in: never let a shell API key take over billing
-  for (const name of API_AUTH_VARS) delete env[name];
+  // Subscription sign-in: never let a shell API key take over billing. A detected Claude Code
+  // setup keeps the variables it may be configured with (a cloud provider, a key, a gateway)
+  if (!profileId || !isDetectedClaudeCodeProfile(profileId)) {
+    for (const name of API_AUTH_VARS) delete env[name];
+  }
   const merged = { ...env, ...profileEnv };
   if (profileEnv.CLAUDE_CONFIG_DIR) {
     // The CLI reads (and refreshes) tokens from the config dir itself
     delete merged.CLAUDE_CODE_OAUTH_TOKEN;
   }
-  return { command, env: merged, profileId, profileName };
+  // Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR
+  return { command, env: withClaudeConfigDir(merged), profileId, profileName };
 }

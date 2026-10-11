@@ -20,6 +20,7 @@ import { getCredentialsFromKeychain, clearKeychainCache } from './credential-uti
 import { reactiveTokenRefresh, ensureValidToken } from './token-refresh';
 import { isProfileRateLimited } from './rate-limit-manager';
 import { getOperationRegistry } from './operation-registry';
+import { usesClaudeSubscription } from './profile-utils';
 
 // Re-export for backward compatibility
 export type { ApiProvider };
@@ -398,7 +399,7 @@ export class UsageMonitor extends EventEmitter {
       // Fast path: no coalescing needed since this is synchronous-ish and returns quickly
       // Check all OAuth profiles for missing credentials
       for (const profile of settings.profiles) {
-        if (profile.configDir) {
+        if (profile.configDir && usesClaudeSubscription(profile)) {
           const expandedConfigDir = profile.configDir.startsWith('~')
             ? profile.configDir.replace(/^~/, homedir())
             : profile.configDir;
@@ -479,6 +480,8 @@ export class UsageMonitor extends EventEmitter {
 
     for (let i = 0; i < settings.profiles.length; i++) {
       const profile = settings.profiles[i];
+      // No subscription usage for a detected cloud provider, API key or gateway setup
+      if (!usesClaudeSubscription(profile)) continue;
       const cached = this.allProfilesUsageCache.get(profile.id);
 
       // Use cached data if fresh (within TTL) and not force refreshing
@@ -1141,6 +1144,10 @@ export class UsageMonitor extends EventEmitter {
 
     if (!activeOAuthProfile) {
       this.debugLog('[UsageMonitor] No active profile found');
+      return null;
+    }
+    // A detected setup on a cloud provider, an API key or a gateway has no subscription usage
+    if (!usesClaudeSubscription(activeOAuthProfile)) {
       return null;
     }
 

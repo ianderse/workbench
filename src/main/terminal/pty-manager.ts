@@ -14,6 +14,7 @@ import { getClaudeProfileManager } from '../claude-profile-manager';
 import { readSettingsFile } from '../settings-utils';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import type { SupportedTerminal } from '../../shared/types/settings';
+import { withClaudeConfigDir } from '../claude-profile/config-dir-paths';
 
 // Windows shell paths are now imported from the platform module via getWindowsShellPaths()
 
@@ -186,7 +187,8 @@ export function spawnPtyProcess(
     cols,
     rows,
     cwd: cwd || os.homedir(),
-    env: {
+    // Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR
+    env: withClaudeConfigDir({
       ...cleanEnv,
       ...profileEnv,
       TERM: 'xterm-256color',
@@ -194,7 +196,7 @@ export function spawnPtyProcess(
       // Suppress zsh's partial line indicator (%) that appears when output
       // doesn't end with a newline. This prevents rendering artifacts in the terminal.
       PROMPT_EOL_MARK: '',
-    },
+    }),
   });
 
   return { pty: ptyProcess, shellType };

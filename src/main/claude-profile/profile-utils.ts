@@ -8,6 +8,7 @@ import { join } from 'path';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import type { ClaudeProfile } from '../../shared/types';
 import { getCredentialsFromKeychain } from './credential-utils';
+import { getClaudeGlobalConfigPath } from './config-dir-paths';
 
 // Track which configDirs have already been warned about missing platform credentials.
 // This prevents log spam when isProfileAuthenticated() is called repeatedly per profile.
@@ -58,6 +59,12 @@ export async function createProfileDirectory(profileName: string): Promise<strin
  * (checks for OAuth token or config directory credential files)
  */
 export function isProfileAuthenticated(profile: ClaudeProfile): boolean {
+  // A detected Claude Code setup that isn't a subscription sign-in (a cloud provider, an API key
+  // or a gateway) is authenticated by Claude Code itself
+  if (!usesClaudeSubscription(profile)) {
+    return true;
+  }
+
   // Check for direct OAuth token first (OAuth-only profiles without configDir)
   // This enables auto-switch to work with profiles that only have oauthToken set
   if (hasValidToken(profile)) {
@@ -72,7 +79,7 @@ export function isProfileAuthenticated(profile: ClaudeProfile): boolean {
 
   // Check for .claude.json with OAuth account info (modern Claude Code CLI)
   // This is how Claude Code CLI stores OAuth authentication since v1.0
-  const claudeJsonPath = join(configDir, '.claude.json');
+  const claudeJsonPath = getClaudeGlobalConfigPath(configDir);
   if (existsSync(claudeJsonPath)) {
     try {
       const content = readFileSync(claudeJsonPath, 'utf-8');
@@ -235,7 +242,7 @@ export function expandHomePath(path: string): string {
  */
 export function getPlanFromConfigDir(configDir?: string): string | null {
   if (!configDir) return null;
-  const claudeJsonPath = join(expandHomePath(configDir), '.claude.json');
+  const claudeJsonPath = getClaudeGlobalConfigPath(configDir);
   if (!existsSync(claudeJsonPath)) return null;
   try {
     const organizationType = JSON.parse(readFileSync(claudeJsonPath, 'utf-8'))?.oauthAccount?.organizationType;
@@ -256,7 +263,7 @@ export function getEmailFromConfigDir(configDir?: string): string | null {
   const expandedConfigDir = expandHomePath(configDir);
 
   // Check .claude.json (primary config file)
-  const claudeJsonPath = join(expandedConfigDir, '.claude.json');
+  const claudeJsonPath = getClaudeGlobalConfigPath(expandedConfigDir);
   if (existsSync(claudeJsonPath)) {
     try {
       const content = readFileSync(claudeJsonPath, 'utf-8');
@@ -291,6 +298,14 @@ export function getEmailFromConfigDir(configDir?: string): string | null {
   return null;
 }
 
+/**
+ * Whether an account signs in with a Claude subscription (usage, limits and re-authentication
+ * apply); a detected setup on a cloud provider, an API key or a gateway doesn't
+ */
+export function usesClaudeSubscription(profile: ClaudeProfile): boolean {
+  return !profile.detected || profile.detected.provider === 'subscription';
+}
+
 /** The Claude account (and organization) a config dir is signed in to */
 export interface ClaudeAccountIdentity {
   email: string | null;
@@ -304,7 +319,7 @@ export interface ClaudeAccountIdentity {
  */
 export function getAccountIdentityFromConfigDir(configDir?: string): ClaudeAccountIdentity | null {
   if (!configDir) return null;
-  const claudeJsonPath = join(expandHomePath(configDir), '.claude.json');
+  const claudeJsonPath = getClaudeGlobalConfigPath(configDir);
   if (!existsSync(claudeJsonPath)) return null;
   try {
     const account = JSON.parse(readFileSync(claudeJsonPath, 'utf-8'))?.oauthAccount;

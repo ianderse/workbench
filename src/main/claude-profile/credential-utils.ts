@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir, userInfo } from 'os';
 import { dirname, join } from 'path';
 import { isMacOS, isWindows, isLinux } from '../platform';
+import { isDefaultClaudeConfigDir } from './config-dir-paths';
 
 /**
  * Create a safe fingerprint of a token for debug logging.
@@ -205,8 +206,12 @@ export function getKeychainServiceName(configDir?: string): string {
       : configDir
   );
 
-  // ALL profiles now use hash-based keychain entries for isolation
-  // This prevents interference with external Claude Code CLI
+  // Claude Code's default ~/.claude (run without CLAUDE_CONFIG_DIR) uses its plain entry
+  if (isDefaultClaudeConfigDir(normalizedConfigDir)) {
+    return 'Claude Code-credentials';
+  }
+
+  // Every other config dir has a hash-based entry, like Claude Code keys it
   const hash = calculateConfigDirHash(normalizedConfigDir);
   return `Claude Code-credentials-${hash}`;
 }

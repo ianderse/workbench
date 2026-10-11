@@ -551,6 +551,7 @@
     "use": "Use this account",
     "signInAgain": "Sign in again",
     "rename": "Rename",
+    "details": "Details",
     "remove": "Remove",
     "menu": "Actions for {{name}}",
     "notSignedIn": "Not signed in",
@@ -589,6 +590,24 @@
       "renameFailed": "Couldn't rename the account",
       "switchFailed": "Couldn't switch accounts",
       "signInFailed": "Sign-in failed"
+    },
+    "providers": {
+      "subscription": "Claude subscription",
+      "bedrock": "Amazon Bedrock",
+      "mantle": "Amazon Bedrock (Mantle)",
+      "vertex": "Google Cloud's Agent Platform",
+      "foundry": "Microsoft Foundry",
+      "anthropic-aws": "Claude Platform on AWS",
+      "auth-token": "Gateway token",
+      "api-key": "API key",
+      "api-key-helper": "API key helper",
+      "oauth-token": "OAuth token"
+    },
+    "detected": {
+      "description": "Found in Claude Code's configuration",
+      "provider": "Signs in with",
+      "profileDir": "Profile folder",
+      "fromEnvironment": "Environment variable"
     }
   }
 }

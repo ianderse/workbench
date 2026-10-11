@@ -17,6 +17,12 @@ vi.mock('../settings-utils', () => ({
   },
 }));
 
+// The machine's own Claude Code setups stay out of these tests
+vi.mock('../claude-profile/claude-code-detection', () => ({
+  detectClaudeCodeSetups: () => [],
+  detectedAccountName: () => 'Claude Code',
+}));
+
 import { ClaudeProfileManager } from '../claude-profile-manager';
 import type { ClaudeProfile } from '../../shared/types';
 

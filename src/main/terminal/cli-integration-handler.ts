@@ -29,6 +29,7 @@ import type {
   RateLimitEvent,
   OAuthTokenEvent
 } from './types';
+import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
 
 // ============================================================================
 // CLI DISPATCH UTILITIES
@@ -889,7 +890,7 @@ export function ensureOnboardingComplete(configDir: string): void {
     const expandedDir = path.resolve(
       configDir.startsWith('~') ? configDir.replace(/^~/, os.homedir()) : configDir
     );
-    const claudeJsonPath = path.join(expandedDir, '.claude.json');
+    const claudeJsonPath = getClaudeGlobalConfigPath(expandedDir);
 
     // Read directly instead of existsSync + readFileSync to avoid TOCTOU race (CodeQL js/file-system-race)
     let content: string;

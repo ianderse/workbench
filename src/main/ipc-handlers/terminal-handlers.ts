@@ -233,6 +233,9 @@ export function registerTerminalHandlers(
     async (_, profileId: string): Promise<IPCResult> => {
       try {
         const profileManager = getClaudeProfileManager();
+        if (profileManager.getProfile(profileId)?.detected) {
+          return { success: false, error: "This account comes from Claude Code's configuration and can't be removed" };
+        }
         const success = profileManager.deleteProfile(profileId);
         if (!success) {
           return { success: false, error: 'Cannot delete default or last profile' };

@@ -145,6 +145,11 @@ export function detectRateLimit(
  * Environment for a specific profile, or null when that profile no longer exists or has no
  * credentials (callers then fall back to the best available profile).
  */
+/** Whether an account is a Claude Code setup found in its own configuration */
+export function isDetectedClaudeCodeProfile(profileId: string): boolean {
+  return !!getClaudeProfileManager().getProfile(profileId)?.detected;
+}
+
 export function getUsableProfileEnv(profileId: string): Record<string, string> | null {
   const profileManager = getClaudeProfileManager();
   if (!profileManager.getProfile(profileId) || !profileManager.hasValidAuth(profileId)) {
