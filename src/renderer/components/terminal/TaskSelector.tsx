@@ -6,7 +6,6 @@ import { TaskListIcon } from '../icons/app-icons';
 import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import { cn } from '../../lib/utils';
 import { isTaskSessionActive } from '../../../shared/utils/claude-run';
-import { PHASE_CONFIG } from './types';
 
 interface TaskSelectorProps {
   terminalId: string;
@@ -38,9 +37,8 @@ export function TaskSelector({
   const itemRefs = useRef(new Map<number, HTMLDivElement>());
   const listboxId = useId();
 
+  // A linked task that is running shows a spinner before its title
   const executionPhase = associatedTask?.executionProgress?.phase || 'idle';
-  const phaseConfig = PHASE_CONFIG[executionPhase];
-  const PhaseIcon = phaseConfig.icon;
   const isPhaseActive =
     executionPhase === 'planning' ||
     executionPhase === 'coding' ||
@@ -102,11 +100,7 @@ export function TaskSelector({
         >
           {associatedTask ? (
             <>
-              {isPhaseActive ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <PhaseIcon className="h-4 w-4" strokeWidth={1.75} />
-              )}
+              {isPhaseActive && <Loader2 className="h-4 w-4 animate-spin" />}
               <span className="max-w-40 truncate">{associatedTask.title}</span>
             </>
           ) : (
