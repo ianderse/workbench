@@ -19,7 +19,7 @@ export interface TerminalProcess {
   title: string;
   /** Associated worktree configuration (persisted across restarts) */
   worktreeConfig?: TerminalWorktreeConfig;
-  /** Whether this terminal has a pending Claude resume that should be triggered on activation */
+  /** Whether this terminal has a pending Claude resume that the renderer triggers once its window is shown */
   pendingCLIResume?: boolean;
   /** Whether Claude was invoked with --dangerously-skip-permissions (YOLO mode) */
   dangerouslySkipPermissions?: boolean;

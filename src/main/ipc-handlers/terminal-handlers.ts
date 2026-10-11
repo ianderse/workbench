@@ -663,8 +663,8 @@ export function registerTerminalHandlers(
     }
   );
 
-  // Activate deferred Claude resume when terminal becomes active
-  // This is triggered by the renderer when a terminal with pendingCLIResume becomes the active tab
+  // Resume a restored terminal's Claude Code session
+  // The renderer sends this once the terminal's window is shown (queued, one window at a time)
   ipcMain.on(
     IPC_CHANNELS.TERMINAL_ACTIVATE_DEFERRED_RESUME,
     (_, id: string) => {

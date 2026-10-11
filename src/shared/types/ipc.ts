@@ -247,7 +247,7 @@ export interface ElectronAPI {
   onTerminalClaudeBusy: (callback: (id: string, isBusy: boolean) => void) => () => void;
   /** Listen for Claude exit (user closed Claude within terminal, returned to shell) */
   onTerminalClaudeExit: (callback: (id: string) => void) => () => void;
-  /** Listen for pending Claude resume notifications (for deferred resume on tab activation) */
+  /** Listen for pending Claude resume notifications (resumed once the window is shown) */
   onTerminalPendingResume: (callback: (id: string) => void) => () => void;
   /** Listen for profile change events - terminals need to be recreated with new profile env vars */
   onTerminalProfileChanged: (callback: (event: TerminalProfileChangedEvent) => void) => () => void;

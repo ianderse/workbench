@@ -128,7 +128,7 @@ export function useTerminalEvents({
     return cleanup;
   }, [terminalId]);
 
-  // Handle pending Claude resume notification (for deferred resume on tab activation)
+  // Handle pending Claude resume notification (resumed once its window is shown)
   useEffect(() => {
     const cleanup = window.electronAPI.onTerminalPendingResume((id) => {
       if (id === terminalId) {

@@ -294,7 +294,7 @@ export class TerminalManager {
 
   /**
    * Activate deferred Claude resume for a terminal
-   * Called when a terminal with pendingCLIResume becomes active (user views it)
+   * Called by the renderer once a terminal with pendingCLIResume is shown
    */
   async activateDeferredResume(id: string): Promise<void> {
     const terminal = this.terminals.get(id);

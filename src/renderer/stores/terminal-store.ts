@@ -63,6 +63,10 @@ function sendTerminalMachineEvent(terminalId: string, event: TerminalEvent): voi
  */
 const xtermCallbacks = new Map<string, (data: string) => void>();
 
+// Restored agent windows waiting to resume their Claude Code session, resumed one at a time
+const claudeResumeQueue: string[] = [];
+let claudeResumeRunning = false;
+
 /**
  * Register an xterm write callback for a terminal.
  * Called when a terminal component mounts and xterm is ready.
@@ -198,7 +202,7 @@ export interface Terminal {
   projectPath?: string;  // Project this terminal belongs to (for multi-project support)
   worktreeConfig?: TerminalWorktreeConfig;  // Associated worktree for isolated development
   isClaudeBusy?: boolean;  // Whether Claude Code is actively processing (for visual indicator)
-  pendingCLIResume?: boolean;  // Whether this terminal has a pending Claude resume (deferred until tab activated)
+  pendingCLIResume?: boolean;  // Whether this terminal has a Claude Code session to resume (resumed once its window is shown)
   launchCLIOnCreate?: boolean;  // Start Claude Code as soon as the PTY is ready ("New agent")
   pendingTaskSession?: PendingTaskSession;  // With launchCLIOnCreate: resume this task session instead of starting a new one
   displayOrder?: number;  // Display order for tab persistence (lower = further left)
@@ -240,7 +244,8 @@ interface TerminalState {
   clearAllTerminals: () => void;
   setHasRestoredSessions: (value: boolean) => void;
   reorderTerminals: (activeId: string, overId: string) => void;
-  resumeAllPendingClaude: () => Promise<void>;
+  /** Resume a restored agent window's Claude Code session (queued: one window at a time) */
+  queueClaudeResume: (id: string) => void;
   /**
    * Open a task's Claude Code session in a new agent window of its project: the window starts in
    * the task's worktree, resumes the session and is titled after the task. Also asks the app to
@@ -606,36 +611,28 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
-  resumeAllPendingClaude: async () => {
-    const state = get();
-
-    // Filter terminals with pending Claude resume
-    const pendingTerminals = state.terminals.filter(t => t.pendingCLIResume === true);
-
-    if (pendingTerminals.length === 0) {
-      debugLog('[TerminalStore] No terminals with pending Claude resume');
-      return;
-    }
-
-    debugLog(`[TerminalStore] Resuming ${pendingTerminals.length} pending Claude sessions with 500ms stagger`);
-
-    // Iterate through terminals with staggered delays
-    for (let i = 0; i < pendingTerminals.length; i++) {
-      const terminal = pendingTerminals[i];
-      // Clear the pending flag BEFORE IPC call to prevent race condition
-      // with auto-resume effect in Terminal.tsx (which checks this flag on a 100ms timeout)
-      get().setPendingClaudeResume(terminal.id, false);
-
-      debugLog(`[TerminalStore] Activating deferred Claude resume for terminal: ${terminal.id}`);
-      window.electronAPI.activateDeferredClaudeResume(terminal.id);
-
-      // Wait 500ms before processing next terminal (staggered delay)
-      if (i < pendingTerminals.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+  queueClaudeResume: (id: string) => {
+    if (!claudeResumeQueue.includes(id)) claudeResumeQueue.push(id);
+    if (claudeResumeRunning) return;
+    claudeResumeRunning = true;
+    void (async () => {
+      try {
+        while (claudeResumeQueue.length > 0) {
+          const terminalId = claudeResumeQueue.shift() as string;
+          // Skip windows closed or already resumed while waiting
+          if (!get().terminals.find((t) => t.id === terminalId)?.pendingCLIResume) continue;
+          debugLog(`[TerminalStore] Resuming Claude Code in terminal: ${terminalId}`);
+          get().setPendingClaudeResume(terminalId, false);
+          window.electronAPI.activateDeferredClaudeResume(terminalId);
+          // The terminal now runs `claude --continue` in the project: show it in Claude mode
+          get().setCLIMode(terminalId, true);
+          // Stagger the starts: many Claude Code processes starting at once can crash the app
+          if (claudeResumeQueue.length > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      } finally {
+        claudeResumeRunning = false;
       }
-    }
-
-    debugLog('[TerminalStore] Completed resuming all pending Claude sessions');
+    })();
   },
 
   openTaskSession: (request: TaskSessionRequest) => {

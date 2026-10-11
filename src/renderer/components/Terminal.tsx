@@ -76,9 +76,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Track last sent PTY dimensions to prevent redundant resize calls
   // This ensures terminal.resize() stays in sync with PTY dimensions
   const lastPtyDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
-  // Track if auto-resume has been attempted to prevent duplicate resume calls
-  // This fixes the race condition where isActive and pendingCLIResume update timing can miss the effect trigger
-  const hasAttemptedAutoResumeRef = useRef(false);
   // Track when the last resize was sent to PTY for grace period logic
   // This prevents false positive mismatch warnings during async resize acknowledgment
   const lastResizeTimeRef = useRef<number>(0);
@@ -550,49 +547,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     };
   }, [isExpanded, fit, id, resizePtyWithTracking]);
 
-  // Trigger deferred Claude resume when terminal becomes active
-  // This ensures Claude sessions are only resumed when the user actually views the terminal,
-  // preventing all terminals from resuming simultaneously on app startup (which can crash the app)
+  // Resume a restored agent window's Claude Code session as soon as the window is shown. The
+  // store queues the resumes, so the project's windows start one after another, not all at once
   useEffect(() => {
-    // Reset resume attempt tracking when terminal is no longer pending
-    if (!terminal?.pendingCLIResume) {
-      hasAttemptedAutoResumeRef.current = false;
-      return;
-    }
-
-    // Only attempt auto-resume once, even if the effect runs multiple times
-    if (hasAttemptedAutoResumeRef.current) {
-      return;
-    }
-
-    // Check if both conditions are met for auto-resume
-    if (isActive && terminal?.pendingCLIResume) {
-      // Defer the resume slightly to ensure all React state updates have propagated
-      // This fixes the race condition where isActive and pendingCLIResume might update
-      // at different times during the restoration flow
-      const timer = setTimeout(() => {
-        if (!isMountedRef.current) return;
-
-        // Mark that we've attempted resume INSIDE the callback to prevent duplicates
-        // This ensures we only mark as attempted if the timeout actually fires
-        // (prevents race condition where effect re-runs before timeout executes)
-        if (hasAttemptedAutoResumeRef.current) return;
-        hasAttemptedAutoResumeRef.current = true;
-
-        // Double-check conditions before resuming (state might have changed)
-        const currentTerminal = useTerminalStore.getState().terminals.find((t) => t.id === id);
-        if (currentTerminal?.pendingCLIResume) {
-          // Clear the pending flag and trigger the actual resume
-          useTerminalStore.getState().setPendingClaudeResume(id, false);
-          window.electronAPI.activateDeferredClaudeResume(id);
-          // The terminal now runs `claude --continue` in the project: show it in Claude mode
-          useTerminalStore.getState().setCLIMode(id, true);
-        }
-      }, 100); // Small delay to let React finish batched updates
-
-      return () => clearTimeout(timer);
-    }
-  }, [isActive, id, terminal?.pendingCLIResume]);
+    if (!terminal?.pendingCLIResume) return;
+    // Let the restore's batched state updates land first
+    const timer = setTimeout(() => {
+      if (isMountedRef.current) useTerminalStore.getState().queueClaudeResume(id);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [id, terminal?.pendingCLIResume]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -757,7 +721,6 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
         dragHandleListeners={dragHandleListeners}
         isExpanded={isExpanded}
         onToggleExpand={onToggleExpand}
-        pendingCLIResume={terminal?.pendingCLIResume}
       />
 
       {/* Padding lives on the wrapper: xterm's fit addon sizes rows from its container's height,
