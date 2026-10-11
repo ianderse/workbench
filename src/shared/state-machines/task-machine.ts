@@ -163,9 +163,13 @@ export const taskMachine = createMachine(
           PR_CREATED: 'pr_created'
         }
       },
+      // Shown in Human Review until its PR is merged (Merge PR) or the task is moved to Done
       pr_created: {
         on: {
-          MARK_DONE: 'done'
+          MARK_DONE: 'done',
+          USER_RESUMED: { target: 'coding', actions: 'clearReviewReason' },
+          PLANNING_STARTED: { target: 'planning', actions: 'clearReviewReason' },
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' }
         }
       },
       done: {

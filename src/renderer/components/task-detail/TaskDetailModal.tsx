@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { TooltipProvider } from '../ui/tooltip';
@@ -22,6 +22,7 @@ import {
   X,
   ArchiveRestore,
   GitPullRequest,
+  GitPullRequestArrow,
   GitPullRequestCreate,
   Play,
   RotateCcw
@@ -47,7 +48,8 @@ import { TaskWarnings } from './TaskWarnings';
 import { TaskLogs } from './TaskLogs';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
-import type { Task, WorktreeCreatePROptions } from '../../../shared/types';
+import { MergePRDialog } from './task-review/MergePRDialog';
+import type { Task, WorktreeCreatePROptions, WorktreeMergePROptions, WorktreeMergePRResult } from '../../../shared/types';
 
 // Status label colors: the top line color of each Kanban column (globals.css `--column-*`)
 const STATUS_BADGE_CLASSES: Record<TaskStatusColumn, string> = {
@@ -164,10 +166,11 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
       const result = await window.electronAPI.createWorktreePR(task.id, options);
       if (result.success && result.data) {
         // Update single task in store with new status and prUrl (more efficient than reloading all tasks)
+        // The task waits in Human Review (PR Created) until its PR is merged
         if (result.data.success && result.data.prUrl && !result.data.alreadyExists) {
           useTaskStore.getState().updateTask(task.id, {
-            status: 'done',
-            metadata: { ...task.metadata, prUrl: result.data.prUrl }
+            status: 'pr_created',
+            metadata: { ...task.metadata, prUrl: result.data.prUrl, prState: 'open' }
           });
         }
         return result.data;
@@ -181,6 +184,32 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
       state.setIsCreatingPR(false);
     }
   };
+
+  // A merged PR moves the task to Done
+  const handleMergePR = async (options: WorktreeMergePROptions): Promise<WorktreeMergePRResult> => {
+    const result = await window.electronAPI.mergeWorktreePR(task.id, options);
+    if (!result.success || !result.data) return { success: false, error: result.error };
+    if (result.data.success) {
+      useTaskStore.getState().updateTask(task.id, { status: 'done', metadata: { ...task.metadata, prState: 'merged' } });
+    }
+    return result.data;
+  };
+
+  // The PR's state is stored with the task; read it from GitHub once when it never was
+  const prStateRequested = useRef(false);
+  const prUrl = task.metadata?.prUrl;
+  const prState = task.metadata?.prState;
+  useEffect(() => {
+    if (!open || !prUrl || prState || prStateRequested.current) return;
+    prStateRequested.current = true;
+    void window.electronAPI.getWorktreePRState(task.id).then((result) => {
+      if (!result.success || !result.data) return;
+      const current = useTaskStore.getState().tasks.find((candidate) => candidate.id === task.id);
+      if (current) useTaskStore.getState().updateTask(task.id, { metadata: { ...current.metadata, prState: result.data } });
+    });
+  }, [open, prUrl, prState, task.id]);
+  // Only an open PR can be merged, and not while the task runs
+  const canMergePR = !!prUrl && prState === 'open' && task.status !== 'in_progress' && task.status !== 'ai_review';
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -300,15 +329,23 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                             <TaskOpenAgentButton task={task} />
                             {/* A PR that exists opens in the browser; otherwise create one (primary action) */}
                             {task.metadata?.prUrl ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="gap-1.5"
-                                onClick={() => void window.electronAPI.openExternal(task.metadata!.prUrl!)}
-                              >
-                                <GitPullRequest className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
-                                {t('common:buttons.openPR')}
-                              </Button>
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1.5"
+                                  onClick={() => void window.electronAPI.openExternal(task.metadata!.prUrl!)}
+                                >
+                                  <GitPullRequest className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                  {t('common:buttons.openPR')}
+                                </Button>
+                                {canMergePR && (
+                                  <Button size="sm" className="gap-1.5" onClick={() => state.setShowMergePRDialog(true)}>
+                                    <GitPullRequestArrow className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                    {t('common:buttons.mergePR')}
+                                  </Button>
+                                )}
+                              </>
                             ) : state.needsReview && state.worktreeStatus?.exists && (
                               <Button
                                 size="sm"
@@ -347,6 +384,15 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         worktreeStatus={state.worktreeStatus}
                         onOpenChange={state.setShowPRDialog}
                         onCreatePR={handleCreatePR}
+                      />
+
+                      {/* Opened by the Merge PR button next to Open PR */}
+                      <MergePRDialog
+                        open={state.showMergePRDialog}
+                        task={task}
+                        worktreeStatus={state.worktreeStatus}
+                        onOpenChange={state.setShowMergePRDialog}
+                        onMergePR={handleMergePR}
                       />
 
                       {/* Logs of all steps, under Request changes */}

@@ -498,14 +498,11 @@ export async function resetTaskToInitialState(
 }
 
 /**
- * Update task_metadata.json to add PR URL.
- * This is a simple JSON file update (no locking needed as it's rarely updated concurrently).
- *
- * @param metadataPath - Path to the task_metadata.json file
- * @param prUrl - The PR URL to add to metadata
- * @returns true if metadata was updated, false if file doesn't exist or failed
+ * Set fields of a task's task_metadata.json (created when missing), e.g. its PR URL and state.
+ * A simple JSON file update (no locking needed as it's rarely updated concurrently).
+ * @returns true if metadata was updated
  */
-export function updateTaskMetadataPrUrl(metadataPath: string, prUrl: string): boolean {
+export function updateTaskMetadataFields(metadataPath: string, fields: Record<string, unknown>): boolean {
   try {
     let metadata: Record<string, unknown> = {};
 
@@ -520,8 +517,7 @@ export function updateTaskMetadataPrUrl(metadataPath: string, prUrl: string): bo
       // File doesn't exist, will create new one
     }
 
-    // Update with prUrl
-    metadata.prUrl = prUrl;
+    Object.assign(metadata, fields);
 
     // Ensure parent directory exists before writing
     mkdirSync(path.dirname(metadataPath), { recursive: true });

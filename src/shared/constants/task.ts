@@ -22,7 +22,7 @@ export const TASK_STATUS_COLUMNS = [
 export type TaskStatusColumn = typeof TASK_STATUS_COLUMNS[number];
 
 // Status label translation keys (use with t() from react-i18next)
-// Note: pr_created maps to 'done' column in Kanban view (see KanbanBoard.tsx)
+// Note: pr_created maps to 'human_review' column in Kanban view until its PR is merged
 // Note: error maps to 'human_review' column in Kanban view (errors need human attention)
 export const TASK_STATUS_LABELS: Record<TaskStatusColumn | 'pr_created' | 'error', string> = {
   backlog: 'columns.backlog',
@@ -36,12 +36,12 @@ export const TASK_STATUS_LABELS: Record<TaskStatusColumn | 'pr_created' | 'error
 };
 
 /**
- * Kanban column a task is shown in: pr_created tasks sit in Done and error tasks in
- * Human Review (errors need human attention).
+ * Kanban column a task is shown in: pr_created tasks wait in Human Review until their PR is
+ * merged (only merged tasks, or tasks moved there by hand, are Done), and so do error tasks
+ * (errors need human attention).
  */
 export function getTaskColumn(status: TaskStatus): TaskStatusColumn {
-  if (status === 'pr_created') return 'done';
-  if (status === 'error') return 'human_review';
+  if (status === 'pr_created' || status === 'error') return 'human_review';
   return status;
 }
 

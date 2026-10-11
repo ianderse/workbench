@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { TASK_STATUS_COLUMNS, canMoveTask, getAllowedTaskMoves, getTaskColumn } from '../task';
 
 describe('getTaskColumn', () => {
-  it('shows pr_created tasks in Done and error tasks in Human Review', () => {
-    expect(getTaskColumn('pr_created')).toBe('done');
+  it('shows pr_created tasks (PR not merged yet) and error tasks in Human Review', () => {
+    expect(getTaskColumn('pr_created')).toBe('human_review');
     expect(getTaskColumn('error')).toBe('human_review');
     expect(getTaskColumn('queue')).toBe('queue');
   });
@@ -21,7 +21,7 @@ describe('getAllowedTaskMoves', () => {
 
   it('treats failed and PR tasks like their visual column', () => {
     expect(getAllowedTaskMoves('error')).toEqual(getAllowedTaskMoves('human_review'));
-    expect(getAllowedTaskMoves('pr_created')).toEqual([]);
+    expect(getAllowedTaskMoves('pr_created')).toEqual(getAllowedTaskMoves('human_review'));
   });
 
   it('never lists the current column', () => {
@@ -46,6 +46,6 @@ describe('canMoveTask', () => {
 
   it('rejects moves within the same column', () => {
     expect(canMoveTask('error', 'human_review')).toBe(false);
-    expect(canMoveTask('pr_created', 'done')).toBe(false);
+    expect(canMoveTask('pr_created', 'human_review')).toBe(false);
   });
 });

@@ -54,6 +54,13 @@ export const workspaceMock = {
     }
   }),
 
+  mergeWorktreePR: async () => ({
+    success: true,
+    data: { success: true, targetBranch: 'main', conflictedFiles: [] }
+  }),
+
+  getWorktreePRState: async () => ({ success: true, data: 'open' as const }),
+
   discardWorktree: async (_taskId: string, _skipStatusChange?: boolean) => ({
     success: true,
     data: {

@@ -45,6 +45,10 @@ import type {
   WorktreeListResult,
   WorktreeCreatePROptions,
   WorktreeCreatePRResult,
+  WorktreeMergePROptions,
+  WorktreeMergePRResult,
+  MergePRProgress,
+  PullRequestState,
   TaskRecoveryResult,
   TaskRecoveryOptions,
   TaskMetadata,
@@ -165,6 +169,8 @@ export interface ElectronAPI {
   mergeWorktree: (taskId: string, options?: { noCommit?: boolean }) => Promise<IPCResult<WorktreeMergeResult>>;
   mergeWorktreePreview: (taskId: string) => Promise<IPCResult<WorktreeMergeResult>>;
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
+  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
+  getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
   discardWorktree: (taskId: string, skipStatusChange?: boolean) => Promise<IPCResult<WorktreeDiscardResult>>;
   clearStagedState: (taskId: string) => Promise<IPCResult<{ cleared: boolean }>>;
   listWorktrees: (projectId: string, options?: { includeStats?: boolean }) => Promise<IPCResult<WorktreeListResult>>;
@@ -438,6 +444,9 @@ export interface ElectronAPI {
   ) => () => void;
   onMergeProgress: (
     callback: (taskId: string, progress: MergeProgress) => void
+  ) => () => void;
+  onMergePRProgress: (
+    callback: (taskId: string, progress: MergePRProgress) => void
   ) => () => void;
 
   // Git operations

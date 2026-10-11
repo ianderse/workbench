@@ -77,6 +77,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
 
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [isCreatingPR, setIsCreatingPR] = useState(false);
+  const [showMergePRDialog, setShowMergePRDialog] = useState(false);
 
   const currentProject = useProjectStore((state) => {
     const currentProjectId = state.activeProjectId || state.selectedProjectId;
@@ -87,7 +88,8 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const isRunning = task.status === 'in_progress';
   // isActiveTask includes ai_review for stuck detection (CHANGELOG documents this feature)
   const isActiveTask = task.status === 'in_progress' || task.status === 'ai_review';
-  const needsReview = task.status === 'human_review';
+  // A task whose PR isn't merged yet is still in review (Human Review column)
+  const needsReview = task.status === 'human_review' || task.status === 'pr_created';
   const executionPhase = task.executionProgress?.phase;
   const hasActiveExecution = executionPhase && executionPhase !== 'idle' && executionPhase !== 'complete' && executionPhase !== 'failed';
   const isIncomplete = isIncompleteHumanReview(task);
@@ -145,7 +147,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setFeedbackImages([]);
   }, []);
 
-  // Load worktree status when task is in human_review (change summary and Create PR)
+  // Load worktree status when task is in review (change summary, Create PR and Merge PR)
   useEffect(() => {
     if (needsReview) {
       window.electronAPI.getWorktreeStatus(task.id).then((statusResult) => {
@@ -331,6 +333,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     taskProgress,
     showPRDialog,
     isCreatingPR,
+    showMergePRDialog,
     isLoadingPlan,
 
     // Setters
@@ -350,6 +353,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setIsLoadingLogs,
     setShowPRDialog,
     setIsCreatingPR,
+    setShowMergePRDialog,
 
     // Handlers
     toggleLogs,

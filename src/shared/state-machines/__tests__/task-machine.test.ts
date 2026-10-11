@@ -317,6 +317,20 @@ describe('taskMachine', () => {
       const snapshot = runEvents(events);
       expect(snapshot.value).toBe('done');
     });
+
+    it('lets a task with an unmerged PR go back to Planning or continue like Human Review', () => {
+      const prCreated: TaskEvent[] = [
+        { type: 'PLANNING_STARTED' },
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' },
+        { type: 'QA_STARTED', iteration: 1, maxIterations: 3 },
+        { type: 'QA_PASSED', iteration: 1, testsRun: {} },
+        { type: 'CREATE_PR' },
+        { type: 'PR_CREATED', prUrl: 'https://github.com/test/pr/1' }
+      ];
+      expect(runEvents([...prCreated, { type: 'MOVED_TO_BACKLOG' }]).value).toBe('backlog');
+      expect(runEvents([...prCreated, { type: 'USER_RESUMED' }]).value).toBe('coding');
+      expect(runEvents([...prCreated, { type: 'PLANNING_STARTED' }]).value).toBe('planning');
+    });
   });
 
   describe('unexpected process exit', () => {

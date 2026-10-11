@@ -464,7 +464,7 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
   const taskOrder = useTaskStore((state) => state.taskOrder);
 
   const tasksByStatus = useMemo(() => {
-    // Note: pr_created tasks are shown in the 'done' column since they're essentially complete
+    // Note: pr_created tasks are shown in the 'human_review' column until their PR is merged
     // Note: error tasks are shown in the 'human_review' column since they need human attention
     const grouped: Record<typeof TASK_STATUS_COLUMNS[number], Task[]> = {
       backlog: [],
@@ -476,7 +476,7 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
     };
 
     filteredTasks.forEach((task) => {
-      // Map pr_created tasks to the done column, error tasks to human_review
+      // Map pr_created and error tasks to human_review
       const targetColumn = getVisualColumn(task.status);
       if (grouped[targetColumn]) {
         grouped[targetColumn].push(task);

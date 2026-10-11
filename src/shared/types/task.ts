@@ -184,6 +184,7 @@ export interface TaskMetadata {
   // Git/Worktree configuration
   baseBranch?: string;  // Override base branch for this task's worktree
   prUrl?: string;  // GitHub PR URL if task has been submitted as a PR
+  prState?: PullRequestState;  // The PR's last known state (set when created or merged, read once from GitHub otherwise)
   useWorktree?: boolean;  // If false, use direct mode (no worktree isolation) - default is true for safety
   useLocalBranch?: boolean;  // If true, use the local branch directly instead of preferring origin/branch (preserves gitignored files)
   pushNewBranches?: boolean;  // If false, keep the task branch local-only instead of auto-pushing to origin
@@ -416,6 +417,36 @@ export interface WorktreeCreatePROptions {
   targetBranch?: string;
   title?: string;
   draft?: boolean;
+}
+
+/** A pull request's state on GitHub */
+export type PullRequestState = 'open' | 'merged' | 'closed';
+
+/** Options for merging a task's pull request */
+export interface WorktreeMergePROptions {
+  /** Branch to merge into; the PR's current base when omitted */
+  targetBranch?: string;
+}
+
+/** Steps of merging a task's pull request (progress events) */
+export type MergePRStep = 'checking' | 'pulling' | 'resolving' | 'verifying' | 'pushing' | 'merging';
+
+export interface MergePRProgress {
+  step: MergePRStep;
+  params?: Record<string, string | number>;
+}
+
+/** Result of merging a task's pull request */
+export interface WorktreeMergePRResult {
+  success: boolean;
+  /** The PR was already merged */
+  alreadyMerged?: boolean;
+  targetBranch?: string;
+  /** Files whose conflicts Claude Code resolved */
+  conflictedFiles?: string[];
+  /** Claude Code's account of the conflict resolution */
+  summary?: string;
+  error?: string;
 }
 
 /**

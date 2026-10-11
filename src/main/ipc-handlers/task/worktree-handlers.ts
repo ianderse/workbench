@@ -1,7 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import type { ConflictSeverity } from '../../../shared/types/task';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult } from '../../../shared/types';
+import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, PullRequestState, Project, Task } from '../../../shared/types';
 import path from 'path';
 import { minimatch } from 'minimatch';
 import { existsSync, readdirSync, statSync, readFileSync, promises as fsPromises } from 'fs';
@@ -11,6 +11,8 @@ import { projectStore } from '../../project-store';
 import { MergeOrchestrator } from '../../ai/merge/orchestrator';
 import { createMergeResolverFn } from '../../ai/runners/merge-resolver';
 import { createPR } from '../../ai/runners/github/pr-creator';
+import { mergePR } from '../../ai/runners/github/pr-merger';
+import { taskHooks } from '../../task-hooks';
 import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
 import { getToolPath } from '../../cli-tool-manager';
@@ -19,10 +21,11 @@ import {
   getTaskWorktreeDir,
   findTaskWorktree,
 } from '../../worktree-paths';
-import { persistPlanStatus, updateTaskMetadataPrUrl } from './plan-file-utils';
+import { persistPlanStatus, updateTaskMetadataFields } from './plan-file-utils';
 import { getIsolatedGitEnv, refreshGitIndex } from '../../utils/git-isolation';
 import { cleanupWorktree } from '../../utils/worktree-cleanup';
 import { taskStateManager } from '../../task-state-manager';
+import { safeSendToRenderer } from '../utils';
 
 // Regex pattern for validating git branch names
 export const GIT_BRANCH_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._/-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/;
@@ -270,8 +273,8 @@ interface TaskStatusUpdateResult {
 }
 
 /**
- * Update task status and metadata after PR creation
- * Updates both main project and worktree locations
+ * Update task status (PR Created: it stays in Human Review until the PR is merged) and metadata
+ * after PR creation. Updates both main project and worktree locations
  * @returns Result object indicating which updates succeeded/failed
  */
 async function updateTaskStatusAfterPRCreation(
@@ -294,15 +297,15 @@ async function updateTaskStatusAfterPRCreation(
 
   // Await status persistence to ensure completion before resolving
   try {
-    const persisted = await persistPlanStatus(planPath, 'done');
+    const persisted = await persistPlanStatus(planPath, 'pr_created');
     result.mainProjectStatus = persisted;
-    debug('Main project status persisted to done:', persisted);
+    debug('Main project status persisted to pr_created:', persisted);
   } catch (err) {
     debug('Failed to persist main project status:', err);
   }
 
   // Update metadata with prUrl in main project
-  result.mainProjectMetadata = updateTaskMetadataPrUrl(metadataPath, prUrl);
+  result.mainProjectMetadata = updateTaskMetadataFields(metadataPath, { prUrl, prState: 'open' });
   debug('Main project metadata updated with prUrl:', result.mainProjectMetadata);
 
   // Also persist to WORKTREE location (worktree takes priority when loading tasks)
@@ -313,14 +316,14 @@ async function updateTaskStatusAfterPRCreation(
     const worktreeMetadataPath = path.join(worktreePath, specsBaseDir, specId, 'task_metadata.json');
 
     try {
-      const persisted = await persistPlanStatus(worktreePlanPath, 'done');
+      const persisted = await persistPlanStatus(worktreePlanPath, 'pr_created');
       result.worktreeStatus = persisted;
-      debug('Worktree status persisted to done:', persisted);
+      debug('Worktree status persisted to pr_created:', persisted);
     } catch (err) {
       debug('Failed to persist worktree status:', err);
     }
 
-    result.worktreeMetadata = updateTaskMetadataPrUrl(worktreeMetadataPath, prUrl);
+    result.worktreeMetadata = updateTaskMetadataFields(worktreeMetadataPath, { prUrl, prState: 'open' });
     debug('Worktree metadata updated with prUrl:', result.worktreeMetadata);
   }
 
@@ -1450,7 +1453,10 @@ export function registerWorktreeHandlers(
         debug('PR creation result:', result);
 
         if (result.success && result.prUrl && !result.alreadyExists) {
-          // Update task status after successful PR creation
+          // Human Review -> PR Created through the state machine (task hooks, renderer), then
+          // persisted in both locations even when the machine was in another state
+          taskStateManager.handleUiEvent(taskId, { type: 'CREATE_PR' }, task, project);
+          taskStateManager.handleUiEvent(taskId, { type: 'PR_CREATED', prUrl: result.prUrl }, task, project);
           await updateTaskStatusAfterPRCreation(
             specDir,
             worktreePath,
@@ -1487,4 +1493,103 @@ export function registerWorktreeHandlers(
       }
     }
   );
+
+  /**
+   * Merge a task's pull request: pull the target branch into the task branch (Claude Code
+   * resolves conflicts without losing changes other tasks merged), push it and merge the PR.
+   * A merged PR moves the task to Done.
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_WORKTREE_MERGE_PR,
+    async (_, taskId: string, options?: WorktreeMergePROptions): Promise<IPCResult<WorktreeMergePRResult>> => {
+      const { task, project } = findTaskAndProject(taskId);
+      if (!task || !project) return { success: false, error: 'Task not found' };
+      const prUrl = task.metadata?.prUrl;
+      if (!prUrl) return { success: false, error: 'This task has no pull request' };
+      if (task.status === 'in_progress' || task.status === 'ai_review') {
+        return { success: false, error: 'Stop the task before merging its pull request' };
+      }
+      const worktreePath = findTaskWorktree(project.path, task.specId);
+      if (!worktreePath) return { success: false, error: 'No worktree found for this task' };
+      if (options?.targetBranch && !GIT_BRANCH_REGEX.test(options.targetBranch)) {
+        return { success: false, error: 'Invalid target branch name' };
+      }
+      if (mergingPRs.has(taskId)) return { success: false, error: 'This pull request is already being merged' };
+
+      mergingPRs.add(taskId);
+      try {
+        const result = await mergePR({
+          projectDir: project.path,
+          worktreePath,
+          prUrl,
+          targetBranch: options?.targetBranch,
+          gitPath: getToolPath('git'),
+          ghPath: getToolPath('gh'),
+          taskTitle: task.title,
+          taskDescription: task.metadata?.userDescription || task.description,
+          profileId: project.settings?.claudeProfileId,
+          dataDir: project.autoBuildPath,
+          onProgress: (step, params) =>
+            safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_PR_PROGRESS, taskId, { step, params }),
+        });
+        if (result.success) await recordPRMerged(task, project, worktreePath);
+        return { success: true, data: result };
+      } catch (error) {
+        console.error('[MERGE_PR] Exception in handler:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to merge the pull request' };
+      } finally {
+        mergingPRs.delete(taskId);
+      }
+    }
+  );
+
+  /** Read a task's PR state from GitHub and store it in the task metadata */
+  ipcMain.handle(
+    IPC_CHANNELS.TASK_WORKTREE_PR_STATE,
+    async (_, taskId: string): Promise<IPCResult<PullRequestState>> => {
+      const { task, project } = findTaskAndProject(taskId);
+      if (!task || !project) return { success: false, error: 'Task not found' };
+      const prUrl = task.metadata?.prUrl;
+      if (!prUrl) return { success: false, error: 'This task has no pull request' };
+      try {
+        const { stdout } = await promisify(execFile)(getToolPath('gh'), ['pr', 'view', prUrl, '--json', 'state', '--jq', '.state'], {
+          cwd: project.path,
+          encoding: 'utf-8',
+          timeout: 30000,
+        });
+        const state = stdout.trim().toLowerCase();
+        if (state !== 'open' && state !== 'merged' && state !== 'closed') {
+          return { success: false, error: `Unknown pull request state: ${stdout.trim()}` };
+        }
+        writeTaskMetadataFields(project, task, findTaskWorktree(project.path, task.specId), { prState: state });
+        return { success: true, data: state };
+      } catch (error) {
+        const stderr = (error as { stderr?: string }).stderr;
+        return { success: false, error: String(stderr || (error instanceof Error ? error.message : error)).trim() };
+      }
+    }
+  );
+}
+
+/** Tasks whose pull request is being merged */
+const mergingPRs = new Set<string>();
+
+/** Set fields of a task's metadata in the main project and its worktree */
+function writeTaskMetadataFields(project: Project, task: Task, worktreePath: string | null, fields: Record<string, unknown>): void {
+  const specsBaseDir = getSpecsDir(project.autoBuildPath);
+  updateTaskMetadataFields(path.join(project.path, specsBaseDir, task.specId, 'task_metadata.json'), fields);
+  if (worktreePath) updateTaskMetadataFields(path.join(worktreePath, specsBaseDir, task.specId, 'task_metadata.json'), fields);
+}
+
+/** A merged PR: remember it and move the task to Done (state machine, else the plan files) */
+async function recordPRMerged(task: Task, project: Project, worktreePath: string): Promise<void> {
+  writeTaskMetadataFields(project, task, worktreePath, { prState: 'merged' });
+  taskStateManager.handleUiEvent(task.id, { type: 'MARK_DONE' }, task, project);
+  if (taskStateManager.getCurrentState(task.id) !== 'done') {
+    const specsBaseDir = getSpecsDir(project.autoBuildPath);
+    await persistPlanStatus(path.join(project.path, specsBaseDir, task.specId, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN), 'done', project.id);
+    await persistPlanStatus(path.join(worktreePath, specsBaseDir, task.specId, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN), 'done');
+    taskHooks.emit('state', { project, task, status: 'done' });
+  }
+  projectStore.invalidateTasksCache(project.id);
 }

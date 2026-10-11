@@ -16,6 +16,10 @@ import type {
   MergeProgress,
   WorktreeCreatePROptions,
   WorktreeCreatePRResult,
+  WorktreeMergePROptions,
+  WorktreeMergePRResult,
+  MergePRProgress,
+  PullRequestState,
   ImageAttachment
 } from '../../shared/types';
 
@@ -69,6 +73,9 @@ export interface TaskAPI {
   archiveTasks: (projectId: string, taskIds: string[], version?: string) => Promise<IPCResult<boolean>>;
   unarchiveTasks: (projectId: string, taskIds: string[]) => Promise<IPCResult<boolean>>;
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
+  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
+  getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
+  onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void) => () => void;
 
   // Task Event Listeners
   // Note: projectId is optional for backward compatibility - events without projectId will still work
@@ -184,6 +191,22 @@ export const createTaskAPI = (): TaskAPI => ({
 
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions): Promise<IPCResult<WorktreeCreatePRResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_CREATE_PR, taskId, options),
+
+  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions): Promise<IPCResult<WorktreeMergePRResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, taskId, options),
+
+  getWorktreePRState: (taskId: string): Promise<IPCResult<PullRequestState>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_PR_STATE, taskId),
+
+  onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, taskId: string, progress: MergePRProgress): void => {
+      callback(taskId, progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.TASK_MERGE_PR_PROGRESS, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TASK_MERGE_PR_PROGRESS, handler);
+    };
+  },
 
   // Task Event Listeners
   onTaskProgress: (

@@ -19,7 +19,10 @@ reviews, requests changes (same session continues) or merges.
 - **Kanban Board** — Visual task management from planning through completion
 - **Agent Terminals** — Parallel AI-powered terminals (12 by default, up to 24) with task context injection
 - **Insights** — Chat for exploring a codebase (runs through Claude Code, read-only tools)
-- **Pull Requests** — Create a GitHub pull request from a task's worktree (via the `gh` CLI)
+- **Pull Requests** — Create a GitHub pull request from a task's worktree and merge it (via the `gh` CLI). A task with
+  an open PR stays in Human Review (PR Created); Merge PR (`src/main/ai/runners/github/pr-merger.ts`) pulls the target
+  branch into the task branch, lets the merge agent (`src/main/ai/runners/merge-agent.ts`, Claude Code) resolve
+  conflicts, checks that no line the target added was lost, pushes and merges the PR, then moves the task to Done
 - **Connectors** — MCP servers added to a task's Claude Code session (`--mcp-config`: Context7, Electron, Puppeteer,
   user-added servers) with app-wide defaults in Settings and per-task choices in the task dialog
 - **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
