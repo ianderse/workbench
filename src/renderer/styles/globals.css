@@ -94,7 +94,6 @@
   --color-info-foreground: var(--info-foreground);
 
   /* Theme-overridable surface tokens (see "Shared design tokens" below) */
-  --color-field: var(--field);
   --color-segment: var(--segment);
   --color-segment-active: var(--segment-active);
   --color-nav-hover: var(--nav-hover);
@@ -292,7 +291,6 @@
 
   /* Surfaces */
   --card-border: rgba(11, 11, 11, 0.1);
-  --field: #FFFFFF;
   --field-border: rgba(11, 11, 11, 0.2);
   --radius-composer: 14px;
   --segment: #F0EFEC;
@@ -439,7 +437,6 @@
 
   /* Surfaces */
   --card-border: rgba(255, 255, 255, 0.1);
-  --field: #1A1A19;
   --field-border: rgba(255, 255, 255, 0.2);
   --radius-composer: 14px;
   --segment: #1A1A19;
@@ -1209,12 +1206,12 @@ body {
    Scoped to dialogs (DIALOG_SURFACE_CLASS adds `claude-dialog`) so pages keep their own controls.
    ============================================ */
 
-/* Fields (claude.ai composer): translucent fill, hairline border that strengthens on focus
-   (no focus ring), muted placeholder; 32px tall */
+/* Fields: no fill of their own (they take the dialog's color, so there is no third shade),
+   hairline border that strengthens on focus (no focus ring), muted placeholder; 32px tall */
 .claude-dialog .field-border {
   height: 2rem;
   border-color: var(--field-border-color);
-  background-color: var(--segment-track);
+  background-color: transparent;
   box-shadow: none;
   border-radius: 8px;
 }
