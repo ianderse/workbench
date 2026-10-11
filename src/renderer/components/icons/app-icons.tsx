@@ -91,15 +91,6 @@ export function ProjectOutlineIcon({ strokeWidth = 1.5, ...props }: IconProps) {
   );
 }
 
-/** Branching tree — git worktrees (agent terminals) */
-export function WorktreeIcon(props: IconProps) {
-  return (
-    <Svg {...props}>
-      <path d="M704 608h128a64 64 0 0 0 64-64v-128a64 64 0 0 0-64-64h-128a64 64 0 0 0-64 64v32h-288v-128h32a64 64 0 0 0 64-64V128a64 64 0 0 0-64-64H256a64 64 0 0 0-64 64v128a64 64 0 0 0 64 64h32v448a96 96 0 0 0 96 96h256v32a64 64 0 0 0 64 64h128a64 64 0 0 0 64-64v-128a64 64 0 0 0-64-64h-128a64 64 0 0 0-64 64v32h-256a32 32 0 0 1-32-32v-256h288v32a64 64 0 0 0 64 64zM256 128h128v128H256V128z m448 640h128v128h-128v-128z m0-352h128v128h-128v-128z" />
-    </Svg>
-  );
-}
-
 /** Checklist — selecting a task for an agent terminal */
 export function TaskListIcon(props: IconProps) {
   return (
