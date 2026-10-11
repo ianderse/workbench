@@ -836,12 +836,6 @@ function ToolUsageHistory({ tools }: ToolUsageHistoryProps) {
 
   if (tools.length === 0) return null;
 
-  // Group tools by name for summary
-  const toolCounts = tools.reduce((acc, tool) => {
-    acc[tool.name] = (acc[tool.name] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
   return (
     <div>
       <button
@@ -850,17 +844,6 @@ function ToolUsageHistory({ tools }: ToolUsageHistoryProps) {
         aria-expanded={expanded}
         className="inline-flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:text-foreground"
       >
-        <span className="flex items-center gap-1.5">
-          {Object.entries(toolCounts).map(([name, count]) => {
-            const Icon = getToolIcon(name);
-            return (
-              <span key={name} className="flex items-center gap-0.5">
-                <Icon className="h-3 w-3" />
-                <span>{count}</span>
-              </span>
-            );
-          })}
-        </span>
         <span>{t('insights.tools.toolsUsed', { count: tools.length })}</span>
         <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
       </button>
