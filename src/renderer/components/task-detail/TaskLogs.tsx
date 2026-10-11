@@ -93,6 +93,9 @@ export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle 
     costUsd !== undefined ? formatCostUsd(costUsd) : null
   ].filter((part): part is string => !!part);
 
+  // Shown once the task has something to show
+  if (items.length === 0 && !legacyLogs) return null;
+
   return (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
       <CollapsibleTrigger asChild>
@@ -131,11 +134,9 @@ export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle 
                 <LogEntry key={`${item.entry.timestamp}-${item.entry.type}-${item.entry.content}`} entry={item.entry} />
               )
             )
-          ) : legacyLogs ? (
-            // Older tasks without step logs
-            <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{legacyLogs.join('\n')}</pre>
           ) : (
-            <p className="text-xs text-muted-foreground">{isLoadingLogs ? '' : t('tasks:logs.empty')}</p>
+            // Older tasks without step logs
+            <pre className="whitespace-pre-wrap break-all font-mono text-xs text-muted-foreground">{legacyLogs!.join('\n')}</pre>
           )}
         </div>
       </CollapsibleContent>

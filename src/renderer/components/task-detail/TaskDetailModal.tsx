@@ -46,6 +46,7 @@ import { TaskMetadata } from './TaskMetadata';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
 import { TaskWarnings } from './TaskWarnings';
 import { TaskLogs } from './TaskLogs';
+import { TaskAttachments } from './TaskAttachments';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
 import { MergePRDialog } from './task-review/MergePRDialog';
@@ -395,14 +396,20 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         onMergePR={handleMergePR}
                       />
 
-                      {/* Logs of all steps, under Request changes */}
-                      <TaskLogs
-                        task={task}
-                        phaseLogs={state.phaseLogs}
-                        isLoadingLogs={state.isLoadingLogs}
-                        isExpanded={state.isLogsExpanded}
-                        onToggle={state.toggleLogs}
-                      />
+                      {/* The description's attachments and the logs of all steps, under Request changes;
+                          each dropdown shows only when it has something to show */}
+                      <div className="space-y-1">
+                        {task.metadata?.attachedImages && task.metadata.attachedImages.length > 0 && (
+                          <TaskAttachments task={task} attachments={task.metadata.attachedImages} />
+                        )}
+                        <TaskLogs
+                          task={task}
+                          phaseLogs={state.phaseLogs}
+                          isLoadingLogs={state.isLoadingLogs}
+                          isExpanded={state.isLogsExpanded}
+                          onToggle={state.toggleLogs}
+                        />
+                      </div>
                     </div>
                   </div>
             </div>

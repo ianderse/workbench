@@ -227,7 +227,7 @@
   "form": {
     "description": "Description",
     "descriptionPlaceholder": "What should Claude Code do?",
-    "attachImages": "Attach images",
+    "attachFiles": "Attach files",
     "dropToAttach": "Drop images to attach",
     "imageAddedSuccess": "Image added successfully!",
     "sections": {
@@ -262,12 +262,14 @@
     "deleting": "Deleting...",
     "failed": "Failed to delete task"
   },
-  "referenceImages": {
+  "attachments": {
     "preview": "Preview {{filename}}"
   },
   "detail": {
     "resumeFailedDescription": "Failed to load implementation plan. Please try again or check the task files.",
-    "attachments": "Reference images"
+    "attachments": "Attachments",
+    "attachmentCount_one": "{{count}} file",
+    "attachmentCount_other": "{{count}} files"
   },
   "warnings": {
     "incompleteTitle": "Task incomplete",
@@ -276,7 +278,6 @@
   },
   "logs": {
     "title": "Logs",
-    "empty": "No logs yet",
     "stopped": "Stopped",
     "entries_one": "{{count}} entry",
     "entries_other": "{{count}} entries",

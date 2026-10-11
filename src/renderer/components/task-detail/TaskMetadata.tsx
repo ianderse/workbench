@@ -7,7 +7,6 @@ import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { cn, formatRelativeTime } from '../../lib/utils';
 import { JSON_ERROR_PREFIX } from '../../../shared/constants';
 import type { Task, WorktreeStatus } from '../../../shared/types';
-import { TaskAttachments } from './TaskAttachments';
 import { MarkdownContent } from '../ui/markdown-content';
 
 interface TaskMetadataProps {
@@ -150,11 +149,6 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
           </p>
           {worktreeAction}
         </div>
-      )}
-
-      {/* Reference images attached to the task */}
-      {task.metadata?.attachedImages && task.metadata.attachedImages.length > 0 && (
-        <TaskAttachments task={task} images={task.metadata.attachedImages} />
       )}
 
       {/* Secondary details as plain rows */}

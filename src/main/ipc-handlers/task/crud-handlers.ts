@@ -153,25 +153,16 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
         userDescription: description
       };
 
-      // Process and save attached images
+      // Save the files attached to the description (any type) in the task's attachments folder
       if (taskMetadata.attachedImages && taskMetadata.attachedImages.length > 0) {
         const attachmentsDir = path.join(specDir, 'attachments');
         mkdirSync(attachmentsDir, { recursive: true });
         const resolvedAttachmentsDir = path.resolve(attachmentsDir);
 
-        // MIME type allowlist (defense in depth - frontend also validates)
-        const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
-
         const savedImages: typeof taskMetadata.attachedImages = [];
 
         for (const image of taskMetadata.attachedImages) {
           if (image.data) {
-            // Validate MIME type
-            if (!image.mimeType || !ALLOWED_MIME_TYPES.includes(image.mimeType)) {
-              console.warn(`[TASK_CREATE] Skipping image with missing or disallowed MIME type: ${image.mimeType}`);
-              continue;
-            }
-
             // Sanitize filename to prevent path traversal attacks
             const sanitizedFilename = path.basename(image.filename);
             if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
@@ -196,7 +187,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
               savedImages.push({
                 id: image.id,
                 filename: sanitizedFilename,
-                mimeType: image.mimeType,
+                mimeType: image.mimeType || 'application/octet-stream',
                 size: image.size,
                 path: `attachments/${sanitizedFilename}`
                 // Don't include data or thumbnail to save space
@@ -414,26 +405,17 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
             updatedMetadata.userDescription = updates.description;
           }
 
-          // Process and save attached images if provided
+          // Save newly attached files (any type) in the task's attachments folder
           if (updates.metadata.attachedImages && updates.metadata.attachedImages.length > 0) {
             const attachmentsDir = path.join(specDir, 'attachments');
             mkdirSync(attachmentsDir, { recursive: true });
             const resolvedAttachmentsDir = path.resolve(attachmentsDir);
-
-            // MIME type allowlist (defense in depth - frontend also validates)
-            const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
 
             const savedImages: typeof updates.metadata.attachedImages = [];
 
             for (const image of updates.metadata.attachedImages) {
               // If image has data (new image), save it
               if (image.data) {
-                // Validate MIME type
-                if (!image.mimeType || !ALLOWED_MIME_TYPES.includes(image.mimeType)) {
-                  console.warn(`[TASK_UPDATE] Skipping image with missing or disallowed MIME type: ${image.mimeType}`);
-                  continue;
-                }
-
                 // Sanitize filename to prevent path traversal attacks
                 const sanitizedFilename = path.basename(image.filename);
                 if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
@@ -456,7 +438,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
                   savedImages.push({
                     id: image.id,
                     filename: sanitizedFilename,
-                    mimeType: image.mimeType,
+                    mimeType: image.mimeType || 'application/octet-stream',
                     size: image.size,
                     path: `attachments/${sanitizedFilename}`
                   });

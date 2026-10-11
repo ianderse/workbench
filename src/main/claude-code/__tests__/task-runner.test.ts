@@ -288,6 +288,27 @@ describe('ClaudeTaskRun', () => {
     expect(log.phases.coding.entries.some((e: { tool_name?: string }) => e.tool_name === 'TaskCreate')).toBe(true);
   });
 
+  it("sends the task's attachments with its first turn like the Claude chat: images, documents and inlined text", async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    writeFileSync(path.join(specDir, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(path.join(specDir, 'notes.md'), '# Notes\nUse the v2 API');
+    writeFileSync(path.join(specDir, 'spec.pdf'), '%PDF-1.4');
+    scripts.push({ messages: [result('s12')] });
+    await makeRun({
+      settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false },
+      attachments: [
+        { path: path.join(specDir, 'shot.png'), filename: 'shot.png', mimeType: 'image/png' },
+        { path: path.join(specDir, 'notes.md'), filename: 'notes.md', mimeType: 'text/markdown' },
+        { path: path.join(specDir, 'spec.pdf'), filename: 'spec.pdf', mimeType: 'application/pdf' },
+      ],
+    }).run();
+    const input = spawned[0].input as Array<{ type: string; text?: string; source?: { media_type: string }; title?: string }>;
+    expect(input.map((block) => block.type)).toEqual(['text', 'image', 'text', 'document']);
+    expect(input[1].source?.media_type).toBe('image/png');
+    expect(input[2].text).toContain('<attached_file name="notes.md">\n# Notes\nUse the v2 API');
+    expect(input[3]).toMatchObject({ title: 'spec.pdf', source: { media_type: 'application/pdf' } });
+  });
+
   it('reports the files its session and subagents edit inside the worktree', async () => {
     triageMock.mockResolvedValue({ triage: triage() });
     const edit = (id: string, name: string, input: Record<string, unknown>, parent: string | null = null) =>

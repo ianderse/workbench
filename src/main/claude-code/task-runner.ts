@@ -32,6 +32,7 @@ import { buildMcpConfig } from './mcp-config';
 import { triageTask, fixedTriage, applyPlanningPolicy } from './triage';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
 import { buildParallelTasksPrompt } from '../task-changelog';
+import { buildAttachmentBlocks } from '../insights/message-content';
 import { detectClaudeLimitMessage, parseLimitResetTime } from './limit';
 import {
   isApiRetry,
@@ -58,13 +59,15 @@ import type {
 } from '../../shared/types/claude-code';
 import type { McpConnectorSettings } from '../../shared/types/settings';
 import type { ExecutionPhase } from '../../shared/constants/phase-protocol';
-import type { SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
+import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
 import { DATA_DIR_NAMES } from '../../shared/constants';
 
 const execFileAsync = promisify(execFile);
 
 export const CLAUDE_RUN_FILE = 'claude_run.json';
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** Other attachments (PDFs, text files; text is also truncated when inlined) */
+const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 /** Tools whose file edits go to the task hooks (and so the project's task changelog) */
 const FILE_EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -573,19 +576,32 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
     }
     blocks.push({ type: 'text', text });
 
-    // Task images go with the session's first turn; feedback images with the revision
-    const images = name === 'revise'
+    // The task's attachments go with the session's first turn; feedback images with the revision.
+    // Like the Claude chat: images as images, PDFs as documents, text files inlined
+    const attachments = name === 'revise'
       ? [...(resume ? [] : this.config.attachments), ...(this.config.feedbackAttachments ?? [])]
       : resume ? [] : this.config.attachments;
-    for (const attachment of images) {
+    const files: ImageAttachment[] = [];
+    for (const attachment of attachments) {
       try {
         const data = readFileSync(attachment.path);
-        if (data.byteLength > MAX_IMAGE_BYTES) continue;
-        blocks.push({ type: 'image', source: { type: 'base64', media_type: attachment.mimeType, data: data.toString('base64') } });
+        const limit = attachment.mimeType.startsWith('image/') ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES;
+        if (data.byteLength > limit) {
+          this.emitLog(`${attachment.filename} is too large to attach`);
+          continue;
+        }
+        files.push({
+          id: attachment.filename,
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          size: data.byteLength,
+          data: data.toString('base64'),
+        });
       } catch {
         this.emitLog(`Could not attach ${attachment.filename}`);
       }
     }
+    blocks.push(...buildAttachmentBlocks(files));
     return blocks;
   }
 

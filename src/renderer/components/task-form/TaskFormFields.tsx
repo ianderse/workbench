@@ -8,7 +8,7 @@
  *
  * Model, effort and planning are decided per task by the Claude Code triage run.
  */
-import { useRef, useState, useEffect, type ReactNode } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image as ImageIcon, Paperclip, X } from 'lucide-react';
 import { SettingsSection } from '../settings/SettingsSection';
@@ -17,6 +17,8 @@ import { ImagePreviewModal } from './ImagePreviewModal';
 import { cn } from '../../lib/utils';
 import { TaskConnectorRows } from './TaskConnectorRows';
 import type { ImageAttachment } from '../../../shared/types';
+import { AttachmentTile } from './AttachmentTile';
+import { useAttachmentThumbnails } from './useAttachmentThumbnails';
 
 interface TaskFormFieldsProps {
   // Project context (for loading image thumbnails from disk)
@@ -71,67 +73,8 @@ export function TaskFormFields({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewImage, setPreviewImage] = useState<ImageAttachment | null>(null);
 
-  // Track images we've attempted to load thumbnails for to prevent infinite loops
-  // Note: Failed thumbnail loads are not retried (persists across re-renders)
-  // This prevents repeated failed IPC calls for missing/corrupt images
-  const loadedThumbnailsRef = useRef<Set<string>>(new Set());
-
-  // Track the latest images to avoid stale closure issues
-  const imagesRef = useRef<ImageAttachment[]>(images);
-  useEffect(() => {
-    imagesRef.current = images;
-  }, [images]);
-
-  // Load thumbnails for images that have path but no thumbnail (fix placeholder bug)
-  // This handles the case when TaskFormFields mounts with persisted images from disk
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadMissingThumbnails = async () => {
-      // Need project context to load images from disk
-      if (!projectPath || !specId) return;
-
-      // Find images that have path but no thumbnail and haven't been attempted yet
-      const imagesToLoad = images.filter(
-        img => img.path && !img.thumbnail && !loadedThumbnailsRef.current.has(img.id)
-      );
-
-      if (imagesToLoad.length === 0) return;
-
-      // Mark these as attempted before loading to prevent re-entry
-      imagesToLoad.forEach(img => loadedThumbnailsRef.current.add(img.id));
-
-      // Collect loaded thumbnails into a Map to avoid stale closure issues
-      const thumbnailMap = new Map<string, string>();
-
-      for (const image of imagesToLoad) {
-        try {
-          const result = await window.electronAPI.loadImageThumbnail(projectPath, specId, image.path!);
-          if (result.success && result.data) {
-            thumbnailMap.set(image.id, result.data);
-          }
-        } catch (error) {
-          // Log for debugging but don't block other images
-          console.debug('Failed to load thumbnail for image', image.id, error);
-        }
-      }
-
-      // Merge thumbnails into current state without overwriting user changes
-      if (thumbnailMap.size > 0 && !cancelled) {
-        const updatedImages = imagesRef.current.map(img => ({
-          ...img,
-          thumbnail: thumbnailMap.get(img.id) ?? img.thumbnail
-        }));
-        onImagesChange(updatedImages);
-      }
-    };
-
-    loadMissingThumbnails();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [images, onImagesChange, projectPath, specId]);
+  // Saved attachments have no thumbnail: loaded from the task folder for display only
+  const thumbnails = useAttachmentThumbnails(projectPath, specId, images);
 
   // Use the shared image upload hook with translated error messages
   const {
@@ -148,6 +91,8 @@ export function TaskFormFields({
     images,
     onImagesChange,
     disabled,
+    // Any kind of file can be attached: images as thumbnails, other files by name
+    acceptAllFiles: true,
     onError,
     errorMessages: {
       maxImagesReached: t('tasks:form.errors.maxImagesReached'),
@@ -179,25 +124,12 @@ export function TaskFormFields({
               onDragLeave={handleDragLeave}
               onDrop={handleDrop}
             >
-              {/* Attached images */}
+              {/* Attachments */}
               {images.length > 0 && (
                 <div className="flex flex-wrap items-center gap-3 px-4 pt-4">
                   {images.map((image) => (
                     <div key={image.id} className="group relative" title={image.filename}>
-                      <button
-                        type="button"
-                        onClick={() => setPreviewImage(image)}
-                        className="block h-14 w-14 cursor-zoom-in overflow-hidden rounded-lg border border-border focus-visible:outline-none focus-visible:shadow-(--shadow-focus)"
-                        aria-label={t('tasks:referenceImages.preview', { filename: image.filename })}
-                      >
-                        {image.thumbnail ? (
-                          <img src={image.thumbnail} alt={image.filename} className="h-full w-full object-cover" />
-                        ) : (
-                          <span className="flex h-full w-full items-center justify-center bg-segment-track">
-                            <ImageIcon className="h-5 w-5 text-muted-foreground" strokeWidth={1.75} />
-                          </span>
-                        )}
-                      </button>
+                      <AttachmentTile attachment={image} thumbnail={thumbnails[image.id]} onPreview={setPreviewImage} />
                       {/* Remove button centered on the thumbnail's top-right corner */}
                       {!disabled && (
                         <button
@@ -241,7 +173,6 @@ export function TaskFormFields({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
                   multiple
                   className="hidden"
                   tabIndex={-1}
@@ -257,8 +188,8 @@ export function TaskFormFields({
                   className="flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={disabled || !canAddMore}
-                  title={t('tasks:form.attachImages')}
-                  aria-label={t('tasks:form.attachImages')}
+                  title={t('tasks:form.attachFiles')}
+                  aria-label={t('tasks:form.attachFiles')}
                 >
                   <Paperclip className="h-4 w-4" />
                 </button>

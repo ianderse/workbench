@@ -18,9 +18,11 @@ export type ClaudeToolResultBlock = {
 };
 
 type ClaudeImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+/** PDF attachment */
+type ClaudeDocumentBlock = { type: 'document'; source: { type: 'base64'; media_type: string; data: string }; title?: string };
 
 type ClaudeAssistantContentBlock = ClaudeTextBlock | ClaudeThinkingBlock | ClaudeToolUseBlock | { type: string };
-export type ClaudeUserContentBlock = ClaudeTextBlock | ClaudeImageBlock | ClaudeToolResultBlock;
+export type ClaudeUserContentBlock = ClaudeTextBlock | ClaudeImageBlock | ClaudeDocumentBlock | ClaudeToolResultBlock;
 
 export interface ClaudeSystemInitMessage {
   type: 'system';

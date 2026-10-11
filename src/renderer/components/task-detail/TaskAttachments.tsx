@@ -1,76 +1,62 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Image as ImageIcon } from 'lucide-react';
+import { ChevronDown } from 'lucide-react';
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from '../ui/collapsible';
 import { ImagePreviewModal } from '../task-form/ImagePreviewModal';
+import { AttachmentTile } from '../task-form/AttachmentTile';
+import { useAttachmentThumbnails } from '../task-form/useAttachmentThumbnails';
 import { useProjectStore } from '../../stores/project-store';
+import { cn } from '../../lib/utils';
 import type { ImageAttachment, Task } from '../../../shared/types';
 
 interface TaskAttachmentsProps {
   task: Task;
-  images: ImageAttachment[];
+  attachments: ImageAttachment[];
 }
 
 /**
- * Read-only reference images of a task (same thumbnails as the task form); click to preview.
- * Thumbnails missing from the task metadata are loaded from the spec folder.
+ * The files attached to a task's description, as a collapsible "Attachments" section like Logs:
+ * images as thumbnails that open a preview, other files by name (same tiles as the task form).
  */
-export function TaskAttachments({ task, images }: TaskAttachmentsProps) {
+export function TaskAttachments({ task, attachments }: TaskAttachmentsProps) {
   const { t } = useTranslation(['tasks']);
+  const [isExpanded, setIsExpanded] = useState(false);
   const [preview, setPreview] = useState<ImageAttachment | null>(null);
-  const [loaded, setLoaded] = useState<Record<string, string>>({});
   const projects = useProjectStore((state) => state.projects);
   const projectPath = useMemo(
     () => projects.find((p) => p.id === task.projectId)?.path,
     [projects, task.projectId]
   );
-
-  useEffect(() => {
-    if (!projectPath) return;
-    let cancelled = false;
-    const missing = images.filter((img) => img.path && !img.thumbnail);
-    void (async () => {
-      const next: Record<string, string> = {};
-      for (const image of missing) {
-        try {
-          const result = await window.electronAPI.loadImageThumbnail(projectPath, task.specId, image.path!);
-          if (result.success && result.data) next[image.id] = result.data;
-        } catch {
-          // A missing image keeps its placeholder
-        }
-      }
-      if (!cancelled && Object.keys(next).length > 0) setLoaded((prev) => ({ ...prev, ...next }));
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [images, projectPath, task.specId]);
-
-  const withThumbnails = images.map((img) => (img.thumbnail || !loaded[img.id] ? img : { ...img, thumbnail: loaded[img.id] }));
+  const thumbnails = useAttachmentThumbnails(projectPath, task.specId, attachments);
 
   return (
-    <div className="space-y-2">
-      <div className="text-sm text-foreground">{t('tasks:detail.attachments')}</div>
-      <div className="flex flex-wrap items-center gap-3">
-        {withThumbnails.map((image) => (
-          <button
-            key={image.id}
-            type="button"
-            onClick={() => setPreview(image)}
-            title={image.filename}
-            className="block h-14 w-14 cursor-zoom-in overflow-hidden rounded-lg border border-border focus-visible:outline-none focus-visible:shadow-(--shadow-focus)"
-            aria-label={t('tasks:referenceImages.preview', { filename: image.filename })}
-          >
-            {image.thumbnail ? (
-              <img src={image.thumbnail} alt={image.filename} className="h-full w-full object-cover" />
-            ) : (
-              <span className="flex h-full w-full items-center justify-center bg-segment-track">
-                <ImageIcon className="h-5 w-5 text-muted-foreground" strokeWidth={1.75} />
-              </span>
+    <Collapsible open={isExpanded} onOpenChange={setIsExpanded}>
+      <CollapsibleTrigger asChild>
+        {/* Same ghost trigger as the Logs section */}
+        <button
+          type="button"
+          className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left outline-none transition-colors hover:bg-nav-hover focus-visible:shadow-(--shadow-focus) data-[state=open]:bg-nav-hover"
+        >
+          <span className="text-sm text-foreground">{t('tasks:detail.attachments')}</span>
+          <span className="text-xs text-(--nav-label-color) tabular-nums">
+            {t('tasks:detail.attachmentCount', { count: attachments.length })}
+          </span>
+          <ChevronDown
+            className={cn(
+              'ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200',
+              isExpanded && 'rotate-180'
             )}
-          </button>
-        ))}
-      </div>
+          />
+        </button>
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <div className="flex flex-wrap items-center gap-3 px-3 py-3">
+          {attachments.map((attachment) => (
+            <AttachmentTile key={attachment.id} attachment={attachment} thumbnail={thumbnails[attachment.id]} onPreview={setPreview} />
+          ))}
+        </div>
+      </CollapsibleContent>
       <ImagePreviewModal open={preview !== null} onOpenChange={(open) => !open && setPreview(null)} image={preview} />
-    </div>
+    </Collapsible>
   );
 }

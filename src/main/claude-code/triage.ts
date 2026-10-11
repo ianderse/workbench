@@ -76,7 +76,7 @@ export interface TriageInput {
   description: string;
   /** Project (or worktree) directory the triage run may read */
   cwd: string;
-  /** Names of attached image files, so triage knows the task has visual context */
+  /** Names of the files attached to the task, so triage knows about that context */
   attachmentNames?: string[];
   settings: ClaudeCodeTaskSettings;
   abortSignal?: AbortSignal;
@@ -116,7 +116,7 @@ export async function triageTask(input: TriageInput): Promise<{ triage: TaskTria
     : ['haiku', 'sonnet', 'opus'];
 
   const attachments = input.attachmentNames?.length
-    ? `\n\nThe task has ${input.attachmentNames.length} attached image(s): ${input.attachmentNames.join(', ')}.`
+    ? `\n\nThe task has ${input.attachmentNames.length} attached file(s): ${input.attachmentNames.join(', ')}.`
     : '';
   const prompt = `Allowed models: ${allowedModels.join(', ')}.\n\n<task>\n${input.description}\n</task>${attachments}`;
 
