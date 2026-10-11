@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { handleIpc, onIpc } from '../ipc-registry';
+import { BrowserWindow } from 'electron';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir, resolveMaxParallelTasks } from '../../../shared/constants';
 import type { IPCResult, TaskStartOptions, TaskStatus, ImageAttachment, Task, Project, TaskLogs, TaskLogPhase, TaskPhaseLog } from '../../../shared/types';
 import path from 'path';
@@ -296,7 +297,7 @@ export function registerTaskExecutionHandlers(
   /**
    * Start a task
    */
-  ipcMain.on(
+  onIpc(
     IPC_CHANNELS.TASK_START,
     async (_, taskId: string, _options?: TaskStartOptions) => {
       if (!getMainWindow()) {
@@ -323,7 +324,7 @@ export function registerTaskExecutionHandlers(
    * attachments/, a fresh implementation_plan.json), forget its state machine, then start
    * it like TASK_START does, or queue it when the parallel task limit is reached.
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_RETRY,
     async (_, taskId: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> => {
       const { task, project: foundProject } = findTaskAndProject(taskId);
@@ -435,7 +436,7 @@ export function registerTaskExecutionHandlers(
   configureTaskQueue(agentManager, startTask);
 
   // The board's Queue column order (top first): the queue starts the top task first
-  ipcMain.on(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, (_, projectId: string, order: string[]) => {
+  onIpc(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, (_, projectId: string, order: string[]) => {
     if (typeof projectId !== 'string' || !Array.isArray(order)) return;
     taskQueueOrder.set(projectId, order);
   });
@@ -443,7 +444,7 @@ export function registerTaskExecutionHandlers(
   /**
    * Stop a task
    */
-  ipcMain.on(IPC_CHANNELS.TASK_STOP, (_, taskId: string) => {
+  onIpc(IPC_CHANNELS.TASK_STOP, (_, taskId: string) => {
     agentManager.killTask(taskId);
     fileWatcher.unwatch(taskId).catch((err) => {
       console.error('[TASK_STOP] Failed to unwatch:', err);
@@ -464,7 +465,7 @@ export function registerTaskExecutionHandlers(
    * Review a task: approve (done) or request changes, which Claude Code applies in the
    * task's session before validating again
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_REVIEW,
     async (
       _,
@@ -525,7 +526,7 @@ export function registerTaskExecutionHandlers(
    * Options:
    * - forceCleanup: When setting to 'done' with a worktree present, delete the worktree first
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_UPDATE_STATUS,
     async (
       _,
@@ -667,7 +668,7 @@ export function registerTaskExecutionHandlers(
   /**
    * Check if a task is actually running (has an active run)
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_CHECK_RUNNING,
     async (_, taskId: string): Promise<IPCResult<boolean>> => {
       return { success: true, data: agentManager.isRunning(taskId) };
@@ -679,7 +680,7 @@ export function registerTaskExecutionHandlers(
    * Moves it to review when Claude Code finished implementing, otherwise back to the
    * backlog (or the requested status), and optionally restarts it.
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_RECOVER_STUCK,
     async (
       _,

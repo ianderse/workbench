@@ -52,6 +52,9 @@ class InsightsService extends EventEmitter {
     this.executor.on('error', (projectId, error) => {
       this.emit('error', projectId, error);
     });
+    this.executor.on('tasks-changed', (projectId) => {
+      this.emit('tasks-changed', projectId);
+    });
     this.executor.on('sdk-rate-limit', (info) => {
       this.emit('sdk-rate-limit', info);
     });

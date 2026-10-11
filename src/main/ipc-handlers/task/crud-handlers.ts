@@ -1,4 +1,5 @@
-import { ipcMain, nativeImage } from 'electron';
+import { handleIpc } from '../ipc-registry';
+import { nativeImage } from 'electron';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, Task, TaskMetadata } from '../../../shared/types';
 import path from 'path';
@@ -65,7 +66,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * @param options - Optional parameters
    * @param options.forceRefresh - If true, invalidates cache before fetching (for refresh button)
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LIST,
     async (_, projectId: string, options?: { forceRefresh?: boolean }): Promise<IPCResult<Task[]>> => {
       console.warn('[IPC] TASK_LIST called with projectId:', projectId, 'options:', options);
@@ -88,7 +89,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
   /**
    * Create a new task
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_CREATE,
     async (
       _,
@@ -255,7 +256,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * because the latter fails on Windows when the directory contains untracked files
    * (node_modules, build artifacts, etc.).
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_DELETE,
     async (_, taskId: string): Promise<IPCResult> => {
       const { rm } = await import('fs/promises');
@@ -352,7 +353,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
   /**
    * Update a task
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_UPDATE,
     async (
       _,
@@ -527,7 +528,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * @param imagePath - Relative path to the image (e.g., 'attachments/image.png')
    * @returns Base64 data URL thumbnail
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LOAD_IMAGE_THUMBNAIL,
     async (
       _,
@@ -614,7 +615,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * Check if a task's worktree has uncommitted changes
    * Used by the UI before showing the delete confirmation dialog
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_CHECK_WORKTREE_CHANGES,
     async (_, taskId: string): Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>> => {
       const { task, project } = findTaskAndProject(taskId);

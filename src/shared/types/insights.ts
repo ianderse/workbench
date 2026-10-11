@@ -16,6 +16,8 @@ export interface InsightsModelConfig {
   profileId: string;           // 'complex' | 'balanced' | 'quick' | 'custom'
   model: ModelType;            // any model ID (e.g. 'sonnet', 'opus', or provider-specific model string)
   thinkingLevel: ThinkingLevel;
+  /** The Kanban button: Claude gets the project's task tools in this conversation */
+  kanbanTools?: boolean;
 }
 
 type InsightsChatRole = 'user' | 'assistant';

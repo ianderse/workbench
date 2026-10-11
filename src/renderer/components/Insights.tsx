@@ -24,7 +24,7 @@ import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn } from '../lib/utils';
-import { GraphIcon } from './icons/app-icons';
+import { GraphIcon, KanbanIcon } from './icons/app-icons';
 import {
   useInsightsStore,
   loadInsightsSession,
@@ -46,7 +46,8 @@ import { AttachmentPreviewDialog } from './AttachmentPreviewDialog';
 import type { InsightsChatMessage, InsightsModelConfig, TaskMetadata, ImageAttachment } from '../../shared/types';
 import {
   MAX_IMAGE_SIZE,
-  parseInsightsError
+  parseInsightsError,
+  DEFAULT_AGENT_PROFILES
 } from '../../shared/constants';
 
 interface InsightsProps {
@@ -306,6 +307,41 @@ export function Insights({ projectId }: InsightsProps) {
     </div>
   ) : null;
 
+  // Kanban button: gives Claude the project's task tools in this conversation (kept with the
+  // conversation's model settings)
+  const kanbanTools = effectiveModelConfig?.kanbanTools === true;
+  const toggleKanbanTools = () => {
+    const balanced = DEFAULT_AGENT_PROFILES.find((profile) => profile.id === 'balanced');
+    const base: InsightsModelConfig = effectiveModelConfig ?? {
+      profileId: 'balanced',
+      model: balanced?.model ?? 'sonnet',
+      thinkingLevel: balanced?.thinkingLevel ?? 'medium',
+    };
+    void handleModelConfigChange({ ...base, kanbanTools: !kanbanTools });
+  };
+  const kanbanButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={toggleKanbanTools}
+          disabled={isLoading}
+          aria-pressed={kanbanTools}
+          className={cn(
+            'flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm transition-colors disabled:pointer-events-none disabled:opacity-40',
+            kanbanTools
+              ? 'bg-primary/15 text-primary hover:bg-primary/20'
+              : 'text-muted-foreground hover:bg-nav-hover hover:text-foreground'
+          )}
+        >
+          <KanbanIcon className="h-4 w-4 shrink-0" />
+          {t('insights.kanbanTools.label')}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{t(kanbanTools ? 'insights.kanbanTools.on' : 'insights.kanbanTools.off')}</TooltipContent>
+    </Tooltip>
+  );
+
   const modelSelector = (
     <InsightsModelSelector
       currentConfig={effectiveModelConfig}
@@ -417,7 +453,7 @@ export function Insights({ projectId }: InsightsProps) {
         {isEmpty ? (
           /* Toolbar (new chat): attach on the left; the model and send on the right */
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
-            <div className="flex items-center gap-0.5">{attachButton}</div>
+            <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
             <div className="flex min-w-0 items-center gap-1.5">
               {modelSelector}
               {/* Send button only appears once there is something to send */}
@@ -587,7 +623,7 @@ export function Insights({ projectId }: InsightsProps) {
                 {composer}
                 {/* Under the field: attach, disclaimer, model */}
                 <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                  <div className="flex items-center gap-0.5">{attachButton}</div>
+                  <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
                   <span className="truncate text-xs text-muted-foreground">{t('insights.disclaimer')}</span>
                   <div className="flex justify-end">{modelSelector}</div>
                 </div>
@@ -753,7 +789,15 @@ function MessageBubble({
   );
 }
 
+/** Auto Claude's task tools (MCP server "auto-claude") as Claude Code names them */
+const TASK_TOOL_PREFIX = 'mcp__auto-claude__';
+
+/** The task tool's own name (create_task, move_task, ...), or null for other tools */
+const taskToolName = (toolName: string): string | null =>
+  toolName.startsWith(TASK_TOOL_PREFIX) ? toolName.slice(TASK_TOOL_PREFIX.length) : null;
+
 const getToolIcon = (toolName: string) => {
+  if (taskToolName(toolName)) return KanbanIcon;
   switch (toolName) {
     case 'Read':
       return FileText;
@@ -844,7 +888,11 @@ function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
                 className="flex items-center gap-2 text-xs"
               >
                 <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="font-medium text-foreground">{tool.name}</span>
+                <span className="font-medium text-foreground">
+                  {taskToolName(tool.name)
+                    ? t(`insights.taskTools.${taskToolName(tool.name)}`, { defaultValue: taskToolName(tool.name) })
+                    : tool.name}
+                </span>
                 {tool.input && (
                   <span className="max-w-[250px] truncate text-muted-foreground">
                     {tool.input}
@@ -870,6 +918,8 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
 
   // Get friendly name and icon for each tool
   const getToolInfo = (toolName: string) => {
+    const taskTool = taskToolName(toolName);
+    if (taskTool) return { icon: KanbanIcon, label: t(`insights.taskTools.${taskTool}`, { defaultValue: taskTool }) };
     switch (toolName) {
       case 'Read':
         return { icon: FileText, label: t('insights.tools.readingFile') };

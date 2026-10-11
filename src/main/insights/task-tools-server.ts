@@ -1,0 +1,173 @@
+/**
+ * Task tools server
+ * =================
+ *
+ * Serves the Claude chat's task tools (`task-tools.ts`) to its Claude Code session as an MCP
+ * server over HTTP (MCP Streamable HTTP, plain JSON responses), on 127.0.0.1 only.
+ *
+ * Each chat turn gets its own bearer token, which names the project the tools act on and stops
+ * working when the turn ends.
+ */
+
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { randomBytes } from 'node:crypto';
+import { TASK_TOOLS, runTaskTool, type TaskToolContext } from './task-tools';
+import { TASK_TOOLS_SERVER_NAME, type TaskToolsMcpServer } from './task-tools-mcp';
+
+const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'];
+const MAX_BODY_BYTES = 1024 * 1024;
+
+interface JsonRpcRequest {
+  jsonrpc: '2.0';
+  id?: string | number | null;
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+/** The task tools of one chat turn */
+export interface TaskToolsSession {
+  mcpServer: TaskToolsMcpServer;
+  /** Stop accepting the session's token */
+  close: () => void;
+}
+
+const sessions = new Map<string, TaskToolContext>();
+let server: Server | null = null;
+let listening: Promise<number> | null = null;
+
+function rpcResult(id: JsonRpcRequest['id'], result: unknown) {
+  return { jsonrpc: '2.0', id: id ?? null, result };
+}
+
+function rpcError(id: JsonRpcRequest['id'], code: number, message: string) {
+  return { jsonrpc: '2.0', id: id ?? null, error: { code, message } };
+}
+
+/** Answer one JSON-RPC message; notifications get no answer */
+async function handleMessage(context: TaskToolContext, message: JsonRpcRequest): Promise<unknown | undefined> {
+  const isNotification = message.id === undefined;
+  switch (message.method) {
+    case 'initialize': {
+      const requested = typeof message.params?.protocolVersion === 'string' ? message.params.protocolVersion : '';
+      return rpcResult(message.id, {
+        protocolVersion: PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: TASK_TOOLS_SERVER_NAME, version: '1.0.0' },
+        instructions: "Manage this project's Auto Claude tasks.",
+      });
+    }
+    case 'ping':
+      return rpcResult(message.id, {});
+    case 'tools/list':
+      return rpcResult(message.id, {
+        tools: TASK_TOOLS.map(({ name, description, inputSchema, mutates }) => ({
+          name,
+          description,
+          inputSchema,
+          annotations: { readOnlyHint: !mutates, destructiveHint: name === 'delete_task' || name === 'retry_task' },
+        })),
+      });
+    case 'tools/call': {
+      const name = String(message.params?.name ?? '');
+      const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
+      try {
+        const result = await runTaskTool(context, name, args);
+        return rpcResult(message.id, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+      } catch (error) {
+        const text = error instanceof Error ? error.message : String(error);
+        return rpcResult(message.id, { content: [{ type: 'text', text }], isError: true });
+      }
+    }
+    default:
+      return isNotification ? undefined : rpcError(message.id, -32601, `Method not found: ${message.method}`);
+  }
+}
+
+function readBody(request: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks: Buffer[] = [];
+    request.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error('Request too large'));
+        request.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    request.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    request.on('error', reject);
+  });
+}
+
+function send(response: ServerResponse, status: number, body?: unknown): void {
+  if (body === undefined) {
+    response.writeHead(status).end();
+    return;
+  }
+  response.writeHead(status, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
+}
+
+async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const token = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1];
+  const context = token ? sessions.get(token) : undefined;
+  if (!context) return send(response, 401, rpcError(null, -32001, 'Unauthorized'));
+  // Only JSON-RPC over POST: no server-initiated stream
+  if (request.method !== 'POST') return send(response, 405);
+
+  let payload: JsonRpcRequest | JsonRpcRequest[];
+  try {
+    payload = JSON.parse(await readBody(request)) as JsonRpcRequest | JsonRpcRequest[];
+  } catch {
+    return send(response, 400, rpcError(null, -32700, 'Parse error'));
+  }
+  const messages = Array.isArray(payload) ? payload : [payload];
+  const answers = (await Promise.all(messages.map((message) => handleMessage(context, message)))).filter((answer) => answer !== undefined);
+  if (answers.length === 0) return send(response, 202);
+  send(response, 200, Array.isArray(payload) ? answers : answers[0]);
+}
+
+function ensureServer(): Promise<number> {
+  if (listening) return listening;
+  listening = new Promise((resolve, reject) => {
+    server = createServer((request, response) => {
+      handleRequest(request, response).catch((error) => {
+        if (!response.headersSent) send(response, 500, rpcError(null, -32603, error instanceof Error ? error.message : String(error)));
+      });
+    });
+    server.once('error', (error) => {
+      listening = null;
+      server = null;
+      reject(error);
+    });
+    server.listen(0, '127.0.0.1', () => resolve((server!.address() as AddressInfo).port));
+  });
+  return listening;
+}
+
+/** Open the task tools for one chat turn of a project */
+export async function openTaskToolsSession(context: TaskToolContext): Promise<TaskToolsSession> {
+  const port = await ensureServer();
+  const token = randomBytes(24).toString('hex');
+  sessions.set(token, context);
+  return {
+    mcpServer: { type: 'http', url: `http://127.0.0.1:${port}/mcp`, headers: { Authorization: `Bearer ${token}` } },
+    close: () => {
+      sessions.delete(token);
+    },
+  };
+}
+
+/**
+ * Stop the server (app shutdown, tests)
+ * @internal
+ */
+export function closeTaskToolsServer(): Promise<void> {
+  sessions.clear();
+  const current = server;
+  server = null;
+  listening = null;
+  return new Promise((resolve) => (current ? current.close(() => resolve()) : resolve()));
+}

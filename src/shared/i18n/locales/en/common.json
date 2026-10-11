@@ -199,6 +199,28 @@
     "errors": {
       "subscription_rejected": "Anthropic rejected this request for your Claude subscription account (HTTP 429), even though your usage is within limits. Subscription accounts must go through Claude Code. Make sure the Claude Code CLI is installed and signed in, or add an Anthropic API key account in Settings → Accounts.",
       "claude_code_missing": "Claude subscription accounts answer through Claude Code, but the Claude Code CLI isn't installed. Install it from claude.ai/download (or via Settings → Developer Tools), then try again."
+    },
+    "taskTools": {
+      "list_tasks": "Listing tasks",
+      "get_task": "Reading a task",
+      "get_task_logs": "Reading task logs",
+      "create_task": "Creating a task",
+      "update_task": "Editing a task",
+      "start_task": "Starting a task",
+      "stop_task": "Stopping a task",
+      "move_task": "Moving a task",
+      "retry_task": "Retrying a task",
+      "request_changes": "Requesting changes",
+      "create_pull_request": "Creating a pull request",
+      "merge_pull_request": "Merging a pull request",
+      "archive_tasks": "Archiving tasks",
+      "unarchive_tasks": "Unarchiving tasks",
+      "delete_task": "Deleting a task"
+    },
+    "kanbanTools": {
+      "label": "Kanban",
+      "off": "Let Claude manage this project's tasks",
+      "on": "Claude can manage this project's tasks"
     }
   },
   "usage": {

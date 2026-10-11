@@ -6,10 +6,11 @@
  * (`claude -p --output-format stream-json --include-partial-messages`), so text streams
  * into the chat as it is written.
  *
- * The CLI runs read-only: only Read/Glob/Grep (plus Bash limited to graphify's read-only
- * searches when the project's memory graph is on) are available, anything else is denied
- * without prompting (`--permission-mode dontAsk`), MCP servers are not loaded and no session is
- * persisted. Credentials come from the best available Claude profile or the active API profile
+ * The CLI can't change the project's files: only Read/Glob/Grep (plus Bash limited to graphify's
+ * read-only searches when the project's memory graph is on) are available, and the only MCP
+ * server is Auto Claude's task tools (`task-tools-server.ts`), so Claude can manage the
+ * project's tasks. Anything else is denied without prompting (`--permission-mode dontAsk`) and
+ * no session is persisted. Credentials come from the best available Claude profile or the active API profile
  * (`resolveClaudeEnv`).
  */
 
@@ -26,6 +27,7 @@ import { CLAUDE_EFFORTS, CLAUDE_MODEL_ALIASES } from '../../shared/types/claude-
 import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-code';
 import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
+import { TASK_TOOLS_SERVER_NAME, type TaskToolsMcpServer } from './task-tools-mcp';
 import { buildMessageContent } from './message-content';
 import {
   buildConversationPrompt,
@@ -58,6 +60,8 @@ export interface InsightsRunConfig {
   graphify?: GraphifyAgentContext;
   /** The project's Claude account (Settings > Project); unset = the account in use */
   profileId?: string;
+  /** MCP server entry of the turn's task tools session */
+  taskTools?: TaskToolsMcpServer;
 }
 
 /** Info about a tool call made during the turn */
@@ -120,14 +124,25 @@ function toClaudeEffort(level: string | undefined): ClaudeEffort {
   return level && (CLAUDE_EFFORTS as readonly string[]).includes(level) ? (level as ClaudeEffort) : 'medium';
 }
 
-/** CLI arguments for a read-only, non-persistent headless turn */
-function buildInsightsArgs(
+/** MCP tools rule for Auto Claude's task tools (every tool of the server) */
+export const INSIGHTS_TASK_TOOLS_RULE = `mcp__${TASK_TOOLS_SERVER_NAME}`;
+
+/** How long a task tool may run (merging a PR with conflicts takes a while) */
+const TASK_TOOL_TIMEOUT_MS = 45 * 60 * 1000;
+
+/** CLI arguments for a non-persistent headless turn that can't change files */
+export function buildInsightsArgs(
   model: string,
   effort: ClaudeEffort,
   systemPromptFile: string,
   withGraphify = false,
+  mcpConfigFile?: string,
 ): string[] {
   const tools = withGraphify ? [...INSIGHTS_READ_ONLY_TOOLS, 'Bash'] : [...INSIGHTS_READ_ONLY_TOOLS];
+  const allowed = [
+    ...(withGraphify ? INSIGHTS_GRAPHIFY_COMMANDS : []),
+    ...(mcpConfigFile ? [INSIGHTS_TASK_TOOLS_RULE] : []),
+  ];
   return [
     '-p',
     '--input-format', 'stream-json',
@@ -137,9 +152,10 @@ function buildInsightsArgs(
     '--model', model,
     '--effort', effort,
     '--tools', tools.join(','),
-    ...(withGraphify ? ['--allowedTools', ...INSIGHTS_GRAPHIFY_COMMANDS] : []),
+    ...(allowed.length ? ['--allowedTools', ...allowed] : []),
     '--permission-mode', 'dontAsk',
     '--strict-mcp-config',
+    ...(mcpConfigFile ? ['--mcp-config', mcpConfigFile] : []),
     '--no-session-persistence',
     '--append-system-prompt-file', systemPromptFile,
   ];
@@ -260,14 +276,22 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     // System prompt goes through a file: no argument length or shell quoting limits
     const tempDir = await mkdtemp(join(tmpdir(), 'auto-claude-insights-'));
     const systemPromptFile = join(tempDir, 'system-prompt.md');
-    const systemPrompt = graphify ? `${buildSystemPrompt(projectDir)}\n\n${graphify.commandPrompt}` : buildSystemPrompt(projectDir);
+    const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!config.taskTools });
+    const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;
     await writeFile(systemPromptFile, systemPrompt, 'utf-8');
+    // The task tools' URL and token go through a file too, so they aren't in the process list
+    let mcpConfigFile: string | undefined;
+    if (config.taskTools) {
+      mcpConfigFile = join(tempDir, 'mcp-config.json');
+      await writeFile(mcpConfigFile, JSON.stringify({ mcpServers: { [TASK_TOOLS_SERVER_NAME]: config.taskTools } }), 'utf-8');
+      env.MCP_TOOL_TIMEOUT = String(TASK_TOOL_TIMEOUT_MS);
+    }
 
     const state = createStreamState();
     try {
       const handle = startClaudeProcess({
         command,
-        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify),
+        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcpConfigFile),
         cwd: projectDir,
         env,
         // Document blocks (PDFs) are valid Anthropic content even though the shared type omits them

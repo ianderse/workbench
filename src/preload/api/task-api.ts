@@ -76,6 +76,7 @@ export interface TaskAPI {
   mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
   getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
   onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void) => () => void;
+  onTaskListChanged: (callback: (projectId: string) => void) => () => void;
 
   // Task Event Listeners
   // Note: projectId is optional for backward compatibility - events without projectId will still work
@@ -197,6 +198,16 @@ export const createTaskAPI = (): TaskAPI => ({
 
   getWorktreePRState: (taskId: string): Promise<IPCResult<PullRequestState>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_PR_STATE, taskId),
+
+  onTaskListChanged: (callback: (projectId: string) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, projectId: string): void => {
+      callback(projectId);
+    };
+    ipcRenderer.on(IPC_CHANNELS.TASK_LIST_CHANGED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TASK_LIST_CHANGED, handler);
+    };
+  },
 
   onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, taskId: string, progress: MergePRProgress): void => {

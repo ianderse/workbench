@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConversationPrompt, extractTaskSuggestion, extractToolInput } from '../prompts';
+import { buildConversationPrompt, buildSystemPrompt, extractTaskSuggestion, extractToolInput } from '../prompts';
 
 describe('extractTaskSuggestion', () => {
   it('parses a suggestion line', () => {
@@ -38,5 +38,19 @@ describe('extractToolInput', () => {
     expect(extractToolInput({ pattern: '*.ts' })).toBe('pattern: *.ts');
     expect(extractToolInput({ file_path: 'src/a.ts' })).toBe('src/a.ts');
     expect(extractToolInput({})).toBe('');
+  });
+});
+
+describe('buildSystemPrompt', () => {
+  it('describes the task tools only when the Kanban button is on', () => {
+    const withTools = buildSystemPrompt('/nonexistent-project', { taskTools: true });
+    expect(withTools).toContain('mcp__auto-claude__');
+    expect(withTools).toContain("don't create it. Suggest it instead");
+
+    const withoutTools = buildSystemPrompt('/nonexistent-project');
+    expect(withoutTools).not.toContain('mcp__auto-claude__');
+    expect(withoutTools).toContain('Kanban button');
+    expect(withoutTools).toContain('When the user asks you to create a task');
+    expect(withoutTools).toContain('__TASK_SUGGESTION__:');
   });
 });

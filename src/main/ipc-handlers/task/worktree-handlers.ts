@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { handleIpc } from '../ipc-registry';
+import { BrowserWindow } from 'electron';
 import type { ConflictSeverity } from '../../../shared/types/task';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, PullRequestState, Project, Task } from '../../../shared/types';
@@ -387,7 +388,7 @@ export function registerWorktreeHandlers(
    * Get the worktree status for a task
    * Per-spec architecture: Each spec has its own worktree at .auto-claude/worktrees/tasks/{spec-name}/
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_STATUS,
     async (_, taskId: string): Promise<IPCResult<WorktreeStatus>> => {
       try {
@@ -502,7 +503,7 @@ export function registerWorktreeHandlers(
   /**
    * Merge the worktree changes into the main branch
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE,
     async (_, taskId: string, options?: { noCommit?: boolean }): Promise<IPCResult<WorktreeMergeResult>> => {
       const isDebugMode = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
@@ -921,7 +922,7 @@ export function registerWorktreeHandlers(
    * Preview merge conflicts before actually merging
    * Uses the TypeScript MergeOrchestrator to analyze potential conflicts without applying changes
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE_PREVIEW,
     async (_, taskId: string): Promise<IPCResult<WorktreeMergeResult>> => {
       console.warn('[IPC] TASK_WORKTREE_MERGE_PREVIEW called with taskId:', taskId);
@@ -1054,7 +1055,7 @@ export function registerWorktreeHandlers(
    * Note: Uses the shared cleanupWorktree utility which handles Windows-specific issues
    * where `git worktree remove --force` fails when the directory contains untracked files.
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_DISCARD,
     async (_, taskId: string, skipStatusChange?: boolean): Promise<IPCResult<WorktreeDiscardResult>> => {
       try {
@@ -1132,7 +1133,7 @@ export function registerWorktreeHandlers(
    * List all spec worktrees for a project
    * Per-spec architecture: Each spec has its own worktree at .auto-claude/worktrees/tasks/{spec-name}/
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LIST_WORKTREES,
     async (_, projectId: string): Promise<IPCResult<WorktreeListResult>> => {
       try {
@@ -1287,7 +1288,7 @@ export function registerWorktreeHandlers(
    * Clear the staged state for a task
    * This allows the user to re-stage changes if needed
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_CLEAR_STAGED_STATE,
     async (_, taskId: string): Promise<IPCResult<{ cleared: boolean }>> => {
       try {
@@ -1363,7 +1364,7 @@ export function registerWorktreeHandlers(
    * Create a Pull Request from the worktree branch
    * Pushes the branch to origin and creates a GitHub PR using gh CLI
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_CREATE_PR,
     async (_, taskId: string, options?: WorktreeCreatePROptions): Promise<IPCResult<WorktreeCreatePRResult>> => {
       const isDebugMode = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
@@ -1499,7 +1500,7 @@ export function registerWorktreeHandlers(
    * resolves conflicts without losing changes other tasks merged), push it and merge the PR.
    * A merged PR moves the task to Done.
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE_PR,
     async (_, taskId: string, options?: WorktreeMergePROptions): Promise<IPCResult<WorktreeMergePRResult>> => {
       const { task, project } = findTaskAndProject(taskId);
@@ -1544,7 +1545,7 @@ export function registerWorktreeHandlers(
   );
 
   /** Read a task's PR state from GitHub and store it in the task metadata */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_PR_STATE,
     async (_, taskId: string): Promise<IPCResult<PullRequestState>> => {
       const { task, project } = findTaskAndProject(taskId);

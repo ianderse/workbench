@@ -18,7 +18,11 @@ reviews, requests changes (same session continues) or merges.
   when to use subagents, skills, MCP tools and its task list
 - **Kanban Board** — Visual task management from planning through completion
 - **Agent Terminals** — Parallel AI-powered terminals (12 by default, up to 24) with task context injection
-- **Insights** — Chat for exploring a codebase (runs through Claude Code, read-only tools)
+- **Insights** — Chat for exploring a codebase (runs through Claude Code; can't change files) that can also manage
+  the project's tasks: Auto Claude's task tools (`src/main/insights/task-tools.ts`, served over local MCP HTTP by
+  `task-tools-server.ts` with a token per chat turn) create, edit, start, stop, retry, move, review, PR, merge, archive
+  and delete tasks through the same IPC handlers as the UI (`ipc-handlers/ipc-registry.ts`); ideas the user didn't ask
+  for stay task suggestions (`__TASK_SUGGESTION__`)
 - **Pull Requests** — Create a GitHub pull request from a task's worktree and merge it (via the `gh` CLI). A task with
   an open PR stays in Human Review (PR Created); Merge PR (`src/main/ai/runners/github/pr-merger.ts`) pulls the target
   branch into the task branch, lets the merge agent (`src/main/ai/runners/merge-agent.ts`, Claude Code) resolve

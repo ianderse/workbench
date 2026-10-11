@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
-import { useTaskStore } from '../stores/task-store';
+import { useTaskStore, loadTasks } from '../stores/task-store';
 import { useAuthFailureStore } from '../stores/auth-failure-store';
 import { useProjectStore } from '../stores/project-store';
 import { setupInsightsListeners } from '../stores/insights-store';
@@ -231,6 +231,12 @@ export function useIpcListeners(): void {
       }
     );
 
+    // Tasks created, edited or moved outside the board (the Claude chat's task tools)
+    const cleanupTaskList = window.electronAPI.onTaskListChanged((projectId: string) => {
+      if (!isTaskForCurrentProject(projectId)) return;
+      void loadTasks(projectId);
+    });
+
     // Claude Code run state (triage, plan, steps, validation) replaces the task's claudeRun
     const cleanupClaudeRun = window.electronAPI.onTaskClaudeRunUpdate(
       (taskId: string, run: import('../../shared/types').ClaudeRunInfo, projectId?: string) => {
@@ -280,6 +286,7 @@ export function useIpcListeners(): void {
       cleanupStatus();
       cleanupRateLimitHold();
       cleanupClaudeRun();
+      cleanupTaskList();
       cleanupExecutionProgress();
       cleanupAuthFailure();
       cleanupInsights();

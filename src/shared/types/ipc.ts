@@ -448,6 +448,8 @@ export interface ElectronAPI {
   onMergePRProgress: (
     callback: (taskId: string, progress: MergePRProgress) => void
   ) => () => void;
+  /** Tasks changed outside the board (e.g. by the Claude chat's task tools) */
+  onTaskListChanged: (callback: (projectId: string) => void) => () => void;
 
   // Git operations
   /** @deprecated Will return GitBranchDetail[] in future - see getGitBranchesWithInfo */

@@ -27,6 +27,8 @@ process.stdin.on('end', () => {
     configDir: process.env.CLAUDE_CONFIG_DIR,
     apiKey: process.env.ANTHROPIC_API_KEY ?? null,
     graphifyOut: process.env.GRAPHIFY_OUT ?? null,
+    mcpConfig: args.includes('--mcp-config') ? JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')) : null,
+    mcpToolTimeout: process.env.MCP_TOOL_TIMEOUT ?? null,
   }));
   for (const event of JSON.parse(process.env.FAKE_EVENTS || '[]')) process.stdout.write(JSON.stringify(event) + '\\n');
   if (process.env.FAKE_STDERR) process.stderr.write(process.env.FAKE_STDERR);
@@ -65,6 +67,7 @@ import {
   runInsights,
   INSIGHTS_READ_ONLY_TOOLS,
   INSIGHTS_GRAPHIFY_COMMANDS,
+  INSIGHTS_TASK_TOOLS_RULE,
   toClaudeModel,
   type InsightsStreamEvent,
 } from '../claude-code-runner';
@@ -182,6 +185,23 @@ describe('runInsights', () => {
     const result = await promise;
     expect(result.toolCalls[0]).toEqual({ name: 'Bash', input: 'graphify explain AgentManager' });
     expect(events[0]).toEqual({ type: 'tool-start', name: 'Bash', input: 'graphify explain AgentManager' });
+  });
+
+  it("gives the CLI Auto Claude's task tools as its only MCP server", async () => {
+    setRun(conversation);
+    const mcpServer = { type: 'http' as const, url: 'http://127.0.0.1:4567/mcp', headers: { Authorization: 'Bearer secret' } };
+    await (await run({ taskTools: mcpServer })).promise;
+    const { args, mcpConfig, mcpToolTimeout, systemPrompt } = record();
+
+    expect(mcpConfig).toEqual({ mcpServers: { 'auto-claude': mcpServer } });
+    // The token stays in the config file, out of the process arguments
+    expect(args.join(' ')).not.toContain('secret');
+    expect(args).toContain('--strict-mcp-config');
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toContain(INSIGHTS_TASK_TOOLS_RULE);
+    expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
+    expect(Number(mcpToolTimeout)).toBeGreaterThan(10 * 60 * 1000);
+    expect(systemPrompt).toContain('mcp__auto-claude__');
+    expect(systemPrompt).toContain('__TASK_SUGGESTION__');
   });
 
   it('keeps Bash out without a memory graph', async () => {

@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron';
+import { handleIpc } from '../ipc-registry';
 import { IPC_CHANNELS } from '../../../shared/constants';
 import type { IPCResult } from '../../../shared/types';
 import { projectStore } from '../../project-store';
@@ -11,7 +11,7 @@ export function registerTaskArchiveHandlers(): void {
   /**
    * Archive tasks
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_ARCHIVE,
     async (
       _,
@@ -38,7 +38,7 @@ export function registerTaskArchiveHandlers(): void {
   /**
    * Unarchive tasks
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_UNARCHIVE,
     async (_, projectId: string, taskIds: string[]): Promise<IPCResult<boolean>> => {
       console.warn('[IPC] TASK_UNARCHIVE called with projectId:', projectId, 'taskIds:', taskIds);

@@ -11,6 +11,7 @@ import { detectRateLimit, createSDKRateLimitInfo } from '../rate-limit-detector'
 import { runInsights } from './claude-code-runner';
 import { getGraphifyPromptContext } from '../graphify';
 import { projectStore } from '../project-store';
+import { openTaskToolsSession } from './task-tools-server';
 
 /**
  * Message processor result
@@ -90,6 +91,15 @@ export class InsightsExecutor extends EventEmitter {
         content: m.content,
       }));
 
+    // With the Kanban button on, Claude can manage the project's tasks; the board reloads when a
+    // tool changes them
+    const taskTools = modelConfig?.kanbanTools
+      ? await openTaskToolsSession({
+        projectId,
+        onTasksChanged: () => this.emit('tasks-changed', projectId),
+      }).catch(() => undefined)
+      : undefined;
+
     try {
       const projectSettings = projectStore.getProject(projectId)?.settings;
       // The project's memory graph, searchable from the chat when its "Use Graphify" setting is on
@@ -107,6 +117,7 @@ export class InsightsExecutor extends EventEmitter {
           attachments: images,
           graphify,
           profileId: projectSettings?.claudeProfileId,
+          taskTools: taskTools?.mcpServer,
         },
         (event) => {
           switch (event.type) {
@@ -202,6 +213,8 @@ export class InsightsExecutor extends EventEmitter {
 
       this.emit('error', projectId, errorMsg);
       throw error;
+    } finally {
+      taskTools?.close();
     }
   }
 

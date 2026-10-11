@@ -416,6 +416,11 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
   // ============================================
 
   // Forward streaming chunks to renderer
+  // The chat's task tools changed tasks: the board reloads them
+  insightsService.on("tasks-changed", (projectId: string) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LIST_CHANGED, projectId);
+  });
+
   insightsService.on("stream-chunk", (projectId: string, chunk: unknown) => {
     safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_STREAM_CHUNK, projectId, chunk);
   });
