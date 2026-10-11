@@ -1,7 +1,6 @@
 import { useState, useRef, useLayoutEffect, useId, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { ExternalLink } from '../ui/external-link';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/button';
@@ -76,7 +75,6 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
     task.metadata.problemSolved ||
     task.metadata.targetAudience ||
     (task.metadata.dependencies && task.metadata.dependencies.length > 0) ||
-    task.metadata.prUrl ||
     (task.metadata.acceptanceCriteria && task.metadata.acceptanceCriteria.length > 0) ||
     (task.metadata.affectedFiles && task.metadata.affectedFiles.length > 0)
   );
@@ -185,17 +183,6 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
                     <li key={idx}>{dep}</li>
                   ))}
                 </ul>
-              }
-            />
-          )}
-
-          {task.metadata.prUrl && (
-            <SettingsRow
-              label={t('tasks:metadata.pullRequest')}
-              description={
-                <ExternalLink href={task.metadata.prUrl} className="break-all">
-                  {task.metadata.prUrl}
-                </ExternalLink>
               }
             />
           )}
