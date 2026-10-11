@@ -248,10 +248,11 @@ async function build(projectPath: string): Promise<GraphifyIndexInfo> {
   const memoryDir = getGraphifyMemoryDir(projectPath);
   await fs.mkdir(memoryDir, { recursive: true });
 
-  // Code-only extraction parses the code locally (tree-sitter), so no API key is needed
+  // Code-only extraction parses the code locally (tree-sitter), so no API key is needed.
+  // The graph mirrors the current code, so a rebuild may shrink it (graphify refuses that by default)
   const { stdout, stderr } = await runGraphify(
     installation.path,
-    ['extract', projectPath, '--code-only', '--out', memoryDir],
+    ['extract', projectPath, '--code-only', '--allow-dedup-shrink', '--out', memoryDir],
     projectPath,
     BUILD_TIMEOUT_MS
   );
