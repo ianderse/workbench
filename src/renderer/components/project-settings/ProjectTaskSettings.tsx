@@ -7,9 +7,6 @@ import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
 
-/** Select value for "use the account in use" (Radix Select has no empty value) */
-const IN_USE_ACCOUNT = '__in_use__';
-
 interface ProjectTaskSettingsProps {
   settings: ProjectSettingsType;
   setSettings: React.Dispatch<React.SetStateAction<ProjectSettingsType>>;
@@ -23,12 +20,13 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
   const { t } = useTranslation('settings');
   const profiles = useClaudeProfileStore((state) => state.profiles);
   const activeProfileId = useClaudeProfileStore((state) => state.activeProfileId);
-  const inUseName = profiles.find((profile) => profile.id === activeProfileId)?.name;
 
-  // An account that was removed falls back to the account in use
-  const accountValue = settings.claudeProfileId && profiles.some((profile) => profile.id === settings.claudeProfileId)
+  // Only the configured accounts are listed; without a choice (or after the chosen account was
+  // removed) the project uses, and shows, the account in use
+  const isAccount = (id: string | undefined) => !!id && profiles.some((profile) => profile.id === id);
+  const accountValue = isAccount(settings.claudeProfileId)
     ? settings.claudeProfileId
-    : IN_USE_ACCOUNT;
+    : isAccount(activeProfileId) ? activeProfileId : undefined;
 
   // The budget is typed as text so partial values ("1.") survive; saved when it parses
   const [budgetDraft, setBudgetDraft] = useState(settings.maxBudgetUsd?.toString() ?? '');
@@ -59,15 +57,13 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
         >
           <Select
             value={accountValue}
-            onValueChange={(value) => setSettings({ ...settings, claudeProfileId: value === IN_USE_ACCOUNT ? undefined : value })}
+            onValueChange={(value) => setSettings({ ...settings, claudeProfileId: value })}
+            disabled={profiles.length === 0}
           >
             <SelectTrigger id="project-claude-account" className="h-8">
-              <SelectValue />
+              <SelectValue placeholder={t('projectPages.tasks.noAccounts')} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={IN_USE_ACCOUNT}>
-                {inUseName ? t('projectPages.tasks.inUseAccountNamed', { name: inUseName }) : t('projectPages.tasks.inUseAccount')}
-              </SelectItem>
               {profiles.map((profile) => (
                 <SelectItem key={profile.id} value={profile.id}>
                   {profile.name}

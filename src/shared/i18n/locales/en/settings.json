@@ -464,8 +464,7 @@
       "title": "Tasks",
       "account": "Account",
       "accountDescription": "The Claude account this project's tasks and chats run on",
-      "inUseAccount": "Account in use",
-      "inUseAccountNamed": "Account in use ({{name}})",
+      "noAccounts": "No Claude accounts",
       "budget": "Budget per task",
       "budgetDescription": "Stop a task when its estimated cost reaches this amount in US dollars. Leave empty for no limit",
       "budgetPlaceholder": "No limit"
