@@ -393,7 +393,7 @@ export function Insights({ projectId }: InsightsProps) {
     <div className="space-y-2">
       <div
         className={cn(
-          'relative rounded-(--radius-composer) bg-card',
+          'relative rounded-(--radius-composer) bg-background',
           'shadow-[0_4px_20px_rgba(0,0,0,0.075),0_0_0_1px_var(--input)]',
           'transition-shadow duration-150 focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.1),0_0_0_1px_var(--input)]'
         )}
