@@ -531,9 +531,11 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Card styles - following design system card-based modularity */
+/* Cards on a page (Kanban tasks) take the page's own shade and stand out by their border: a
+   lighter fill would add a third shade next to the sidebar and the page. Opaque, so a dragged
+   card still covers what is under it. */
 .card-surface {
-  background-color: var(--card);
+  background-color: var(--background);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-xl);
   box-shadow: var(--card-surface-shadow);

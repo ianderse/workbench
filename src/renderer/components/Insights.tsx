@@ -764,7 +764,7 @@ function MessageBubble({
             const isCreated = taskCreated.has(taskKey);
 
             return (
-              <div key={taskKey} className="rounded-xl border border-border bg-card p-4">
+              <div key={taskKey} className="rounded-xl border border-border bg-background p-4">
                 <div className="mb-1.5 text-xs font-medium text-muted-foreground">
                   {t('insights.suggestedTask')}
                 </div>
