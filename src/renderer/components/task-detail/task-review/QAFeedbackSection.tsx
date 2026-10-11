@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUp, Image as ImageIcon, Loader2, Plus, X } from 'lucide-react';
+import { ArrowUp, Image as ImageIcon, Loader2, Paperclip, X } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../ui/tooltip';
 import {
   generateImageId,
@@ -37,7 +37,7 @@ const MIME_TO_EXTENSION: Record<string, string> = {
 
 /**
  * "Request changes" composer, styled like the chat composer on the Claude page: the feedback
- * field with attached images, a "+" button to add images (paste and drop work too), and a send
+ * field with attached images, a paperclip button to add images (paste and drop work too), and a send
  * button. Enter sends, Shift+Enter adds a line. Claude Code applies the request in the task's
  * session, assessing it first and validating afterwards.
  */
@@ -239,7 +239,7 @@ export function QAFeedbackSection({
                       disabled={isSubmitting || images.length >= MAX_IMAGES_PER_TASK}
                       aria-label={t('feedback.addImages')}
                     >
-                      <Plus className="h-4 w-4" />
+                      <Paperclip className="h-4 w-4" />
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>{t('feedback.addImages')}</TooltipContent>

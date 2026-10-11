@@ -379,7 +379,7 @@ export function Insights({ projectId }: InsightsProps) {
             disabled={isLoading || !canAddMore}
             aria-label={t('insights.attachments.add')}
           >
-            <Plus className="h-4 w-4" />
+            <Paperclip className="h-4 w-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent>{t('insights.attachments.add')}</TooltipContent>

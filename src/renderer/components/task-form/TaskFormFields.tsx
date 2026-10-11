@@ -3,14 +3,14 @@
  *
  * Bundles the common form fields used in both TaskCreationWizard and TaskEditDialog:
  * - Description: a composer like the Claude page's (Insights) input, with image thumbnails,
- *   a "+" button to attach images, paste (Ctrl/Cmd+V) and drag and drop
+ *   a paperclip button to attach images, paste (Ctrl/Cmd+V) and drag and drop
  * - Connectors (MCP servers for the task's Claude Code session)
  *
  * Model, effort and planning are decided per task by the Claude Code triage run.
  */
 import { useRef, useState, useEffect, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Image as ImageIcon, Plus, X } from 'lucide-react';
+import { Image as ImageIcon, Paperclip, X } from 'lucide-react';
 import { SettingsSection } from '../settings/SettingsSection';
 import { useImageUpload } from './useImageUpload';
 import { ImagePreviewModal } from './ImagePreviewModal';
@@ -281,7 +281,7 @@ export function TaskFormFields({
                   title={t('tasks:form.attachImages')}
                   aria-label={t('tasks:form.attachImages')}
                 >
-                  <Plus className="h-4 w-4" />
+                  <Paperclip className="h-4 w-4" />
                 </button>
               </div>
 
