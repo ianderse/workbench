@@ -16,6 +16,20 @@ import type { Task, WorktreeStatus } from '../../../../shared/types';
 // Mock electronAPI
 vi.mock('../../../../preload/api', () => ({}));
 
+// The project's branches for the target branch picker
+vi.mock('../../../hooks/useProjectBranches', () => ({
+  useProjectBranches: () => ({
+    branches: [
+      { name: 'develop', type: 'local', displayName: 'develop' },
+      { name: 'origin/main', type: 'remote', displayName: 'origin/main' }
+    ],
+    detectedBranch: 'develop',
+    isLoading: false,
+    error: null,
+    refresh: vi.fn()
+  })
+}));
+
 // Mock window.electronAPI
 const mockOpenExternal = vi.fn();
 Object.defineProperty(window, 'electronAPI', {
@@ -104,8 +118,32 @@ describe('CreatePRDialog', () => {
     );
 
     await waitFor(() => {
-      const branchInput = screen.getByLabelText(/target branch/i);
-      expect(branchInput).toHaveValue('develop');
+      const branchPicker = screen.getByLabelText(/target branch/i);
+      expect(branchPicker).toHaveTextContent('develop');
+    });
+  });
+
+  it('should send a remote target branch without its remote name', async () => {
+    render(
+      <CreatePRDialog
+        open={true}
+        task={mockTask}
+        worktreeStatus={mockWorktreeStatus}
+        onOpenChange={mockOnOpenChange}
+        onCreatePR={mockOnCreatePR}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText(/target branch/i));
+    fireEvent.click(await screen.findByRole('option', { name: /origin\/main/ }));
+    fireEvent.click(screen.getByRole('button', { name: /create pull request/i }));
+
+    await waitFor(() => {
+      expect(mockOnCreatePR).toHaveBeenCalledWith({
+        targetBranch: 'main',
+        title: 'Implement user authentication',
+        draft: false
+      });
     });
   });
 
