@@ -16,7 +16,6 @@ import { ClaudeAccountsSection } from './ClaudeAccountsSection';
 import { ProfileList } from './ProfileList';
 import { ProjectMetricsSection } from './ProjectMetricsSection';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
-import { useToast } from '../../hooks/use-toast';
 import type { AppSettings, ClaudeAutoSwitchSettings } from '../../../shared/types';
 
 interface AccountSettingsProps {
@@ -31,7 +30,6 @@ const PRIORITY_ID_PREFIX = 'oauth-';
 
 export function AccountSettings({ isOpen }: AccountSettingsProps) {
   const { t } = useTranslation('settings');
-  const { toast } = useToast();
   const { profiles, activeProfileId, usage, reload } = useClaudeAccounts(isOpen);
 
   const [autoSwitchSettings, setAutoSwitchSettings] = useState<ClaudeAutoSwitchSettings | null>(null);
@@ -39,13 +37,14 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
   const [priorityOrder, setPriorityOrder] = useState<string[]>([]);
   const [isSavingPriority, setIsSavingPriority] = useState(false);
 
-  const showUpdateFailed = useCallback((description?: string) => {
-    toast({
-      variant: 'destructive',
-      title: t('accounts.toast.settingsUpdateFailed'),
-      description: description || t('accounts.toast.tryAgain'),
+  // A failed settings change, shown at the top of the section it came from
+  const [settingsError, setSettingsError] = useState<{ section: 'switching' | 'priority'; message: string } | null>(null);
+  const showUpdateFailed = useCallback((section: 'switching' | 'priority', description?: string) => {
+    setSettingsError({
+      section,
+      message: `${t('accounts.toast.settingsUpdateFailed')}: ${description || t('accounts.toast.tryAgain')}`,
     });
-  }, [t, toast]);
+  }, [t]);
 
   const loadAutoSwitchSettings = useCallback(async () => {
     setIsLoadingAutoSwitch(true);
@@ -73,15 +72,16 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
 
   const handleUpdateAutoSwitch = async (updates: Partial<ClaudeAutoSwitchSettings>) => {
     setIsLoadingAutoSwitch(true);
+    setSettingsError(null);
     try {
       const result = await window.electronAPI.updateAutoSwitchSettings(updates);
       if (result.success) {
         await loadAutoSwitchSettings();
       } else {
-        showUpdateFailed(result.error);
+        showUpdateFailed('switching', result.error);
       }
     } catch {
-      showUpdateFailed();
+      showUpdateFailed('switching');
     } finally {
       setIsLoadingAutoSwitch(false);
     }
@@ -121,15 +121,16 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
   const savePriorityOrder = async (profileIds: string[]) => {
     const order = profileIds.map((id) => `${PRIORITY_ID_PREFIX}${id}`);
     setIsSavingPriority(true);
+    setSettingsError(null);
     try {
       const result = await window.electronAPI.setAccountPriorityOrder(order);
       if (result.success) {
         setPriorityOrder(order);
       } else {
-        showUpdateFailed(result.error);
+        showUpdateFailed('priority', result.error);
       }
     } catch {
-      showUpdateFailed();
+      showUpdateFailed('priority');
     } finally {
       setIsSavingPriority(false);
     }
@@ -141,7 +142,7 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
     try {
       const result = await window.electronAPI.setActiveClaudeProfile(profileId);
       if (!result.success) {
-        showUpdateFailed(result.error);
+        showUpdateFailed('priority', result.error);
         return;
       }
     } finally {
@@ -199,6 +200,9 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
       {/* Automatic account switching */}
       {totalAccounts > 1 && (
         <SettingsSection title={t('accounts.autoSwitching.title')}>
+          {settingsError?.section === 'switching' && (
+            <p role="alert" className="mb-3 text-sm text-destructive">{settingsError.message}</p>
+          )}
           <SettingsRows>
             <SettingsRow
               label={t('accounts.autoSwitching.enableAutoSwitching')}
@@ -299,6 +303,9 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
       {totalAccounts > 1 && autoSwitchSettings?.enabled && (
         <SettingsSection title={t('accounts.priority.title')}>
           <p className="-mt-2 mb-1 text-sm text-(--nav-label-color)">{t('accounts.priority.description')}</p>
+          {settingsError?.section === 'priority' && (
+            <p role="alert" className="mb-3 text-sm text-destructive">{settingsError.message}</p>
+          )}
           <AccountPriorityList
             accounts={priorityAccounts}
             onReorder={(ids) => void savePriorityOrder(ids)}

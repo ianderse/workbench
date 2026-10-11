@@ -135,26 +135,10 @@
     },
     "deleteAriaLabel": "Delete profile {{name}}",
     "toast": {
-      "create": {
-        "title": "Profile created",
-        "description": "\"{{name}}\" has been added successfully."
-      },
-      "update": {
-        "title": "Profile updated",
-        "description": "\"{{name}}\" has been updated successfully."
-      },
       "delete": {
-        "title": "Profile deleted",
-        "description": "\"{{name}}\" has been removed.",
-        "errorTitle": "Failed to delete profile",
         "errorFallback": "An error occurred while deleting the profile."
       },
       "switch": {
-        "oauthTitle": "Switched to OAuth",
-        "oauthDescription": "Now using OAuth authentication",
-        "profileTitle": "Profile activated",
-        "profileDescription": "Now using {{name}}",
-        "errorTitle": "Failed to switch authentication",
         "errorFallback": "An error occurred while switching authentication method."
       }
     },
@@ -488,12 +472,9 @@
       "kValue": "{{value}}K"
     },
     "importExport": {
-      "exportSuccess": "Settings exported successfully",
       "exportFailed": "Failed to export settings",
-      "importSuccess": "Settings imported successfully",
       "importFailed": "Failed to import settings: Invalid JSON format",
       "importFailedRange": "Failed to import settings: Values out of valid range",
-      "copySuccess": "Settings copied to clipboard",
       "copyFailed": "Failed to copy to clipboard",
       "fileTooLarge": "Import file too large (max 10KB)",
       "readError": "Failed to read file",
@@ -690,13 +671,9 @@
       "description": "\"{{name}}\" and its sign-in are removed from Auto Claude"
     },
     "toast": {
-      "added": "Account added",
-      "removed": "Account removed",
       "removeFailed": "Couldn't remove the account",
       "renameFailed": "Couldn't rename the account",
       "switchFailed": "Couldn't switch accounts",
-      "signInStarted": "Opening your browser to sign in",
-      "signedIn": "Signed in",
       "signInFailed": "Sign-in failed"
     }
   }

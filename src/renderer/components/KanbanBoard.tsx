@@ -35,7 +35,6 @@ import { persistTaskStatus, forceCompleteTask, archiveTasks, useTaskStore, isQue
 import { resolveMaxParallelTasks, getTaskColumn as getVisualColumn, canMoveTask } from '../../shared/constants/task';
 import { useProjectStore } from '../stores/project-store';
 import { useSettingsStore } from '../stores/settings-store';
-import { useToast } from '../hooks/use-toast';
 import { WorktreeCleanupDialog } from './WorktreeCleanupDialog';
 import type { Task, TaskStatus, TaskOrderState } from '../../shared/types';
 
@@ -394,7 +393,8 @@ const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskCli
 
 export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isRefreshing }: KanbanBoardProps) {
   const { t } = useTranslation(['tasks', 'dialogs', 'common']);
-  const { toast } = useToast();
+  // The last board action's failure (moving a task, saving the column order), shown in the header
+  const [boardError, setBoardError] = useState<string | null>(null);
   const [activeTask, setActiveTask] = useState<Task | null>(null);
   const [overColumnId, setOverColumnId] = useState<string | null>(null);
   const { showArchived, toggleShowArchived } = useViewState();
@@ -414,7 +414,6 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
   const project = projectId ? projects.find((p) => p.id === projectId) : undefined;
   const appMaxParallelTasks = useSettingsStore((state) => state.settings.maxParallelTasks);
   const maxParallelTasks = resolveMaxParallelTasks(appMaxParallelTasks, project?.settings?.maxParallelTasks);
-
 
   // Worktree cleanup dialog state
   const [worktreeCleanupDialog, setWorktreeCleanupDialog] = useState<{
@@ -552,6 +551,7 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
    * Consolidated handler that accepts an optional task object for the dialog title
    */
   const handleStatusChange = async (taskId: string, requestedStatus: TaskStatus, providedTask?: Task) => {
+    setBoardError(null);
     const task = providedTask || tasks.find(t => t.id === taskId);
     let newStatus = requestedStatus;
 
@@ -582,12 +582,7 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
           error: undefined
         });
       } else {
-        // Show error toast for other failures
-        toast({
-          title: t('common:errors.operationFailed'),
-          description: result.error || t('common:errors.unknownError'),
-          variant: 'destructive'
-        });
+        setBoardError(result.error || t('common:errors.unknownError'));
       }
     }
     // Queued tasks are started by the main process (services/task-queue.ts) whenever
@@ -630,22 +625,15 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
     const backlogTasks = tasksByStatus.backlog;
     if (backlogTasks.length === 0) return;
 
-    let movedCount = 0;
     for (const task of backlogTasks) {
       const result = await persistTaskStatus(task.id, 'queue');
-      if (result.success) {
-        movedCount++;
-      } else {
+      if (!result.success) {
         console.error(`[Queue] Failed to move task ${task.id} to queue:`, result.error);
       }
     }
 
-    // The main process starts queued tasks that fit the parallel task limit
-
-    toast({
-      title: t('queue.queueAllSuccess', { count: movedCount }),
-      variant: 'default'
-    });
+    // The main process starts queued tasks that fit the parallel task limit; the moved tasks
+    // show up in the Queue column
   };
 
   // Get task order actions from store
@@ -657,15 +645,9 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
 
   const saveTaskOrder = useCallback((projectIdToSave: string) => {
     const success = saveTaskOrderToStorage(projectIdToSave);
-    if (!success) {
-      toast({
-        title: t('kanban.orderSaveFailedTitle'),
-        description: t('kanban.orderSaveFailedDescription'),
-        variant: 'destructive'
-      });
-    }
+    if (!success) setBoardError(t('kanban.orderSaveFailedDescription'));
     return success;
-  }, [saveTaskOrderToStorage, toast, t]);
+  }, [saveTaskOrderToStorage, t]);
 
   // Load task order on mount and when project changes
   useEffect(() => {
@@ -673,7 +655,6 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
       loadTaskOrder(projectId);
     }
   }, [projectId, loadTaskOrder]);
-
 
   // Clean up stale task IDs from order when tasks change (e.g., after deletion)
   // This ensures the persisted order doesn't contain IDs for deleted tasks
@@ -799,8 +780,13 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
 
   return (
     <div className="flex h-full flex-col">
-      {/* Kanban header: refresh and queue settings */}
-      <div className="flex items-center justify-end px-6 pt-2">
+      {/* Kanban header: the last board action's failure, then refresh and queue settings */}
+      <div className="flex items-center justify-end gap-4 px-6 pt-2">
+          {boardError && (
+            <p role="alert" className="mr-auto min-w-0 truncate text-sm text-destructive" title={boardError}>
+              {boardError}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <Button
               variant="ghost"
@@ -877,7 +863,6 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
         }}
         onConfirm={handleWorktreeCleanupConfirm}
       />
-
 
     </div>
   );

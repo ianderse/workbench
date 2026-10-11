@@ -38,13 +38,6 @@ if (!window.matchMedia) {
   })) as unknown as typeof window.matchMedia;
 }
 
-// Mock the toast hook
-vi.mock('../../../../hooks/use-toast', () => ({
-  useToast: () => ({
-    toast: vi.fn(),
-  }),
-}));
-
 // Mock xterm.js to prevent initialization errors in tests
 // vi.mock calls are hoisted to the top, so we use function keyword
 vi.mock('@xterm/xterm', () => ({

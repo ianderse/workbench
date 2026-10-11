@@ -26,8 +26,7 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   GripVertical,
   Check,
-  Infinity,
-  AlertCircle
+  Infinity
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
@@ -170,8 +169,7 @@ function SortableAccountItem({ account, index, onSetActive }: SortableAccountIte
 
         {/* OAuth account not authenticated */}
         {account.type === 'oauth' && !account.isAvailable && (
-          <div className="flex items-center gap-1.5 text-xs text-destructive">
-            <AlertCircle className="h-3.5 w-3.5" strokeWidth={1.75} />
+          <div className="text-xs text-destructive">
             {t('accounts.priority.needsAuth')}
           </div>
         )}
@@ -180,8 +178,7 @@ function SortableAccountItem({ account, index, onSetActive }: SortableAccountIte
         {account.type === 'oauth' && account.isDuplicateUsage && account.isAvailable && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex w-fit cursor-help items-center gap-1.5 text-xs text-(--nav-label-color)">
-                <AlertCircle className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <div className="w-fit cursor-help text-xs text-(--nav-label-color)">
                 {t('accounts.priority.duplicateUsage')}
               </div>
             </TooltipTrigger>
@@ -195,8 +192,7 @@ function SortableAccountItem({ account, index, onSetActive }: SortableAccountIte
         {account.type === 'oauth' && account.needsReauthentication && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="flex w-fit cursor-help items-center gap-1.5 text-xs text-destructive">
-                <AlertCircle className="h-3.5 w-3.5" strokeWidth={1.75} />
+              <div className="w-fit cursor-help text-xs text-destructive">
                 {t('accounts.priority.needsReauth')}
               </div>
             </TooltipTrigger>

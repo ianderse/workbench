@@ -17,7 +17,6 @@ import {
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { useToast } from '../../hooks/use-toast';
 import type { ClaudeProfile } from '../../../shared/types';
 
 type SignInStatus = 'idle' | 'authenticating' | 'waiting' | 'success' | 'error';
@@ -33,7 +32,6 @@ interface ClaudeAccountDialogProps {
 
 export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: ClaudeAccountDialogProps) {
   const { t } = useTranslation('settings');
-  const { toast } = useToast();
   const isRename = !!profile;
 
   const [name, setName] = useState('');
@@ -97,7 +95,6 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
       if (result.success && result.data?.authenticated) {
         setStatus('success');
         setEmail(result.data.email ?? null);
-        toast({ title: t('claudeAccounts.toast.added'), description: trimmed });
         onSaved?.();
       } else {
         setStatus('error');
@@ -112,13 +109,16 @@ export function ClaudeAccountDialog({ open, onOpenChange, profile, onSaved }: Cl
   const handleRename = async () => {
     if (!profile || !name.trim()) return;
     setIsSaving(true);
+    setStatus('idle');
     try {
       const result = await window.electronAPI.renameClaudeProfile(profile.id, name.trim());
       if (result.success) {
         onSaved?.();
         onOpenChange(false);
       } else {
-        toast({ variant: 'destructive', title: t('claudeAccounts.toast.renameFailed'), description: result.error ?? '' });
+        // Shown in the dialog's error line
+        setStatus('error');
+        setError(result.error ?? t('claudeAccounts.toast.renameFailed'));
       }
     } finally {
       setIsSaving(false);

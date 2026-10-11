@@ -4,7 +4,6 @@ import {
   Loader2,
   Plus,
   CheckCircle2,
-  AlertCircle,
   Search,
   FileText,
   FolderSearch,
@@ -368,8 +367,7 @@ export function Insights({ projectId }: InsightsProps) {
 
   const parsedError = status.phase === 'error' && status.error ? parseInsightsError(status.error) : null;
   const errorBanner = parsedError ? (
-    <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+    <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
       {parsedError.code ? (
         <div className="min-w-0 space-y-1">
           <p>{t(`insights.errors.${parsedError.code}`)}</p>

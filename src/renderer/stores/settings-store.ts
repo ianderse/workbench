@@ -2,7 +2,6 @@ import { create } from 'zustand';
 import type { AppSettings } from '../../shared/types';
 import type { APIProfile, ProfileFormData, TestConnectionResult, ModelInfo } from '@shared/types/profile';
 import { DEFAULT_APP_SETTINGS } from '../../shared/constants';
-import { toast } from '../hooks/use-toast';
 
 interface SettingsState {
   settings: AppSettings;
@@ -209,15 +208,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       if (result.success && result.data) {
         set({ testConnectionResult: result.data, isTestingConnection: false });
 
-        // Show toast on success
-        // TODO: Use i18n translation keys (settings:connection.successTitle, settings:connection.successDescription)
-        // Note: Zustand stores can't use useTranslation() hook - need to pass t() or use i18n.t()
-        if (result.data.success) {
-          toast({
-            title: 'Connection successful',
-            description: 'Your API credentials are valid.'
-          });
-        }
         return result.data;
       }
 
@@ -228,11 +218,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         message: result.error || 'Failed to test connection'
       };
       set({ testConnectionResult: errorResult, isTestingConnection: false });
-      toast({
-        variant: 'destructive',
-        title: 'Connection test failed',
-        description: result.error || 'Failed to test connection'
-      });
       return errorResult;
     } catch (error) {
       // Unexpected error - set testConnectionResult for inline display
@@ -242,11 +227,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         message: error instanceof Error ? error.message : 'Failed to test connection'
       };
       set({ testConnectionResult: errorResult, isTestingConnection: false });
-      toast({
-        variant: 'destructive',
-        title: 'Connection test failed',
-        description: error instanceof Error ? error.message : 'Failed to test connection'
-      });
       return errorResult;
     }
   },

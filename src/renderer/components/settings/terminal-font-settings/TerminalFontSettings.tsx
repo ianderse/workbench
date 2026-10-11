@@ -1,6 +1,6 @@
+import { useState } from 'react';
 import { Copy, Download, Upload } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useToast } from '../../../hooks/use-toast';
 import { Button } from '../../ui/button';
 import { SettingsRow, SegmentedControl, type SegmentedOption } from '../SettingsRow';
 import { useTerminalFontSettingsStore } from '../../../stores/terminal-font-settings-store';
@@ -16,7 +16,6 @@ import { SCROLLBACK_PRESETS } from '../../../lib/font-options';
  */
 export function TerminalFontSettings() {
   const { t } = useTranslation('settings');
-  const { toast } = useToast();
 
   const cursorStyle = useTerminalFontSettingsStore((state) => state.cursorStyle);
   const scrollback = useTerminalFontSettingsStore((state) => state.scrollback);
@@ -38,10 +37,14 @@ export function TerminalFontSettings() {
   const exportSettings = useTerminalFontSettingsStore((state) => state.exportSettings);
   const importSettings = useTerminalFontSettingsStore((state) => state.importSettings);
 
+  // Why the last export, import or copy failed, shown in the Import and export row
+  const [ioError, setIoError] = useState<string | null>(null);
+
   /**
    * Handle export configuration to JSON file
    */
   const handleExport = () => {
+    setIoError(null);
     try {
       const json = exportSettings();
       const blob = new Blob([json], { type: 'application/json' });
@@ -53,16 +56,9 @@ export function TerminalFontSettings() {
       link.click();
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-
-      toast({
-        title: t('terminalFonts.importExport.exportSuccess', { defaultValue: 'Settings exported successfully' }),
-      });
     } catch (error) {
       console.error('Failed to export settings:', error);
-      toast({
-        variant: 'destructive',
-        title: t('terminalFonts.importExport.exportFailed', { defaultValue: 'Failed to export settings' }),
-      });
+      setIoError(t('terminalFonts.importExport.exportFailed', { defaultValue: 'Failed to export settings' }));
     }
   };
 
@@ -70,12 +66,10 @@ export function TerminalFontSettings() {
    * Handle import configuration from JSON file
    */
   const handleImport = (file: File) => {
+    setIoError(null);
     // Check file size
     if (file.size > MAX_IMPORT_FILE_SIZE) {
-      toast({
-        variant: 'destructive',
-        title: t('terminalFonts.importExport.fileTooLarge', { defaultValue: 'Import file too large (max 10KB)' }),
-      });
+      setIoError(t('terminalFonts.importExport.fileTooLarge', { defaultValue: 'Import file too large (max 10KB)' }));
       return;
     }
 
@@ -83,33 +77,19 @@ export function TerminalFontSettings() {
     reader.onload = (e) => {
       try {
         const json = e.target?.result as string;
-        const success = importSettings(json);
-
-        if (success) {
-          toast({
-            title: t('terminalFonts.importExport.importSuccess', { defaultValue: 'Settings imported successfully' }),
-          });
-        } else {
-          toast({
-            variant: 'destructive',
-            title: t('terminalFonts.importExport.importFailed', { defaultValue: 'Failed to import settings: Invalid JSON format' }),
-            description: t('terminalFonts.importExport.importFailedRange', { defaultValue: 'Values must be within valid ranges' }),
-          });
+        if (!importSettings(json)) {
+          setIoError(
+            `${t('terminalFonts.importExport.importFailed', { defaultValue: 'Failed to import settings: Invalid JSON format' })}. ${t('terminalFonts.importExport.importFailedRange', { defaultValue: 'Values must be within valid ranges' })}`
+          );
         }
       } catch (error) {
         console.error('Failed to import settings:', error);
-        toast({
-          variant: 'destructive',
-          title: t('terminalFonts.importExport.readError', { defaultValue: 'Failed to read file' }),
-        });
+        setIoError(t('terminalFonts.importExport.readError', { defaultValue: 'Failed to read file' }));
       }
     };
 
     reader.onerror = () => {
-      toast({
-        variant: 'destructive',
-        title: t('terminalFonts.importExport.readError', { defaultValue: 'Failed to read file' }),
-      });
+      setIoError(t('terminalFonts.importExport.readError', { defaultValue: 'Failed to read file' }));
     };
 
     reader.readAsText(file);
@@ -119,19 +99,12 @@ export function TerminalFontSettings() {
    * Handle copy configuration to clipboard
    */
   const handleCopyToClipboard = async () => {
+    setIoError(null);
     try {
-      const json = exportSettings();
-      await navigator.clipboard.writeText(json);
-
-      toast({
-        title: t('terminalFonts.importExport.copySuccess', { defaultValue: 'Settings copied to clipboard' }),
-      });
+      await navigator.clipboard.writeText(exportSettings());
     } catch (error) {
       console.error('Failed to copy to clipboard:', error);
-      toast({
-        variant: 'destructive',
-        title: t('terminalFonts.importExport.copyFailed', { defaultValue: 'Failed to copy to clipboard' }),
-      });
+      setIoError(t('terminalFonts.importExport.copyFailed', { defaultValue: 'Failed to copy to clipboard' }));
     }
   };
 
@@ -168,9 +141,15 @@ export function TerminalFontSettings() {
       {/* Settings as JSON: export, import, copy */}
       <SettingsRow
         label={t('terminalFonts.importExport.label', { defaultValue: 'Import and export' })}
-        description={t('terminalFonts.importExport.description', {
-          defaultValue: 'Save, load or copy your terminal settings as JSON',
-        })}
+        description={
+          ioError ? (
+            <span role="alert" className="text-destructive">{ioError}</span>
+          ) : (
+            t('terminalFonts.importExport.description', {
+              defaultValue: 'Save, load or copy your terminal settings as JSON',
+            })
+          )
+        }
       >
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" variant="outline" size="sm" onClick={handleExport}>

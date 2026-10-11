@@ -26,7 +26,6 @@ import {
   AlertDialogTitle
 } from '../ui/alert-dialog';
 import { cn } from '../../lib/utils';
-import { useToast } from '../../hooks/use-toast';
 import { SettingsRow } from './SettingsRow';
 import { ClaudeAccountDialog } from './ClaudeAccountDialog';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
@@ -34,20 +33,22 @@ import type { ClaudeProfile } from '../../../shared/types';
 
 export function ClaudeAccountsSection() {
   const { t } = useTranslation('settings');
-  const { toast } = useToast();
   const { profiles, activeProfileId, usage, reload } = useClaudeAccounts();
 
   const [dialog, setDialog] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
   const [removeTarget, setRemoveTarget] = useState<ClaudeProfile | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // The last failed action on an account, shown in its row instead of the description
+  const [rowError, setRowError] = useState<{ id: string; message: string } | null>(null);
+  const fail = (id: string, title: string, detail?: string) =>
+    setRowError({ id, message: detail ? `${title}: ${detail}` : title });
 
   const handleUse = async (profile: ClaudeProfile) => {
     setBusyId(profile.id);
+    setRowError(null);
     try {
       const result = await window.electronAPI.setActiveClaudeProfile(profile.id);
-      if (!result.success) {
-        toast({ variant: 'destructive', title: t('claudeAccounts.toast.switchFailed'), description: result.error ?? '' });
-      }
+      if (!result.success) fail(profile.id, t('claudeAccounts.toast.switchFailed'), result.error);
       await reload();
     } finally {
       setBusyId(null);
@@ -56,21 +57,16 @@ export function ClaudeAccountsSection() {
 
   const handleSignInAgain = async (profile: ClaudeProfile) => {
     setBusyId(profile.id);
-    toast({ title: t('claudeAccounts.toast.signInStarted') });
+    setRowError(null);
     try {
+      // The row shows the signed-in account once it reloads
       const result = await window.electronAPI.claudeAuthLoginSubprocess(profile.id);
-      if (result.success && result.data?.authenticated) {
-        toast({ title: t('claudeAccounts.toast.signedIn'), description: result.data.email ?? profile.name });
-      } else {
-        toast({ variant: 'destructive', title: t('claudeAccounts.toast.signInFailed'), description: result.error ?? '' });
+      if (!(result.success && result.data?.authenticated)) {
+        fail(profile.id, t('claudeAccounts.toast.signInFailed'), result.error);
       }
       await reload();
     } catch (err) {
-      toast({
-        variant: 'destructive',
-        title: t('claudeAccounts.toast.signInFailed'),
-        description: err instanceof Error ? err.message : ''
-      });
+      fail(profile.id, t('claudeAccounts.toast.signInFailed'), err instanceof Error ? err.message : undefined);
     } finally {
       setBusyId(null);
     }
@@ -80,13 +76,10 @@ export function ClaudeAccountsSection() {
     if (!removeTarget) return;
     const target = removeTarget;
     setBusyId(target.id);
+    setRowError(null);
     try {
       const result = await window.electronAPI.deleteClaudeProfile(target.id);
-      if (result.success) {
-        toast({ title: t('claudeAccounts.toast.removed'), description: target.name });
-      } else {
-        toast({ variant: 'destructive', title: t('claudeAccounts.toast.removeFailed'), description: result.error ?? '' });
-      }
+      if (!result.success) fail(target.id, t('claudeAccounts.toast.removeFailed'), result.error);
       await reload();
     } finally {
       setBusyId(null);
@@ -128,7 +121,13 @@ export function ClaudeAccountsSection() {
                 {isActive && <span className="shrink-0 text-(--nav-label-color)">{t('claudeAccounts.inUse')}</span>}
               </span>
             }
-            description={describe(profile) || undefined}
+            description={
+              rowError?.id === profile.id ? (
+                <span role="alert" className="text-destructive">{rowError.message}</span>
+              ) : (
+                describe(profile) || undefined
+              )
+            }
           >
             <DropdownMenu>
               <DropdownMenuTrigger asChild>

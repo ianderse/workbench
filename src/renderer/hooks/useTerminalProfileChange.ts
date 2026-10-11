@@ -1,6 +1,4 @@
 import { useEffect, useCallback, useRef } from 'react';
-import { useTranslation } from 'react-i18next';
-import { toast } from './use-toast';
 import { useTerminalStore } from '../stores/terminal-store';
 import { terminalBufferManager } from '../lib/terminal-buffer-manager';
 import type { TerminalProfileChangedEvent } from '../../shared/types';
@@ -13,7 +11,6 @@ import { debugLog, debugError } from '../../shared/utils/debug-logger';
  * migrated and automatically resumed with --continue.
  */
 export function useTerminalProfileChange(): void {
-  const { t } = useTranslation(['terminal']);
   // Track terminals being recreated to prevent duplicate processing
   const recreatingTerminals = useRef<Set<string>>(new Set());
 
@@ -115,19 +112,14 @@ export function useTerminalProfileChange(): void {
         window.electronAPI.resumeClaudeInTerminal(newTerminal.id, { dangerouslySkipPermissions });
         debugLog('[useTerminalProfileChange] Resume initiated for terminal:', newTerminal.id);
       } else if (isCLIMode && !sessionMigrated) {
-        // Session had an active Claude session but migration failed
-        // Notify user that their Claude session was lost
+        // Session had an active Claude session but migration failed: the window shows a new shell
         debugError('[useTerminalProfileChange] Session migration failed for terminal:', terminalId);
-        toast({
-          title: t('terminal:swap.migrationFailed'),
-          variant: 'destructive',
-        });
       }
 
     } finally {
       recreatingTerminals.current.delete(terminalId);
     }
-  }, [t]);
+  }, []);
 
   useEffect(() => {
     const cleanup = window.electronAPI.onTerminalProfileChanged(async (event: TerminalProfileChangedEvent) => {

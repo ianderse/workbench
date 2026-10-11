@@ -4,7 +4,6 @@ import { RefreshCw } from 'lucide-react';
 import { debugLog } from '../shared/utils/debug-logger';
 import { TooltipProvider } from './components/ui/tooltip';
 import { Button } from './components/ui/button';
-import { Toaster } from './components/ui/toaster';
 import {
   Dialog,
   DialogContent,
@@ -816,9 +815,6 @@ export function App() {
 
         {/* Global Download Indicator - shows Ollama model download progress */}
         <GlobalDownloadIndicator />
-
-        {/* Toast notifications */}
-        <Toaster />
       </div>
       </TooltipProvider>
     </ViewStateProvider>

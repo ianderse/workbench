@@ -106,8 +106,7 @@ export function GlobalDownloadIndicator() {
                       </span>
                     )}
                     {download.status === 'failed' && (
-                      <span className="text-xs text-destructive flex items-center gap-1">
-                        <AlertCircle className="h-3 w-3" />
+                      <span className="text-xs text-destructive">
                         {t('downloads.failedLabel')}
                       </span>
                     )}

@@ -12,7 +12,6 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { ProfileEditDialog } from './ProfileEditDialog';
 import { SettingsRow } from './SettingsRow';
 import { maskApiKey } from '../../lib/profile-utils';
-import { useToast } from '../../hooks/use-toast';
 import type { APIProfile } from '@shared/types/profile';
 import {
   AlertDialog,
@@ -48,36 +47,29 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
     profilesError
   } = useSettingsStore();
 
-  const { toast } = useToast();
 
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editProfile, setEditProfile] = useState<APIProfile | null>(null);
   const [deleteConfirmProfile, setDeleteConfirmProfile] = useState<APIProfile | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isSettingActive, setIsSettingActive] = useState(false);
+  // Failures shown where they happened: switching in the profile's row, deleting in the dialog
+  const [switchError, setSwitchError] = useState<{ id: string | null; message: string } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDeleteProfile = async () => {
     if (!deleteConfirmProfile) return;
 
     setIsDeleting(true);
+    setDeleteError(null);
     const success = await deleteProfile(deleteConfirmProfile.id);
     setIsDeleting(false);
 
     if (success) {
-      toast({
-        title: t('settings:apiProfiles.toast.delete.title'),
-        description: t('settings:apiProfiles.toast.delete.description', {
-          name: deleteConfirmProfile.name
-        }),
-      });
       setDeleteConfirmProfile(null);
       onProfileSaved?.();
     } else {
-      toast({
-        variant: 'destructive',
-        title: t('settings:apiProfiles.toast.delete.errorTitle'),
-        description: profilesError || t('settings:apiProfiles.toast.delete.errorFallback'),
-      });
+      setDeleteError(profilesError || t('settings:apiProfiles.toast.delete.errorFallback'));
     }
   };
 
@@ -87,34 +79,17 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
   const handleSetActiveProfile = async (profileId: string | null) => {
     if (profileId !== null && profileId === activeProfileId) return;
 
+    // The row being switched from (null: going back to Claude accounts) shows a failure
+    const rowId = profileId ?? activeProfileId ?? null;
     setIsSettingActive(true);
+    setSwitchError(null);
     const success = await setActiveProfile(profileId);
     setIsSettingActive(false);
 
     if (success) {
-      if (profileId === null) {
-        toast({
-          title: t('settings:apiProfiles.toast.switch.oauthTitle'),
-          description: t('settings:apiProfiles.toast.switch.oauthDescription'),
-        });
-      } else {
-        const activeProfile = profiles.find(p => p.id === profileId);
-        if (activeProfile) {
-          toast({
-            title: t('settings:apiProfiles.toast.switch.profileTitle'),
-            description: t('settings:apiProfiles.toast.switch.profileDescription', {
-              name: activeProfile.name
-            }),
-          });
-        }
-      }
       onProfileSaved?.();
     } else {
-      toast({
-        variant: 'destructive',
-        title: t('settings:apiProfiles.toast.switch.errorTitle'),
-        description: profilesError || t('settings:apiProfiles.toast.switch.errorFallback'),
-      });
+      setSwitchError({ id: rowId, message: profilesError || t('settings:apiProfiles.toast.switch.errorFallback') });
     }
   };
 
@@ -136,6 +111,9 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
               </span>
             }
             description={
+              switchError?.id === profile.id ? (
+                <span role="alert" className="text-destructive">{switchError.message}</span>
+              ) : (
               <span className="block truncate" title={profile.baseUrl}>
                 {[
                   getHostFromUrl(profile.baseUrl),
@@ -147,6 +125,7 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
                   .filter(Boolean)
                   .join(' · ')}
               </span>
+              )
             }
           >
             <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
@@ -233,7 +212,10 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
       {/* Delete Confirmation Dialog */}
       <AlertDialog
         open={deleteConfirmProfile !== null}
-        onOpenChange={() => setDeleteConfirmProfile(null)}
+        onOpenChange={() => {
+          setDeleteConfirmProfile(null);
+          setDeleteError(null);
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -243,13 +225,20 @@ export function ProfileList({ onProfileSaved }: ProfileListProps) {
                 name: deleteConfirmProfile?.name ?? ''
               })}
             </AlertDialogDescription>
+            {deleteError && (
+              <p role="alert" className="text-sm text-destructive">{deleteError}</p>
+            )}
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>
               {t('settings:apiProfiles.dialog.cancel')}
             </AlertDialogCancel>
             <AlertDialogAction
-              onClick={handleDeleteProfile}
+              onClick={(e) => {
+                // Stay open until the delete finishes, so a failure can be shown here
+                e.preventDefault();
+                void handleDeleteProfile();
+              }}
               disabled={isDeleting}
               className={buttonVariants({ variant: 'destructive', size: 'sm' })}
             >

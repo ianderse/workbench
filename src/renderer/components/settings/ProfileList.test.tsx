@@ -30,13 +30,6 @@ vi.mock('../../stores/settings-store', () => ({
   useSettingsStore: vi.fn()
 }));
 
-// Mock the toast hook
-vi.mock('../../hooks/use-toast', () => ({
-  useToast: () => ({
-    toast: vi.fn()
-  })
-}));
-
 // Test profile data
 const testProfiles: APIProfile[] = [
   {

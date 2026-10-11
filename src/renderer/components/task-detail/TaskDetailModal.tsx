@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
-import { useToast } from '../../hooks/use-toast';
 import { TooltipProvider } from '../ui/tooltip';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
@@ -82,22 +81,19 @@ export function TaskDetailModal({ open, task, onOpenChange }: TaskDetailModalPro
 // Separate component to use hooks only when task exists
 function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; task: Task; onOpenChange: (open: boolean) => void }) {
   const { t } = useTranslation(['tasks']);
-  const { toast } = useToast();
   const state = useTaskDetail({ task });
   const [isUnarchiving, setIsUnarchiving] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  // Why the last footer action failed, shown in the footer (cleared by the next action)
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Archived tasks can be brought back to the board from here
   const handleUnarchive = async () => {
     setIsUnarchiving(true);
+    setActionError(null);
     const result = await unarchiveTasks(task.projectId, [task.id]);
     setIsUnarchiving(false);
-    if (!result.success) {
-      toast({
-        title: t('tasks:actions.unarchiveFailed', { error: result.error ?? '' }),
-        variant: 'destructive'
-      });
-    }
+    if (!result.success) setActionError(t('tasks:actions.unarchiveFailed', { error: result.error ?? '' }));
   };
   const activeProject = useProjectStore(s => s.getActiveProject());
 
@@ -106,49 +102,32 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     if (state.isRunning && !state.isStuck) {
       stopTask(task.id);
     } else {
+      setActionError(null);
       // If task is incomplete, validate and reload plan before starting
       if (state.isIncomplete) {
         const isValid = await state.reloadPlanForIncompleteTask();
         if (!isValid) {
-          toast({
-            title: t('tasks:detail.resumeFailedTitle'),
-            description: t('tasks:detail.resumeFailedDescription'),
-            variant: 'destructive',
-            duration: 5000,
-          });
+          setActionError(t('tasks:detail.resumeFailedDescription'));
           return;
         }
       }
+      // A queued task moves to the Queue column, which the dialog's status label shows
       const result = await startTaskOrQueue(task.id);
-      if (!result.success) {
-        toast({
-          title: t('tasks:wizard.errors.startFailed'),
-          description: result.error,
-          variant: 'destructive',
-        });
-      } else if (result.action === 'queued') {
-        toast({ title: t('tasks:queue.movedToQueue') });
-      }
+      if (!result.success) setActionError(result.error || t('tasks:wizard.errors.startFailed'));
     }
   };
 
   // Retry starts the task over: worktree changes and the previous run are discarded
   const handleRetry = async () => {
     setIsRetrying(true);
+    setActionError(null);
     const result = await retryTask(task.id);
     setIsRetrying(false);
     if (result.success) {
       state.setIsStuck(false);
       state.setHasCheckedRunning(false);
-    }
-    if (!result.success) {
-      toast({
-        title: t('tasks:wizard.errors.startFailed'),
-        description: result.error,
-        variant: 'destructive',
-      });
-    } else if (result.action === 'queued') {
-      toast({ title: t('tasks:queue.movedToQueue') });
+    } else {
+      setActionError(result.error || t('tasks:wizard.errors.startFailed'));
     }
   };
 
@@ -226,14 +205,6 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   };
 
   const handleClose = () => {
-    // Show toast notification if task is running
-    if (state.isRunning && !state.isStuck) {
-      toast({
-        title: t('tasks:notifications.backgroundTaskTitle'),
-        description: t('tasks:notifications.backgroundTaskDescription'),
-        duration: 4000,
-      });
-    }
     onOpenChange(false);
   };
 
@@ -436,6 +407,12 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
 
             {/* Footer: task actions (the close button stays at the top) */}
             <div className="flex shrink-0 items-center justify-end gap-2 px-6 py-3 electron-no-drag">
+              {/* The last action's failure, left of the buttons */}
+              {actionError && (
+                <p role="alert" className="mr-auto min-w-0 truncate text-sm text-destructive" title={actionError}>
+                  {actionError}
+                </p>
+              )}
               {task.metadata?.archivedAt && (
                 <Button variant="ghost" size="sm" className="gap-1.5" onClick={handleUnarchive} disabled={isUnarchiving}>
                   {isUnarchiving ? (

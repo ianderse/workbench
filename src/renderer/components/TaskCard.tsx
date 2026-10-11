@@ -19,7 +19,6 @@ import {
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
 import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask } from '../stores/task-store';
-import { useToast } from '../hooks/use-toast';
 import type { Task, TaskStatus } from '../../shared/types';
 
 // Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
@@ -85,9 +84,10 @@ export const TaskCard = memo(function TaskCard({
   onStatusChange
 }: TaskCardProps) {
   const { t } = useTranslation(['tasks', 'errors']);
-  const { toast } = useToast();
   const [isStuck, setIsStuck] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  // Why starting or retrying from the card failed, shown under the description
+  const [actionError, setActionError] = useState<string | null>(null);
   const stuckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const isRunning = task.status === 'in_progress';
@@ -190,16 +190,9 @@ export const TaskCard = memo(function TaskCard({
       // User should be able to force-stop a stuck task
       stopTask(task.id);
     } else {
+      // A queued task moves to the Queue column, so only a failure needs telling
       const result = await startTaskOrQueue(task.id);
-      if (!result.success) {
-        toast({
-          title: t('tasks:wizard.errors.startFailed'),
-          description: result.error,
-          variant: 'destructive',
-        });
-      } else if (result.action === 'queued') {
-        toast({ title: t('tasks:queue.movedToQueue') });
-      }
+      setActionError(result.success ? null : result.error || t('tasks:wizard.errors.startFailed'));
     }
   };
 
@@ -212,8 +205,9 @@ export const TaskCard = memo(function TaskCard({
     setIsRetrying(false);
     if (result.success) {
       setIsStuck(false);
+      setActionError(null);
     } else {
-      toast({ title: t('wizard.errors.startFailed'), description: result.error, variant: 'destructive' });
+      setActionError(result.error || t('wizard.errors.startFailed'));
     }
   };
 
@@ -269,6 +263,11 @@ export const TaskCard = memo(function TaskCard({
         {sanitizedDescription && (
           <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2">
             {sanitizedDescription}
+          </p>
+        )}
+        {actionError && (
+          <p role="alert" className="mt-1.5 text-xs text-destructive line-clamp-2">
+            {actionError}
           </p>
         )}
 
