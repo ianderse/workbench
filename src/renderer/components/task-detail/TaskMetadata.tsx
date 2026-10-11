@@ -1,8 +1,6 @@
 import { useState, useRef, useLayoutEffect, useId, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { Button } from '../ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
@@ -10,6 +8,7 @@ import { cn, formatRelativeTime } from '../../lib/utils';
 import { JSON_ERROR_PREFIX } from '../../../shared/constants';
 import type { Task, WorktreeStatus } from '../../../shared/types';
 import { TaskAttachments } from './TaskAttachments';
+import { MarkdownContent } from '../ui/markdown-content';
 
 interface TaskMetadataProps {
   task: Task;
@@ -94,20 +93,19 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
       {/* Description - primary content in the claude info box */}
       {displayDescription && (
         <div className="max-w-full overflow-hidden rounded-xl bg-segment-track px-4 py-3">
-          <div
+          {/* Rendered like the Claude chat's replies; long lines and images stay inside the box */}
+          <MarkdownContent
             ref={contentRef}
             id={contentId}
             className={cn(
-              'prose prose-sm dark:prose-invert max-w-none overflow-hidden prose-p:text-foreground/90 prose-p:leading-relaxed prose-headings:text-foreground prose-strong:text-foreground prose-li:text-foreground/90 prose-ul:my-2 prose-li:my-0.5 prose-a:break-all prose-pre:overflow-x-auto prose-img:max-w-full [&_img]:!max-w-full [&_img]:h-auto [&_code]:break-all [&_code]:whitespace-pre-wrap [&_*]:max-w-full',
+              'overflow-hidden prose-pre:overflow-x-auto [&_img]:h-auto [&_img]:max-w-full',
               // Fade the last lines out while collapsed
               !isExpanded && hasOverflow && 'max-h-[200px] [mask-image:linear-gradient(to_bottom,black_70%,transparent)]'
             )}
-            style={{ wordBreak: 'break-word', overflowWrap: 'anywhere' }}
+            style={{ overflowWrap: 'anywhere' }}
           >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {displayDescription}
-            </ReactMarkdown>
-          </div>
+            {displayDescription}
+          </MarkdownContent>
 
           {/* Expand/Collapse button */}
           {hasOverflow && (

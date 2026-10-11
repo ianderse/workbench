@@ -1,4 +1,4 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Loader2,
@@ -19,8 +19,7 @@ import {
   Paperclip,
   X
 } from 'lucide-react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownContent } from './ui/markdown-content';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
@@ -50,42 +49,6 @@ import {
   parseInsightsError
 } from '../../shared/constants';
 
-// createSafeLink - factory function that creates a SafeLink component with i18n support
-const createSafeLink = (opensInNewWindowText: string) => {
-  return function SafeLink({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
-    // Validate URL - only allow http, https, and relative links
-    const isValidUrl = href && (
-      href.startsWith('http://') ||
-      href.startsWith('https://') ||
-      href.startsWith('/') ||
-      href.startsWith('#')
-    );
-
-    if (!isValidUrl) {
-      // For invalid or potentially malicious URLs, render as plain text
-      return <span className="text-muted-foreground">{children}</span>;
-    }
-
-    // External links get security attributes and accessibility indicator
-    const isExternal = href?.startsWith('http://') || href?.startsWith('https://');
-
-    return (
-      <a
-        href={href}
-        {...props}
-        {...(isExternal && {
-          target: '_blank',
-          rel: 'noopener noreferrer',
-        })}
-        className="text-primary hover:underline"
-      >
-        {children}
-        {isExternal && <span className="sr-only"> {opensInNewWindowText}</span>}
-      </a>
-    );
-  };
-};
-
 interface InsightsProps {
   projectId: string;
 }
@@ -98,11 +61,6 @@ export function Insights({ projectId }: InsightsProps) {
   const streamingContent = useInsightsStore((state) => state.streamingContent);
   const currentTool = useInsightsStore((state) => state.currentTool);
   const isLoadingSessions = useInsightsStore((state) => state.isLoadingSessions);
-
-  // Create markdown components with translated accessibility text
-  const markdownComponents = useMemo(() => ({
-    a: createSafeLink(t('accessibility.opensInNewWindow')),
-  }), [t]);
 
   const [inputValue, setInputValue] = useState('');
   const [creatingTask, setCreatingTask] = useState<Set<string>>(new Set());
@@ -589,7 +547,6 @@ export function Insights({ projectId }: InsightsProps) {
                   <MessageBubble
                     key={message.id}
                     message={message}
-                    markdownComponents={markdownComponents}
                     onCreateTask={handleCreateTask}
                     creatingTask={creatingTask}
                     taskCreated={taskCreated}
@@ -601,11 +558,7 @@ export function Insights({ projectId }: InsightsProps) {
                 {(streamingContent || currentTool) && (
                   <div className="space-y-2">
                     {streamingContent && (
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-[0.9375rem] leading-relaxed text-foreground">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {streamingContent}
-                        </ReactMarkdown>
-                      </div>
+                      <MarkdownContent>{streamingContent}</MarkdownContent>
                     )}
                     {/* Tool usage indicator */}
                     {currentTool && (
@@ -677,7 +630,6 @@ function SparkMark({ className, animate }: SparkMarkProps) {
 
 interface MessageBubbleProps {
   message: InsightsChatMessage;
-  markdownComponents: Components;
   onCreateTask: (messageId: string, taskIndex: number, taskData: { title: string; description: string; metadata?: TaskMetadata }) => void;
   creatingTask: Set<string>;
   taskCreated: Set<string>;
@@ -686,7 +638,6 @@ interface MessageBubbleProps {
 
 function MessageBubble({
   message,
-  markdownComponents,
   onPreviewImage,
   onCreateTask,
   creatingTask,
@@ -741,11 +692,7 @@ function MessageBubble({
   return (
     <div className="space-y-3">
       {message.content && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[0.9375rem] leading-relaxed text-foreground">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-            {message.content}
-          </ReactMarkdown>
-        </div>
+        <MarkdownContent>{message.content}</MarkdownContent>
       )}
 
       {/* A button that copies the reply's markdown, then the tools used */}
