@@ -197,9 +197,8 @@ export class ClaudeProfileManager {
   /**
    * Remove duplicate profiles that share the same configDir (compared after normalization).
    * The first entry per configDir is kept; data that only a duplicate has (default flag,
-   * OAuth token, email, subscription info, usage) is merged into it. The active profile,
-   * the account priority order and provider accounts that referenced a removed id are
-   * remapped to the kept profile.
+   * OAuth token, email, subscription info, usage) is merged into it. The active profile and
+   * provider accounts that referenced a removed id are remapped to the kept profile.
    */
   private deduplicateProfiles(): void {
     const keptIndexByDir = new Map<string, number>();
@@ -229,7 +228,7 @@ export class ClaudeProfileManager {
   }
 
   /**
-   * Point references to removed profiles (active profile, account priority order) at the
+   * Point references to removed profiles (the active profile) at the
    * profiles that replaced them. Callers remove the profiles themselves and save.
    */
   private remapRemovedProfiles(idRemap: Map<string, string>): void {
@@ -237,14 +236,6 @@ export class ClaudeProfileManager {
 
     if (this.data.activeProfileId) {
       this.data.activeProfileId = remapId(this.data.activeProfileId);
-    }
-
-    // Unified account priority order uses 'oauth-{profileId}'; keep the first occurrence
-    if (this.data.accountPriorityOrder) {
-      const seen = new Set<string>();
-      this.data.accountPriorityOrder = this.data.accountPriorityOrder
-        .map(id => (id.startsWith('oauth-') ? `oauth-${remapId(id.slice('oauth-'.length))}` : id))
-        .filter(id => (seen.has(id) ? false : (seen.add(id), true)));
     }
 
     if (this.data.migratedProfileIds) {
@@ -515,24 +506,6 @@ export class ClaudeProfileManager {
       ...(this.data.autoSwitch || DEFAULT_AUTO_SWITCH_SETTINGS),
       ...settings
     };
-    this.save();
-  }
-
-  /**
-   * Get unified account priority order
-   * Returns array of account IDs in priority order (first = highest priority)
-   * IDs are prefixed: 'oauth-{profileId}' for OAuth, 'api-{profileId}' for API profiles
-   */
-  getAccountPriorityOrder(): string[] {
-    return this.data.accountPriorityOrder || [];
-  }
-
-  /**
-   * Set unified account priority order
-   * @param order Array of account IDs in priority order
-   */
-  setAccountPriorityOrder(order: string[]): void {
-    this.data.accountPriorityOrder = order;
     this.save();
   }
 
@@ -961,19 +934,17 @@ export class ClaudeProfileManager {
   }
 
   /**
-   * Get the best profile to switch to based on priority order and availability
+   * Get the best profile to switch to based on availability and usage
    * Returns null if no good alternative is available
    *
    * Selection logic:
-   * 1. Respects user's configured account priority order
-   * 2. Filters by availability (authenticated, not rate-limited, below thresholds)
-   * 3. Returns first available profile in priority order
-   * 4. Falls back to "least bad" option if no profile meets all criteria
+   * 1. Filters by availability (authenticated, not rate-limited, below thresholds)
+   * 2. Returns the available profile with the most headroom (lowest usage)
+   * 3. Falls back to "least bad" option if no profile meets all criteria
    */
   getBestAvailableProfile(excludeProfileId?: string): ClaudeProfile | null {
     const settings = this.getAutoSwitchSettings();
-    const priorityOrder = this.getAccountPriorityOrder();
-    return getBestAvailableProfile(this.data.profiles, settings, excludeProfileId, priorityOrder);
+    return getBestAvailableProfile(this.data.profiles, settings, excludeProfileId);
   }
 
   /**
@@ -1008,7 +979,6 @@ export class ClaudeProfileManager {
    */
   async getBestAvailableUnifiedAccount(excludeAccountId?: string): Promise<UnifiedAccount | null> {
     const settings = this.getAutoSwitchSettings();
-    const priorityOrder = this.getAccountPriorityOrder();
     const activeOAuthId = this.data.activeProfileId;
 
     // Load API profiles and active API profile ID from profiles.json
@@ -1020,7 +990,6 @@ export class ClaudeProfileManager {
       settings,
       {
         excludeAccountId,
-        priorityOrder,
         activeOAuthId,
         activeAPIId
       }
@@ -1037,8 +1006,7 @@ export class ClaudeProfileManager {
     }
 
     const settings = this.getAutoSwitchSettings();
-    const priorityOrder = this.getAccountPriorityOrder();
-    return shouldProactivelySwitchImpl(profile, this.data.profiles, settings, priorityOrder);
+    return shouldProactivelySwitchImpl(profile, this.data.profiles, settings);
   }
 
   /**

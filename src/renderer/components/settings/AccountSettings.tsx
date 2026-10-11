@@ -2,8 +2,8 @@
  * AccountSettings - how Claude Code signs in
  *
  * claude.ai settings layout: Claude accounts (subscriptions, with usage), API profiles
- * (Anthropic-compatible endpoints), spending per project (Metrics), automatic account switching
- * and the switching order.
+ * (Anthropic-compatible endpoints), spending per project (Metrics) and automatic account
+ * switching.
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,6 @@ import { Switch } from '../ui/switch';
 import { cn } from '../../lib/utils';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
-import { AccountPriorityList, type UnifiedAccount } from './AccountPriorityList';
 import { ClaudeAccountsSection } from './ClaudeAccountsSection';
 import { ProfileList } from './ProfileList';
 import { ProjectMetricsSection } from './ProjectMetricsSection';
@@ -25,25 +24,16 @@ interface AccountSettingsProps {
   isOpen: boolean;
 }
 
-/** Priority order entries are Claude profile ids with this prefix (shared with the profile scorer) */
-const PRIORITY_ID_PREFIX = 'oauth-';
-
 export function AccountSettings({ isOpen }: AccountSettingsProps) {
   const { t } = useTranslation('settings');
-  const { profiles, activeProfileId, usage, reload } = useClaudeAccounts(isOpen);
+  const { profiles } = useClaudeAccounts(isOpen);
 
   const [autoSwitchSettings, setAutoSwitchSettings] = useState<ClaudeAutoSwitchSettings | null>(null);
   const [isLoadingAutoSwitch, setIsLoadingAutoSwitch] = useState(false);
-  const [priorityOrder, setPriorityOrder] = useState<string[]>([]);
-  const [isSavingPriority, setIsSavingPriority] = useState(false);
-
-  // A failed settings change, shown at the top of the section it came from
-  const [settingsError, setSettingsError] = useState<{ section: 'switching' | 'priority'; message: string } | null>(null);
-  const showUpdateFailed = useCallback((section: 'switching' | 'priority', description?: string) => {
-    setSettingsError({
-      section,
-      message: `${t('accounts.toast.settingsUpdateFailed')}: ${description || t('accounts.toast.tryAgain')}`,
-    });
+  // A failed settings change, shown at the top of the switching section
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const showUpdateFailed = useCallback((description?: string) => {
+    setSettingsError(`${t('accounts.toast.settingsUpdateFailed')}: ${description || t('accounts.toast.tryAgain')}`);
   }, [t]);
 
   const loadAutoSwitchSettings = useCallback(async () => {
@@ -61,13 +51,6 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
   useEffect(() => {
     if (!isOpen) return;
     void loadAutoSwitchSettings();
-    window.electronAPI.getAccountPriorityOrder?.()
-      .then((result) => {
-        if (result.success && result.data) setPriorityOrder(result.data);
-      })
-      .catch(() => {
-        // Non-fatal: accounts keep their natural order
-      });
   }, [isOpen, loadAutoSwitchSettings]);
 
   const handleUpdateAutoSwitch = async (updates: Partial<ClaudeAutoSwitchSettings>) => {
@@ -78,78 +61,13 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
       if (result.success) {
         await loadAutoSwitchSettings();
       } else {
-        showUpdateFailed('switching', result.error);
+        showUpdateFailed(result.error);
       }
     } catch {
-      showUpdateFailed('switching');
+      showUpdateFailed();
     } finally {
       setIsLoadingAutoSwitch(false);
     }
-  };
-
-  // Claude accounts in switching order (accounts missing from the saved order come last)
-  const orderedProfiles = [...profiles].sort((a, b) => {
-    const aPos = priorityOrder.indexOf(`${PRIORITY_ID_PREFIX}${a.id}`);
-    const bPos = priorityOrder.indexOf(`${PRIORITY_ID_PREFIX}${b.id}`);
-    return (aPos === -1 ? Infinity : aPos) - (bPos === -1 ? Infinity : bPos);
-  });
-
-  const priorityAccounts: UnifiedAccount[] = orderedProfiles.map((profile) => {
-    const summary = usage.get(profile.id);
-    const email = summary?.profileEmail || profile.email;
-    const isAuthenticated = summary?.isAuthenticated ?? profile.isAuthenticated !== false;
-    return {
-      id: profile.id,
-      name: profile.name,
-      type: 'oauth',
-      displayName: profile.name,
-      identifier: email || t('accounts.priority.noEmail'),
-      profileEmail: email,
-      isActive: profile.id === activeProfileId,
-      isNext: false,
-      isAvailable: isAuthenticated,
-      isAuthenticated,
-      hasUnlimitedUsage: false,
-      sessionPercent: summary?.sessionPercent,
-      weeklyPercent: summary?.weeklyPercent,
-      isRateLimited: summary?.isRateLimited,
-      rateLimitType: summary?.rateLimitType,
-      needsReauthentication: summary?.needsReauthentication,
-    };
-  });
-
-  const savePriorityOrder = async (profileIds: string[]) => {
-    const order = profileIds.map((id) => `${PRIORITY_ID_PREFIX}${id}`);
-    setIsSavingPriority(true);
-    setSettingsError(null);
-    try {
-      const result = await window.electronAPI.setAccountPriorityOrder(order);
-      if (result.success) {
-        setPriorityOrder(order);
-      } else {
-        showUpdateFailed('priority', result.error);
-      }
-    } catch {
-      showUpdateFailed('priority');
-    } finally {
-      setIsSavingPriority(false);
-    }
-  };
-
-  // Use an account now and put it first in the order
-  const handleSetActive = async (profileId: string) => {
-    setIsSavingPriority(true);
-    try {
-      const result = await window.electronAPI.setActiveClaudeProfile(profileId);
-      if (!result.success) {
-        showUpdateFailed('priority', result.error);
-        return;
-      }
-    } finally {
-      setIsSavingPriority(false);
-    }
-    await savePriorityOrder([profileId, ...orderedProfiles.map((p) => p.id).filter((id) => id !== profileId)]);
-    await reload();
   };
 
   const totalAccounts = profiles.length;
@@ -200,8 +118,8 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
       {/* Automatic account switching */}
       {totalAccounts > 1 && (
         <SettingsSection title={t('accounts.autoSwitching.title')}>
-          {settingsError?.section === 'switching' && (
-            <p role="alert" className="mb-3 text-sm text-destructive">{settingsError.message}</p>
+          {settingsError && (
+            <p role="alert" className="mb-3 text-sm text-destructive">{settingsError}</p>
           )}
           <SettingsRows>
             <SettingsRow
@@ -296,22 +214,6 @@ export function AccountSettings({ isOpen }: AccountSettingsProps) {
               </SettingsRow>
             )}
           </SettingsRows>
-        </SettingsSection>
-      )}
-
-      {/* Switching order */}
-      {totalAccounts > 1 && autoSwitchSettings?.enabled && (
-        <SettingsSection title={t('accounts.priority.title')}>
-          <p className="-mt-2 mb-1 text-sm text-(--nav-label-color)">{t('accounts.priority.description')}</p>
-          {settingsError?.section === 'priority' && (
-            <p role="alert" className="mb-3 text-sm text-destructive">{settingsError.message}</p>
-          )}
-          <AccountPriorityList
-            accounts={priorityAccounts}
-            onReorder={(ids) => void savePriorityOrder(ids)}
-            onSetActive={(id) => void handleSetActive(id)}
-            isLoading={isSavingPriority}
-          />
         </SettingsSection>
       )}
     </>

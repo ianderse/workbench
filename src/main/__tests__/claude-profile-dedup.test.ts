@@ -25,7 +25,7 @@ function profile(id: string, configDir: string, overrides: Partial<ClaudeProfile
 }
 
 type ManagerInternals = {
-  data: { profiles: ClaudeProfile[]; activeProfileId: string; accountPriorityOrder?: string[] };
+  data: { profiles: ClaudeProfile[]; activeProfileId: string };
   deduplicateProfiles: () => void;
 };
 
@@ -70,20 +70,18 @@ describe('ClaudeProfileManager profile deduplication', () => {
     expect(internals.data.profiles.map(p => p.id)).toEqual(['a', 'b']);
   });
 
-  it('removes duplicates on startup, remapping the active profile and priority order', () => {
+  it('removes duplicates on startup, remapping the active profile', () => {
     internals.data.profiles = [
       profile('keep', '/profiles/work'),
       profile('other', '/profiles/personal'),
       profile('dup', '/profiles/work'),
     ];
     internals.data.activeProfileId = 'dup';
-    internals.data.accountPriorityOrder = ['oauth-dup', 'oauth-keep', 'oauth-other', 'api-x'];
 
     internals.deduplicateProfiles();
 
     expect(internals.data.profiles.map(p => p.id)).toEqual(['keep', 'other']);
     expect(internals.data.activeProfileId).toBe('keep');
-    expect(internals.data.accountPriorityOrder).toEqual(['oauth-keep', 'oauth-other', 'api-x']);
   });
 
   it('merges data that only a duplicate has into the kept profile', () => {

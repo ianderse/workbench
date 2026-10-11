@@ -2000,16 +2000,11 @@ export class UsageMonitor extends EventEmitter {
     const profileManager = getClaudeProfileManager();
     const excludeIds = new Set([currentProfileId, ...additionalExclusions]);
 
-    // Get priority order for unified account system
-    const priorityOrder = profileManager.getAccountPriorityOrder();
-
     // Build unified list of available accounts
     type UnifiedSwapTarget = {
       id: string;
-      unifiedId: string;  // oauth-{id} or api-{id}
       name: string;
       type: 'oauth' | 'api';
-      priorityIndex: number;
     };
 
     const unifiedAccounts: UnifiedSwapTarget[] = [];
@@ -2019,14 +2014,10 @@ export class UsageMonitor extends EventEmitter {
     for (const profile of oauthProfiles) {
       // Never swap to an account without credentials (e.g. a sign-in that never finished)
       if (!excludeIds.has(profile.id) && profileManager.hasValidAuth(profile.id)) {
-        const unifiedId = `oauth-${profile.id}`;
-        const priorityIndex = priorityOrder.indexOf(unifiedId);
         unifiedAccounts.push({
           id: profile.id,
-          unifiedId,
           name: profile.name,
-          type: 'oauth',
-          priorityIndex: priorityIndex === -1 ? Infinity : priorityIndex
+          type: 'oauth'
         });
       }
     }
@@ -2036,14 +2027,10 @@ export class UsageMonitor extends EventEmitter {
       const profilesFile = await loadProfilesFile();
       for (const apiProfile of profilesFile.profiles) {
         if (!excludeIds.has(apiProfile.id) && apiProfile.apiKey) {
-          const unifiedId = `api-${apiProfile.id}`;
-          const priorityIndex = priorityOrder.indexOf(unifiedId);
           unifiedAccounts.push({
             id: apiProfile.id,
-            unifiedId,
             name: apiProfile.name,
-            type: 'api',
-            priorityIndex: priorityIndex === -1 ? Infinity : priorityIndex
+            type: 'api'
           });
         }
       }
@@ -2061,22 +2048,8 @@ export class UsageMonitor extends EventEmitter {
       return;
     }
 
-    // Sort by priority order (lower index = higher priority)
-    // If no priority order is set, OAuth profiles come first (they were already sorted by availability)
-    unifiedAccounts.sort((a, b) => {
-      // If both have priority indices, use them
-      if (a.priorityIndex !== Infinity || b.priorityIndex !== Infinity) {
-        return a.priorityIndex - b.priorityIndex;
-      }
-      // Otherwise, prefer OAuth profiles (which are sorted by availability)
-      if (a.type !== b.type) {
-        return a.type === 'oauth' ? -1 : 1;
-      }
-      return 0;
-    });
-
-    // Use the best available from unified accounts
-    const bestAccount = unifiedAccounts[0];
+    // Claude accounts (already sorted by availability) come before API profiles
+    const bestAccount = unifiedAccounts.find((account) => account.type === 'oauth') ?? unifiedAccounts[0];
 
     this.debugLog('[UsageMonitor] Proactive swap:', {
       from: currentProfileId,

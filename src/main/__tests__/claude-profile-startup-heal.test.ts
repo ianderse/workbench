@@ -101,7 +101,6 @@ describe('ClaudeProfileManager startup repair', () => {
       ],
       activeProfileId: 'primary-1',
       autoSwitch: DEFAULT_AUTO_SWITCH_SETTINGS,
-      accountPriorityOrder: ['pa_1', 'oauth-primary-1'],
     }));
   });
 
@@ -124,7 +123,6 @@ describe('ClaudeProfileManager startup repair', () => {
     expect(settings.profiles.map(p => p.id)).toEqual(['primary']);
     expect(settings.activeProfileId).toBe('primary');
     expect(manager.isProfileRateLimited('primary')).toEqual({ limited: false });
-    expect(manager.getAccountPriorityOrder()).toEqual(['pa_1', 'oauth-primary']);
 
     // Persisted, and the duplicate's config dir is left alone on disk
     const stored = JSON.parse(readFileSync(storePath, 'utf-8'));

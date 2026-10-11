@@ -347,39 +347,6 @@
       "empty": "No initialized projects",
       "error": "Could not read the projects' spending"
     },
-    "priority": {
-      "title": "Account priority order",
-      "dragHandle": "Drag to reorder",
-      "description": "Drag to reorder. Tasks switch to the next available account in this order",
-      "setActive": "Set active",
-      "setActiveTooltip": "Make this the primary account",
-      "noAccounts": "No accounts configured. Add accounts above to set priority.",
-      "noEmail": "No email",
-      "active": "Active",
-      "inUse": "In use",
-      "next": "Next",
-      "unlimited": "Unlimited",
-      "unavailable": "Unavailable",
-      "payPerUse": "Pay-per-use",
-      "needsAuth": "Not authenticated",
-      "duplicateUsage": "Duplicate usage pattern",
-      "duplicateUsageHint": "These OAuth profiles share matching usage values. Verify that each profile is associated with a different account if this was unexpected.",
-      "needsReauth": "Needs re-auth",
-      "needsReauthHint": "This profile's refresh token is invalid. Click to re-authenticate.",
-      "sessionUsage": "Session usage (5-hour window)",
-      "weeklyUsage": "Weekly usage (7-day window)",
-      "sessionShort": "Session {{percent}}%",
-      "weeklyShort": "Weekly {{percent}}%",
-      "tipTitle": "How priority works",
-      "tipDescription": "When the account in use hits its session or weekly limit, tasks continue on the next available account in this order",
-      "status": {
-        "healthy": "Healthy",
-        "moderate": "Moderate",
-        "highUsage": "High usage",
-        "nearLimit": "Near limit",
-        "rateLimited": "Rate limited"
-      }
-    },
     "toast": {
       "settingsUpdateFailed": "Failed to Update Settings",
       "tryAgain": "Please try again."

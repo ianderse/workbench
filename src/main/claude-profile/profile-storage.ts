@@ -38,8 +38,6 @@ export interface ProfileStoreData {
   profiles: ClaudeProfile[];
   activeProfileId: string;
   autoSwitch?: ClaudeAutoSwitchSettings;
-  /** Unified priority order for both OAuth and API profiles */
-  accountPriorityOrder?: string[];
   /**
    * Profile IDs that were migrated from shared ~/.claude to isolated directories.
    * These profiles need re-authentication since their credentials are in the old location.
