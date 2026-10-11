@@ -37,29 +37,3 @@ export function isWindows(): boolean {
   return getCurrentPlatform() === 'win32';
 }
 
-/**
- * Check if the current platform is macOS.
- *
- * @returns true if running on macOS
- */
-export function isMacOS(): boolean {
-  return getCurrentPlatform() === 'darwin';
-}
-
-/**
- * Check if the current platform is Linux.
- *
- * @returns true if running on Linux
- */
-export function isLinux(): boolean {
-  return getCurrentPlatform() === 'linux';
-}
-
-/**
- * Check if the current platform is Unix-like (macOS or Linux).
- *
- * @returns true if running on a Unix-like platform
- */
-export function isUnix(): boolean {
-  return isMacOS() || isLinux();
-}

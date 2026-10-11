@@ -81,7 +81,7 @@ const PTY_EXIT_TIMEOUT_UNIX = 500;
  * Returns a promise that resolves when the PTY's onExit event fires.
  * Has a timeout fallback in case the exit event never fires.
  */
-export function waitForPtyExit(terminalId: string, timeoutMs?: number): Promise<void> {
+function waitForPtyExit(terminalId: string, timeoutMs?: number): Promise<void> {
   const timeout = timeoutMs ?? (isWindows() ? PTY_EXIT_TIMEOUT_WINDOWS : PTY_EXIT_TIMEOUT_UNIX);
 
   return new Promise<void>((resolve) => {

@@ -38,10 +38,3 @@ export function decryptToken(storedToken: string): string {
   // Return as-is for legacy unencrypted tokens
   return storedToken;
 }
-
-/**
- * Check if a token is encrypted
- */
-export function isTokenEncrypted(storedToken: string): boolean {
-  return storedToken.startsWith('enc:');
-}

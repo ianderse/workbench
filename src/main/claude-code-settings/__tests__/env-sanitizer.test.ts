@@ -1,10 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
-  sanitizeEnvVars,
-  isDangerousEnvVar,
-  isWarningEnvVar,
-  getDangerousEnvVars,
-  getWarningEnvVars,
+  sanitizeEnvVars
 } from '../env-sanitizer';
 
 // Mock debug logger
@@ -459,78 +455,6 @@ describe('env-sanitizer', () => {
         expect.stringContaining('Blocked 3 dangerous'),
         expect.anything()
       );
-    });
-  });
-
-  describe('isDangerousEnvVar', () => {
-    it('returns true for LD_PRELOAD', () => {
-      expect(isDangerousEnvVar('LD_PRELOAD')).toBe(true);
-    });
-
-    it('returns true for NODE_OPTIONS', () => {
-      expect(isDangerousEnvVar('NODE_OPTIONS')).toBe(true);
-    });
-
-    it('returns false for safe variables', () => {
-      expect(isDangerousEnvVar('NODE_ENV')).toBe(false);
-      expect(isDangerousEnvVar('DATABASE_URL')).toBe(false);
-      expect(isDangerousEnvVar('API_KEY')).toBe(false);
-    });
-
-    it('is case-insensitive', () => {
-      expect(isDangerousEnvVar('ld_preload')).toBe(true);
-      expect(isDangerousEnvVar('Ld_Preload')).toBe(true);
-      expect(isDangerousEnvVar('node_options')).toBe(true);
-    });
-  });
-
-  describe('isWarningEnvVar', () => {
-    it('returns true for PATH', () => {
-      expect(isWarningEnvVar('PATH')).toBe(true);
-    });
-
-    it('returns true for SHELL', () => {
-      expect(isWarningEnvVar('SHELL')).toBe(true);
-    });
-
-    it('returns false for safe variables', () => {
-      expect(isWarningEnvVar('NODE_ENV')).toBe(false);
-      expect(isWarningEnvVar('DATABASE_URL')).toBe(false);
-    });
-
-    it('is case-insensitive', () => {
-      expect(isWarningEnvVar('path')).toBe(true);
-      expect(isWarningEnvVar('Path')).toBe(true);
-      expect(isWarningEnvVar('shell')).toBe(true);
-    });
-  });
-
-  describe('getDangerousEnvVars', () => {
-    it('returns sorted array of dangerous variable names', () => {
-      const vars = getDangerousEnvVars();
-
-      expect(Array.isArray(vars)).toBe(true);
-      expect(vars.length).toBeGreaterThan(0);
-      expect(vars).toContain('LD_PRELOAD');
-      expect(vars).toContain('NODE_OPTIONS');
-      expect(vars).toContain('PYTHONSTARTUP');
-      // Check sorted
-      const sorted = [...vars].sort();
-      expect(vars).toEqual(sorted);
-    });
-  });
-
-  describe('getWarningEnvVars', () => {
-    it('returns sorted array of warning variable names', () => {
-      const vars = getWarningEnvVars();
-
-      expect(Array.isArray(vars)).toBe(true);
-      expect(vars.length).toBeGreaterThan(0);
-      expect(vars).toContain('PATH');
-      expect(vars).toContain('SHELL');
-      // Check sorted
-      const sorted = [...vars].sort();
-      expect(vars).toEqual(sorted);
     });
   });
 

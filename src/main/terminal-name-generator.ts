@@ -20,7 +20,7 @@ const SYSTEM_PROMPT =
  *
  * Emits "sdk-rate-limit" events on 429 errors (same interface as before).
  */
-export class TerminalNameGenerator extends EventEmitter {
+class TerminalNameGenerator extends EventEmitter {
   constructor() {
     super();
     debug('TerminalNameGenerator initialized');

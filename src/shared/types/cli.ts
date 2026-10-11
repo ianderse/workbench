@@ -118,7 +118,7 @@ export interface GraphifyGraphNode {
 }
 
 /** An edge of a project's memory graph */
-export interface GraphifyGraphLink {
+interface GraphifyGraphLink {
   source: string;
   target: string;
   /** e.g. calls, imports, contains */

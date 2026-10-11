@@ -7,4 +7,4 @@
  */
 
 export { createOrGetWorktree } from './worktree-manager';
-export type { WorktreeResult } from './worktree-manager';
+;

@@ -232,7 +232,7 @@ const browserMockAPI: ElectronAPI = {
 /**
  * Initialize browser mock if not running in Electron
  */
-export function initBrowserMock(): void {
+function initBrowserMock(): void {
   if (!isElectron) {
     console.warn('%c[Browser Mock] Initializing mock electronAPI for browser preview', 'color: #f0ad4e; font-weight: bold;');
     (window as Window & { electronAPI: ElectronAPI }).electronAPI = browserMockAPI;

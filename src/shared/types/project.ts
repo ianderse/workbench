@@ -162,7 +162,7 @@ export interface MemorySystemStatus {
 }
 
 // Memory Infrastructure Types
-export interface MemoryDatabaseStatus {
+interface MemoryDatabaseStatus {
   databasePath: string;
   databaseExists: boolean;
   databases: string[];
@@ -185,18 +185,12 @@ export interface MemoryValidationResult {
   };
 }
 
-export interface MemoryConnectionTestResult {
-  database: MemoryValidationResult;
-  llmProvider: MemoryValidationResult;
-  ready: boolean;
-}
-
 // Memory Provider Types
 // Embedding Providers: OpenAI, Voyage AI, Azure OpenAI, Ollama (local), Google, OpenRouter
 // Note: LLM provider removed - Claude SDK handles RAG queries
 export type MemoryEmbeddingProvider = 'openai' | 'voyage' | 'azure_openai' | 'ollama' | 'google' | 'openrouter';
 
-export interface MemoryProviderConfig {
+interface MemoryProviderConfig {
   // Embedding Provider (LLM provider removed - Claude SDK handles RAG)
   embeddingProvider: MemoryEmbeddingProvider;
   embeddingModel?: string;  // Embedding model, uses provider default if not specified
@@ -234,15 +228,6 @@ export interface MemoryProviderConfig {
   dbPath?: string;    // Database storage path (default: ~/.auto-claude/memories)
 }
 
-export interface MemoryProviderInfo {
-  id: string;
-  name: string;
-  description: string;
-  requiresApiKey: boolean;
-  defaultModel: string;
-  supportedModels: string[];
-}
-
 export interface MemorySystemState {
   initialized: boolean;
   database?: string;
@@ -251,7 +236,6 @@ export interface MemorySystemState {
   createdAt?: string;
   errorLog: Array<{ timestamp: string; error: string }>;
 }
-
 
 export type MemoryType =
   | 'gotcha'
@@ -293,9 +277,6 @@ export interface RendererMemory {
   // Search score (added by search results)
   score?: number;
 }
-
-// Backward compatibility alias
-export type MemoryEpisode = RendererMemory;
 
 export interface ContextSearchResult {
   content: string;
@@ -355,7 +336,7 @@ export interface ProjectEnvConfig {
  * Per-agent MCP override configuration.
  * Stored in .auto-claude/.env as AGENT_MCP_<agent>_ADD and AGENT_MCP_<agent>_REMOVE
  */
-export interface AgentMcpOverride {
+interface AgentMcpOverride {
   /** MCP servers to add beyond the agent's defaults */
   add?: string[];
   /** MCP servers to remove from the agent's defaults */
@@ -366,7 +347,7 @@ export interface AgentMcpOverride {
  * Map of agent type to their MCP overrides.
  * Agent types match backend AGENT_CONFIGS keys (e.g., 'planner', 'coder', 'qa_reviewer')
  */
-export interface AgentMcpOverrides {
+interface AgentMcpOverrides {
   [agentType: string]: AgentMcpOverride;
 }
 

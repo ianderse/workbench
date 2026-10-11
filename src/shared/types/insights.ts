@@ -18,7 +18,7 @@ export interface InsightsModelConfig {
   thinkingLevel: ThinkingLevel;
 }
 
-export type InsightsChatRole = 'user' | 'assistant';
+type InsightsChatRole = 'user' | 'assistant';
 
 // Tool usage record for showing what tools the AI used
 export interface InsightsToolUsage {

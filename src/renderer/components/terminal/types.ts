@@ -22,18 +22,6 @@ export interface TerminalProps {
   onToggleExpand?: () => void;
 }
 
-/**
- * Get the responsive max-width class for terminal title based on terminal count.
- * More terminals = narrower title to fit all elements.
- */
-export function getTitleMaxWidthClass(terminalCount: number): string {
-  if (terminalCount <= 2) return 'max-w-72'; // 288px - large
-  if (terminalCount <= 4) return 'max-w-56'; // 224px - medium
-  if (terminalCount <= 6) return 'max-w-48'; // 192px - default
-  if (terminalCount <= 9) return 'max-w-40'; // 160px - compact
-  return 'max-w-36'; // 144px - compact for 10-12 terminals
-}
-
 export const PHASE_CONFIG: Record<ExecutionPhase, { label: string; color: string; icon: React.ElementType }> = {
   idle: { label: 'Ready', color: 'bg-muted text-muted-foreground', icon: Circle },
   planning: { label: 'Planning', color: 'bg-info/20 text-info', icon: Search },

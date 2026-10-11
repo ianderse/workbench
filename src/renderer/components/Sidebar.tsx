@@ -26,7 +26,6 @@ import {
 import { cn } from '../lib/utils';
 import {
   useProjectStore,
-  removeProject,
   initializeProject
 } from '../stores/project-store';
 import { useSettingsStore, saveSettings } from '../stores/settings-store';
@@ -60,7 +59,6 @@ const navItems: NavItem[] = [
   // Only shown when the project has a memory graph (.auto-claude/knowledge)
   { id: 'memory', labelKey: 'navigation:items.memory', icon: GraphIcon },
 ];
-
 
 export function Sidebar({
   onSettingsClick,
@@ -197,13 +195,6 @@ export function Sidebar({
     }
   };
 
-  const _handleRemoveProject = async (projectId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    await removeProject(projectId);
-  };
-
-
   const handleNavClick = (view: SidebarView) => {
     onViewChange?.(view);
   };
@@ -260,7 +251,6 @@ export function Sidebar({
   const newTaskDisabled = !selectedProjectId || !selectedProject?.autoBuildPath;
   // The Projects row shows the active project's name (falls back to "Projects")
   const projectsLabel = selectedProject?.name ?? t('items.projects');
-
 
   return (
     <TooltipProvider>

@@ -6,9 +6,8 @@
 
 import { ipcMain } from 'electron';
 import { execFileSync } from 'child_process';
-import * as path from 'path';
 import * as fs from 'fs';
-import { getOllamaExecutablePaths, getOllamaInstallCommand as getPlatformOllamaInstallCommand, getWhichCommand, getCurrentOS } from '../platform';
+import { getOllamaExecutablePaths, getOllamaInstallCommand as getPlatformOllamaInstallCommand, getWhichCommand } from '../platform';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type {
   IPCResult,
@@ -50,18 +49,6 @@ interface OllamaEmbeddingModel {
   description: string;      // Model description
   size_bytes: number;
   size_gb: number;
-}
-
-/**
- * Recommended Embedding Model Card
- * Pre-curated models suitable for Auto Claude memory system
- */
-interface OllamaRecommendedModel {
-  name: string;          // Model identifier
-  description: string;   // Human-readable description
-  size_estimate: string; // Estimated download size (e.g., '621 MB')
-  dim: number;           // Embedding vector dimension
-  installed: boolean;    // Whether model is currently installed
 }
 
 /**

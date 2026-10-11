@@ -79,7 +79,7 @@ export function getPlanPath(project: Project, task: Task): string {
 /**
  * Map UI TaskStatus to Python-compatible planStatus
  */
-export function mapStatusToPlanStatus(status: TaskStatus): string {
+function mapStatusToPlanStatus(status: TaskStatus): string {
   switch (status) {
     case 'queue':
       return 'queued';
@@ -139,63 +139,6 @@ export async function persistPlanStatus(planPath: string, status: TaskStatus, pr
       return false;
     }
   });
-}
-
-/**
- * Persist task status synchronously (for use in event handlers where async isn't practical).
- *
- * WARNING: This function bypasses the async locking mechanism entirely!
- *
- * This means it can race with concurrent async operations (persistPlanStatus, updatePlanFile,
- * createPlanIfNotExists) that may be in flight for the same file. Using this function while
- * async operations are pending can result in:
- * - Lost updates (this write may overwrite changes from an async operation, or vice versa)
- * - Corrupted JSON (if writes interleave at the filesystem level)
- * - Inconsistent state between what was written and what the async operation expected to read
- *
- * ONLY use this function when ALL of the following conditions are met:
- * 1. You are in a synchronous context that cannot use async/await (e.g., certain event handlers)
- * 2. You are certain no async plan operations are pending or in-flight for this file path
- * 3. No other code will initiate async plan operations until this function returns
- *
- * When possible, prefer using the async `persistPlanStatus` function instead, which properly
- * participates in the locking mechanism and prevents race conditions.
- *
- * @param planPath - Path to the implementation_plan.json file
- * @param status - The TaskStatus to persist
- * @param projectId - Optional project ID to invalidate cache (recommended for performance)
- * @returns true if status was persisted, false otherwise
- */
-export function persistPlanStatusSync(planPath: string, status: TaskStatus, projectId?: string): boolean {
-  try {
-    // Read file directly without existence check to avoid TOCTOU race condition
-    const planContent = readFileSync(planPath, 'utf-8');
-    const plan = safeParseJson<Record<string, unknown>>(planContent);
-    if (!plan) {
-      console.warn(`[plan-file-utils] Unrepairable JSON in ${planPath} - sync status not persisted`);
-      return false;
-    }
-
-    plan.status = status;
-    plan.planStatus = mapStatusToPlanStatus(status);
-    plan.updated_at = new Date().toISOString();
-
-    writeFileAtomicSync(planPath, JSON.stringify(plan, null, 2));
-
-    // Invalidate tasks cache since status changed
-    if (projectId) {
-      projectStore.invalidateTasksCache(projectId);
-    }
-
-    return true;
-  } catch (err) {
-    // File not found is expected - return false
-    if (isFileNotFoundError(err)) {
-      return false;
-    }
-    console.warn(`[plan-file-utils] Could not persist status to ${planPath}:`, err);
-    return false;
-  }
 }
 
 /**
@@ -412,47 +355,6 @@ export function persistPlanPhaseSync(
 }
 
 /**
- * Read and update the plan file atomically.
- *
- * @param planPath - Path to the implementation_plan.json file
- * @param updater - Function that receives the current plan and returns the updated plan
- * @returns The updated plan, or null if the file doesn't exist
- */
-export async function updatePlanFile<T extends Record<string, unknown>>(
-  planPath: string,
-  updater: (plan: T) => T
-): Promise<T | null> {
-  return withPlanLock(planPath, async () => {
-    try {
-      console.warn(`[plan-file-utils] Reading implementation_plan.json for update`, { planPath });
-      // Read file directly without existence check to avoid TOCTOU race condition
-      const planContent = readFileSync(planPath, 'utf-8');
-      const plan = safeParseJson<T>(planContent);
-      if (!plan) {
-        console.warn(`[plan-file-utils] Unrepairable JSON in ${planPath} - update skipped`);
-        return null;
-      }
-
-      const updatedPlan = updater(plan);
-      // Add updated_at timestamp - use type assertion since T extends Record<string, unknown>
-      (updatedPlan as Record<string, unknown>).updated_at = new Date().toISOString();
-
-      writeFileAtomicSync(planPath, JSON.stringify(updatedPlan, null, 2));
-      console.warn(`[plan-file-utils] Successfully updated implementation_plan.json`);
-      return updatedPlan;
-    } catch (err) {
-      // File not found is expected - return null
-      if (isFileNotFoundError(err)) {
-        console.warn(`[plan-file-utils] implementation_plan.json not found at ${planPath} - update skipped`);
-        return null;
-      }
-      console.warn(`[plan-file-utils] Could not update plan at ${planPath}:`, err);
-      return null;
-    }
-  });
-}
-
-/**
  * Create a new plan file if it doesn't exist.
  *
  * @param planPath - Path to the implementation_plan.json file
@@ -634,7 +536,7 @@ export function updateTaskMetadataPrUrl(metadataPath: string, prUrl: string): bo
 }
 
 /** Name of the plan phase that mirrors Claude Code's task list */
-export const CLAUDE_TASK_LIST_PHASE_NAME = 'Claude Code task list';
+const CLAUDE_TASK_LIST_PHASE_NAME = 'Claude Code task list';
 
 /**
  * Mirror Claude Code's task list (TaskCreate/TaskUpdate) as the task's subtasks: one phase
@@ -728,7 +630,7 @@ export function hasStartedImplementation(project: Project, task: Task): boolean 
  * @param task - The task to check
  * @returns true if the task has a valid plan with subtasks, false otherwise
  */
-export function hasPlanWithSubtasks(project: Project, task: Task): boolean {
+function hasPlanWithSubtasks(project: Project, task: Task): boolean {
   try {
     const planPath = getPlanPath(project, task);
     const planContent = readFileSync(planPath, 'utf-8');

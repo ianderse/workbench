@@ -871,7 +871,7 @@ function mapDependencies(services: Record<string, ServiceInfo>): void {
  * It detects project structure, services, frameworks, infrastructure, and conventions,
  * then serialises the result to the ProjectIndex format used by the frontend.
  */
-export function buildProjectIndex(projectDir: string): ProjectIndex {
+function buildProjectIndex(projectDir: string): ProjectIndex {
   const resolvedDir = path.resolve(projectDir);
 
   const projectType = detectProjectType(resolvedDir);

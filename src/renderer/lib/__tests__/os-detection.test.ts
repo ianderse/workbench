@@ -9,7 +9,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 describe('os-detection', () => {
-  let getOS: typeof import('../os-detection').getOS;
   let isWindows: typeof import('../os-detection').isWindows;
   let isMacOS: typeof import('../os-detection').isMacOS;
   let isLinux: typeof import('../os-detection').isLinux;
@@ -22,7 +21,6 @@ describe('os-detection', () => {
 
     // Import fresh module
     const osModule = await import('../os-detection');
-    getOS = osModule.getOS;
     isWindows = osModule.isWindows;
     isMacOS = osModule.isMacOS;
     isLinux = osModule.isLinux;
@@ -61,32 +59,6 @@ describe('os-detection', () => {
       writable: true,
     });
   };
-
-  describe('getOS', () => {
-    it('should return "windows" on Windows platform', () => {
-      mockPlatform('Win32');
-
-      expect(getOS()).toBe('windows');
-    });
-
-    it('should return "macos" on macOS platform', () => {
-      mockPlatform('MacIntel');
-
-      expect(getOS()).toBe('macos');
-    });
-
-    it('should return "linux" on Linux platform', () => {
-      mockPlatform('Linux x86_64');
-
-      expect(getOS()).toBe('linux');
-    });
-
-    it('should return "unknown" for unknown platforms', () => {
-      mockPlatform('FreeBSD amd64');
-
-      expect(getOS()).toBe('unknown');
-    });
-  });
 
   describe('isWindows', () => {
     it('should return true on Windows platform', () => {

@@ -33,7 +33,6 @@ import type {
   ProjectEnvConfig,
   InfrastructureStatus,
   MemoryValidationResult,
-  MemoryConnectionTestResult,
   GitStatus,
   CustomMcpServer,
   McpHealthCheckResult,
@@ -100,7 +99,7 @@ import type { APIProfile, ProfilesFile, TestConnectionResult, DiscoverModelsResu
 /**
  * Branch type indicator for distinguishing local from remote branches
  */
-export type GitBranchType = 'local' | 'remote';
+type GitBranchType = 'local' | 'remote';
 
 /**
  * Structured branch information for UI display with type indicators
@@ -123,7 +122,7 @@ export interface GitBranchDetail {
 
 // Electron API exposed via contextBridge
 // Tab state interface (persisted in main process)
-export interface TabState {
+interface TabState {
   openProjectIds: string[];
   activeProjectId: string | null;
   tabOrder: string[];
@@ -556,7 +555,7 @@ export interface ElectronAPI {
 }
 
 /** Platform information exposed via contextBridge for platform-specific behavior */
-export interface PlatformInfo {
+interface PlatformInfo {
   isWindows: boolean;
   isMacOS: boolean;
   isLinux: boolean;

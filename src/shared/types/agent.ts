@@ -236,12 +236,6 @@ export interface ClaudeAutoSwitchSettings {
   autoSwitchOnAuthFailure: boolean;
 }
 
-export interface ClaudeAuthResult {
-  success: boolean;
-  authenticated: boolean;
-  error?: string;
-}
-
 /**
  * Payload for TERMINAL_PROFILE_CHANGED event.
  * Sent when profile switches and terminals need to be refreshed.

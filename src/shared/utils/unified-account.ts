@@ -21,7 +21,7 @@ export const OAUTH_ID_PREFIX = 'oauth-';
 /**
  * ID prefix for API accounts in unified format
  */
-export const API_ID_PREFIX = 'api-';
+const API_ID_PREFIX = 'api-';
 
 // ============================================
 // Conversion Functions
@@ -108,59 +108,4 @@ export function apiProfileToUnified(
     isAuthenticated,
     needsReauthentication: false
   };
-}
-
-// ============================================
-// ID Helper Functions
-// ============================================
-
-/**
- * Check if a unified account ID is for an OAuth account
- */
-export function isOAuthAccountId(id: string): boolean {
-  return id.startsWith(OAUTH_ID_PREFIX);
-}
-
-/**
- * Check if a unified account ID is for an API account
- */
-export function isAPIAccountId(id: string): boolean {
-  return id.startsWith(API_ID_PREFIX);
-}
-
-/**
- * Extract the original profile ID from a unified account ID
- */
-export function extractProfileId(unifiedId: string): string {
-  if (unifiedId.startsWith(OAUTH_ID_PREFIX)) {
-    return unifiedId.slice(OAUTH_ID_PREFIX.length);
-  }
-  if (unifiedId.startsWith(API_ID_PREFIX)) {
-    return unifiedId.slice(API_ID_PREFIX.length);
-  }
-  return unifiedId;
-}
-
-/**
- * Create a unified account ID from an OAuth profile ID
- * Guards against double-prefixing if profileId already has the prefix
- */
-export function toOAuthUnifiedId(profileId: string): string {
-  if (profileId.startsWith(OAUTH_ID_PREFIX)) return profileId;
-  if (profileId.startsWith(API_ID_PREFIX)) {
-    throw new Error(`Cannot convert API-prefixed ID "${profileId}" to OAuth unified ID`);
-  }
-  return `${OAUTH_ID_PREFIX}${profileId}`;
-}
-
-/**
- * Create a unified account ID from an API profile ID
- * Guards against double-prefixing if profileId already has the prefix
- */
-export function toAPIUnifiedId(profileId: string): string {
-  if (profileId.startsWith(API_ID_PREFIX)) return profileId;
-  if (profileId.startsWith(OAUTH_ID_PREFIX)) {
-    throw new Error(`Cannot convert OAuth-prefixed ID "${profileId}" to API unified ID`);
-  }
-  return `${API_ID_PREFIX}${profileId}`;
 }

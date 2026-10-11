@@ -4,11 +4,7 @@ import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, Task
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
 import { useProjectStore } from './project-store';
 import { useSettingsStore } from './settings-store';
-import { DEFAULT_MAX_PARALLEL_TASKS, resolveMaxParallelTasks } from '../../shared/constants/task';
-
-/** Default max parallel tasks when no project setting is configured */
-export { DEFAULT_MAX_PARALLEL_TASKS };
-
+import { resolveMaxParallelTasks } from '../../shared/constants/task';
 
 /** Maximum log entries stored per task to prevent renderer OOM */
 export const MAX_LOG_ENTRIES = 5000;
@@ -87,13 +83,6 @@ export function hasRecentActivity(taskId: string): boolean {
   const lastActivity = taskLastActivity.get(taskId);
   if (!lastActivity) return false;
   return Date.now() - lastActivity < STUCK_ACTIVITY_THRESHOLD_MS;
-}
-
-/**
- * Clear activity tracking for a task (call when task completes or is deleted)
- */
-export function clearTaskActivity(taskId: string): void {
-  taskLastActivity.delete(taskId);
 }
 
 /**
@@ -987,39 +976,6 @@ export async function checkTaskRunning(taskId: string): Promise<boolean> {
 }
 
 /**
- * Recover a stuck task (status shows in_progress but no process running)
- * @param taskId - The task ID to recover
- * @param options - Recovery options (autoRestart defaults to true)
- */
-export async function recoverStuckTask(
-  taskId: string,
-  options: { targetStatus?: TaskStatus; autoRestart?: boolean } = { autoRestart: true }
-): Promise<{ success: boolean; message: string; autoRestarted?: boolean }> {
-  try {
-    const result = await window.electronAPI.recoverStuckTask(taskId, options);
-
-    if (result.success && result.data) {
-      return {
-        success: true,
-        message: result.data.message,
-        autoRestarted: result.data.autoRestarted
-      };
-    }
-
-    return {
-      success: false,
-      message: result.error || 'Failed to recover task'
-    };
-  } catch (error) {
-    console.error('Error recovering stuck task:', error);
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : 'Unknown error'
-    };
-  }
-}
-
-/**
  * Delete a task and its spec directory
  */
 export async function deleteTask(
@@ -1046,52 +1002,6 @@ export async function deleteTask(
     };
   } catch (error) {
     console.error('Error deleting task:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
-  }
-}
-
-/**
- * Delete multiple tasks
- * Permanently removes tasks from the project
- */
-export async function deleteTasks(
-  taskIds: string[]
-): Promise<{ success: boolean; error?: string; failedIds?: string[] }> {
-  const store = useTaskStore.getState();
-  const failedIds: string[] = [];
-
-  try {
-    // Delete tasks one by one (API only supports single delete)
-    for (const taskId of taskIds) {
-      const result = await window.electronAPI.deleteTask(taskId);
-      if (!result.success) {
-        failedIds.push(taskId);
-      }
-    }
-
-    // Remove successfully deleted tasks from local state
-    const deletedIds = new Set(taskIds.filter(id => !failedIds.includes(id)));
-    store.setTasks(store.tasks.filter(t => !deletedIds.has(t.id) && !deletedIds.has(t.specId || '')));
-
-    // Clear selection if selected task was deleted
-    if (store.selectedTaskId && deletedIds.has(store.selectedTaskId)) {
-      store.selectTask(null);
-    }
-
-    if (failedIds.length > 0) {
-      return {
-        success: false,
-        error: `Failed to delete ${failedIds.length} task(s)`,
-        failedIds
-      };
-    }
-
-    return { success: true };
-  } catch (error) {
-    console.error('Error deleting tasks:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -1243,32 +1153,11 @@ export function clearDraft(projectId: string): void {
 }
 
 /**
- * Check if a draft exists for a project
- */
-export function hasDraft(projectId: string): boolean {
-  const key = getDraftKey(projectId);
-  return localStorage.getItem(key) !== null;
-}
-
-/**
  * Check if a draft has any meaningful content (description or images)
  */
 export function isDraftEmpty(draft: Pick<TaskCreationDraft, 'description' | 'images'> | null): boolean {
   if (!draft) return true;
   return !draft.description?.trim() && (draft.images?.length ?? 0) === 0;
-}
-
-// ============================================
-// GitHub Issue Linking Helpers
-// ============================================
-
-/**
- * Find a task by GitHub issue number
- * Used to check if a task already exists for a GitHub issue
- */
-export function getTaskByGitHubIssue(issueNumber: number): Task | undefined {
-  const store = useTaskStore.getState();
-  return store.tasks.find(t => t.metadata?.githubIssueNumber === issueNumber);
 }
 
 // ============================================
@@ -1302,14 +1191,6 @@ export function taskHasErrors(task: Task): boolean {
   return task.status === 'error'
     || (task.status === 'human_review' && task.reviewReason === 'errors')
     || task.executionProgress?.phase === 'failed';
-}
-
-/**
- * Get the count of completed subtasks for a task
- */
-export function getCompletedSubtaskCount(task: Task): number {
-  if (!task.subtasks || task.subtasks.length === 0) return 0;
-  return task.subtasks.filter(s => s.status === 'completed').length;
 }
 
 /**

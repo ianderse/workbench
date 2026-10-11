@@ -1,7 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import path from 'path';
+import { describe, it, expect } from 'vitest';
 import { buildMcpConfig } from '../mcp-config';
 import { resolveClaudeCodeTaskSettings } from '../settings';
 import { applyPlanningPolicy, fixedTriage } from '../triage';

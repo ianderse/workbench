@@ -46,7 +46,7 @@ export interface RunClaudeTextResult {
 }
 
 /** Error from a one-shot Claude Code run */
-export class ClaudeCodeRunError extends Error {
+class ClaudeCodeRunError extends Error {
   constructor(message: string, readonly stderr?: string) {
     super(message);
     this.name = 'ClaudeCodeRunError';

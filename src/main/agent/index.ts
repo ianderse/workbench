@@ -6,12 +6,12 @@
  */
 
 export { AgentManager } from './agent-manager';
-export { AgentState } from './agent-state';
+;
 
 export type {
   AgentAuthFailure,
-  AgentManagerEvents,
+  
   ExecutionProgressData,
   ProcessType,
-  StartTaskOptions,
+  
 } from './types';

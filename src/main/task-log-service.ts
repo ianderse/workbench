@@ -26,7 +26,7 @@ function findWorktreeSpecDir(projectPath: string, specId: string, specsRelPath: 
  * the worktree's spec directory, not the main project's spec directory. This service
  * watches both locations and merges logs from both sources.
  */
-export class TaskLogService extends EventEmitter {
+class TaskLogService extends EventEmitter {
   private logCache: Map<string, TaskLogs> = new Map();
   private pollIntervals: Map<string, NodeJS.Timeout> = new Map();
   // Store paths being watched for each specId (main + worktree)

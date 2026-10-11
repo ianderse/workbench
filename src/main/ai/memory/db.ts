@@ -97,44 +97,8 @@ export async function getMemoryClient(
 }
 
 /**
- * Close and reset the singleton client.
- * Call this on app quit or when switching projects.
- */
-export async function closeMemoryClient(): Promise<void> {
-  if (_client) {
-    _client.close();
-    _client = null;
-  }
-}
-
-/**
- * Get a web app (Next.js) memory client for pure cloud access.
- * Not a singleton — each call creates a new client.
- *
- * @param tursoUrl - Turso Cloud database URL
- * @param authToken - Auth token for the database
- */
-export async function getWebMemoryClient(
-  tursoUrl: string,
-  authToken: string,
-): Promise<Client> {
-  const client = loadCreateClient()({ url: tursoUrl, authToken });
-
-  // Apply PRAGMAs
-  for (const pragma of MEMORY_PRAGMA_SQL.split('\n').filter(l => l.trim())) {
-    try {
-      await client.execute(pragma);
-    } catch {
-      // Ignore unsupported PRAGMAs in cloud mode
-    }
-  }
-
-  await client.executeMultiple(MEMORY_SCHEMA_SQL);
-  return client;
-}
-
-/**
  * Create an in-memory client (for tests — no Electron dependency).
+ * @internal Test hook
  */
 export async function getInMemoryClient(): Promise<Client> {
   const client = loadCreateClient()({ url: ':memory:' });

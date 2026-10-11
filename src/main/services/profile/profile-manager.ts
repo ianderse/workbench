@@ -109,30 +109,6 @@ export async function loadProfilesFile(): Promise<ProfilesFile> {
 }
 
 /**
- * Save profiles.json to disk
- * Creates the auto-claude directory if it doesn't exist
- * Ensures secure file permissions (user read/write only)
- */
-export async function saveProfilesFile(data: ProfilesFile): Promise<void> {
-  const filePath = getProfilesFilePath();
-  const dir = path.dirname(filePath);
-
-  // Ensure directory exists
-  // mkdir with recursive: true resolves successfully if dir already exists
-  await fs.mkdir(dir, { recursive: true });
-
-  // Write file with formatted JSON
-  const content = JSON.stringify(data, null, 2);
-  await fs.writeFile(filePath, content, 'utf-8');
-
-  // Set secure file permissions (user read/write only - 0600)
-  const permissionsValid = await validateFilePermissions(filePath);
-  if (!permissionsValid) {
-    throw new Error('Failed to set secure file permissions on profiles file');
-  }
-}
-
-/**
  * Generate a unique UUID v4 for a new profile
  */
 export function generateProfileId(): string {
@@ -171,7 +147,7 @@ export async function validateFilePermissions(filePath: string): Promise<boolean
  * @param fn Function to execute while holding the lock
  * @returns Result of the function execution
  */
-export async function withProfilesLock<T>(fn: () => Promise<T>): Promise<T> {
+async function withProfilesLock<T>(fn: () => Promise<T>): Promise<T> {
   const filePath = getProfilesFilePath();
   const dir = path.dirname(filePath);
 

@@ -7,7 +7,6 @@ import type {
   InsightsModelConfig,
   ImageAttachment
 } from '../../shared/types';
-import { InsightsConfig } from './config';
 import { detectRateLimit, createSDKRateLimitInfo } from '../rate-limit-detector';
 import { runInsights } from './claude-code-runner';
 import { getGraphifyPromptContext } from '../graphify';
@@ -26,12 +25,10 @@ interface ProcessorResult {
  * Executor for insights: runs each chat turn through Claude Code
  */
 export class InsightsExecutor extends EventEmitter {
-  private config: InsightsConfig;
   private abortControllers: Map<string, AbortController> = new Map();
 
-  constructor(config: InsightsConfig) {
+  constructor() {
     super();
-    this.config = config;
   }
 
   /**

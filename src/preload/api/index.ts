@@ -46,33 +46,6 @@ export const createElectronAPI = (): ElectronAPI => ({
 
 // Export individual API creators for potential use in tests or specialized contexts
 // Note: InsightsAPI is included in AgentAPI
-export {
-  createProjectAPI,
-  createTerminalAPI,
-  createTaskAPI,
-  createSettingsAPI,
-  createFileAPI,
-  createAgentAPI,
-  createAppUpdateAPI,
-  createProfileAPI,
-  createClaudeCodeAPI,
-  createGraphifyAPI,
-  createMcpAPI,
-  createQueueAPI
-};
+;
 
-export type {
-  ProjectAPI,
-  TerminalAPI,
-  TaskAPI,
-  SettingsAPI,
-  FileAPI,
-  AgentAPI,
-  InsightsAPI,
-  AppUpdateAPI,
-  ProfileAPI,
-  ClaudeCodeAPI,
-  GraphifyAPI,
-  McpAPI,
-  QueueAPI
-};
+;

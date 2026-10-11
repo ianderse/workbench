@@ -12,38 +12,10 @@ export function generateImageId(): string {
 }
 
 /**
- * Format file size for display
- */
-export function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/**
- * Check if a file is a valid image type
- */
-export function isValidImageType(file: File): boolean {
-  return ALLOWED_IMAGE_TYPES.includes(file.type as (typeof ALLOWED_IMAGE_TYPES)[number]);
-}
-
-/**
  * Check if a MIME type is a valid image type
  */
 export function isValidImageMimeType(mimeType: string): boolean {
   return ALLOWED_IMAGE_TYPES.includes(mimeType as (typeof ALLOWED_IMAGE_TYPES)[number]);
-}
-
-/**
- * Convert a File to base64 data URL
- */
-export async function fileToBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
 }
 
 /**

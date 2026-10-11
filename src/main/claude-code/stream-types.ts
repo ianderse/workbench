@@ -7,18 +7,19 @@
  * left out; unknown message types pass through as `ClaudeOtherMessage`.
  */
 
-export type ClaudeTextBlock = { type: 'text'; text: string };
-export type ClaudeThinkingBlock = { type: 'thinking'; thinking: string };
-export type ClaudeToolUseBlock = { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
+type ClaudeTextBlock = { type: 'text'; text: string };
+type ClaudeThinkingBlock = { type: 'thinking'; thinking: string };
+type ClaudeToolUseBlock = { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> };
 export type ClaudeToolResultBlock = {
   type: 'tool_result';
   tool_use_id: string;
   content?: string | Array<{ type: string; text?: string }>;
   is_error?: boolean;
 };
-export type ClaudeImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
 
-export type ClaudeAssistantContentBlock = ClaudeTextBlock | ClaudeThinkingBlock | ClaudeToolUseBlock | { type: string };
+type ClaudeImageBlock = { type: 'image'; source: { type: 'base64'; media_type: string; data: string } };
+
+type ClaudeAssistantContentBlock = ClaudeTextBlock | ClaudeThinkingBlock | ClaudeToolUseBlock | { type: string };
 export type ClaudeUserContentBlock = ClaudeTextBlock | ClaudeImageBlock | ClaudeToolResultBlock;
 
 export interface ClaudeSystemInitMessage {
@@ -107,7 +108,7 @@ export interface ClaudeResultMessage {
   permission_denials?: unknown[];
 }
 
-export interface ClaudeOtherMessage {
+interface ClaudeOtherMessage {
   type: string;
   subtype?: string;
   [key: string]: unknown;

@@ -565,7 +565,7 @@ export function getDownloadedUpdateInfo(): AppUpdateInfo | null {
 /**
  * Check if a version string represents a prerelease (beta, alpha, rc, etc.)
  */
-export function isPrerelease(version: string): boolean {
+function isPrerelease(version: string): boolean {
   return /-(alpha|beta|rc|dev|canary)\.\d+$/i.test(version) || version.includes('-');
 }
 
@@ -696,7 +696,7 @@ async function fetchLatestStableRelease(): Promise<AppUpdateInfo | null> {
  * 1. Current version is a prerelease
  * 2. A stable version exists
  */
-export async function checkForStableDowngrade(): Promise<AppUpdateInfo | null> {
+async function checkForStableDowngrade(): Promise<AppUpdateInfo | null> {
   const currentVersion = getCurrentVersion();
 
   // Only check for downgrade if currently on a prerelease

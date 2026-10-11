@@ -89,7 +89,7 @@ export class AgentManager extends EventEmitter {
   }
 
   private async launch(taskId: string, options: StartTaskOptions, isRestart: boolean): Promise<void> {
-    const { project, task } = options;
+    const { project } = options;
     const projectId = project.id;
 
     // Only one run per task

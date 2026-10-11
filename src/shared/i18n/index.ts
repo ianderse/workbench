@@ -14,9 +14,9 @@ import enTerminal from './locales/en/terminal.json';
 import enErrors from './locales/en/errors.json';
 
 
-export const defaultNS = 'common';
+const defaultNS = 'common';
 
-export const resources = {
+const resources = {
   en: {
     common: enCommon,
     navigation: enNavigation,
@@ -47,4 +47,5 @@ i18n
     }
   });
 
+/** @internal The configured instance, for tests (the app loads this module for its side effects) */
 export default i18n;

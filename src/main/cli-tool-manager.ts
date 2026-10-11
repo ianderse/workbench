@@ -33,7 +33,7 @@ import { findHomebrewPython as findHomebrewPythonUtil } from './utils/homebrew-p
 
 const execFileAsync = promisify(execFile);
 
-export type ExecFileSyncOptionsWithVerbatim = ExecFileSyncOptions & {
+type ExecFileSyncOptionsWithVerbatim = ExecFileSyncOptions & {
   windowsVerbatimArguments?: boolean;
 };
 export type ExecFileAsyncOptionsWithVerbatim = ExecFileOptionsWithStringEncoding & {
@@ -2095,31 +2095,6 @@ export function getToolPath(tool: CLITool): string {
 }
 
 /**
- * Get Claude CLI path for SDK usage
- *
- * Returns null when a .cmd file is detected on Windows, so the SDK
- * can use its bundled claude.exe instead. The SDK's bundled CLI is
- * a proper Windows executable that can be spawned by anyio.open_process().
- *
- * Use this function when passing a CLI path to the Claude Agent SDK.
- * For other uses (like spawning claude directly), use getToolPath('claude').
- *
- * @returns Claude CLI path, or null if SDK should use bundled CLI
- *
- * @example
- * ```typescript
- * import { getClaudeCliPathForSdk } from './cli-tool-manager';
- *
- * const cliPath = getClaudeCliPathForSdk();
- * // Pass to Python backend which uses Claude Agent SDK
- * // If null, SDK will use its bundled claude.exe
- * ```
- */
-export function getClaudeCliPathForSdk(): string | null {
-  return cliToolManager.getClaudeCliPathForSdk();
-}
-
-/**
  * Configure CLI tools with user settings
  *
  * Call this when user updates CLI tool paths in Settings.
@@ -2173,7 +2148,7 @@ export function getToolInfoAsync(tool: CLITool): Promise<ToolDetectionResult> {
 }
 
 /** Tools shown in Settings > Developer > Paths */
-export const PATHS_PAGE_TOOLS: CLITool[] = ['python', 'git', 'gh', 'glab', 'claude'];
+const PATHS_PAGE_TOOLS: CLITool[] = ['python', 'git', 'gh', 'glab', 'claude'];
 
 /** Detect the Paths page tools in the background (at app start), so the page opens instantly */
 export function warmToolInfo(): void {
@@ -2197,6 +2172,7 @@ export function warmToolInfo(): void {
  * // Force re-detection (e.g., after installing new tools)
  * clearToolCache();
  * ```
+ * @internal Test hook
  */
 export function clearToolCache(): void {
   cliToolManager.clearCache();
@@ -2244,26 +2220,6 @@ export function isPathFromWrongPlatform(pathStr: string | undefined): boolean {
  */
 export async function getToolPathAsync(tool: CLITool): Promise<string> {
   return cliToolManager.getToolPathAsync(tool);
-}
-
-/**
- * Get Claude CLI path for SDK usage asynchronously (non-blocking)
- *
- * Returns null when a .cmd file is detected on Windows, so the SDK
- * can use its bundled claude.exe instead.
- *
- * @returns Promise resolving to Claude CLI path, or null if SDK should use bundled CLI
- *
- * @example
- * ```typescript
- * import { getClaudeCliPathForSdkAsync } from './cli-tool-manager';
- *
- * const cliPath = await getClaudeCliPathForSdkAsync();
- * // Pass to Python backend which uses Claude Agent SDK
- * ```
- */
-export async function getClaudeCliPathForSdkAsync(): Promise<string | null> {
-  return cliToolManager.getClaudeCliPathForSdkAsync();
 }
 
 /**

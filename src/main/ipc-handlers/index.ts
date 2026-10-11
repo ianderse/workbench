@@ -99,21 +99,4 @@ export function setupIpcHandlers(
 }
 
 // Re-export all individual registration functions for potential custom usage
-export {
-  registerProjectHandlers,
-  registerTaskHandlers,
-  registerTerminalHandlers,
-  registerTerminalWorktreeIpcHandlers,
-  registerAgenteventsHandlers,
-  registerSettingsHandlers,
-  registerFileHandlers,
-  registerContextHandlers,
-  registerEnvHandlers,
-  registerInsightsHandlers,
-  registerMemoryHandlers,
-  registerAppUpdateHandlers,
-  registerClaudeCodeHandlers,
-  registerGraphifyHandlers,
-  registerMcpHandlers,
-  registerProfileHandlers
-};
+;

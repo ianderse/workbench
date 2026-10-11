@@ -110,7 +110,7 @@ export interface TaskRunConfig {
   profileId?: string;
 }
 
-export interface TaskRunProgress {
+interface TaskRunProgress {
   phase: ExecutionPhase;
   phaseProgress: number;
   overallProgress: number;
@@ -136,7 +136,7 @@ export interface TaskRunCallbacks {
   onSubtasks?: (subtasks: TaskRunSubtask[]) => void;
 }
 
-export type TaskRunStatus = 'completed' | 'failed' | 'rate_limited' | 'auth_failed' | 'stopped';
+type TaskRunStatus = 'completed' | 'failed' | 'rate_limited' | 'auth_failed' | 'stopped';
 
 export interface TaskRunOutcome {
   status: TaskRunStatus;

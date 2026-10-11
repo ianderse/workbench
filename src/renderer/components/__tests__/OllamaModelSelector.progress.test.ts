@@ -1,16 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
 /**
- * Progress calculation utilities extracted from OllamaModelSelector
- * Tests for speed, time, and percentage calculations
- */
-
-interface ProgressTracking {
-  lastCompleted: number;
-  lastUpdate: number;
-}
-
-/**
  * Core calculation functions (same as component implementation)
  * These utilities are extracted for testability and reusability
  */

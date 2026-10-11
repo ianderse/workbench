@@ -49,13 +49,13 @@ export interface Subtask {
   };
 }
 
-export interface QAReport {
+interface QAReport {
   status: 'passed' | 'failed' | 'pending';
   issues: QAIssue[];
   timestamp: Date;
 }
 
-export interface QAIssue {
+interface QAIssue {
   id: string;
   severity: 'critical' | 'major' | 'minor';
   description: string;
@@ -274,7 +274,7 @@ export interface ImplementationPlan {
   rateLimitHold?: RateLimitHold | null;  // Persisted rate-limit hold (see RateLimitHold)
 }
 
-export interface Phase {
+interface Phase {
   phase: number;
   name: string;
   type: string;
@@ -309,23 +309,11 @@ export interface WorktreeStatus {
   deletions?: number;
 }
 
-export interface WorktreeDiff {
-  files: WorktreeDiffFile[];
-  summary: string;
-}
-
-export interface WorktreeDiffFile {
-  path: string;
-  status: 'added' | 'modified' | 'deleted' | 'renamed';
-  additions: number;
-  deletions: number;
-}
-
 // Conflict severity levels from merge system
 export type ConflictSeverity = 'none' | 'low' | 'medium' | 'high' | 'critical';
 
 // Type of conflict
-export type ConflictType = 'semantic' | 'git';
+type ConflictType = 'semantic' | 'git';
 
 // Information about a detected conflict
 export interface MergeConflict {
@@ -340,7 +328,7 @@ export interface MergeConflict {
 }
 
 // Path-mapped file that needs AI merge due to rename
-export interface PathMappedAIMerge {
+interface PathMappedAIMerge {
   oldPath: string;
   newPath: string;
   reason: string;
@@ -351,7 +339,7 @@ export interface PathMappedAIMerge {
 // - 'superseded': Target has newer version of same feature
 // - 'diverged': Standard diverged branches (AI can resolve)
 // - 'normal_conflict': Actual conflicting changes
-export type ConflictScenario = 'already_merged' | 'superseded' | 'diverged' | 'normal_conflict';
+type ConflictScenario = 'already_merged' | 'superseded' | 'diverged' | 'normal_conflict';
 
 // Git-level conflict information (branch divergence)
 export interface GitConflictInfo {
@@ -387,7 +375,7 @@ export interface MergeStats {
 }
 
 // Merge progress tracking (for progress bar during merge operations)
-export type MergeStage = 'analyzing' | 'detecting_conflicts' | 'resolving' | 'validating' | 'complete' | 'error';
+type MergeStage = 'analyzing' | 'detecting_conflicts' | 'resolving' | 'validating' | 'complete' | 'error';
 
 export interface MergeProgress {
   stage: MergeStage;
@@ -488,16 +476,6 @@ export interface WorktreeListResult {
   worktrees: WorktreeListItem[];
 }
 
-// Stuck task recovery types
-export interface StuckTaskInfo {
-  taskId: string;
-  specId: string;
-  title: string;
-  status: TaskStatus;
-  isActuallyRunning: boolean;
-  lastUpdated: Date;
-}
-
 export interface TaskRecoveryResult {
   taskId: string;
   recovered: boolean;
@@ -509,12 +487,6 @@ export interface TaskRecoveryResult {
 export interface TaskRecoveryOptions {
   targetStatus?: TaskStatus;
   autoRestart?: boolean;
-}
-
-export interface TaskProgressUpdate {
-  taskId: string;
-  plan: ImplementationPlan;
-  currentSubtask?: string;
 }
 
 export interface TaskStartOptions {

@@ -11,7 +11,6 @@ import * as crypto from 'crypto';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { getClaudeProfileManager, initializeClaudeProfileManager } from '../claude-profile-manager';
 import { getFullCredentialsFromKeychain, clearKeychainCache, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
-import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { getEmailFromConfigDir } from '../claude-profile/profile-utils';
 import { findStandaloneLimitReset } from '../claude-profile/rate-limit-manager';
 import * as OutputParser from './output-parser';
@@ -242,7 +241,6 @@ function escapeShellCommand(cmd: string): string {
  */
 const YOLO_MODE_FLAG = ' --dangerously-skip-permissions';
 
-
 /**
  * Printed by the shell right after a CLI the app launched in a window exits: an OSC sequence that
  * xterm ignores. TerminalManager closes the window when it sees it (unless the app itself is
@@ -336,7 +334,7 @@ export function buildResumeSessionFlag(sessionId: string): string {
  * Extra flags for an agent window's `claude` command: the resumed session (if any), YOLO mode,
  * and the Graphify hint
  */
-export function buildClaudeExtraFlags(
+function buildClaudeExtraFlags(
   terminal: Pick<TerminalProcess, 'graphifyOut'>,
   dangerouslySkipPermissions: boolean | undefined,
   resumeSessionId?: string
@@ -958,8 +956,6 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
     extraFlags,
     terminal,
     profileManager,
-    projectPath,
-    startTime,
     getWindow,
     logPrefix,
   } = options;
@@ -1038,8 +1034,6 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
     extraFlags,
     terminal,
     profileManager,
-    projectPath,
-    startTime,
     getWindow,
     logPrefix,
   } = options;

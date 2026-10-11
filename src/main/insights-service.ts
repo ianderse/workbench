@@ -25,7 +25,7 @@ import { InsightsExecutor } from './insights/insights-executor';
  * - SessionManager: Manages session lifecycle and cache
  * - InsightsExecutor: Executes Python insights runner
  */
-export class InsightsService extends EventEmitter {
+class InsightsService extends EventEmitter {
   private config: InsightsConfig;
   private paths: InsightsPaths;
   private storage: SessionStorage;
@@ -40,7 +40,7 @@ export class InsightsService extends EventEmitter {
     this.paths = new InsightsPaths();
     this.storage = new SessionStorage(this.paths);
     this.sessionManager = new SessionManager(this.storage, this.paths);
-    this.executor = new InsightsExecutor(this.config);
+    this.executor = new InsightsExecutor();
 
     // Forward executor events
     this.executor.on('status', (projectId, status) => {

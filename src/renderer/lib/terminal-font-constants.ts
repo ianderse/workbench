@@ -4,70 +4,34 @@
  */
 
 // Font size constraints
-export const FONT_SIZE_MIN = 10;
-export const FONT_SIZE_MAX = 24;
-export const FONT_SIZE_STEP = 1;
-
+const FONT_SIZE_MIN = 10;
+const FONT_SIZE_MAX = 24;
 // Font weight constraints
-export const FONT_WEIGHT_MIN = 100;
-export const FONT_WEIGHT_MAX = 900;
-export const FONT_WEIGHT_STEP = 100;
+const FONT_WEIGHT_MIN = 100;
+const FONT_WEIGHT_MAX = 900;
+const FONT_WEIGHT_STEP = 100;
 
 // Line height constraints
-export const LINE_HEIGHT_MIN = 1.0;
-export const LINE_HEIGHT_MAX = 2.0;
-export const LINE_HEIGHT_STEP = 0.1;
-
+const LINE_HEIGHT_MIN = 1.0;
+const LINE_HEIGHT_MAX = 2.0;
 // Letter spacing constraints
-export const LETTER_SPACING_MIN = -2;
-export const LETTER_SPACING_MAX = 5;
-export const LETTER_SPACING_STEP = 0.5;
-
+const LETTER_SPACING_MIN = -2;
+const LETTER_SPACING_MAX = 5;
 // Scrollback constraints
-export const SCROLLBACK_MIN = 1000;
-export const SCROLLBACK_MAX = 100000;
-export const SCROLLBACK_STEP = 1000;
-
+const SCROLLBACK_MIN = 1000;
+const SCROLLBACK_MAX = 100000;
 // Maximum font array length to prevent DoS
-export const MAX_FONT_FAMILY_LENGTH = 10;
+const MAX_FONT_FAMILY_LENGTH = 10;
 
 // Maximum file size for import (10KB)
 export const MAX_IMPORT_FILE_SIZE = 10 * 1024;
 
 // Valid cursor styles
-export const VALID_CURSOR_STYLES = ['block', 'underline', 'bar'] as const;
+const VALID_CURSOR_STYLES = ['block', 'underline', 'bar'] as const;
 export type CursorStyle = typeof VALID_CURSOR_STYLES[number];
 
 // Hex color regex (3-digit, 6-digit, or 8-digit)
-export const HEX_COLOR_REGEX = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
-
-/**
- * Shared Tailwind CSS classes for range input sliders
- * Custom styling for webkit (Chrome, Safari, Edge) and Firefox thumb controls
- */
-export const SLIDER_INPUT_CLASSES = [
-  'w-full h-2 bg-muted rounded-lg appearance-none cursor-pointer',
-  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-  // Webkit (Chrome, Safari, Edge)
-  '[&::-webkit-slider-thumb]:appearance-none',
-  '[&::-webkit-slider-thumb]:w-4',
-  '[&::-webkit-slider-thumb]:h-4',
-  '[&::-webkit-slider-thumb]:rounded-full',
-  '[&::-webkit-slider-thumb]:bg-primary',
-  '[&::-webkit-slider-thumb]:cursor-pointer',
-  '[&::-webkit-slider-thumb]:transition-all',
-  '[&::-webkit-slider-thumb]:hover:scale-110',
-  // Firefox
-  '[&::-moz-range-thumb]:w-4',
-  '[&::-moz-range-thumb]:h-4',
-  '[&::-moz-range-thumb]:rounded-full',
-  '[&::-moz-range-thumb]:bg-primary',
-  '[&::-moz-range-thumb]:border-0',
-  '[&::-moz-range-thumb]:cursor-pointer',
-  '[&::-moz-range-thumb]:transition-all',
-  '[&::-moz-range-thumb]:hover:scale-110',
-] as const;
-
+const HEX_COLOR_REGEX = /^#([0-9A-Fa-f]{3}|[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/;
 /**
  * Validates a font size value is within bounds
  */

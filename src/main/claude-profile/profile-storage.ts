@@ -15,7 +15,7 @@ import type { ClaudeProfile, ClaudeAutoSwitchSettings } from '../../shared/types
 const DEFAULT_CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
 const CLAUDE_PROFILES_DIR = join(homedir(), '.claude-profiles');
 
-export const STORE_VERSION = 3;  // Bumped for encrypted token storage
+const STORE_VERSION = 3;  // Bumped for encrypted token storage
 
 /**
  * Default auto-switch settings
@@ -199,23 +199,6 @@ function parseAndMigrateProfileData(data: Record<string, unknown>): ProfileStore
     }
 
     return data as unknown as ProfileStoreData;
-  }
-
-  return null;
-}
-
-/**
- * Load profiles from disk
- */
-export function loadProfileStore(storePath: string): ProfileStoreData | null {
-  try {
-    if (existsSync(storePath)) {
-      const content = readFileSync(storePath, 'utf-8');
-      const data = JSON.parse(content);
-      return parseAndMigrateProfileData(data);
-    }
-  } catch (error) {
-    console.error('[ProfileStorage] Error loading profiles:', error);
   }
 
   return null;

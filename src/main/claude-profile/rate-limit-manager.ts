@@ -13,7 +13,7 @@ import { detectClaudeLimitMessage } from '../claude-code/limit';
  * looks like a limit message (source code, a diff or a chat shown in a terminal), e.g.
  * "Dec 17 at 6am (Europe/Oslo)" two months ahead.
  */
-export const MAX_RATE_LIMIT_RESET_MS = 8 * 24 * 60 * 60 * 1000;
+const MAX_RATE_LIMIT_RESET_MS = 8 * 24 * 60 * 60 * 1000;
 
 /** ANSI escape sequences (CSI / OSC) and other control characters */
 const ANSI_PATTERN = /\x1b\[[0-9;?!>]*[A-Za-z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b./g;
@@ -28,12 +28,12 @@ const RESET_TEXT_PATTERN =
   /^(?:[A-Za-z]{3,9}\.?\s+\d{1,2}(?:,|\s+at)?\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)?(?:\s*\([A-Za-z0-9_+\-/]+\))?$/i;
 
 /** Remove terminal escape codes from a reset string and trim it */
-export function cleanResetText(resetTimeStr: string): string {
+function cleanResetText(resetTimeStr: string): string {
   return resetTimeStr.replace(ANSI_PATTERN, '').trim();
 }
 
 /** Whether a reset string looks like one Claude Code prints */
-export function isPlausibleResetText(resetTimeStr: string): boolean {
+function isPlausibleResetText(resetTimeStr: string): boolean {
   if (!resetTimeStr || CONTROL_CHARS.test(resetTimeStr)) return false;
   return RESET_TEXT_PATTERN.test(resetTimeStr.trim());
 }
@@ -71,7 +71,7 @@ function toDate(value: unknown): Date | null {
  * Whether a stored rate limit event can be a real Claude limit: valid dates, a reset no more
  * than {@link MAX_RATE_LIMIT_RESET_MS} after the hit, and a clean reset string.
  */
-export function isPlausibleRateLimitEvent(event: ClaudeRateLimitEvent): boolean {
+function isPlausibleRateLimitEvent(event: ClaudeRateLimitEvent): boolean {
   const hitAt = toDate(event?.hitAt);
   const resetAt = toDate(event?.resetAt);
   if (!hitAt || !resetAt) return false;

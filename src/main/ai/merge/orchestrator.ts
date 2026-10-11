@@ -42,7 +42,7 @@ export interface TaskMergeRequest {
   priority: number;
 }
 
-export interface MergeStats {
+interface MergeStats {
   filesProcessed: number;
   filesAutoMerged: number;
   filesAiMerged: number;
@@ -66,7 +66,7 @@ export interface MergeReport {
   error?: string;
 }
 
-export type ProgressStage =
+type ProgressStage =
   | 'analyzing'
   | 'detecting_conflicts'
   | 'resolving'

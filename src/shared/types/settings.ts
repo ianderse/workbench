@@ -28,7 +28,7 @@ export type InterfaceFont = 'anthropic-sans' | 'system' | 'sans-serif' | 'inter'
 
 // Developer tools preferences - IDE and terminal selection
 // Comprehensive list based on Stack Overflow Developer Survey 2024, JetBrains Survey, and market research
-export type SupportedIDE =
+type SupportedIDE =
   // Microsoft/VS Code Ecosystem
   | 'vscode'           // Visual Studio Code (~73% market share)
   | 'visualstudio'     // Visual Studio (full IDE)
@@ -169,7 +169,7 @@ export type SupportedCLI =
   | 'codex'         // Codex CLI
   | 'custom';
 
-export interface ThemePreviewColors {
+interface ThemePreviewColors {
   bg: string;
   accent: string;
   darkBg: string;

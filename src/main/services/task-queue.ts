@@ -23,7 +23,7 @@ import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
 import { sortColumnTasks } from '../../shared/utils/task-column-order';
 
 /** Delay used to coalesce bursts of requests (e.g. "Queue all") into one pass. */
-export const TASK_QUEUE_DEBOUNCE_MS = 100;
+const TASK_QUEUE_DEBOUNCE_MS = 100;
 
 /** A pass stops after this many failed starts (likely a shared cause, e.g. auth or git). */
 export const MAX_FAILED_STARTS_PER_PASS = 3;
@@ -46,11 +46,6 @@ export interface TaskQueueDeps {
   startTask: (taskId: string, projectId: string) => Promise<boolean>;
   /** Debounce override for tests. */
   debounceMs?: number;
-}
-
-/** Tasks counted against the parallel limit. */
-export function countInProgressTasks(tasks: Task[]): number {
-  return tasks.filter((t) => t.status === 'in_progress' && !t.metadata?.archivedAt).length;
 }
 
 /**

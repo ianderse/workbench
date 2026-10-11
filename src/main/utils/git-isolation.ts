@@ -80,36 +80,6 @@ export function getIsolatedGitEnv(
 }
 
 /**
- * Creates spawn options with isolated git environment.
- *
- * Convenience function that returns common spawn options
- * with the isolated environment already set.
- *
- * @param cwd - Working directory for the command
- * @param additionalOptions - Additional spawn options to merge
- * @returns Spawn options object with isolated git environment
- *
- * @example
- * ```typescript
- * import { execFileSync } from 'child_process';
- * import { getIsolatedGitSpawnOptions } from './git-isolation';
- *
- * execFileSync('git', ['status'], getIsolatedGitSpawnOptions(worktreePath));
- * ```
- */
-export function getIsolatedGitSpawnOptions(
-  cwd: string,
-  additionalOptions: Record<string, unknown> = {}
-): Record<string, unknown> {
-  return {
-    cwd,
-    env: getIsolatedGitEnv(),
-    encoding: 'utf-8',
-    ...additionalOptions,
-  };
-}
-
-/**
  * Result type for detectWorktreeBranch function.
  */
 export interface WorktreeBranchDetectionResult {

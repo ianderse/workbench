@@ -59,7 +59,7 @@ export interface InsightsRunConfig {
 }
 
 /** Info about a tool call made during the turn */
-export interface ToolCallInfo {
+interface ToolCallInfo {
   name: string;
   input: string;
 }
@@ -81,7 +81,7 @@ export type InsightsStreamEvent =
 export type InsightsStreamCallback = (event: InsightsStreamEvent) => void;
 
 /** Error raised when the model finishes without producing any answer text */
-export const EMPTY_RESPONSE_ERROR = 'The model returned an empty response';
+const EMPTY_RESPONSE_ERROR = 'The model returned an empty response';
 
 /** Tools the Insights agent may use (read-only codebase exploration) */
 export const INSIGHTS_READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'] as const;
@@ -114,12 +114,12 @@ export function toClaudeModel(model: string | undefined): string {
 }
 
 /** Claude Code effort for a stored thinking level */
-export function toClaudeEffort(level: string | undefined): ClaudeEffort {
+function toClaudeEffort(level: string | undefined): ClaudeEffort {
   return level && (CLAUDE_EFFORTS as readonly string[]).includes(level) ? (level as ClaudeEffort) : 'medium';
 }
 
 /** CLI arguments for a read-only, non-persistent headless turn */
-export function buildInsightsArgs(
+function buildInsightsArgs(
   model: string,
   effort: ClaudeEffort,
   systemPromptFile: string,
@@ -147,7 +147,7 @@ export function buildInsightsArgs(
 // Stream handling
 // =============================================================================
 
-export interface StreamState {
+interface StreamState {
   text: string;
   toolCalls: ToolCallInfo[];
   /** tool_use id → tool name, for matching tool results */
@@ -157,12 +157,12 @@ export interface StreamState {
   result?: { isError: boolean; subtype?: string; text?: string };
 }
 
-export function createStreamState(): StreamState {
+function createStreamState(): StreamState {
   return { text: '', toolCalls: [], toolNames: new Map(), pendingTools: new Map() };
 }
 
 /** Apply one stream-json message from the CLI to the turn state, emitting UI events */
-export function handleInsightsEvent(
+function handleInsightsEvent(
   event: ClaudeStreamMessage | Record<string, unknown>,
   state: StreamState,
   onStream?: InsightsStreamCallback,

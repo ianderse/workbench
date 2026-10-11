@@ -9,14 +9,14 @@ import path from 'path';
 import { existsSync } from 'fs';
 
 // Path constants for worktree directories
-export const TASK_WORKTREE_DIR = '.auto-claude/worktrees/tasks';
-export const TERMINAL_WORKTREE_DIR = '.auto-claude/worktrees/terminal';
+const TASK_WORKTREE_DIR = '.auto-claude/worktrees/tasks';
+const TERMINAL_WORKTREE_DIR = '.auto-claude/worktrees/terminal';
 
 // Metadata directories (separate from git worktrees to avoid uncommitted files)
-export const TERMINAL_WORKTREE_METADATA_DIR = '.auto-claude/terminal/metadata';
+const TERMINAL_WORKTREE_METADATA_DIR = '.auto-claude/terminal/metadata';
 
 // Legacy path for backwards compatibility
-export const LEGACY_WORKTREE_DIR = '.worktrees';
+const LEGACY_WORKTREE_DIR = '.worktrees';
 
 /**
  * Get the task worktrees directory path
@@ -27,21 +27,6 @@ export function getTaskWorktreeDir(projectPath: string): string {
     return '';
   }
   return path.join(projectPath, TASK_WORKTREE_DIR);
-}
-
-/**
- * Get the full path for a specific task worktree
- */
-export function getTaskWorktreePath(projectPath: string, specId: string): string {
-  if (!projectPath || typeof projectPath !== 'string') {
-    console.error('[worktree-paths] getTaskWorktreePath: projectPath is undefined or not a string');
-    return '';
-  }
-  if (!specId || typeof specId !== 'string') {
-    console.error('[worktree-paths] getTaskWorktreePath: specId is undefined or not a string');
-    return '';
-  }
-  return path.join(projectPath, TASK_WORKTREE_DIR, specId);
 }
 
 /**
@@ -123,50 +108,6 @@ export function getTerminalWorktreePath(projectPath: string, name: string): stri
     return '';
   }
   return path.join(projectPath, TERMINAL_WORKTREE_DIR, name);
-}
-
-/**
- * Find a terminal worktree path, checking new location first then legacy
- * Returns the path if found, null otherwise
- * Includes path traversal protection to ensure paths stay within project
- */
-export function findTerminalWorktree(projectPath: string, name: string): string | null {
-  if (!projectPath || typeof projectPath !== 'string') {
-    console.error('[worktree-paths] findTerminalWorktree: projectPath is undefined or not a string');
-    return null;
-  }
-  if (!name || typeof name !== 'string') {
-    console.error('[worktree-paths] findTerminalWorktree: name is undefined or not a string');
-    return null;
-  }
-
-  const normalizedProject = path.resolve(projectPath);
-
-  // Check new path first
-  const newPath = path.join(projectPath, TERMINAL_WORKTREE_DIR, name);
-  const resolvedNewPath = path.resolve(newPath);
-
-  // Validate path stays within project (defense against path traversal)
-  if (!isPathWithinBase(resolvedNewPath, normalizedProject)) {
-    console.error(`[worktree-paths] Path traversal detected: name "${name}" resolves outside project`);
-    return null;
-  }
-
-  if (existsSync(resolvedNewPath)) return resolvedNewPath;
-
-  // Legacy fallback (terminal worktrees used terminal-{name} prefix)
-  const legacyPath = path.join(projectPath, LEGACY_WORKTREE_DIR, `terminal-${name}`);
-  const resolvedLegacyPath = path.resolve(legacyPath);
-
-  // Validate legacy path as well
-  if (!isPathWithinBase(resolvedLegacyPath, normalizedProject)) {
-    console.error(`[worktree-paths] Path traversal detected: name "${name}" resolves outside project (legacy)`);
-    return null;
-  }
-
-  if (existsSync(resolvedLegacyPath)) return resolvedLegacyPath;
-
-  return null;
 }
 
 /**

@@ -5,66 +5,13 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  nativePlugin,
   type Memory,
   type MemoryType,
   type MemorySource,
-  type MemoryScope,
   type UniversalPhase,
   type WorkUnitRef,
-  type MemoryRelation,
-  type MemorySearchFilters,
-  type MemoryRecordEntry,
-  type MemoryCandidate,
-  type AcuteCandidate,
-  type SignalType,
-  type SessionOutcome,
-  type SessionType,
+  type MemoryRecordEntry
 } from '../types';
-
-describe('nativePlugin', () => {
-  it('has id "native"', () => {
-    expect(nativePlugin.id).toBe('native');
-  });
-
-  it('maps known phases to UniversalPhase values', () => {
-    expect(nativePlugin.mapPhase('planning')).toBe('define');
-    expect(nativePlugin.mapPhase('spec')).toBe('define');
-    expect(nativePlugin.mapPhase('coding')).toBe('implement');
-    expect(nativePlugin.mapPhase('qa_review')).toBe('validate');
-    expect(nativePlugin.mapPhase('qa_fix')).toBe('refine');
-    expect(nativePlugin.mapPhase('debugging')).toBe('refine');
-    expect(nativePlugin.mapPhase('insights')).toBe('explore');
-  });
-
-  it('returns "explore" for unknown phases', () => {
-    expect(nativePlugin.mapPhase('unknown_phase')).toBe('explore');
-  });
-
-  it('resolveWorkUnitRef returns correct label with subtask', () => {
-    const ref = nativePlugin.resolveWorkUnitRef({
-      specNumber: '042',
-      subtaskId: '3',
-    });
-    expect(ref.methodology).toBe('native');
-    expect(ref.hierarchy).toEqual(['042', '3']);
-    expect(ref.label).toBe('Spec 042 / Subtask 3');
-  });
-
-  it('resolveWorkUnitRef returns correct label without subtask', () => {
-    const ref = nativePlugin.resolveWorkUnitRef({ specNumber: '007' });
-    expect(ref.hierarchy).toEqual(['007']);
-    expect(ref.label).toBe('Spec 007');
-  });
-
-  it('getRelayTransitions returns expected transitions', () => {
-    const transitions = nativePlugin.getRelayTransitions();
-    expect(transitions).toHaveLength(3);
-    expect(transitions[0]).toMatchObject({ from: 'planner', to: 'coder' });
-    expect(transitions[1]).toMatchObject({ from: 'coder', to: 'qa_reviewer' });
-    expect(transitions[2]).toMatchObject({ from: 'qa_reviewer', to: 'qa_fixer' });
-  });
-});
 
 describe('Type shape validation (compile-time checks)', () => {
   it('MemoryType values are assignable', () => {
@@ -111,24 +58,6 @@ describe('Type shape validation (compile-time checks)', () => {
       'reflect',
     ];
     expect(phases).toHaveLength(6);
-  });
-
-  it('SessionOutcome values are assignable', () => {
-    const outcomes: SessionOutcome[] = ['success', 'failure', 'abandoned', 'partial'];
-    expect(outcomes).toHaveLength(4);
-  });
-
-  it('SessionType values are assignable', () => {
-    const types: SessionType[] = [
-      'build',
-      'insights',
-      'roadmap',
-      'terminal',
-      'changelog',
-      'spec_creation',
-      'pr_review',
-    ];
-    expect(types).toHaveLength(7);
   });
 
   it('Memory interface can be constructed', () => {

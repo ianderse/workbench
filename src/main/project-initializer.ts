@@ -246,16 +246,6 @@ export function hasLocalSource(projectPath: string): boolean {
 }
 
 /**
- * Get the local source path for a project (if it exists)
- */
-export function getLocalSourcePath(projectPath: string): string | null {
-  if (hasLocalSource(projectPath)) {
-    return projectPath;
-  }
-  return null;
-}
-
-/**
  * Check if project is initialized (has .auto-claude directory)
  */
 export function isInitialized(projectPath: string): boolean {
@@ -331,38 +321,6 @@ export function initializeProject(projectPath: string): InitializationResult {
     return {
       success: false,
       error: errorMessage
-    };
-  }
-}
-
-/**
- * Ensure all data directories exist in .auto-claude.
- * Useful if new directories are added in future versions.
- */
-export function ensureDataDirectories(projectPath: string): InitializationResult {
-  const dotAutoBuildPath = path.join(projectPath, '.auto-claude');
-
-  if (!existsSync(dotAutoBuildPath)) {
-    return {
-      success: false,
-      error: 'Project not initialized. Run initialize first.'
-    };
-  }
-
-  try {
-    for (const dataDir of DATA_DIRECTORIES) {
-      const dirPath = path.join(dotAutoBuildPath, dataDir);
-      if (!existsSync(dirPath)) {
-        debug('Creating missing data directory', { dataDir, dirPath });
-        mkdirSync(dirPath, { recursive: true });
-        writeFileSync(path.join(dirPath, '.gitkeep'), '', 'utf-8');
-      }
-    }
-    return { success: true };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }

@@ -44,7 +44,7 @@ let detection: Promise<GraphifyInstallation | null> | null = null;
 let latestVersion: Promise<string | null> | null = null;
 const buildsInProgress = new Map<string, Promise<GraphifyIndexInfo>>();
 
-export { getGraphifyMemoryDir, getGraphifyGraphPath, hasGraphifyGraph };
+export {   hasGraphifyGraph };
 
 async function runGraphify(
   executable: string,
@@ -138,7 +138,7 @@ async function getConfigDirsMissingCommand(): Promise<{ dirs: string[]; missing:
 }
 
 /** Whether Claude Code offers /graphify, counted over its config directories */
-export async function getGraphifyClaudeCommandStatus(): Promise<{ configDirs: number; missing: number }> {
+async function getGraphifyClaudeCommandStatus(): Promise<{ configDirs: number; missing: number }> {
   const { dirs, missing } = await getConfigDirsMissingCommand();
   return { configDirs: dirs.length, missing: missing.length };
 }

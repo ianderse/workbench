@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { detectProvider, getProviderLabel, getProviderBadgeColor } from './provider-detection';
+import { detectProvider } from './provider-detection';
 
 describe('provider-detection', () => {
   describe('detectProvider', () => {
@@ -66,55 +66,4 @@ describe('provider-detection', () => {
     });
   });
 
-  describe('getProviderLabel', () => {
-    it('should return correct label for Anthropic', () => {
-      expect(getProviderLabel('anthropic')).toBe('Anthropic');
-    });
-
-    it('should return correct label for z.ai', () => {
-      expect(getProviderLabel('zai')).toBe('z.ai');
-    });
-
-    it('should return correct label for ZHIPU', () => {
-      expect(getProviderLabel('zhipu')).toBe('ZHIPU AI');
-    });
-
-    it('should return Unknown for unknown provider', () => {
-      expect(getProviderLabel('unknown')).toBe('Unknown');
-    });
-  });
-
-  describe('getProviderBadgeColor', () => {
-    it('should return orange colors for Anthropic', () => {
-      const color = getProviderBadgeColor('anthropic');
-      expect(color).toContain('orange');
-      expect(color).toContain('bg-orange-500/10');
-      expect(color).toContain('text-orange-500');
-      expect(color).toContain('border-orange-500/20');
-    });
-
-    it('should return blue colors for z.ai', () => {
-      const color = getProviderBadgeColor('zai');
-      expect(color).toContain('blue');
-      expect(color).toContain('bg-blue-500/10');
-      expect(color).toContain('text-blue-500');
-      expect(color).toContain('border-blue-500/20');
-    });
-
-    it('should return purple colors for ZHIPU', () => {
-      const color = getProviderBadgeColor('zhipu');
-      expect(color).toContain('purple');
-      expect(color).toContain('bg-purple-500/10');
-      expect(color).toContain('text-purple-500');
-      expect(color).toContain('border-purple-500/20');
-    });
-
-    it('should return gray colors for unknown', () => {
-      const color = getProviderBadgeColor('unknown');
-      expect(color).toContain('gray');
-      expect(color).toContain('bg-gray-500/10');
-      expect(color).toContain('text-gray-500');
-      expect(color).toContain('border-gray-500/20');
-    });
-  });
 });

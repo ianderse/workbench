@@ -31,7 +31,7 @@ export interface ClaudeProcessOptions {
   timeoutMs?: number;
 }
 
-export interface ClaudeProcessResult {
+interface ClaudeProcessResult {
   exitCode: number | null;
   signal: NodeJS.Signals | null;
   /** The final `result` message, when the CLI produced one */

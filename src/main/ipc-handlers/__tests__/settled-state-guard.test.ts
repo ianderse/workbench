@@ -6,7 +6,7 @@
  * terminal/review state.
  */
 import { describe, it, expect } from 'vitest';
-import { XSTATE_SETTLED_STATES, XSTATE_TO_PHASE, TASK_STATE_NAMES } from '../../../shared/state-machines';
+import { XSTATE_SETTLED_STATES, XSTATE_TO_PHASE } from '../../../shared/state-machines';
 
 describe('XSTATE_SETTLED_STATES', () => {
   it('should contain the expected settled states', () => {
@@ -28,12 +28,6 @@ describe('XSTATE_SETTLED_STATES', () => {
     expect(XSTATE_SETTLED_STATES.has('qa_fixing')).toBe(false);
   });
 
-  it('should only contain valid task state names', () => {
-    const validNames = new Set(TASK_STATE_NAMES);
-    for (const state of XSTATE_SETTLED_STATES) {
-      expect(validNames.has(state as typeof TASK_STATE_NAMES[number])).toBe(true);
-    }
-  });
 });
 
 describe('settled state guard behavior', () => {
@@ -80,11 +74,6 @@ describe('settled state guard behavior', () => {
 });
 
 describe('XSTATE_TO_PHASE', () => {
-  it('should have a mapping for every task state', () => {
-    for (const state of TASK_STATE_NAMES) {
-      expect(XSTATE_TO_PHASE[state]).toBeDefined();
-    }
-  });
 
   it('should map settled states to non-active phases', () => {
     // Settled states should map to phases that indicate completion or stoppage

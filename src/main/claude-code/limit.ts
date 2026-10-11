@@ -75,23 +75,6 @@ export function detectClaudeLimitMessage(text: string | null | undefined): Claud
   return { message: trimmed, resetText };
 }
 
-/**
- * Error thrown by the session runner when the model responds with a Claude
- * limit message instead of doing work. Classified as a rate limit.
- */
-export class ClaudeLimitReachedError extends Error {
-  readonly limit: ClaudeLimitMessage;
-  /** Absolute reset time, or null if it could not be determined */
-  readonly resetAt: Date | null;
-
-  constructor(limit: ClaudeLimitMessage, now: Date = new Date()) {
-    super(limit.message);
-    this.name = 'ClaudeLimitReachedError';
-    this.limit = limit;
-    this.resetAt = limit.resetText ? parseLimitResetTime(limit.resetText, now) : null;
-  }
-}
-
 // =============================================================================
 // Reset time parsing
 // =============================================================================

@@ -24,7 +24,7 @@ const terminalActors = new Map<string, TerminalActor>();
  * Get or create an XState terminal actor for a given terminal ID.
  * Actors are lazily created on first access and cached for the terminal's lifetime.
  */
-export function getOrCreateTerminalActor(terminalId: string): TerminalActor {
+function getOrCreateTerminalActor(terminalId: string): TerminalActor {
   let actor = terminalActors.get(terminalId);
   if (!actor) {
     actor = createActor(terminalMachine);
@@ -39,7 +39,7 @@ export function getOrCreateTerminalActor(terminalId: string): TerminalActor {
  * Send an event to a terminal's XState machine.
  * Creates the actor if it doesn't exist yet.
  */
-export function sendTerminalMachineEvent(terminalId: string, event: TerminalEvent): void {
+function sendTerminalMachineEvent(terminalId: string, event: TerminalEvent): void {
   const actor = getOrCreateTerminalActor(terminalId);
   const stateBefore = String(actor.getSnapshot().value);
   actor.send(event);
@@ -179,7 +179,7 @@ export function buildTaskWorktreeConfig(request: TaskSessionRequest, terminalId:
 }
 
 /** Ask the app to show the Agents page of a project (e.g. after opening a task's session) */
-export interface AgentsViewRequest {
+interface AgentsViewRequest {
   projectPath: string;
   /** Increases with every request, so the same project can be requested again */
   seq: number;

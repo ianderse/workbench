@@ -3,9 +3,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { Task, TaskStatus } from '../../../shared/types';
 import {
   TaskQueue,
-  countInProgressTasks,
   getPromotableQueuedTasks,
-  MAX_FAILED_STARTS_PER_PASS,
+  MAX_FAILED_STARTS_PER_PASS
 } from '../task-queue';
 
 const NOW = Date.parse('2026-10-05T10:00:00.000Z');
@@ -47,14 +46,6 @@ function createHarness(initial: Record<string, Task[]>, maxParallel = 3) {
 }
 
 describe('task queue helpers', () => {
-  it('counts unarchived in-progress tasks only', () => {
-    expect(countInProgressTasks([
-      makeTask('a', 'in_progress'),
-      makeTask('b', 'in_progress', { metadata: { archivedAt: new Date().toISOString() } as Task['metadata'] }),
-      makeTask('c', 'queue'),
-      makeTask('d', 'ai_review'),
-    ])).toBe(1);
-  });
 
   it('lists queued tasks top of the column first (newest first when unarranged), without held or archived ones', () => {
     const tasks = [

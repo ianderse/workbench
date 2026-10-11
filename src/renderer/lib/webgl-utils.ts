@@ -19,19 +19,6 @@ export function supportsWebGL2(): boolean {
 }
 
 /**
- * Check if WebGL (version 1) is supported
- */
-export function supportsWebGL(): boolean {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    return gl !== null;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if the current browser is Safari
  * Note: Chrome's user agent also contains "Safari", so we need to exclude it
  */
@@ -82,92 +69,4 @@ export function getMaxWebGLContexts(): number {
   }
 
   return maxContexts;
-}
-
-/**
- * Check if terminal configuration is compatible with WebGL
- * Some features don't work well with WebGL rendering
- */
-export function canUseWebGL(options: {
-  transparency?: boolean;
-  ligatures?: boolean;
-}): boolean {
-  // WebGL doesn't work well with transparency (Hyper finding)
-  if (options.transparency) {
-    return false;
-  }
-
-  // Ligatures can cause issues with WebGL in some terminals
-  if (options.ligatures) {
-    return false;
-  }
-
-  return supportsWebGL2() || supportsWebGL();
-}
-
-/**
- * Get WebGL info for debugging
- */
-export function getWebGLInfo(): {
-  webgl1Supported: boolean;
-  webgl2Supported: boolean;
-  maxContexts: number;
-  renderer?: string;
-  vendor?: string;
-} {
-  const info = {
-    webgl1Supported: supportsWebGL(),
-    webgl2Supported: supportsWebGL2(),
-    maxContexts: getMaxWebGLContexts(),
-    renderer: undefined as string | undefined,
-    vendor: undefined as string | undefined,
-  };
-
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-
-    if (gl) {
-      const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-      if (debugInfo) {
-        info.renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
-        info.vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
-      }
-    }
-  } catch {
-    // Info not available
-  }
-
-  return info;
-}
-
-/**
- * Test WebGL context creation to verify it's working
- */
-export function testWebGLContext(): {
-  success: boolean;
-  error?: string;
-} {
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
-
-    if (!gl) {
-      return {
-        success: false,
-        error: 'Failed to create WebGL context',
-      };
-    }
-
-    // Try a simple render to verify it works
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-
-    return { success: true };
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
 }

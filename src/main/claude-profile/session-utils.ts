@@ -1,12 +1,3 @@
-/**
- * Session Utilities
- *
- * Handles Claude Code session migration between profiles.
- * Sessions are stored in CLAUDE_CONFIG_DIR/projects/{cwd-path-hash}/{session-id}.jsonl
- * and can be copied between profiles to enable session continuity after profile switches.
- */
-
-import { existsSync } from 'fs';
 import { mkdir, copyFile, cp, unlink } from 'fs/promises';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
@@ -27,7 +18,7 @@ import { isNodeError } from '../utils/type-guards';
  * @param cwd - The working directory path to convert
  * @returns The sanitized path format used by Claude for project identification
  */
-export function cwdToProjectPath(cwd: string): string {
+function cwdToProjectPath(cwd: string): string {
   // Normalize to forward slashes first (cross-platform: Windows C:\foo\bar -> C:/foo/bar)
   const normalized = cwd.replace(/\\/g, '/');
   // Remove Windows drive letter (C:, D:, etc.) to avoid colons in directory names
@@ -43,7 +34,7 @@ export function cwdToProjectPath(cwd: string): string {
  * @param sessionId - The session UUID
  * @returns Full path to the session .jsonl file
  */
-export function getSessionFilePath(configDir: string, cwd: string, sessionId: string): string {
+function getSessionFilePath(configDir: string, cwd: string, sessionId: string): string {
   const expandedConfigDir = configDir.startsWith('~')
     ? configDir.replace(/^~/, homedir())
     : configDir;
@@ -60,7 +51,7 @@ export function getSessionFilePath(configDir: string, cwd: string, sessionId: st
  * @param sessionId - The session UUID
  * @returns Full path to the session directory (contains tool-results/)
  */
-export function getSessionDirPath(configDir: string, cwd: string, sessionId: string): string {
+function getSessionDirPath(configDir: string, cwd: string, sessionId: string): string {
   const expandedConfigDir = configDir.startsWith('~')
     ? configDir.replace(/^~/, homedir())
     : configDir;
@@ -190,17 +181,4 @@ export async function migrateSession(
 
     return result;
   }
-}
-
-/**
- * Check if a session exists in a profile's config directory.
- *
- * @param configDir - The profile's CLAUDE_CONFIG_DIR path
- * @param cwd - The working directory where the session was created
- * @param sessionId - The session UUID to check
- * @returns true if the session file exists
- */
-export function sessionExists(configDir: string, cwd: string, sessionId: string): boolean {
-  const sessionFile = getSessionFilePath(configDir, cwd, sessionId);
-  return existsSync(sessionFile);
 }

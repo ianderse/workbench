@@ -27,12 +27,10 @@ vi.mock('../../../shared/utils/debug-logger', () => ({
 
 // Import mocked functions after vi.mock calls
 import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
 import { isWindows, isMacOS } from '../../platform';
 
 const mockExistsSync = vi.mocked(existsSync);
 const mockReadFileSync = vi.mocked(readFileSync);
-const _mockHomedir = vi.mocked(homedir);
 const mockIsWindows = vi.mocked(isWindows);
 const mockIsMacOS = vi.mocked(isMacOS);
 

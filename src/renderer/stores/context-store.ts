@@ -177,28 +177,6 @@ export async function searchMemories(
 }
 
 /**
- * Load recent memories
- */
-export async function loadRecentMemories(
-  projectId: string,
-  limit: number = 20
-): Promise<void> {
-  const store = useContextStore.getState();
-  store.setMemoriesLoading(true);
-
-  try {
-    const result = await window.electronAPI.getRecentMemories(projectId, limit);
-    if (result.success && result.data) {
-      store.setRecentMemories(result.data);
-    }
-  } catch (_error) {
-    // Silently fail - memories are optional
-  } finally {
-    store.setMemoriesLoading(false);
-  }
-}
-
-/**
  * Verify a memory (mark as user-verified)
  */
 export async function verifyMemory(memoryId: string): Promise<boolean> {
@@ -244,24 +222,6 @@ export async function pinMemory(memoryId: string, pinned: boolean): Promise<bool
 export async function deprecateMemory(memoryId: string): Promise<boolean> {
   try {
     const result = await window.electronAPI.deprecateMemory(memoryId);
-    if (result.success) {
-      const store = useContextStore.getState();
-      store.setRecentMemories(
-        store.recentMemories.filter((m) => m.id !== memoryId)
-      );
-    }
-    return result.success;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Delete a memory permanently
- */
-export async function deleteMemory(memoryId: string): Promise<boolean> {
-  try {
-    const result = await window.electronAPI.deleteMemory(memoryId);
     if (result.success) {
       const store = useContextStore.getState();
       store.setRecentMemories(

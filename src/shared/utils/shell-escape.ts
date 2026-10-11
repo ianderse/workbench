@@ -40,7 +40,7 @@ export function escapeShellArg(arg: string): string {
  * @param path - The path to escape
  * @returns The escaped path safe for use in shell commands
  */
-export function escapeShellPath(path: string): string {
+function escapeShellPath(path: string): string {
   return escapeShellArg(path);
 }
 
@@ -77,36 +77,6 @@ export function buildCdCommand(path: string | undefined, shellType?: WindowsShel
 }
 
 /**
- * Escape a string for safe use as a Windows cmd.exe argument.
- *
- * Windows cmd.exe uses different escaping rules than POSIX shells.
- * This function escapes special characters that could break out of strings
- * or execute additional commands.
- *
- * @param arg - The argument to escape
- * @returns The escaped argument safe for use in cmd.exe
- */
-export function escapeShellArgWindows(arg: string): string {
-  // Escape characters that have special meaning in cmd.exe:
-  // ^ is the escape character in cmd.exe
-  // " & | < > ^ need to be escaped
-  // % is used for variable expansion
-  // \n and \r terminate commands and must be removed
-  const escaped = arg
-    .replace(/\r/g, '')        // Remove carriage returns (command terminators)
-    .replace(/\n/g, '')        // Remove newlines (command terminators)
-    .replace(/\^/g, '^^')     // Escape carets first (escape char itself)
-    .replace(/"/g, '^"')      // Escape double quotes
-    .replace(/&/g, '^&')      // Escape ampersand (command separator)
-    .replace(/\|/g, '^|')     // Escape pipe
-    .replace(/</g, '^<')      // Escape less than
-    .replace(/>/g, '^>')      // Escape greater than
-    .replace(/%/g, '%%');     // Escape percent (variable expansion)
-
-  return escaped;
-}
-
-/**
  * Escape a string for safe use inside Windows cmd.exe double-quoted strings.
  *
  * Inside double quotes in cmd.exe, the escaping rules are different:
@@ -138,31 +108,4 @@ export function escapeForWindowsDoubleQuote(arg: string): string {
     .replace(/"/g, '""');      // Escape double quotes by doubling
 
   return escaped;
-}
-
-/**
- * Validate that a path doesn't contain obviously malicious patterns.
- * This is a defense-in-depth measure - escaping should handle all cases,
- * but this can catch obvious attack attempts early.
- *
- * @param path - The path to validate
- * @returns true if the path appears safe, false if it contains suspicious patterns
- */
-export function isPathSafe(path: string): boolean {
-  // Check for obvious shell metacharacters that shouldn't appear in paths
-  // Note: This is defense-in-depth; escaping handles these, but we can log/reject
-  const suspiciousPatterns = [
-    /\$\(/, // Command substitution $(...)
-    /`/,   // Backtick command substitution
-    /\|/,  // Pipe
-    /;/,   // Command separator
-    /&&/,  // AND operator
-    /\|\|/, // OR operator
-    />/,   // Output redirection
-    /</,   // Input redirection
-    /\n/,  // Newlines
-    /\r/,  // Carriage returns
-  ];
-
-  return !suspiciousPatterns.some(pattern => pattern.test(path));
 }

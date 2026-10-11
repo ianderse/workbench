@@ -91,7 +91,7 @@ export interface ClaudeRunPhase {
 }
 
 /** What Claude Code loaded for the session (from the stream's `system/init` event) */
-export interface ClaudeRunInit {
+interface ClaudeRunInit {
   claudeCodeVersion?: string;
   model?: string;
   permissionMode?: string;
@@ -105,7 +105,7 @@ export interface ClaudeRunInit {
 }
 
 /** A subagent or background task Claude Code started during the run */
-export interface ClaudeRunSubagent {
+interface ClaudeRunSubagent {
   id: string;
   description: string;
   type?: string;
@@ -114,14 +114,14 @@ export interface ClaudeRunSubagent {
   endedAt?: string;
 }
 
-export interface ValidationCheck {
+interface ValidationCheck {
   name: string;
   command?: string;
   passed: boolean;
   details?: string;
 }
 
-export interface ValidationFinding {
+interface ValidationFinding {
   severity: 'critical' | 'major' | 'minor';
   description: string;
   fixed: boolean;

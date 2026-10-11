@@ -227,9 +227,6 @@ export class UsageMonitor extends EventEmitter {
   // Request coalescing: track in-flight getAllProfilesUsage() promise to avoid parallel duplicate fetches
   private allProfilesUsageInflight: Promise<AllProfilesUsage | null> | null = null;
 
-  // Timestamp of last inactive-profile refresh (for adaptive cadence)
-  private lastInactiveProfileRefreshAt = 0;
-
   // Rate-limit (429) tracking: separate from general API failures, uses longer cooldown
   private rateLimitedProfiles: Map<string, number> = new Map(); // profileId -> 429 timestamp
   private static RATE_LIMIT_COOLDOWN_MS = 10 * 60 * 1000; // 10 minutes cooldown for 429s
@@ -928,127 +925,6 @@ export class UsageMonitor extends EventEmitter {
     score -= sessionPercent * 0.2;
 
     return Math.round(score * 100) / 100; // Round to 2 decimal places
-  }
-
-  /**
-   * Get credential for usage monitoring (OAuth token or API key)
-   * Detects profile type and returns appropriate credential
-   *
-   * Priority:
-   * 1. API Profile (if active) - returns apiKey directly
-   * 2. OAuth Profile - reads FRESH token from Keychain (not cached oauthToken)
-   *
-   * IMPORTANT: For OAuth profiles, we read from Keychain instead of cached profile.oauthToken.
-   * OAuth tokens expire in 8-12 hours, but Claude CLI auto-refreshes and stores fresh tokens
-   * in Keychain. Using cached tokens causes 401 errors after a few hours.
-   * See: docs/LONG_LIVED_AUTH_PLAN.md
-   *
-   * @returns The credential string or undefined if none available
-   */
-  private async getCredential(): Promise<string | undefined> {
-    // Try API profile first (highest priority)
-    try {
-      const profilesFile = await loadProfilesFile();
-      if (profilesFile.activeProfileId) {
-        const activeProfile = profilesFile.profiles.find(
-          (p) => p.id === profilesFile.activeProfileId
-        );
-        if (activeProfile?.apiKey) {
-          this.traceLog('[UsageMonitor:TRACE] Using API profile credential: ' + activeProfile.name);
-          return activeProfile.apiKey;
-        }
-      }
-    } catch (error) {
-      // API profile loading failed, fall through to OAuth
-      this.traceLog('[UsageMonitor:TRACE] Failed to load API profiles, falling back to OAuth:', error);
-    }
-
-    // Fall back to Claude OAuth profile - use ensureValidToken for proactive refresh
-    const profileManager = getClaudeProfileManager();
-    const activeProfile = profileManager.getActiveProfile();
-    if (activeProfile) {
-      // Use ensureValidToken to proactively refresh tokens before they expire
-      // This prevents 401 errors during overnight autonomous operation
-      try {
-        const tokenResult = await ensureValidToken(activeProfile.configDir);
-
-        if (tokenResult.wasRefreshed) {
-          this.debugLog('[UsageMonitor] Proactively refreshed token for profile: ' + activeProfile.name, {
-            tokenFingerprint: getCredentialFingerprint(tokenResult.token)
-          });
-
-          // Check if token refresh succeeded but persistence failed
-          // The token works for this session but will be lost on restart
-          if (tokenResult.persistenceFailed) {
-            console.warn('[UsageMonitor] Token refreshed but persistence failed for profile: ' + activeProfile.name +
-              ' - user should re-authenticate to avoid auth errors on next restart');
-            this.needsReauthProfiles.add(activeProfile.id);
-          } else {
-            // Token was refreshed and persisted successfully - clear from needsReauth if present
-            this.needsReauthProfiles.delete(activeProfile.id);
-          }
-        }
-
-        if (tokenResult.token) {
-          // Valid token obtained — clear any stale needs-reauth flag
-          if (!tokenResult.persistenceFailed) {
-            this.needsReauthProfiles.delete(activeProfile.id);
-          }
-          this.traceLog('[UsageMonitor:TRACE] Using OAuth token for profile: ' + activeProfile.name, {
-            tokenFingerprint: getCredentialFingerprint(tokenResult.token),
-            wasRefreshed: tokenResult.wasRefreshed
-          });
-          return tokenResult.token;
-        }
-
-        // Token unavailable - log the error
-        if (tokenResult.error) {
-          this.traceLog('[UsageMonitor:TRACE] Token validation failed:', tokenResult.error);
-
-          // Check for invalid_grant error - indicates refresh token is permanently invalid
-          // and user needs to manually re-authenticate
-          if (tokenResult.errorCode === 'invalid_grant') {
-            this.traceLog('[UsageMonitor:TRACE] Profile needs re-authentication (invalid refresh token): ' + activeProfile.name);
-            this.needsReauthProfiles.add(activeProfile.id);
-          }
-
-          // Check for missing_credentials error - indicates no token in credential store
-          // User needs to authenticate via /login
-          if (tokenResult.errorCode === 'missing_credentials') {
-            this.traceLog('[UsageMonitor:TRACE] Profile needs authentication (no credentials found): ' + activeProfile.name);
-            this.needsReauthProfiles.add(activeProfile.id);
-          }
-        }
-      } catch (error) {
-        console.error('[UsageMonitor] ensureValidToken threw error:', error);
-      }
-
-      // Fallback: Try direct keychain read (e.g., if refresh token unavailable)
-      const keychainCreds = getCredentialsFromKeychain(activeProfile.configDir);
-      if (keychainCreds.token) {
-        // Got a valid token from keychain fallback — clear stale needs-reauth flag
-        this.needsReauthProfiles.delete(activeProfile.id);
-        this.traceLog('[UsageMonitor:TRACE] Using fallback OAuth token from Keychain for profile: ' + activeProfile.name, {
-          tokenFingerprint: getCredentialFingerprint(keychainCreds.token)
-        });
-        return keychainCreds.token;
-      }
-
-      // Keychain read also failed
-      if (keychainCreds.error) {
-        this.traceLog('[UsageMonitor:TRACE] Keychain access failed:', keychainCreds.error);
-      } else {
-        this.traceLog('[UsageMonitor:TRACE] No token in Keychain for profile: ' + activeProfile.name +
-          ' - user may need to re-authenticate with claude /login');
-      }
-
-      // Mark profile as needing re-authentication since credentials are missing
-      this.needsReauthProfiles.add(activeProfile.id);
-    }
-
-    // No credential available
-    this.traceLog('[UsageMonitor:TRACE] No credential available (no API or OAuth profile active)');
-    return undefined;
   }
 
   /**

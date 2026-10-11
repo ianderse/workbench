@@ -56,7 +56,7 @@ export function getTaskColumn(status: TaskStatus): TaskStatusColumn {
  * - Human Review (also failed tasks): queue it, resume it or mark it done
  * - Done: none (final)
  */
-export const TASK_COLUMN_TRANSITIONS: Record<TaskStatusColumn, readonly TaskStatusColumn[]> = {
+const TASK_COLUMN_TRANSITIONS: Record<TaskStatusColumn, readonly TaskStatusColumn[]> = {
   backlog: ['queue', 'in_progress'],
   queue: ['backlog', 'in_progress'],
   in_progress: [],
@@ -103,47 +103,6 @@ export const TASK_STATUS_PRIORITY: Record<TaskStatus, number> = {
 } as const;
 
 // ============================================
-// Subtask Status
-// ============================================
-
-export const SUBTASK_STATUS_COLORS: Record<string, string> = {
-  pending: 'bg-muted',
-  in_progress: 'bg-info',
-  completed: 'bg-success',
-  failed: 'bg-destructive'
-};
-
-// ============================================
-// Execution Phases
-// ============================================
-
-// Execution phase colors (for progress bars and indicators)
-export const EXECUTION_PHASE_COLORS: Record<string, string> = {
-  idle: 'bg-muted text-muted-foreground',
-  planning: 'bg-amber-500 text-amber-50',
-  coding: 'bg-info text-info-foreground',
-  rate_limit_paused: 'bg-orange-500 text-orange-50',
-  auth_failure_paused: 'bg-red-500 text-red-50',
-  qa_review: 'bg-purple-500 text-purple-50',
-  qa_fixing: 'bg-warning text-warning-foreground',
-  complete: 'bg-success text-success-foreground',
-  failed: 'bg-destructive text-destructive-foreground'
-};
-
-// Execution phase progress weights (for overall progress calculation)
-export const EXECUTION_PHASE_WEIGHTS: Record<string, { start: number; end: number }> = {
-  idle: { start: 0, end: 0 },
-  planning: { start: 0, end: 20 },
-  coding: { start: 20, end: 80 },
-  rate_limit_paused: { start: 20, end: 80 },  // Same as coding (pause during coding)
-  auth_failure_paused: { start: 20, end: 80 },  // Same as coding (pause during coding)
-  qa_review: { start: 80, end: 95 },
-  qa_fixing: { start: 80, end: 95 },  // Same range as qa_review, cycles back
-  complete: { start: 100, end: 100 },
-  failed: { start: 0, end: 0 }
-};
-
-// ============================================
 // Image/Attachment Constants
 // ============================================
 
@@ -152,10 +111,6 @@ export const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
 // Maximum number of images per task
 export const MAX_IMAGES_PER_TASK = 10;
-
-// Maximum number of referenced files per task
-export const MAX_REFERENCED_FILES = 20;
-
 // Allowed image MIME types
 export const ALLOWED_IMAGE_TYPES = [
   'image/png',
@@ -164,16 +119,8 @@ export const ALLOWED_IMAGE_TYPES = [
   'image/gif',
   'image/webp'
 ] as const;
-
-// Allowed image file extensions (for display)
-export const ALLOWED_IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'] as const;
-
 // Human-readable allowed types for error messages
 export const ALLOWED_IMAGE_TYPES_DISPLAY = 'PNG, JPEG, GIF, WebP';
-
-// Attachments directory name within spec folder
-export const ATTACHMENTS_DIR = 'attachments';
-
 // ============================================
 // JSON Error Markers
 // ============================================

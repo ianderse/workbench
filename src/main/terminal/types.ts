@@ -65,15 +65,6 @@ export interface OAuthTokenEvent {
   detectedAt: string;
 }
 
-
-/**
- * Session capture result
- */
-export interface SessionCaptureResult {
-  sessionId: string | null;
-  captured: boolean;
-}
-
 /**
  * Terminal creation result
  */

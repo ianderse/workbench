@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron';
+import type { ConflictSeverity } from '../../../shared/types/task';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult } from '../../../shared/types';
 import path from 'path';
@@ -25,61 +26,6 @@ import { taskStateManager } from '../../task-state-manager';
 
 // Regex pattern for validating git branch names
 export const GIT_BRANCH_REGEX = /^[a-zA-Z0-9][a-zA-Z0-9._/-]*[a-zA-Z0-9]$|^[a-zA-Z0-9]$/;
-
-/**
- * Validates a detected branch name and returns the safe branch to delete.
- *
- * Why `auto-claude/` prefix is considered safe:
- * - All task worktrees use branches named `auto-claude/{specId}`
- * - This pattern is controlled by Auto-Claude, not user input
- * - If detected branch matches this pattern, it's a valid task branch
- * - If it doesn't match (e.g., `main`, `develop`, `feature/xxx`), it's likely
- *   the main project's branch being incorrectly detected from a corrupted worktree
- *
- * Issue #1479: When cleaning up a corrupted worktree, git rev-parse walks up
- * to the main project and returns its current branch instead of the worktree's branch.
- * This could cause deletion of the wrong branch.
- */
-export function validateWorktreeBranch(
-  detectedBranch: string | null,
-  expectedBranch: string
-): { branchToDelete: string; usedFallback: boolean; reason: string } {
-  // If detection failed, use expected pattern
-  if (detectedBranch === null) {
-    return {
-      branchToDelete: expectedBranch,
-      usedFallback: true,
-      reason: 'detection_failed',
-    };
-  }
-
-  // Exact match - ideal case
-  if (detectedBranch === expectedBranch) {
-    return {
-      branchToDelete: detectedBranch,
-      usedFallback: false,
-      reason: 'exact_match',
-    };
-  }
-
-  // Matches auto-claude pattern with valid specId (not just "auto-claude/")
-  // The specId must be non-empty for this to be a valid task branch
-  if (detectedBranch.startsWith('auto-claude/') && detectedBranch.length > 'auto-claude/'.length) {
-    return {
-      branchToDelete: detectedBranch,
-      usedFallback: false,
-      reason: 'pattern_match',
-    };
-  }
-
-  // Detected branch doesn't match expected pattern - use fallback
-  // This is the critical security fix for issue #1479
-  return {
-    branchToDelete: expectedBranch,
-    usedFallback: true,
-    reason: 'invalid_pattern',
-  };
-}
 
 // Maximum PR title length (GitHub's limit is 256 characters)
 const MAX_PR_TITLE_LENGTH = 256;
@@ -225,7 +171,6 @@ function isGitWorkTree(projectPath: string): boolean {
     return false;
   }
 }
-
 
 /**
  * Read the stored base branch from task_metadata.json
@@ -381,8 +326,6 @@ async function updateTaskStatusAfterPRCreation(
 
   return result;
 }
-
-
 
 /**
  * Generic retry wrapper with exponential backoff
@@ -1061,7 +1004,7 @@ export function registerWorktreeHandlers(
           file: String(c['file'] ?? ''),
           location: String(c['location'] ?? ''),
           tasks: Array.isArray(c['tasks']) ? (c['tasks'] as string[]) : [],
-          severity: (c['severity'] ?? 'low') as import('../../../shared/types/task').ConflictSeverity,
+          severity: (c['severity'] ?? 'low') as ConflictSeverity,
           canAutoMerge: Boolean(c['can_auto_merge']),
           strategy: c['strategy'] != null ? String(c['strategy']) : undefined,
           reason: String(c['reason'] ?? ''),
@@ -1154,7 +1097,6 @@ export function registerWorktreeHandlers(
 
         // The Claude Code session ran in the discarded worktree: start over next time
         resetTaskRunState(project, task);
-
 
         // Only send status change to backlog if not skipped
         // (skip when caller will set a different status, e.g., 'done')
