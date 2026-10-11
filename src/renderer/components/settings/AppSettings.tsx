@@ -80,7 +80,7 @@ interface NavItemConfig<T extends string> {
   iconStrokeWidth?: number;
 }
 
-// One list: app pages, then the selected project's pages (Project, Knowledge) above Updates
+// One list: app pages with the selected project's pages
 type TopNavItem =
   | ({ kind: 'app' } & NavItemConfig<AppPage>)
   | ({ kind: 'project' } & NavItemConfig<ProjectSettingsSection>);
@@ -90,10 +90,10 @@ const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'accounts', icon: CircleUserRound },
   // The wide, short creature reads small at 18px: 20px, with the extra 2px taken out of the gap
   { kind: 'app', id: 'agents', icon: AgentOutlineIcon, iconClassName: '-mx-px h-5 w-5', iconStrokeWidth: 1.35 },
-  { kind: 'app', id: 'connectors', icon: Blocks },
-  { kind: 'app', id: 'devtools', icon: CodeXml },
   { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
+  { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'project', id: 'knowledge', icon: GraduationCap },
+  { kind: 'app', id: 'devtools', icon: CodeXml },
   { kind: 'app', id: 'updates', icon: Download }
 ];
 
