@@ -457,21 +457,24 @@ export function Insights({ projectId }: InsightsProps) {
         />
 
         {isEmpty ? (
-          /* Toolbar (new chat): attach on the left, send on the right */
+          /* Toolbar (new chat): attach on the left; the model and send on the right */
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
             <div className="flex items-center gap-0.5">{attachButton}</div>
-            {/* Send button only appears once there is something to send */}
-            {canSend && (
-              <button
-                type="button"
-                onClick={handleSend}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90"
-                aria-label={t('insights.send')}
-                title={t('insights.send')}
-              >
-                <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
-              </button>
-            )}
+            <div className="flex min-w-0 items-center gap-1.5">
+              {modelSelector}
+              {/* Send button only appears once there is something to send */}
+              {canSend && (
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90"
+                  aria-label={t('insights.send')}
+                  title={t('insights.send')}
+                >
+                  <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           /* Reply: send sits inside the single-line field, always visible (disabled until there is something to send) */
@@ -573,11 +576,6 @@ export function Insights({ projectId }: InsightsProps) {
               </h1>
 
               {composer}
-
-              {/* Meta row */}
-              <div className="mt-2 flex items-center justify-end text-sm">
-                {modelSelector}
-              </div>
 
               {errorBanner && <div className="mt-6">{errorBanner}</div>}
             </div>
