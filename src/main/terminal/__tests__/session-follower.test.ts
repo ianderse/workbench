@@ -67,7 +67,7 @@ describe('SessionFollower', () => {
     const text = stripAnsi(output);
     expect(text).toContain('› <task>Fix the bug</task>');
     expect(text).toContain('● Looking at the handler');
-    expect(text).toContain('● Read(src/a.ts)');
+    expect(text).toContain(`● Read(${path.join('src', 'a.ts')})`);
     expect(text).toContain('⎿  line one (+1 lines)');
   });
 

@@ -812,7 +812,8 @@ describe('invokeCLIAsync', () => {
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
       expect(written).toContain(buildCdCommand('/tmp/project/.auto-claude/worktrees/tasks/001-x'));
-      expect(written).toContain(getConfigDirCommand(platform, '/tmp/task-config'));
+      // The config dir is resolved on the host (a drive letter on Windows)
+      expect(written).toContain(getConfigDirCommand(platform, path.resolve('/tmp/task-config')));
       expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455 --dangerously-skip-permissions');
       expect(profileManager.markProfileUsed).toHaveBeenCalledWith('work');
       expect(terminal.isCLIMode).toBe(true);
@@ -837,7 +838,7 @@ describe('invokeCLIAsync', () => {
       await invokeCLIAsync(terminal, '/tmp/wt', 'work', () => null, false, { resumeSessionId: 'sess-1' });
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      expect(written).toContain(getConfigDirCommand(platform, '/tmp/work-config'));
+      expect(written).toContain(getConfigDirCommand(platform, path.resolve('/tmp/work-config')));
       expect(written).toContain('--resume sess-1');
       expect(written).not.toContain('--dangerously-skip-permissions');
     });

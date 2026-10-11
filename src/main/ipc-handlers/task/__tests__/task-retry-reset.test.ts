@@ -110,6 +110,8 @@ describe('discardTaskWorktree', () => {
     git(repo, 'config', 'user.email', 'test@example.com');
     git(repo, 'config', 'user.name', 'Test');
     git(repo, 'config', 'commit.gpgsign', 'false');
+    // Keep README.md's line endings as written (Windows checks out CRLF by default)
+    git(repo, 'config', 'core.autocrlf', 'false');
     writeFileSync(path.join(repo, '.gitignore'), '.auto-claude/\n');
     writeFileSync(path.join(repo, 'README.md'), 'base\n');
     git(repo, 'add', '.');
