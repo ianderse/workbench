@@ -11,9 +11,10 @@ interface CachedBranches {
 const cacheKey = (projectPath: string) => `branches:${projectPath}`;
 
 /**
- * A project's branches, shared by the branch pickers (project settings, task and worktree
- * dialogs). Shows the last fetched list right away and only lists branches when none were
- * fetched before; `refresh()` also fetches remote refs (git fetch) and updates every picker.
+ * A project's branches, shared by the branch pickers (project settings, task, worktree and PR
+ * dialogs). Shows the last listed branches right away and lists them again in the background
+ * (local refs only, no network), so branches made outside the app show up; `refresh()` also
+ * fetches remote refs (git fetch) and updates every picker.
  */
 export function useProjectBranches(projectPath: string | null | undefined) {
   const [state, setState] = useState<CachedBranches | null>(() =>
@@ -22,9 +23,10 @@ export function useProjectBranches(projectPath: string | null | undefined) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async (fetchRemote: boolean): Promise<CachedBranches | null> => {
+  // quiet: update a shown list without the loading state (pickers stay usable)
+  const load = useCallback(async (fetchRemote: boolean, quiet = false): Promise<CachedBranches | null> => {
     if (!projectPath) return null;
-    setIsLoading(true);
+    if (!quiet) setIsLoading(true);
     setError(null);
     try {
       const result = await window.electronAPI.getGitBranchesWithInfo(projectPath, fetchRemote);
@@ -42,7 +44,7 @@ export function useProjectBranches(projectPath: string | null | undefined) {
       setError(err instanceof Error ? err.message : String(err));
       return null;
     } finally {
-      setIsLoading(false);
+      if (!quiet) setIsLoading(false);
     }
   }, [projectPath]);
 
@@ -53,7 +55,7 @@ export function useProjectBranches(projectPath: string | null | undefined) {
     }
     const cached = readRefreshCache<CachedBranches>(cacheKey(projectPath));
     setState(cached ?? null);
-    if (!cached) void load(false);
+    void load(false, !!cached);
   }, [projectPath, load]);
 
   return {

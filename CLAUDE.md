@@ -62,7 +62,8 @@ whole app every time a dialog opened.
 
 **Don't re-fetch on open** — Pages and dialogs show stored values (Zustand stores, settings, or
 `src/renderer/lib/refresh-cache.ts` for results of slow checks) and only fetch when the user presses a refresh
-button, or once when nothing was fetched before. Shared hook: `useProjectBranches()`.
+button, or once when nothing was fetched before. Shared hook: `useProjectBranches()` (it lists local refs
+again in the background, never `git fetch`, so branches made outside the app show up).
 
 ## Work Approach: Orchestrator-First
 

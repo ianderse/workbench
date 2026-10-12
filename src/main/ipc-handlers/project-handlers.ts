@@ -101,7 +101,8 @@ async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false):
     const [currentResult, localResult, remoteResult] = await Promise.all([
       git(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
       git(['branch', '--format=%(refname:short)']),
-      git(['branch', '-r', '--format=%(refname:short)']).catch(() => ''),
+      // %(symref) marks pointers like origin/HEAD (short name "origin"), which aren't branches
+      git(['for-each-ref', '--format=%(refname:short)%09%(symref)', 'refs/remotes']).catch(() => ''),
     ]);
     const currentBranch = currentResult.trim() || null;
 
@@ -116,7 +117,8 @@ async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false):
     // pointers and branches that also exist locally
     const localNames = new Set(localBranches.map(b => b.name));
     const remoteBranches: GitBranchDetail[] = remoteResult.trim().split('\n')
-      .map(b => b.trim())
+      .filter(line => line.trim() && !line.split('\t')[1])
+      .map(line => line.split('\t')[0].trim())
       .filter(b => b && !b.endsWith('/HEAD'))
       .map(fullName => {
         const name = fullName.replace(/^origin\//, '');
