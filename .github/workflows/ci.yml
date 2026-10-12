@@ -4,6 +4,11 @@
 # platform-specific bugs before they merge. ALL platforms must pass.
 #
 # Optimized: Frontend-only matrix, path filters to skip on docs-only changes.
+#
+# Pull requests don't start CI on their own, so feature branches can be pushed as often as
+# needed without using runner minutes. Before merging, run it by hand: Actions > CI > Run
+# workflow, pick the PR's branch (the results show on the PR's commit). Pushes to main and
+# develop (merges) still run it automatically.
 
 name: CI
 
@@ -19,20 +24,11 @@ on:
       - 'package*.json'
       - 'tsconfig*.json'
       - '.github/workflows/ci.yml'
-  pull_request:
-    branches: [main, develop]
-    paths:
-      - 'src/**'
-      - 'resources/**'
-      - '.github/scripts/**'
-      - 'electron.vite.config.ts'
-      - 'vitest.config.ts'
-      - 'package*.json'
-      - 'tsconfig*.json'
-      - '.github/workflows/ci.yml'
+  # Feature branches / pull requests: started by hand before merging
+  workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
