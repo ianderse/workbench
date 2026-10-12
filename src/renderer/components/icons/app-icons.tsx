@@ -55,13 +55,20 @@ export function GraphIcon(props: IconProps) {
 export function GraphColorIcon(props: IconProps) {
   return (
     <Svg viewBox="9.5 8.2 80.8 86.1" {...props}>
-      <GraphIconPath />
-      <circle cx="50.3" cy="48.9" r="11.3" fill="#E15759"></circle>
-      <circle cx="79.3" cy="19.2" r="11.3" fill="#F28E2B"></circle>
-      <circle cx="23.5" cy="24.2" r="7.6" fill="#4E79A7"></circle>
-      <circle cx="20.5" cy="80.4" r="11.3" fill="#EDC948"></circle>
-      <circle cx="54.4" cy="85.5" r="9.1" fill="#59A14F"></circle>
-      <circle cx="78.6" cy="69.4" r="7.6" fill="#76B7B2"></circle>
+      {/* Muted edges, so the colored nodes stand out */}
+      <g opacity={0.5}>
+        <GraphIconPath />
+      </g>
+      {/* The colors fade (onto the muted nodes below) in an option that isn't selected or hovered,
+          like the one-color icons, which take the option's muted text color */}
+      <g className="transition-opacity duration-200 ease-out [[aria-checked=false]:not(:hover)_&]:opacity-60">
+        <circle cx="50.3" cy="48.9" r="11.3" fill="#E15759"></circle>
+        <circle cx="79.3" cy="19.2" r="11.3" fill="#F28E2B"></circle>
+        <circle cx="23.5" cy="24.2" r="7.6" fill="#4E79A7"></circle>
+        <circle cx="20.5" cy="80.4" r="11.3" fill="#EDC948"></circle>
+        <circle cx="54.4" cy="85.5" r="9.1" fill="#59A14F"></circle>
+        <circle cx="78.6" cy="69.4" r="7.6" fill="#B07AA1"></circle>
+      </g>
     </Svg>
   );
 }
