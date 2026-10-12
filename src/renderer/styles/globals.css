@@ -245,7 +245,8 @@
   /* Dialog fields (claude.ai composer): hairline border, stronger on focus */
   --field-border-color: rgb(31 30 29 / 0.15);
   --field-border-focus: rgb(31 30 29 / 0.3);
-  --field-placeholder: #73726C;
+  /* Placeholders: clearly lighter than typed text (and secondary text) */
+  --field-placeholder: #A09E98;
 
   --popover: #FFFFFF;
   --popover-foreground: #0B0B0B;
@@ -391,7 +392,7 @@
   --sidebar-foreground: #F0EFEC;
   --field-border-color: rgb(222 220 209 / 0.15);
   --field-border-focus: rgb(222 220 209 / 0.3);
-  --field-placeholder: #85847F;
+  --field-placeholder: #6A6964;
 
   --popover: #20201F;
   --popover-foreground: #F0EFEC;
@@ -511,6 +512,11 @@
 @layer base {
   * {
     border-color: var(--border);
+  }
+  /* Every field's placeholder, so it doesn't read as typed text */
+  ::placeholder {
+    color: var(--field-placeholder);
+    opacity: 1;
   }
 }
 

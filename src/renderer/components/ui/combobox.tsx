@@ -176,14 +176,14 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
               // field-border: picks up the claude field look inside dialogs (and goes borderless in a row's control slot)
               'field-border flex h-10 w-full items-center justify-between rounded-lg',
               'border border-border bg-transparent px-3 py-2 text-sm',
-              'text-foreground placeholder:text-muted-foreground',
+              'text-foreground placeholder:text-(--field-placeholder)',
               'focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary',
               'disabled:cursor-not-allowed disabled:opacity-50',
               'transition-colors duration-200',
               className
             )}
           >
-            <span className={cn('flex items-center gap-2 truncate', !selectedOption && 'text-muted-foreground')}>
+            <span className={cn('flex items-center gap-2 truncate', !selectedOption && 'text-(--field-placeholder)')}>
               {selectedOption?.icon && (
                 <span className="shrink-0 text-muted-foreground">{selectedOption.icon}</span>
               )}
@@ -215,7 +215,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
               placeholder={searchPlaceholder}
               className={cn(
                 'flex h-10 w-full bg-transparent py-3 px-2 text-sm',
-                'placeholder:text-muted-foreground',
+                'placeholder:text-(--field-placeholder)',
                 'focus:outline-none',
                 'disabled:cursor-not-allowed disabled:opacity-50'
               )}

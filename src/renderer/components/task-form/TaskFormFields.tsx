@@ -162,7 +162,7 @@ export function TaskFormFields({
                   className={cn(
                     'relative block max-h-96 min-h-[7.5rem] w-full resize-none overflow-y-auto border-0 bg-transparent',
                     'px-4 pt-4 pb-1 text-[0.9375rem] leading-relaxed',
-                    'text-foreground placeholder:text-muted-foreground',
+                    'text-foreground placeholder:text-(--field-placeholder)',
                     'focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60'
                   )}
                 />

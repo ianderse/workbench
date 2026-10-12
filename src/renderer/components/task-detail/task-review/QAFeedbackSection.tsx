@@ -206,7 +206,7 @@ export function QAFeedbackSection({
           disabled={isSubmitting}
           className={cn(
             'block max-h-72 min-h-[3rem] w-full resize-none overflow-y-auto border-0 bg-transparent px-4 pt-4 pb-1',
-            'text-[0.9375rem] leading-relaxed text-foreground placeholder:text-muted-foreground',
+            'text-[0.9375rem] leading-relaxed text-foreground placeholder:text-(--field-placeholder)',
             'focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60'
           )}
         />

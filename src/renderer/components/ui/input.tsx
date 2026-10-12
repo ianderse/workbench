@@ -15,7 +15,7 @@ const Input = React.forwardRef<HTMLInputElement, InputProps>(
         lang={lang ?? i18n.language}
         className={cn(
           'field-border flex h-10 w-full rounded-lg border border-border bg-transparent px-3 py-2 text-sm text-foreground',
-          'placeholder:text-muted-foreground',
+          'placeholder:text-(--field-placeholder)',
           'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:border-primary',
           'disabled:cursor-not-allowed disabled:opacity-50',
           'transition-colors duration-200',

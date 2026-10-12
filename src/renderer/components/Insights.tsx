@@ -444,7 +444,7 @@ export function Insights({ projectId }: InsightsProps) {
           className={cn(
             'block max-h-96 w-full resize-none overflow-y-auto border-0 bg-transparent',
             isEmpty ? 'min-h-[3rem] px-4 pt-4 pb-1' : 'min-h-[3rem] py-3 pl-4 pr-12',
-            'text-[0.9375rem] leading-relaxed text-foreground placeholder:text-muted-foreground',
+            'text-[0.9375rem] leading-relaxed text-foreground placeholder:text-(--field-placeholder)',
             'focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60'
           )}
           disabled={isLoading}
