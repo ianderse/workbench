@@ -3,19 +3,23 @@
  * claude-code-detection). One account is in use; with automatic switching on, tasks move to the
  * next account when it hits a limit. Each row shows the account's email and usage (or its
  * provider); its menu switches to it, signs it in again and shows its details. Adding an account
- * runs Claude Code's own sign-in in a terminal.
+ * (or signing one in again) runs Claude Code's own sign-in (`claude auth login`) in the user's
+ * terminal; the accounts are then detected again until the sign-in shows up.
  */
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, Info, MoreHorizontal, Plus, RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '../ui/dropdown-menu';
 import { cn } from '../../lib/utils';
 import { SettingsRow } from './SettingsRow';
-import { ClaudeLoginDialog } from './ClaudeLoginDialog';
 import { DetectedAccountDialog } from './DetectedAccountDialog';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
 import type { ClaudeProfile } from '../../../shared/types';
+
+/** How often (and how long) the accounts are detected again while a sign-in runs in a terminal */
+const LOGIN_WATCH_INTERVAL_MS = 3000;
+const LOGIN_WATCH_MAX_TRIES = 200;
 
 export function ClaudeAccountsSection() {
   const { t } = useTranslation('settings');
@@ -23,8 +27,10 @@ export function ClaudeAccountsSection() {
   // Only Claude Code's own setups are accounts
   const profiles = allProfiles.filter((profile) => profile.detected);
 
-  // Claude Code's sign-in in a terminal: a new account, or one to sign in again
-  const [login, setLogin] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
+  // Claude Code's sign-in running in the user's terminal: a new account, or one to sign in again
+  const [login, setLogin] = useState<{ profileId?: string; known: Map<string, string> } | null>(null);
+  // Status of adding an account, shown in the Add row
+  const [addStatus, setAddStatus] = useState<{ message: string; error?: boolean } | null>(null);
   // Details (and name) of an account
   const [details, setDetails] = useState<{ open: boolean; profile?: ClaudeProfile }>({ open: false });
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -45,6 +51,56 @@ export function ClaudeAccountsSection() {
       setBusyId(null);
     }
   };
+
+  // A sign-in account as detected: changes when Claude Code signs it in
+  const signInState = (profile: ClaudeProfile) => JSON.stringify([profile.isAuthenticated, profile.email, profile.detected]);
+
+  const startLogin = async (profile?: ClaudeProfile) => {
+    setRowError(null);
+    setAddStatus(null);
+    const known = new Map(profiles.map((p) => [p.id, signInState(p)] as const));
+    const result = await window.electronAPI.loginClaudeAccount(profile?.id);
+    if (!result.success) {
+      const message = result.error ?? t('claudeAccounts.login.failedToStart');
+      if (profile) setRowError({ id: profile.id, message });
+      else setAddStatus({ message, error: true });
+      return;
+    }
+    if (!profile) setAddStatus({ message: t('claudeAccounts.login.waiting') });
+    setLogin({ profileId: profile?.id, known });
+  };
+
+  // While the sign-in runs in the terminal, detect Claude Code's setups again until it shows up
+  useEffect(() => {
+    if (!login) return;
+    let tries = 0;
+    let stopped = false;
+    const timer = setInterval(async () => {
+      tries++;
+      const result = await window.electronAPI.redetectClaudeAccounts();
+      if (stopped) return;
+      const accounts = result.success && result.data
+        ? result.data.profiles.filter((p) => p.detected?.provider === 'subscription' && p.isAuthenticated)
+        : [];
+      const signedIn = login.profileId
+        ? accounts.find((p) => p.id === login.profileId && login.known.get(p.id) !== signInState(p))
+        : accounts.find((p) => !login.known.has(p.id));
+      const timedOut = tries >= LOGIN_WATCH_MAX_TRIES;
+      if (!signedIn && !timedOut) return;
+      clearInterval(timer);
+      setLogin(null);
+      if (!login.profileId) {
+        setAddStatus(signedIn
+          ? { message: signedIn.email ? t('claudeAccounts.login.signedInAs', { email: signedIn.email }) : t('claudeAccounts.login.signedIn') }
+          : { message: t('claudeAccounts.login.notSignedIn') });
+      }
+      await reload();
+    }, LOGIN_WATCH_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [login, reload, t]);
 
   const describe = (profile: ClaudeProfile): string => {
     // A setup on a cloud provider, an API key or a gateway: what it reaches Claude through
@@ -114,7 +170,7 @@ export function ClaudeAccountsSection() {
                 </DropdownMenuItem>
                 {/* A subscription sign-in signs in again with Claude Code's own login */}
                 {profile.detected?.provider === 'subscription' && (
-                  <DropdownMenuItem className="cursor-pointer" onSelect={() => setLogin({ open: true, profile })}>
+                  <DropdownMenuItem className="cursor-pointer" onSelect={() => void startLogin(profile)}>
                     <RefreshCw className="h-4 w-4 text-(--nav-label-color)" strokeWidth={1.75} />
                     {t('claudeAccounts.signInAgain')}
                   </DropdownMenuItem>
@@ -130,20 +186,19 @@ export function ClaudeAccountsSection() {
       })}
       <SettingsRow
         label={t('claudeAccounts.add')}
-        description={profiles.length > 1 ? t('claudeAccounts.addDescriptionMore') : t('claudeAccounts.addDescription')}
+        description={
+          addStatus ? (
+            <span role={addStatus.error ? 'alert' : undefined} className={addStatus.error ? 'text-destructive' : undefined}>
+              {addStatus.message}
+            </span>
+          ) : profiles.length > 1 ? t('claudeAccounts.addDescriptionMore') : t('claudeAccounts.addDescription')
+        }
       >
-        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setLogin({ open: true })}>
+        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void startLogin()}>
           <Plus className="h-4 w-4" strokeWidth={1.75} />
           {t('claudeAccounts.addButton')}
         </Button>
       </SettingsRow>
-
-      <ClaudeLoginDialog
-        open={login.open}
-        profile={login.profile}
-        onOpenChange={(open) => setLogin((current) => ({ ...current, open }))}
-        onDetected={() => void reload()}
-      />
 
       <DetectedAccountDialog
         open={details.open}

@@ -557,7 +557,7 @@
     "usage": "Session {{session}}% · Weekly {{weekly}}%",
     "add": "Add Claude account",
     "addButton": "Add",
-    "addDescription": "Sign in with Claude Code's own login in a terminal",
+    "addDescription": "Opens a terminal with claude auth login",
     "addDescriptionMore": "Tasks switch to the next account when the one in use hits a limit",
     "dialog": {
       "name": "Account name",
@@ -587,15 +587,11 @@
       "fromEnvironment": "Environment variable"
     },
     "login": {
-      "title": "Add Claude account",
-      "signInAgainTitle": "Sign in to {{name}} again",
-      "description": "Claude Code signs in and saves the credentials itself. Follow the steps below",
-      "checking": "Looking for the account...",
+      "waiting": "Finish signing in in the terminal",
       "signedInAs": "Signed in as {{email}}",
       "signedIn": "Signed in",
       "notSignedIn": "No new sign-in was found",
-      "failedToStart": "Couldn't start Claude Code's sign-in",
-      "close": "Close"
+      "failedToStart": "Couldn't open a terminal for Claude Code's sign-in"
     }
   }
 }

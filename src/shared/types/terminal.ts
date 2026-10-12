@@ -20,11 +20,6 @@ export interface TerminalCreateOptions {
   skipOAuthToken?: boolean;
   /** Custom environment variables to add to the terminal (merged with defaults) */
   env?: Record<string, string>;
-  /**
-   * Run Claude Code's own sign-in (`claude auth login`) instead of a shell: for a new account,
-   * or to sign an account in again. The main process picks the account's config dir.
-   */
-  claudeLogin?: { profileId?: string };
 }
 
 /**

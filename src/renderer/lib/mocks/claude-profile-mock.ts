@@ -24,6 +24,7 @@ export const claudeProfileMock = {
   }),
 
   deleteClaudeProfile: async () => ({ success: true }),
+  loginClaudeAccount: async () => ({ success: true }),
   redetectClaudeAccounts: async () => ({ success: true, data: { profiles: [], activeProfileId: '' } }),
 
   renameClaudeProfile: async () => ({ success: true }),
