@@ -246,7 +246,7 @@ export const TaskCard = memo(function TaskCard({
             {/* Title, with an alert icon at the right when the task failed */}
             <div className="flex items-start gap-2">
               <h3
-                className="min-w-0 flex-1 font-bold text-sm text-foreground line-clamp-2 leading-snug"
+                className="min-w-0 flex-1 font-bold text-sm text-foreground line-clamp-2 leading-snug wrap-anywhere"
                 title={displayTitle}
               >
                 {displayTitle}
@@ -259,14 +259,15 @@ export const TaskCard = memo(function TaskCard({
               )}
             </div>
 
-        {/* Description - sanitized to handle markdown content (memoized) */}
+        {/* Description - sanitized to handle markdown content (memoized); long paths and URLs
+            wrap instead of widening the card past its column */}
         {sanitizedDescription && (
-          <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2">
+          <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2 wrap-anywhere">
             {sanitizedDescription}
           </p>
         )}
         {actionError && (
-          <p role="alert" className="mt-1.5 text-xs text-destructive line-clamp-2">
+          <p role="alert" className="mt-1.5 text-xs text-destructive line-clamp-2 wrap-anywhere">
             {actionError}
           </p>
         )}
