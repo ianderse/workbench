@@ -26,6 +26,9 @@ export interface McpConnectorSettings {
 /** Interface font choice (Appearance settings) */
 export type InterfaceFont = 'anthropic-sans' | 'system' | 'sans-serif' | 'inter';
 
+/** How the Graph page draws the memory graph: one muted color, or Graphify's community colors */
+export type GraphStyle = 'plain' | 'colorful';
+
 // Developer tools preferences - IDE and terminal selection
 // Comprehensive list based on Stack Overflow Developer Survey 2024, JetBrains Survey, and market research
 type SupportedIDE =
@@ -229,6 +232,8 @@ export interface AppSettings {
   notifications: NotificationSettings;
   // Interface font (default Anthropic Sans)
   interfaceFont?: InterfaceFont;
+  // Graph page colors (Settings > General > Appearance; default plain)
+  graphStyle?: GraphStyle;
   // Maximum tasks in progress at once per project; others wait in the Queue (Settings > Claude Code)
   maxParallelTasks?: number;
   // MCP connector defaults for new tasks (Settings > Connectors)

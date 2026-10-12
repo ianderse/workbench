@@ -216,7 +216,11 @@
     "modeDescription": "Use light or dark mode, or match your system",
     "light": "Light",
     "dark": "Dark",
-    "system": "System"
+    "system": "System",
+    "graphStyle": "Graph style",
+    "graphStyleDescription": "Use plain or colorful mode for showing your project's knowledge graph",
+    "graphPlain": "Plain",
+    "graphColorful": "Colorful"
   },
   "fonts": {
     "interfaceFont": "Interface font",

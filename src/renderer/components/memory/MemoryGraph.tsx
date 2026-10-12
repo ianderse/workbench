@@ -7,6 +7,7 @@ import { Application, Circle, Color, Container, Graphics, Text } from 'pixi.js';
 import { select } from 'd3-selection';
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from 'd3-zoom';
 import { useMemoryGraphStore } from '../../stores/memory-graph-store';
+import { useSettingsStore } from '../../stores/settings-store';
 import type { GraphifyGraph, GraphifyGraphNode } from '../../../shared/types/cli';
 import type { LayoutMessage, LayoutRequest } from './graph-layout.worker';
 import { communityColorIndex, GRAPHIFY_COMMUNITY_COLORS } from './graphify-colors';
@@ -46,12 +47,24 @@ const ZOOM_RESET_MS = 1000;
 /** Theme colors from the page's CSS, re-read when the appearance changes */
 function readColors() {
   const body = getComputedStyle(document.body);
+  const root = getComputedStyle(document.documentElement);
   const text = new Color(body.color);
-  // Node and link colors come from Graphify's palette, the same in light and dark. Links are much
-  // fainter than Graphify's 0.7 / 0.35 (kept as a 2:1 ratio) because thousands overlap in 3D.
   return {
+    // Colorful style: node and link colors come from Graphify's palette, the same in light and
+    // dark. Links are much fainter than Graphify's 0.7 / 0.35 (kept as a 2:1 ratio) because
+    // thousands overlap in 3D.
     linkAlpha: { extracted: 0.08, inferred: 0.04 },
     dimmedLinkAlpha: 0.03,
+    // Plain style: nodes in the muted label grey (in 3D many overlap, and the text color added up
+    // too bright), links in the text color; a hovered neighbourhood lights up in the primary color
+    plain: {
+      node: new Color(root.getPropertyValue('--nav-label-color').trim() || body.color),
+      nodeAlpha: 0.5,
+      accent: new Color(root.getPropertyValue('--primary').trim() || body.color),
+      link: text,
+      linkAlpha: 0.035,
+      dimmedLinkAlpha: 0.02,
+    },
     text,
     font: body.fontFamily,
   };
@@ -70,8 +83,9 @@ function LoadingDots() {
 /**
  * Obsidian-style graph view of the project's memory graph (Graphify's graph.json). Like Obsidian,
  * the force layout runs in a Web Worker (in 3D, with d3-force-3d) and PixiJS draws the graph with
- * WebGL. Nodes and links are colored by community with Graphify's own palette. Drag the background to turn the graph like a globe (it keeps spinning when flicked), wheel
- * to zoom, Shift+drag to pan, drag nodes to move them and hover to highlight a node's neighbours.
+ * WebGL. Nodes and links are colored by community with Graphify's own palette, or drawn in one muted
+ * color (Settings > Appearance > Graph style). Drag the background to turn the graph like a globe
+ * (it keeps spinning when flicked), wheel to zoom, Shift+drag to pan, drag nodes to move them and hover to highlight a node's neighbours.
  * Left alone, the graph turns slowly, and 5 seconds after the last touch the view resets to it.
  */
 export function MemoryGraph({ projectId }: { projectId: string }) {
@@ -82,6 +96,14 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
   const [status, setStatus] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
   // False until the first layout of the loaded graph is drawn
   const [laidOut, setLaidOut] = useState(false);
+  // Graph style: switching it redraws the graph in place (no new layout)
+  const colorful = useSettingsStore((state) => state.settings.graphStyle ?? 'plain') === 'colorful';
+  const colorfulRef = useRef(colorful);
+  const restyleRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    colorfulRef.current = colorful;
+    restyleRef.current?.();
+  }, [colorful]);
 
   // Load the graph (again after a rebuild)
   useEffect(() => {
@@ -196,11 +218,20 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       const nodeGraphics: Graphics[] = [];
       const labels = new Map<number, Text>();
 
-      // Nodes are colored by community like Graphify's graph view; the hovered node turns white with
-      // a ring in its community color (Graphify's highlight), the rest of its neighbourhood stays lit
+      // Colorful: nodes are colored by community like Graphify's graph view; the hovered node turns
+      // white with a ring in its community color (Graphify's highlight), the rest of its
+      // neighbourhood stays lit. Plain: every node in the muted grey; a hovered node and its
+      // neighbours light up in the primary color at half opacity
+      const isLit = (index: number) =>
+        !!hovered && (hovered.index === index || neighbours[hovered.index].has(index));
       const drawNode = (node: ViewNode) => {
-        const color = PALETTE[node.colorIndex];
         const shape = nodeGraphics[node.index].clear().circle(0, 0, node.radius);
+        if (!colorfulRef.current) {
+          const { plain } = colors;
+          shape.fill(isLit(node.index) ? { color: plain.accent, alpha: 0.5 } : { color: plain.node, alpha: plain.nodeAlpha });
+          return;
+        }
+        const color = PALETTE[node.colorIndex];
         if (hovered?.index === node.index) {
           shape.fill(HIGHLIGHT_FILL).stroke({ width: 1.5, color });
         } else {
@@ -292,9 +323,29 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         }
       };
 
+      // Plain: every link in the text color; with a hovered node every link dims and its own links
+      // are drawn on top in the primary color
+      const drawPlainLinks = (width: number) => {
+        const { plain } = colors;
+        for (const [s, t] of linkPairs) {
+          linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
+        }
+        linkLayer.stroke({ width, color: plain.link, alpha: hovered ? plain.dimmedLinkAlpha : plain.linkAlpha });
+        if (!hovered) return;
+        for (const [s, t] of linkPairs) {
+          if (s !== hovered.index && t !== hovered.index) continue;
+          linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
+        }
+        linkLayer.stroke({ width: width * 1.5, color: plain.accent, alpha: 0.5 });
+      };
+
       const drawLinks = () => {
         linkLayer.clear();
         const width = 1 / transform.k;
+        if (!colorfulRef.current) {
+          drawPlainLinks(width);
+          return;
+        }
         // One stroke per (community color, extracted or not) group; with a hovered node every link
         // dims first and the node's own links are drawn on top at Graphify's opacities
         const strokeGroup = (group: number, only: ((s: number, t: number) => boolean) | null, lineWidth: number, alpha: number) => {
@@ -559,12 +610,15 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       pixi.stage.on('pointerupoutside', endDrag);
 
       // Follow the theme (light/dark)
-      themeObserver = new MutationObserver(() => {
+      // Theme or graph style changed: redraw with the new colors
+      const restyle = () => {
         colors = readColors();
         for (const node of nodes) drawNode(node);
         for (const label of labels.values()) label.style.fill = colors.text;
         dirty = true;
-      });
+      };
+      restyleRef.current = restyle;
+      themeObserver = new MutationObserver(restyle);
       themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
     };
 
@@ -572,6 +626,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
 
     return () => {
       disposed = true;
+      restyleRef.current = null;
       themeObserver?.disconnect();
       send({ type: 'stop' });
       worker.terminate();

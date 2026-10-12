@@ -56,6 +56,8 @@ export const DEFAULT_APP_SETTINGS = {
   globalOpenAIApiKey: undefined as string | undefined,
   // Interface font (bundled Anthropic Sans)
   interfaceFont: 'anthropic-sans' as const,
+  // Graph page colors: one muted color (Graphify's community colors with 'colorful')
+  graphStyle: 'plain' as const,
   // Log order setting for task detail view (default chronological - oldest first)
   logOrder: 'chronological' as const,
   // Beta updates opt-in (receive pre-release versions)
