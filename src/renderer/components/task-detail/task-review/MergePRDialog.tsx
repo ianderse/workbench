@@ -137,8 +137,12 @@ export function MergePRDialog({ open, task, worktreeStatus, onOpenChange, onMerg
           <>
             <div className="-mx-6 mt-2 min-h-0 overflow-y-auto px-6">
               <SettingsRows>
-                <SettingsRow label={t('taskReview:pr.labels.sourceBranch')}>
-                  <span className="font-mono text-xs text-(--nav-label-color)">
+                {/* A long branch name is cut short (full name on hover) so the label stays on one line */}
+                <SettingsRow label={<span className="whitespace-nowrap">{t('taskReview:pr.labels.sourceBranch')}</span>}>
+                  <span
+                    className="block max-w-72 truncate font-mono text-xs text-(--nav-label-color)"
+                    title={worktreeStatus?.branch}
+                  >
                     {worktreeStatus?.branch || t('taskReview:pr.labels.unknown')}
                   </span>
                 </SettingsRow>
