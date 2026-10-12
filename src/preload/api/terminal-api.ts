@@ -34,6 +34,7 @@ export interface TerminalAPI {
   sendTerminalInput: (id: string, data: string) => void;
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<IPCResult<{ success: boolean }>>;
   invokeCLIInTerminal: (id: string, cwd?: string) => void;
+  resumeTaskSessionInTerminal: (id: string, options: import('../../shared/types').TerminalTaskSessionOptions) => void;
   generateTerminalName: (command: string, cwd?: string) => Promise<IPCResult<string>>;
   setTerminalTitle: (id: string, title: string) => void;
   setTerminalWorktreeConfig: (id: string, config: TerminalWorktreeConfig | undefined) => void;
@@ -95,6 +96,8 @@ export interface TerminalAPI {
   getClaudeProfiles: () => Promise<IPCResult<ClaudeProfileSettings>>;
   saveClaudeProfile: (profile: ClaudeProfile) => Promise<IPCResult<ClaudeProfile>>;
   deleteClaudeProfile: (profileId: string) => Promise<IPCResult>;
+  loginClaudeAccount: (profileId?: string) => Promise<IPCResult>;
+  redetectClaudeAccounts: () => Promise<IPCResult<ClaudeProfileSettings>>;
   renameClaudeProfile: (profileId: string, newName: string) => Promise<IPCResult>;
   setActiveClaudeProfile: (profileId: string) => Promise<IPCResult>;
   switchClaudeProfile: (terminalId: string, profileId: string) => Promise<IPCResult>;
@@ -103,11 +106,10 @@ export interface TerminalAPI {
   authenticateClaudeProfile: (profileId: string) => Promise<IPCResult<{ terminalId: string; configDir: string }>>;
   verifyClaudeProfileAuth: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
   claudeAuthLoginSubprocess: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
+  cancelClaudeAuthLogin: (profileId: string) => Promise<IPCResult>;
   onClaudeAuthLoginProgress: (callback: (data: { status: string; message?: string }) => void) => () => void;
   getAutoSwitchSettings: () => Promise<IPCResult<import('../../shared/types').ClaudeAutoSwitchSettings>>;
   updateAutoSwitchSettings: (settings: Partial<import('../../shared/types').ClaudeAutoSwitchSettings>) => Promise<IPCResult>;
-  getAccountPriorityOrder: () => Promise<IPCResult<string[]>>;
-  setAccountPriorityOrder: (order: string[]) => Promise<IPCResult>;
   fetchClaudeUsage: (terminalId: string) => Promise<IPCResult>;
   getBestAvailableProfile: (excludeProfileId?: string) => Promise<IPCResult<import('../../shared/types').ClaudeProfile | null>>;
   onAuthFailure: (callback: (info: import('../../shared/types').AuthFailureInfo) => void) => () => void;
@@ -137,6 +139,9 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   invokeCLIInTerminal: (id: string, cwd?: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TERMINAL_INVOKE_CLI, id, cwd),
+
+  resumeTaskSessionInTerminal: (id: string, options: import('../../shared/types').TerminalTaskSessionOptions): void =>
+    ipcRenderer.send(IPC_CHANNELS.TERMINAL_RESUME_TASK_SESSION, id, options),
 
   generateTerminalName: (command: string, cwd?: string): Promise<IPCResult<string>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_GENERATE_NAME, command, cwd),
@@ -390,6 +395,12 @@ export const createTerminalAPI = (): TerminalAPI => ({
   deleteClaudeProfile: (profileId: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_DELETE, profileId),
 
+  loginClaudeAccount: (profileId?: string): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_LOGIN, profileId),
+
+  redetectClaudeAccounts: (): Promise<IPCResult<ClaudeProfileSettings>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_ACCOUNTS_REDETECT),
+
   renameClaudeProfile: (profileId: string, newName: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_RENAME, profileId, newName),
 
@@ -414,6 +425,9 @@ export const createTerminalAPI = (): TerminalAPI => ({
   claudeAuthLoginSubprocess: (profileId: string): Promise<IPCResult<{ authenticated: boolean; email?: string }>> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_SUBPROCESS, profileId),
 
+  cancelClaudeAuthLogin: (profileId: string): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_CANCEL, profileId),
+
   onClaudeAuthLoginProgress: (
     callback: (data: { status: string; message?: string }) => void
   ): (() => void) => {
@@ -434,12 +448,6 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   updateAutoSwitchSettings: (settings: Partial<import('../../shared/types').ClaudeAutoSwitchSettings>): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_UPDATE_AUTO_SWITCH, settings),
-
-  getAccountPriorityOrder: (): Promise<IPCResult<string[]>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.ACCOUNT_PRIORITY_GET),
-
-  setAccountPriorityOrder: (order: string[]): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.ACCOUNT_PRIORITY_SET, order),
 
   fetchClaudeUsage: (terminalId: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_FETCH_USAGE, terminalId),

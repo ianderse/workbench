@@ -20,7 +20,7 @@ interface ProjectEnvState {
   incrementRequestId: () => number;
 }
 
-export const useProjectEnvStore = create<ProjectEnvState>((set, get) => ({
+const useProjectEnvStore = create<ProjectEnvState>((set, get) => ({
   // Initial state
   envConfig: null,
   projectId: null,

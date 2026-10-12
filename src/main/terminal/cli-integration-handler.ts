@@ -11,8 +11,8 @@ import * as crypto from 'crypto';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { getClaudeProfileManager, initializeClaudeProfileManager } from '../claude-profile-manager';
 import { getFullCredentialsFromKeychain, clearKeychainCache, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
-import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { getEmailFromConfigDir } from '../claude-profile/profile-utils';
+import { findStandaloneLimitReset } from '../claude-profile/rate-limit-manager';
 import * as OutputParser from './output-parser';
 import * as SessionHandler from './session-handler';
 import * as PtyManager from './pty-manager';
@@ -29,6 +29,7 @@ import type {
   RateLimitEvent,
   OAuthTokenEvent
 } from './types';
+import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
 
 // ============================================================================
 // CLI DISPATCH UTILITIES
@@ -242,12 +243,52 @@ function escapeShellCommand(cmd: string): string {
 const YOLO_MODE_FLAG = ' --dangerously-skip-permissions';
 
 /**
+ * Printed by the shell right after a CLI the app launched in a window exits: an OSC sequence that
+ * xterm ignores. TerminalManager closes the window when it sees it (unless the app itself is
+ * restarting the CLI, e.g. for an account switch). The typed command shows it as the literal text
+ * "\\033...", so only the real output matches.
+ */
+export const CLI_EXIT_MARKER = '\x1b]777;auto-claude-cli-exit\x07';
+
+/**
+ * Type a CLI launch command into the window's shell, followed (in POSIX shells: bash, zsh, fish)
+ * by printing CLI_EXIT_MARKER once the CLI exits, whatever its exit code. cmd.exe cannot print it,
+ * so on Windows the window stays open when the CLI exits.
+ */
+/**
+ * Whether this output finishes a CLI exit marker that should close the window. The marker can be
+ * split across output chunks; an exit the app caused itself (cliRestarting) is consumed instead.
+ */
+export function shouldCloseOnCliExit(
+  terminal: Pick<TerminalProcess, 'cliRestarting' | 'cliExitTail'>,
+  data: string
+): boolean {
+  const text = (terminal.cliExitTail ?? '') + data;
+  if (!text.includes(CLI_EXIT_MARKER)) {
+    terminal.cliExitTail = text.slice(-(CLI_EXIT_MARKER.length - 1));
+    return false;
+  }
+  terminal.cliExitTail = '';
+  if (terminal.cliRestarting) {
+    terminal.cliRestarting = false;
+    return false;
+  }
+  return true;
+}
+
+function writeCliCommand(terminal: TerminalProcess, command: string): void {
+  const line = command.endsWith('\r') ? command.slice(0, -1) : command;
+  const withMarker = isWindows() ? line : `${line}; printf '\\033]777;auto-claude-cli-exit\\007'`;
+  PtyManager.writeToPty(terminal, `${withMarker}\r`);
+}
+
+/**
  * Claude Code flag that tells it where the project's memory graph is, when the terminal's project
  * has one: Graphify's /graphify skill looks for graphify-out in the working directory, while the
- * graph lives in .auto-claude/memory (the terminal's GRAPHIFY_OUT points there). Left out when the
+ * graph lives in .auto-claude/knowledge (the terminal's GRAPHIFY_OUT points there). Left out when the
  * path has characters that would need escaping inside the shell command.
  */
-function graphifyHintFlag(terminal: TerminalProcess): string {
+function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut'>): string {
   const out = terminal.graphifyOut;
   if (!out || /["'$`%!]/.test(out) || (!isWindows() && out.includes('\\'))) return '';
   const graph = path.join(out, 'graph.json');
@@ -256,6 +297,66 @@ function graphifyHintFlag(terminal: TerminalProcess): string {
     `under the working directory. For /graphify questions about the code, run graphify query, explain, path or ` +
     `affected with --graph ${graph}, and do not rebuild the graph.`;
   return ` --append-system-prompt ${isWindows() ? `"${text}"` : `'${text}'`}`;
+}
+
+/**
+ * Options for launching Claude Code on a specific session (an agent window resuming a task)
+ */
+export interface InvokeCLIOptions {
+  /** Resume this Claude Code session (`claude --resume <id>`) instead of starting a new one */
+  resumeSessionId?: string;
+  /**
+   * Claude config dir that holds the session transcript. When set, Claude Code runs with this
+   * CLAUDE_CONFIG_DIR even if the terminal (or its active profile) uses another one.
+   */
+  configDir?: string;
+}
+
+/** Session ids are UUIDs; anything else is refused so it never reaches the shell unescaped */
+const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/;
+
+/** Whether a Claude Code session id is safe to pass on the command line */
+export function isValidClaudeSessionId(sessionId: string): boolean {
+  return SESSION_ID_PATTERN.test(sessionId);
+}
+
+/**
+ * Flags that resume a Claude Code session (` --resume <id>`).
+ * Throws for ids that are not plain session ids.
+ */
+export function buildResumeSessionFlag(sessionId: string): string {
+  if (!isValidClaudeSessionId(sessionId)) {
+    throw new Error(`Invalid Claude Code session id: ${sessionId}`);
+  }
+  return ` --resume ${sessionId}`;
+}
+
+/**
+ * Extra flags for an agent window's `claude` command: the resumed session (if any), YOLO mode,
+ * and the Graphify hint
+ */
+function buildClaudeExtraFlags(
+  terminal: Pick<TerminalProcess, 'graphifyOut'>,
+  dangerouslySkipPermissions: boolean | undefined,
+  resumeSessionId?: string
+): string | undefined {
+  const flags =
+    `${resumeSessionId ? buildResumeSessionFlag(resumeSessionId) : ''}` +
+    `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
+  return flags || undefined;
+}
+
+/**
+ * The CLAUDE_CONFIG_DIR to force for a resumed session, or undefined to keep the terminal's
+ * environment. `~` is expanded; the default ~/.claude needs no override (Claude Code uses it
+ * when CLAUDE_CONFIG_DIR is unset, and setting it would move its .claude.json).
+ */
+export function resolveSessionConfigDir(configDir: string | undefined): string | undefined {
+  if (!configDir) return undefined;
+  const expanded = configDir.startsWith('~') ? path.join(os.homedir(), configDir.slice(1)) : configDir;
+  const normalized = path.resolve(expanded);
+  if (normalized === path.resolve(os.homedir(), '.claude')) return undefined;
+  return normalized;
 }
 
 // ============================================================================
@@ -443,7 +544,13 @@ export function handleRateLimit(
   getWindow: WindowGetter,
   switchProfileCallback: (terminalId: string, profileId: string) => Promise<void>
 ): void {
-  const resetTime = OutputParser.extractRateLimitReset(data);
+  if (!OutputParser.extractRateLimitReset(data)) {
+    return;
+  }
+  // Only a limit message on its own line counts. Terminals also show source code, diffs and
+  // chats that quote one (e.g. `"Limit reached · resets Dec 17 at 6am (Europe/Oslo)"`), which
+  // used to flag a working account as rate limited for months.
+  const resetTime = findStandaloneLimitReset(data);
   if (!resetTime) {
     return;
   }
@@ -461,6 +568,10 @@ export function handleRateLimit(
 
   try {
     const rateLimitEvent = profileManager.recordRateLimitEvent(currentProfileId, resetTime);
+    if (!rateLimitEvent) {
+      // Not a real Claude reset time (see recordRateLimitEvent)
+      return;
+    }
     console.warn('[ClaudeIntegration] Recorded rate limit event:', rateLimitEvent.type);
   } catch (err) {
     console.error('[ClaudeIntegration] Failed to record rate limit event:', err);
@@ -678,6 +789,13 @@ export function handleOAuthToken(
       return;
     }
 
+    // A token-looking string in an ordinary terminal (code, logs, a diff) says nothing about
+    // the active account. Only update it when its config dir really has credentials.
+    if (!profileManager.hasValidAuth(activeProfile.id)) {
+      console.warn('[ClaudeIntegration] Token-like output in a non-profile terminal, but the active profile has no credentials; ignoring');
+      return;
+    }
+
     // Fallback/validation: Read email from Claude's config file (authoritative source)
     const configEmail = getEmailFromConfigDir(activeProfile.configDir);
     if (configEmail) {
@@ -772,7 +890,7 @@ export function ensureOnboardingComplete(configDir: string): void {
     const expandedDir = path.resolve(
       configDir.startsWith('~') ? configDir.replace(/^~/, os.homedir()) : configDir
     );
-    const claudeJsonPath = path.join(expandedDir, '.claude.json');
+    const claudeJsonPath = getClaudeGlobalConfigPath(expandedDir);
 
     // Read directly instead of existsSync + readFileSync to avoid TOCTOU race (CodeQL js/file-system-race)
     let content: string;
@@ -839,8 +957,6 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
     extraFlags,
     terminal,
     profileManager,
-    projectPath,
-    startTime,
     getWindow,
     logPrefix,
   } = options;
@@ -864,7 +980,7 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
       extraFlags
     );
     debugLog(`${logPrefix} Executing command (configDir method, history-safe)`);
-    PtyManager.writeToPty(terminal, command);
+    writeCliCommand(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
     finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (configDir) ==========`);
@@ -894,7 +1010,7 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
       extraFlags
     );
     debugLog(`${logPrefix} Executing command (temp file method, history-safe)`);
-    PtyManager.writeToPty(terminal, command);
+    writeCliCommand(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
     finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (temp file) ==========`);
@@ -919,8 +1035,6 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
     extraFlags,
     terminal,
     profileManager,
-    projectPath,
-    startTime,
     getWindow,
     logPrefix,
   } = options;
@@ -944,7 +1058,7 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
       extraFlags
     );
     debugLog(`${logPrefix} Executing command (configDir method, history-safe)`);
-    PtyManager.writeToPty(terminal, command);
+    writeCliCommand(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
     finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (configDir) ==========`);
@@ -974,7 +1088,7 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
       extraFlags
     );
     debugLog(`${logPrefix} Executing command (temp file method, history-safe)`);
-    PtyManager.writeToPty(terminal, command);
+    writeCliCommand(terminal, command);
     profileManager.markProfileUsed(activeProfile.id);
     finalizeClaudeInvoke(terminal, activeProfile, getWindow);
     debugLog(`${logPrefix} ========== INVOKE CLAUDE COMPLETE (temp file) ==========`);
@@ -1072,7 +1186,7 @@ export function invokeClaude(
 
     const command = buildClaudeShellCommand(cwdCommand, pathPrefix, escapedClaudeCmd, { method: 'default' }, extraFlags);
     debugLog('[ClaudeIntegration:invokeClaude] Executing command (default method):', command);
-    PtyManager.writeToPty(terminal, command);
+    writeCliCommand(terminal, command);
 
     if (activeProfile) {
       profileManager.markProfileUsed(activeProfile.id);
@@ -1126,7 +1240,7 @@ export function resumeClaude(
     const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
-    PtyManager.writeToPty(terminal, `${command}\r`);
+    writeCliCommand(terminal, command);
 
     // Only auto-rename if terminal has default name
     // This preserves user-customized names and prevents renaming on every resume
@@ -1163,11 +1277,13 @@ export async function invokeCLIAsync(
   cwd: string | undefined,
   profileId: string | undefined,
   getWindow: WindowGetter,
-  dangerouslySkipPermissions?: boolean
+  dangerouslySkipPermissions?: boolean,
+  options: InvokeCLIOptions = {}
 ): Promise<void> {
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
   const previousProfileId = terminal.claudeProfileId;
+  const { resumeSessionId } = options;
 
   const startTime = Date.now();
 
@@ -1178,8 +1294,10 @@ export async function invokeCLIAsync(
     debugLog('[ClaudeIntegration:invokeCLIAsync] CWD:', cwd);
     debugLog('[ClaudeIntegration:invokeCLIAsync] Dangerously skip permissions:', dangerouslySkipPermissions);
 
-    // Compute extra flags for YOLO mode
-    const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` || undefined;
+    debugLog('[ClaudeIntegration:invokeCLIAsync] Resume session:', resumeSessionId);
+
+    // Extra flags: the resumed session, YOLO mode and the Graphify hint
+    const extraFlags = buildClaudeExtraFlags(terminal, dangerouslySkipPermissions, resumeSessionId);
 
     terminal.isCLIMode = true;
     // Store YOLO mode setting so it persists across profile switches
@@ -1191,15 +1309,16 @@ export async function invokeCLIAsync(
     const settings = await readSettingsFileAsync();
     const preferredCLI = (settings?.preferredCLI as SupportedCLI | undefined) || 'claude-code';
 
-    if (preferredCLI !== 'claude-code') {
+    // A resumed task session is always a Claude Code session, whatever the preferred CLI
+    if (preferredCLI !== 'claude-code' && !resumeSessionId) {
       // Non-Claude CLI: change directory if needed, then run the CLI command directly
       const cwdCommand = buildCdCommand(cwd, terminal.shellType);
       const command = getCLICommand(preferredCLI, settings?.customCLIPath as string | undefined);
       debugLog('[ClaudeIntegration:invokeCLIAsync] Non-Claude CLI dispatch:', { preferredCLI, command });
       if (cwdCommand) {
-        PtyManager.writeToPty(terminal, `${cwdCommand} && ${command}\r`);
+        writeCliCommand(terminal, `${cwdCommand} && ${command}`);
       } else {
-        PtyManager.writeToPty(terminal, `${command}\r`);
+        writeCliCommand(terminal, command);
       }
       return;
     }
@@ -1246,6 +1365,29 @@ export async function invokeCLIAsync(
       needsEnvOverride
     });
 
+    // A resumed session must run on the config dir that holds its transcript, even when the
+    // terminal already uses that profile or the profile is the default one
+    const sessionConfigDir = resumeSessionId
+      ? resolveSessionConfigDir(options.configDir ?? activeProfile?.configDir)
+      : undefined;
+    if (sessionConfigDir) {
+      ensureOnboardingComplete(sessionConfigDir);
+      const command = buildClaudeShellCommand(
+        cwdCommand,
+        pathPrefix,
+        escapedClaudeCmd,
+        { method: 'config-dir', configDir: sessionConfigDir },
+        extraFlags
+      );
+      debugLog('[ClaudeIntegration:invokeCLIAsync] Resuming session (configDir method, history-safe)');
+      writeCliCommand(terminal, command);
+      if (activeProfile) {
+        profileManager.markProfileUsed(activeProfile.id);
+      }
+      finalizeClaudeInvoke(terminal, activeProfile, getWindow);
+      return;
+    }
+
     // Try to execute using profile-specific method (configDir or temp-file) with async file operations
     const executed = await executeProfileCommandAsync({
       needsEnvOverride,
@@ -1273,7 +1415,7 @@ export async function invokeCLIAsync(
 
     const command = buildClaudeShellCommand(cwdCommand, pathPrefix, escapedClaudeCmd, { method: 'default' }, extraFlags);
     debugLog('[ClaudeIntegration:invokeCLIAsync] Executing command (default method):', command);
-    PtyManager.writeToPty(terminal, command);
+    writeCliCommand(terminal, command);
 
     if (activeProfile) {
       profileManager.markProfileUsed(activeProfile.id);
@@ -1342,7 +1484,7 @@ export async function resumeClaudeAsync(
     const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
-    PtyManager.writeToPty(terminal, `${command}\r`);
+    writeCliCommand(terminal, command);
 
     // Only auto-rename if terminal has default name
     // This preserves user-customized names and prevents renaming on every resume
@@ -1508,6 +1650,9 @@ export async function switchClaudeProfile(
   if (terminal.isCLIMode) {
     console.warn('[ClaudeIntegration:switchClaudeProfile] Sending exit commands (Ctrl+C, /exit)');
     debugLog('[ClaudeIntegration:switchClaudeProfile] Terminal is in Claude mode, sending exit commands');
+
+    // The CLI's exit marker that follows is the app's own restart: keep the window open
+    terminal.cliRestarting = true;
 
     // Send Ctrl+C to interrupt any ongoing operation
     debugLog('[ClaudeIntegration:switchClaudeProfile] Sending Ctrl+C (\\x03)');

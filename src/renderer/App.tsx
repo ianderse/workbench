@@ -1,10 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { debugLog } from '../shared/utils/debug-logger';
 import { TooltipProvider } from './components/ui/tooltip';
 import { Button } from './components/ui/button';
-import { Toaster } from './components/ui/toaster';
 import {
   Dialog,
   DialogContent,
@@ -26,16 +25,13 @@ import { Insights } from './components/Insights';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AuthFailureModal } from './components/AuthFailureModal';
-import { OnboardingWizard } from './components/onboarding';
 import { AppUpdateNotification } from './components/AppUpdateNotification';
 import { ProactiveSwapListener } from './components/ProactiveSwapListener';
 import { useProjectStore, loadProjects, initializeProject, removeProject } from './stores/project-store';
 import { useTaskStore, loadTasks } from './stores/task-store';
-import { useSettingsStore, loadSettings, loadProfiles, saveSettings } from './stores/settings-store';
-import { useClaudeProfileStore, loadClaudeProfiles } from './stores/claude-profile-store';
+import { useSettingsStore, loadSettings, loadProfiles } from './stores/settings-store';
+import { loadClaudeProfiles } from './stores/claude-profile-store';
 import { useTerminalStore, restoreTerminalSessions } from './stores/terminal-store';
-import { initDownloadProgressListener } from './stores/download-store';
-import { GlobalDownloadIndicator } from './components/GlobalDownloadIndicator';
 import { useIpcListeners } from './hooks/useIpc';
 import { useTitleBarColors } from './hooks/useTitleBarColors';
 import { useGlobalTerminalListeners } from './hooks/useGlobalTerminalListeners';
@@ -73,7 +69,6 @@ export function App() {
   const setActiveProject = useProjectStore((state) => state.setActiveProject);
   const tasks = useTaskStore((state) => state.tasks);
   const settings = useSettingsStore((state) => state.settings);
-  const settingsLoading = useSettingsStore((state) => state.isLoading);
 
   // Keep the terminal limit in sync with the "Maximum windows" setting
   useEffect(() => {
@@ -81,12 +76,6 @@ export function App() {
       useTerminalStore.getState().setMaxTerminals(settings.maxTerminals);
     }
   }, [settings.maxTerminals]);
-
-  // API Profile state
-  const profiles = useSettingsStore((state) => state.profiles);
-
-  // Claude Profile state (OAuth)
-  const claudeProfiles = useClaudeProfileStore((state) => state.profiles);
 
   // UI State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
@@ -114,7 +103,6 @@ export function App() {
       setActiveView('kanban');
     }
   }, [activeView, memoryGraphAvailable]);
-  const [isOnboardingWizardOpen, setIsOnboardingWizardOpen] = useState(false);
   const [isRefreshingTasks, setIsRefreshingTasks] = useState(false);
 
   // Initialize dialog state
@@ -143,12 +131,6 @@ export function App() {
     loadSettings();
     loadProfiles();
     loadClaudeProfiles();
-    // Initialize global download progress listener for Ollama model downloads
-    const cleanupDownloadListener = initDownloadProgressListener();
-
-    return () => {
-      cleanupDownloadListener();
-    };
   }, []);
 
   // Restore tab state and open tabs for loaded projects
@@ -199,35 +181,6 @@ export function App() {
       }
     }
   }, [projects, activeProjectId, selectedProjectId, openProjectIds, openProjectTab, setActiveProject, projectTabs.length, projectTabs.map]);
-
-  // Track if settings have been loaded at least once
-  const [settingsHaveLoaded, setSettingsHaveLoaded] = useState(false);
-
-  // Mark settings as loaded when loading completes
-  useEffect(() => {
-    if (!settingsLoading && !settingsHaveLoaded) {
-      setSettingsHaveLoaded(true);
-    }
-  }, [settingsLoading, settingsHaveLoaded]);
-
-  // First-run detection - show onboarding wizard if not completed
-  // Only check AFTER settings have been loaded from disk to avoid race condition
-  useEffect(() => {
-    // Check if either auth method is configured
-    // API profiles: if profiles exist, auth is configured (user has gone through setup)
-    const hasAPIProfileConfigured = profiles.length > 0;
-    const hasOAuthConfigured = claudeProfiles.some(p =>
-      p.oauthToken || (p.isDefault && p.configDir)
-    );
-    const hasAnyAuth = hasAPIProfileConfigured || hasOAuthConfigured;
-
-    // Only show wizard if onboarding not completed AND no auth is configured
-    if (settingsHaveLoaded &&
-        settings.onboardingCompleted === false &&
-        !hasAnyAuth) {
-      setIsOnboardingWizardOpen(true);
-    }
-  }, [settingsHaveLoaded, settings.onboardingCompleted, profiles, claudeProfiles]);
 
   const { t, i18n } = useTranslation('dialogs');
 
@@ -439,11 +392,13 @@ export function App() {
     const logsChanged =
       JSON.stringify(selectedTask.logs || []) !==
       JSON.stringify(updatedTask.logs || []);
+    // The Claude Code run (session, steps, costs) is replaced as a whole on every update
+    const claudeRunChanged = selectedTask.claudeRun !== updatedTask.claudeRun;
 
     const hasChanged =
       subtasksChanged || statusChanged || titleChanged || descriptionChanged ||
       metadataChanged || executionProgressChanged || qaReportChanged ||
-      reviewReasonChanged || logsChanged;
+      reviewReasonChanged || logsChanged || claudeRunChanged;
 
     debugLog('[App] Task comparison', {
       hasChanged,
@@ -457,6 +412,7 @@ export function App() {
         qaReport: qaReportChanged,
         reviewReason: reviewReasonChanged,
         logs: logsChanged,
+        claudeRun: claudeRunChanged,
       },
     });
 
@@ -471,6 +427,7 @@ export function App() {
       if (qaReportChanged) reasons.push('QAReport');
       if (reviewReasonChanged) reasons.push('ReviewReason');
       if (logsChanged) reasons.push('Logs');
+      if (claudeRunChanged) reasons.push('ClaudeRun');
 
       debugLog('[App] Updating selectedTask', {
         taskId: updatedTask.id,
@@ -499,29 +456,6 @@ export function App() {
 
   const handleCloseTaskDetail = () => {
     setSelectedTask(null);
-  };
-
-  const handleOpenInbuiltTerminal = (_id: string, cwd: string) => {
-    // Note: _id parameter is intentionally unused - terminal ID is auto-generated by addTerminal()
-    // Parameter kept for callback signature consistency with callers
-    console.warn('[App] Opening inbuilt terminal:', { cwd });
-
-    // Switch to terminals view
-    setActiveView('terminals');
-
-    // Close modal
-    setSelectedTask(null);
-
-    // Add terminal to store - this will trigger Terminal component to mount
-    // which will then create the backend PTY via usePtyProcess
-    // Note: TerminalGrid is always mounted (just hidden), so no need to wait
-    const terminal = useTerminalStore.getState().addTerminal(cwd, selectedProject?.path);
-
-    if (!terminal) {
-      console.error('[App] Failed to add terminal to store (max terminals reached?)');
-    } else {
-      console.warn('[App] Terminal added to store:', terminal.id);
-    }
   };
 
   const [addProjectInitialStep, setAddProjectInitialStep] = useState<AddProjectModalStep>('choose');
@@ -564,6 +498,21 @@ export function App() {
     setActiveProject(projectId);
     setActiveView((view) => (view === 'projects' ? 'kanban' : view));
   }, [openProjectTab, setActiveProject]);
+
+  // "Open agent" in task details opens the task's session in a new agent window: close the task
+  // dialog and show the Agents page of the task's project
+  const agentsViewRequest = useTerminalStore((state) => state.agentsViewRequest);
+  const handledAgentsViewSeqRef = useRef(0);
+  useEffect(() => {
+    if (!agentsViewRequest || agentsViewRequest.seq === handledAgentsViewSeqRef.current) return;
+    handledAgentsViewSeqRef.current = agentsViewRequest.seq;
+    setSelectedTask(null);
+    const project = projects.find((p) => p.path === agentsViewRequest.projectPath);
+    if (project && project.id !== (activeProjectId || selectedProjectId)) {
+      handleSelectProject(project.id);
+    }
+    setActiveView('terminals');
+  }, [agentsViewRequest, projects, activeProjectId, selectedProjectId, handleSelectProject]);
 
   const handleProjectTabClose = (projectId: string) => {
     // Show confirmation dialog before removing the project
@@ -712,12 +661,8 @@ export function App() {
               </>
             ) : (
               <WelcomeScreen
-                projects={projects}
                 onNewProject={handleNewProject}
                 onOpenProject={handleOpenExistingProject}
-                onSelectProject={(projectId) => {
-                  openProjectTab(projectId);
-                }}
               />
             )}
           </main>
@@ -728,8 +673,6 @@ export function App() {
           open={!!selectedTask}
           task={selectedTask}
           onOpenChange={(open) => !open && handleCloseTaskDetail()}
-          onSwitchToTerminals={() => setActiveView('terminals')}
-          onOpenInbuiltTerminal={handleOpenInbuiltTerminal}
         />
 
         {/* Dialogs */}
@@ -788,18 +731,9 @@ export function App() {
                 <p className="text-foreground mb-2">{t('initialize.willDo')}</p>
                 <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                   <li>{t('initialize.createFolder')}</li>
-                  <li>{t('initialize.copyFramework')}</li>
                   <li>{t('initialize.setupSpecs')}</li>
                 </ul>
               </div>
-              {!settings.autoBuildPath && (
-                <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
-                  <p className="text-foreground">{t('initialize.sourcePathNotConfigured')}</p>
-                  <p className="text-muted-foreground mt-1">
-                    {t('initialize.sourcePathNotConfiguredDescription')}
-                  </p>
-                </div>
-              )}
               {initError && (
                 <div className="text-sm" role="alert">
                   <p className="text-destructive">{t('initialize.initFailed')}</p>
@@ -816,7 +750,7 @@ export function App() {
               <Button
                 size="sm"
                 onClick={handleInitialize}
-                disabled={isInitializing || !settings.autoBuildPath}
+                disabled={isInitializing}
               >
                 {isInitializing ? (
                   <>
@@ -864,28 +798,8 @@ export function App() {
           setIsSettingsDialogOpen(true);
         }} />
 
-        {/* Onboarding Wizard - shows on first launch when onboardingCompleted is false */}
-        <OnboardingWizard
-          open={isOnboardingWizardOpen}
-          onOpenChange={setIsOnboardingWizardOpen}
-          onOpenTaskCreator={() => {
-            setIsOnboardingWizardOpen(false);
-            setIsNewTaskDialogOpen(true);
-          }}
-          onOpenSettings={() => {
-            setIsOnboardingWizardOpen(false);
-            setIsSettingsDialogOpen(true);
-          }}
-        />
-
         {/* App Update Notification - shows when new app version is available */}
         <AppUpdateNotification />
-
-        {/* Global Download Indicator - shows Ollama model download progress */}
-        <GlobalDownloadIndicator />
-
-        {/* Toast notifications */}
-        <Toaster />
       </div>
       </TooltipProvider>
     </ViewStateProvider>

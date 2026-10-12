@@ -35,9 +35,7 @@ import {
   getWindowsCredentialTarget,
   getCredentialsFromKeychain,
   getFullCredentialsFromKeychain,
-  getCredentials,
   clearKeychainCache,
-  clearCredentialCache,
 } from './credential-utils';
 import { isMacOS, isWindows, isLinux } from '../platform';
 import { existsSync, readFileSync } from 'fs';
@@ -48,7 +46,7 @@ describe('credential-utils', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // Clear the credential cache before each test
-    clearCredentialCache();
+    clearKeychainCache();
   });
 
   describe('calculateConfigDirHash', () => {
@@ -470,7 +468,7 @@ describe('credential-utils', () => {
       vi.mocked(isWindows).mockReturnValue(true);
       vi.mocked(isLinux).mockReturnValue(false);
       vi.mocked(homedir).mockReturnValue('C:\\Users\\TestUser');
-      clearCredentialCache();
+      clearKeychainCache();
     });
 
     it('should return full credentials from file when available', () => {
@@ -574,12 +572,6 @@ describe('credential-utils', () => {
     });
   });
 
-  describe('getCredentials alias', () => {
-    it('should be an alias for getCredentialsFromKeychain', () => {
-      expect(getCredentials).toBe(getCredentialsFromKeychain);
-    });
-  });
-
   describe('clearKeychainCache', () => {
     beforeEach(() => {
       vi.mocked(isMacOS).mockReturnValue(true);
@@ -623,12 +615,6 @@ describe('credential-utils', () => {
     });
   });
 
-  describe('clearCredentialCache alias', () => {
-    it('should be an alias for clearKeychainCache', () => {
-      expect(clearCredentialCache).toBe(clearKeychainCache);
-    });
-  });
-
   describe('token validation', () => {
     beforeEach(() => {
       vi.mocked(isMacOS).mockReturnValue(true);
@@ -643,7 +629,7 @@ describe('credential-utils', () => {
       ];
 
       for (const token of validTokens) {
-        clearCredentialCache();
+        clearKeychainCache();
         vi.mocked(execFileSync).mockReturnValue(JSON.stringify({
           claudeAiOauth: { accessToken: token, email: 'test@test.com' },
         }));
@@ -661,7 +647,7 @@ describe('credential-utils', () => {
       ];
 
       for (const token of invalidTokens) {
-        clearCredentialCache();
+        clearKeychainCache();
         vi.mocked(execFileSync).mockReturnValue(JSON.stringify({
           claudeAiOauth: { accessToken: token, email: 'test@test.com' },
         }));
@@ -672,7 +658,7 @@ describe('credential-utils', () => {
     });
 
     it('should reject empty token string', () => {
-      clearCredentialCache();
+      clearKeychainCache();
       vi.mocked(execFileSync).mockReturnValue(JSON.stringify({
         claudeAiOauth: { accessToken: '', email: 'test@test.com' },
       }));

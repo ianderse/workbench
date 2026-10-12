@@ -4,11 +4,7 @@ import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, Task
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
 import { useProjectStore } from './project-store';
 import { useSettingsStore } from './settings-store';
-import { DEFAULT_MAX_PARALLEL_TASKS, resolveMaxParallelTasks } from '../../shared/constants/task';
-
-/** Default max parallel tasks when no project setting is configured */
-export { DEFAULT_MAX_PARALLEL_TASKS };
-
+import { resolveMaxParallelTasks } from '../../shared/constants/task';
 
 /** Maximum log entries stored per task to prevent renderer OOM */
 export const MAX_LOG_ENTRIES = 5000;
@@ -90,13 +86,6 @@ export function hasRecentActivity(taskId: string): boolean {
 }
 
 /**
- * Clear activity tracking for a task (call when task completes or is deleted)
- */
-export function clearTaskActivity(taskId: string): void {
-  taskLastActivity.delete(taskId);
-}
-
-/**
  * Notify all registered listeners when a task status changes
  */
 function notifyTaskStatusChange(taskId: string, oldStatus: TaskStatus | undefined, newStatus: TaskStatus): void {
@@ -168,6 +157,12 @@ function validatePlanData(plan: ImplementationPlan): boolean {
   }
 
   return true;
+}
+
+/** Send a project's Queue column order to the main process (the queue starts the top task first) */
+function syncQueueOrder(projectId: string, order: string[]): void {
+  if (typeof window === 'undefined') return;
+  window.electronAPI?.setQueueOrder?.(projectId, order);
 }
 
 // localStorage key prefix for task order persistence
@@ -628,6 +623,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           columnCounts: Object.entries(validatedOrder).map(([col, ids]) => ({ col, count: ids.length }))
         });
         set({ taskOrder: validatedOrder });
+        // Keep the main-process queue in step with the board's Queue column order
+        syncQueueOrder(projectId, validatedOrder.queue);
       } else {
         debugLog('[TaskStore.loadTaskOrder] No stored task order found, using empty order');
         set({ taskOrder: createEmptyTaskOrder() });
@@ -648,6 +645,8 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
       const key = getTaskOrderKey(projectId);
       localStorage.setItem(key, JSON.stringify(state.taskOrder));
+      // The main-process queue starts the top task of the Queue column first
+      syncQueueOrder(projectId, state.taskOrder.queue ?? []);
       return true;
     } catch (error) {
       console.error('Failed to save task order:', error);
@@ -900,6 +899,38 @@ export async function startTaskOrQueue(taskId: string): Promise<StartTaskOrQueue
 }
 
 /**
+ * Retry a task from a clean slate: the main process discards its worktree changes, resets
+ * its spec files and starts it again (or queues it when the parallel limit is reached).
+ * Clears the previous run's state (run steps, subtasks, logs) from the store.
+ */
+export async function retryTask(taskId: string): Promise<StartTaskOrQueueResult> {
+  try {
+    const result = await window.electronAPI.retryTask(taskId);
+    if (!result.success || !result.data) {
+      return { action: 'started', success: false, error: result.error };
+    }
+    const { action } = result.data;
+    const store = useTaskStore.getState();
+    store.updateTask(taskId, {
+      claudeRun: undefined,
+      subtasks: [],
+      logs: [],
+      qaReport: undefined,
+      reviewReason: undefined,
+      rateLimitHold: undefined,
+      stagedInMainProject: undefined,
+      stagedAt: undefined,
+      executionProgress: { phase: action === 'started' ? 'planning' : 'idle', phaseProgress: 0, overallProgress: 0 }
+    });
+    store.updateTaskStatus(taskId, action === 'started' ? 'in_progress' : 'queue');
+    return { action, success: true };
+  } catch (error) {
+    console.error('Error retrying task:', error);
+    return { action: 'started', success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * Update task title/description/metadata and persist to file
  */
 export async function persistUpdateTask(
@@ -945,39 +976,6 @@ export async function checkTaskRunning(taskId: string): Promise<boolean> {
 }
 
 /**
- * Recover a stuck task (status shows in_progress but no process running)
- * @param taskId - The task ID to recover
- * @param options - Recovery options (autoRestart defaults to true)
- */
-export async function recoverStuckTask(
-  taskId: string,
-  options: { targetStatus?: TaskStatus; autoRestart?: boolean } = { autoRestart: true }
-): Promise<{ success: boolean; message: string; autoRestarted?: boolean }> {
-  try {
-    const result = await window.electronAPI.recoverStuckTask(taskId, options);
-
-    if (result.success && result.data) {
-      return {
-        success: true,
-        message: result.data.message,
-        autoRestarted: result.data.autoRestarted
-      };
-    }
-
-    return {
-      success: false,
-      message: result.error || 'Failed to recover task'
-    };
-  } catch (error) {
-    console.error('Error recovering stuck task:', error);
-    return {
-      success: false,
-      message: error instanceof Error ? error.message : 'Unknown error'
-    };
-  }
-}
-
-/**
  * Delete a task and its spec directory
  */
 export async function deleteTask(
@@ -1004,52 +1002,6 @@ export async function deleteTask(
     };
   } catch (error) {
     console.error('Error deleting task:', error);
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error'
-    };
-  }
-}
-
-/**
- * Delete multiple tasks
- * Permanently removes tasks from the project
- */
-export async function deleteTasks(
-  taskIds: string[]
-): Promise<{ success: boolean; error?: string; failedIds?: string[] }> {
-  const store = useTaskStore.getState();
-  const failedIds: string[] = [];
-
-  try {
-    // Delete tasks one by one (API only supports single delete)
-    for (const taskId of taskIds) {
-      const result = await window.electronAPI.deleteTask(taskId);
-      if (!result.success) {
-        failedIds.push(taskId);
-      }
-    }
-
-    // Remove successfully deleted tasks from local state
-    const deletedIds = new Set(taskIds.filter(id => !failedIds.includes(id)));
-    store.setTasks(store.tasks.filter(t => !deletedIds.has(t.id) && !deletedIds.has(t.specId || '')));
-
-    // Clear selection if selected task was deleted
-    if (store.selectedTaskId && deletedIds.has(store.selectedTaskId)) {
-      store.selectTask(null);
-    }
-
-    if (failedIds.length > 0) {
-      return {
-        success: false,
-        error: `Failed to delete ${failedIds.length} task(s)`,
-        failedIds
-      };
-    }
-
-    return { success: true };
-  } catch (error) {
-    console.error('Error deleting tasks:', error);
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error'
@@ -1124,6 +1076,15 @@ export async function unarchiveTasks(
 const DRAFT_KEY_PREFIX = 'task-creation-draft';
 
 /**
+ * Fields of the creation form kept in a draft. Drafts saved by older versions may hold more
+ * fields (title, classification, agent profile); loadDraft drops them.
+ */
+export type TaskCreationDraft = Pick<
+  TaskDraft,
+  'projectId' | 'description' | 'images' | 'mcpConnectors' | 'pushNewBranches' | 'savedAt'
+>;
+
+/**
  * Get the localStorage key for a project's draft
  */
 function getDraftKey(projectId: string): string {
@@ -1134,7 +1095,7 @@ function getDraftKey(projectId: string): string {
  * Save a task creation draft to localStorage
  * Note: For large images, we only store thumbnails in the draft to avoid localStorage limits
  */
-export function saveDraft(draft: TaskDraft): void {
+export function saveDraft(draft: TaskCreationDraft): void {
   try {
     const key = getDraftKey(draft.projectId);
     // Create a copy with thumbnails only to avoid localStorage size limits
@@ -1155,16 +1116,23 @@ export function saveDraft(draft: TaskDraft): void {
 /**
  * Load a task creation draft from localStorage
  */
-export function loadDraft(projectId: string): TaskDraft | null {
+export function loadDraft(projectId: string): TaskCreationDraft | null {
   try {
     const key = getDraftKey(projectId);
     const stored = localStorage.getItem(key);
     if (!stored) return null;
 
-    const draft = JSON.parse(stored);
-    // Convert savedAt back to Date
-    draft.savedAt = new Date(draft.savedAt);
-    return draft as TaskDraft;
+    const raw = JSON.parse(stored) as Record<string, unknown> | null;
+    if (!raw || typeof raw !== 'object') return null;
+    return {
+      projectId: typeof raw.projectId === 'string' ? raw.projectId : projectId,
+      description: typeof raw.description === 'string' ? raw.description : '',
+      images: Array.isArray(raw.images) ? (raw.images as ImageAttachment[]) : [],
+      mcpConnectors: Array.isArray(raw.mcpConnectors) ? (raw.mcpConnectors as string[]) : undefined,
+      pushNewBranches: typeof raw.pushNewBranches === 'boolean' ? raw.pushNewBranches : undefined,
+      // Convert savedAt back to Date
+      savedAt: new Date(typeof raw.savedAt === 'string' ? raw.savedAt : Date.now())
+    };
   } catch (error) {
     console.error('Failed to load draft:', error);
     return null;
@@ -1184,40 +1152,11 @@ export function clearDraft(projectId: string): void {
 }
 
 /**
- * Check if a draft exists for a project
+ * Check if a draft has any meaningful content (description or images)
  */
-export function hasDraft(projectId: string): boolean {
-  const key = getDraftKey(projectId);
-  return localStorage.getItem(key) !== null;
-}
-
-/**
- * Check if a draft has any meaningful content (title, description, or images)
- */
-export function isDraftEmpty(draft: TaskDraft | null): boolean {
+export function isDraftEmpty(draft: Pick<TaskCreationDraft, 'description' | 'images'> | null): boolean {
   if (!draft) return true;
-  return (
-    !draft.title.trim() &&
-    !draft.description.trim() &&
-    draft.images.length === 0 &&
-    !draft.category &&
-    !draft.priority &&
-    !draft.complexity &&
-    !draft.impact
-  );
-}
-
-// ============================================
-// GitHub Issue Linking Helpers
-// ============================================
-
-/**
- * Find a task by GitHub issue number
- * Used to check if a task already exists for a GitHub issue
- */
-export function getTaskByGitHubIssue(issueNumber: number): Task | undefined {
-  const store = useTaskStore.getState();
-  return store.tasks.find(t => t.metadata?.githubIssueNumber === issueNumber);
+  return !draft.description?.trim() && (draft.images?.length ?? 0) === 0;
 }
 
 // ============================================
@@ -1246,12 +1185,20 @@ export function isIncompleteHumanReview(task: Task): boolean {
   return completedSubtasks === 0;
 }
 
+/** Whether a task ended with errors (the card shows "Has errors") */
+export function taskHasErrors(task: Task): boolean {
+  return task.status === 'error'
+    || (task.status === 'human_review' && task.reviewReason === 'errors')
+    || task.executionProgress?.phase === 'failed';
+}
+
 /**
- * Get the count of completed subtasks for a task
+ * Whether the task's run was stopped before it finished: stopped by the user (waits in Human
+ * Review), or back in Planning with a previous run (stopped early or moved back)
  */
-export function getCompletedSubtaskCount(task: Task): number {
-  if (!task.subtasks || task.subtasks.length === 0) return 0;
-  return task.subtasks.filter(s => s.status === 'completed').length;
+export function taskWasStopped(task: Task): boolean {
+  return (task.status === 'human_review' && task.reviewReason === 'stopped')
+    || (task.status === 'backlog' && !!task.claudeRun?.sessionId);
 }
 
 /**

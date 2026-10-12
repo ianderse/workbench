@@ -12,9 +12,19 @@ export interface Project {
   updatedAt: Date;
 }
 
+/** Spending of one initialized project (Settings > Accounts > Metrics) */
+export interface ProjectCostMetrics {
+  projectId: string;
+  name: string;
+  path: string;
+  /** Tasks (spec directories) in the project */
+  taskCount: number;
+  /** Sum of the tasks' Claude Code run costs (USD) */
+  totalCostUsd: number;
+}
+
 export interface ProjectSettings {
   model: string;
-  memoryBackend: 'memory' | 'file';
   notifications: NotificationSettings;
   /** Main branch name for worktree creation (default: auto-detected or 'main') */
   mainBranch?: string;
@@ -24,6 +34,10 @@ export interface ProjectSettings {
   useClaudeMd?: boolean;
   /** Point agents at the project's Graphify memory graph (default: false; needs Graphify installed) */
   useGraphify?: boolean;
+  /** Stop a task once its estimated spend reaches this amount (`--max-budget-usd`); unset = no cap */
+  maxBudgetUsd?: number;
+  /** Claude account (profile id) the project's tasks and chats run on; unset = the account in use */
+  claudeProfileId?: string;
   /** Maximum parallel tasks allowed (default: 3) */
   maxParallelTasks?: number;
 }
@@ -141,162 +155,8 @@ export interface ConventionsInfo {
   git_hooks?: string;
 }
 
-export interface MemorySystemStatus {
-  enabled: boolean;
-  available: boolean;
-  database?: string;
-  dbPath?: string;
-  embeddingProvider?: string;
-  reason?: string;
-}
-
-// Memory Infrastructure Types
-export interface MemoryDatabaseStatus {
-  databasePath: string;
-  databaseExists: boolean;
-  databases: string[];
-  error?: string;
-}
-
-export interface InfrastructureStatus {
-  memory: MemoryDatabaseStatus;
-  ready: boolean; // True if memory database is available
-}
-
-// Memory Validation Types
-export interface MemoryValidationResult {
-  success: boolean;
-  message: string;
-  details?: {
-    provider?: string;
-    model?: string;
-    latencyMs?: number;
-  };
-}
-
-export interface MemoryConnectionTestResult {
-  database: MemoryValidationResult;
-  llmProvider: MemoryValidationResult;
-  ready: boolean;
-}
-
-// Memory Provider Types
-// Embedding Providers: OpenAI, Voyage AI, Azure OpenAI, Ollama (local), Google, OpenRouter
-// Note: LLM provider removed - Claude SDK handles RAG queries
-export type MemoryEmbeddingProvider = 'openai' | 'voyage' | 'azure_openai' | 'ollama' | 'google' | 'openrouter';
-
-export interface MemoryProviderConfig {
-  // Embedding Provider (LLM provider removed - Claude SDK handles RAG)
-  embeddingProvider: MemoryEmbeddingProvider;
-  embeddingModel?: string;  // Embedding model, uses provider default if not specified
-
-  // OpenAI Embeddings
-  openaiApiKey?: string;
-  openaiEmbeddingModel?: string;
-
-  // Azure OpenAI Embeddings
-  azureOpenaiApiKey?: string;
-  azureOpenaiBaseUrl?: string;
-  azureOpenaiEmbeddingDeployment?: string;
-
-  // Voyage AI Embeddings
-  voyageApiKey?: string;
-  voyageEmbeddingModel?: string;
-
-  // Google AI Embeddings
-  googleApiKey?: string;
-  googleEmbeddingModel?: string;
-
-  // OpenRouter (multi-provider aggregator)
-  openrouterApiKey?: string;
-  openrouterBaseUrl?: string;  // Default: https://openrouter.ai/api/v1
-  openrouterLlmModel?: string;  // LLM model selection (e.g., 'anthropic/claude-sonnet-4')
-  openrouterEmbeddingModel?: string;
-
-  // Ollama Embeddings (local, no API key required)
-  ollamaBaseUrl?: string;  // Default: http://localhost:11434
-  ollamaEmbeddingModel?: string;
-  ollamaEmbeddingDim?: number;
-
-  // Memory database settings (embedded libSQL - no Docker required)
-  database?: string;  // Database name (default: auto_claude_memory)
-  dbPath?: string;    // Database storage path (default: ~/.auto-claude/memories)
-}
-
-export interface MemoryProviderInfo {
-  id: string;
-  name: string;
-  description: string;
-  requiresApiKey: boolean;
-  defaultModel: string;
-  supportedModels: string[];
-}
-
-export interface MemorySystemState {
-  initialized: boolean;
-  database?: string;
-  episodeCount: number;
-  lastSessionAt?: string;
-  createdAt?: string;
-  errorLog: Array<{ timestamp: string; error: string }>;
-}
-
-
-export type MemoryType =
-  | 'gotcha'
-  | 'decision'
-  | 'preference'
-  | 'pattern'
-  | 'requirement'
-  | 'error_pattern'
-  | 'module_insight'
-  | 'prefetch_pattern'
-  | 'work_state'
-  | 'causal_dependency'
-  | 'task_calibration'
-  | 'e2e_observation'
-  | 'dead_end'
-  | 'work_unit_outcome'
-  | 'workflow_recipe'
-  | 'context_cost';
-
-export interface RendererMemory {
-  id: string;
-  type: MemoryType;
-  content: string;
-  confidence: number;
-  tags: string[];
-  relatedFiles: string[];
-  relatedModules: string[];
-  createdAt: string;
-  lastAccessedAt: string;
-  accessCount: number;
-  scope: 'global' | 'module' | 'work_unit' | 'session';
-  source: 'agent_explicit' | 'observer_inferred' | 'qa_auto' | 'mcp_auto' | 'commit_auto' | 'user_taught';
-  needsReview?: boolean;
-  userVerified?: boolean;
-  citationText?: string;
-  pinned?: boolean;
-  methodology?: string;
-  deprecated?: boolean;
-  // Search score (added by search results)
-  score?: number;
-}
-
-// Backward compatibility alias
-export type MemoryEpisode = RendererMemory;
-
-export interface ContextSearchResult {
-  content: string;
-  score: number;
-  type: string;
-}
-
 export interface ProjectContextData {
   projectIndex: ProjectIndex | null;
-  memoryStatus: MemorySystemStatus | null;
-  memoryState: MemorySystemState | null;
-  recentMemories: RendererMemory[];
   isLoading: boolean;
   error?: string;
 }
@@ -308,17 +168,6 @@ export interface ProjectEnvConfig {
 
   // Git/Worktree Settings
   defaultBranch?: string; // Base branch for worktree creation (e.g., 'main', 'develop')
-
-  // Memory Integration (V2 - Multi-provider support)
-  // Uses the embedded libSQL memory database (no Docker required)
-  memoryEnabled: boolean;
-  memoryProviderConfig?: MemoryProviderConfig;  // Provider configuration
-  // Legacy fields (still supported for backward compatibility)
-  openaiApiKey?: string;
-  // Indicates if the OpenAI key is from global settings (not project-specific)
-  openaiKeyIsGlobal?: boolean;
-  memoryDatabase?: string;
-  memoryDbPath?: string;
 
   // UI Settings
   enableFancyUi: boolean;
@@ -344,7 +193,7 @@ export interface ProjectEnvConfig {
  * Per-agent MCP override configuration.
  * Stored in .auto-claude/.env as AGENT_MCP_<agent>_ADD and AGENT_MCP_<agent>_REMOVE
  */
-export interface AgentMcpOverride {
+interface AgentMcpOverride {
   /** MCP servers to add beyond the agent's defaults */
   add?: string[];
   /** MCP servers to remove from the agent's defaults */
@@ -355,7 +204,7 @@ export interface AgentMcpOverride {
  * Map of agent type to their MCP overrides.
  * Agent types match backend AGENT_CONFIGS keys (e.g., 'planner', 'coder', 'qa_reviewer')
  */
-export interface AgentMcpOverrides {
+interface AgentMcpOverrides {
   [agentType: string]: AgentMcpOverride;
 }
 
@@ -449,11 +298,4 @@ export interface CreateProjectFolderResult {
   path: string;
   name: string;
   gitInitialized: boolean;
-}
-
-// File Explorer Types
-export interface FileNode {
-  path: string;
-  name: string;
-  isDirectory: boolean;
 }

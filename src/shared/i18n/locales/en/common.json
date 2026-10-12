@@ -46,7 +46,6 @@
     "confirm": "Confirm",
     "retry": "Retry",
     "create": "Create",
-    "createPR": "Create PR",
     "open": "Open",
     "start": "Start",
     "refresh": "Refresh",
@@ -59,13 +58,15 @@
     "gotIt": "Got it",
     "continue": "Continue",
     "saving": "Saving...",
-    "deleting": "Deleting..."
+    "deleting": "Deleting...",
+    "openPR": "Open PR",
+    "mergePR": "Merge PR",
+    "createPR": "Create PR"
   },
   "actions": {
     "save": "Save",
     "apply": "Apply",
-    "delete": "Delete",
-    "settings": "Settings"
+    "delete": "Delete"
   },
   "os": {
     "windows": "Windows",
@@ -91,16 +92,9 @@
     "deleteSelected": "Delete Selected",
     "archiveSelected": "Archive Selected"
   },
-  "time": {
-    "justNow": "Just now",
-    "minutesAgo": "{{count}}m ago",
-    "hoursAgo": "{{count}}h ago",
-    "daysAgo": "{{count}}d ago"
-  },
   "errors": {
     "generic": "An error occurred",
     "unknownError": "An unknown error occurred",
-    "operationFailed": "Operation failed",
     "networkError": "Network error",
     "notFound": "Not found",
     "unauthorized": "Unauthorized"
@@ -110,19 +104,6 @@
     "swapFrom": "Switched from",
     "swapTo": "to",
     "swapReason": "({{reason}} swap)"
-  },
-  "downloads": {
-    "toggleExpand": "Toggle download details",
-    "downloading": "Downloading {{count}} model",
-    "downloading_plural": "Downloading {{count}} models",
-    "complete": "{{count}} download complete",
-    "complete_plural": "{{count}} downloads complete",
-    "failed": "{{count}} download failed",
-    "failed_plural": "{{count}} downloads failed",
-    "clearAll": "Clear all completed downloads",
-    "done": "Done",
-    "failedLabel": "Failed",
-    "starting": "Starting..."
   },
   "insights": {
     "suggestedTask": "Suggested Task",
@@ -170,6 +151,8 @@
     "sending": "Sending…",
     "thinking": "Thinking…",
     "disclaimer": "Claude is AI and can make mistakes.",
+    "copyResponse": "Copy response",
+    "copied": "Copied",
     "tools": {
       "readingFile": "Reading file",
       "searchingFiles": "Searching files",
@@ -216,70 +199,39 @@
     "errors": {
       "subscription_rejected": "Anthropic rejected this request for your Claude subscription account (HTTP 429), even though your usage is within limits. Subscription accounts must go through Claude Code. Make sure the Claude Code CLI is installed and signed in, or add an Anthropic API key account in Settings → Accounts.",
       "claude_code_missing": "Claude subscription accounts answer through Claude Code, but the Claude Code CLI isn't installed. Install it from claude.ai/download (or via Settings → Developer Tools), then try again."
+    },
+    "taskTools": {
+      "list_tasks": "Listing tasks",
+      "get_task": "Reading a task",
+      "get_task_logs": "Reading task logs",
+      "create_task": "Creating a task",
+      "update_task": "Editing a task",
+      "start_task": "Starting a task",
+      "stop_task": "Stopping a task",
+      "move_task": "Moving a task",
+      "retry_task": "Retrying a task",
+      "request_changes": "Requesting changes",
+      "create_pull_request": "Creating a pull request",
+      "merge_pull_request": "Merging a pull request",
+      "archive_tasks": "Archiving tasks",
+      "unarchive_tasks": "Unarchiving tasks",
+      "delete_task": "Deleting a task"
+    },
+    "kanbanTools": {
+      "label": "Kanban",
+      "off": "Let Claude manage this project's tasks",
+      "on": "Claude can manage this project's tasks"
     }
   },
   "usage": {
     "dataUnavailable": "Usage data unavailable",
     "dataUnavailableDescription": "The usage monitoring endpoint for this provider is not available or not supported.",
     "activeAccount": "Active Account",
-    "usageAlert": "Usage Alert",
-    "accountExceedsThreshold": "Account usage exceeds 90% threshold",
-    "authentication": "Authentication",
-    "authenticationAriaLabel": "Authentication: {{provider}}",
-    "authenticationDetails": "Authentication Details",
-    "apiProfile": "API Profile",
-    "apiKey": "API Key",
-    "oauth": "OAuth",
-    "codex": "Codex",
-    "codexSubscription": "Codex Subscription",
-    "claudeCode": "Claude Code",
-    "claudeCodeSubscription": "Claude Code subscription",
-    "subscription": "Subscription",
-    "provider": "Provider",
-    "providerAnthropic": "Anthropic",
-    "providerZai": "Z.AI",
-    "providerZhipu": "ZHIPU AI",
-    "crossProvider": "Cross-Provider",
-    "crossProviderConfig": "Cross-Provider",
-    "crossProviderUsage": "Cross-Provider Usage",
-    "crossProviderActive": "Cross-Provider Active",
-    "providerOpenRouter": "OpenRouter",
-    "providerUnknown": "Unknown",
-    "providerOpenAI": "OpenAI",
-    "providerGoogle": "Google AI",
-    "providerMistral": "Mistral",
-    "providerGroq": "Groq",
-    "providerXai": "xAI",
-    "providerBedrock": "AWS Bedrock",
-    "providerAzure": "Azure OpenAI",
-    "providerOllama": "Ollama",
-    "providerCustomEndpoint": "Custom Endpoint",
-    "billingSubscription": "Subscription",
-    "billingPayPerUse": "Pay-per-use",
     "apiKeyBadge": "API key",
-    "invalidKeyBadge": "Invalid key",
-    "localBadge": "Local",
-    "apiKeyChecking": "Checking the API key with {{provider}}...",
-    "apiKeyValid": "Pay as you go: {{provider}} bills this key per token, so there's no usage limit to show",
-    "apiKeyInvalid": "{{provider}} rejected this API key. Update or replace it in Accounts",
-    "apiKeyUnreachable": "Couldn't reach {{provider}} to check this API key",
-    "apiKeyUnknown": "Pay as you go: {{provider}} bills this key per token. The key can't be checked from here",
-    "localNoLimits": "Local models run on your machine, with no usage limits",
+    "apiKeyUnknown": "Pay as you go: {{provider}} bills this API profile per token, so there's no usage limit to show",
     "manageAccounts": "Manage accounts",
-    "noUsageMonitoring": "Usage monitoring not available for this provider",
-    "subscriptionBadge": "Subscription",
-    "subscriptionLimitsApply": "Rate limits apply",
-    "subscriptionMonitoringComingSoon": "This subscription account has rate limits, but usage monitoring is not yet available for this provider.",
-    "queuePosition": "Queue Position",
     "inUse": "In Use",
-    "noAccount": "No Account",
-    "noAccountDescription": "Add an account in Settings to get started",
-    "accountName": "Account",
     "profile": "Profile",
-    "id": "ID",
-    "created": "Created",
-    "apiEndpoint": "API Endpoint",
-    "sessionQuota": "Session Quota",
     "notAvailable": "N/A",
     "usageStatusAriaLabel": "Usage status",
     "usageBreakdown": "Usage Breakdown",
@@ -424,87 +376,6 @@
     "branchType": {
       "local": "Local",
       "remote": "Remote"
-    }
-  },
-  "memory": {
-    "types": {
-      "gotcha": "Gotcha",
-      "decision": "Decision",
-      "preference": "Preference",
-      "pattern": "Pattern",
-      "requirement": "Requirement",
-      "error_pattern": "Error Pattern",
-      "module_insight": "Module Insight",
-      "prefetch_pattern": "Prefetch Pattern",
-      "work_state": "Work State",
-      "causal_dependency": "Causal Dependency",
-      "task_calibration": "Task Calibration",
-      "e2e_observation": "E2E Observation",
-      "dead_end": "Dead End",
-      "work_unit_outcome": "Work Unit Outcome",
-      "workflow_recipe": "Workflow Recipe",
-      "context_cost": "Context Cost"
-    },
-    "filters": {
-      "all": "All",
-      "patterns": "Patterns",
-      "errors": "Errors & Gotchas",
-      "decisions": "Decisions",
-      "insights": "Code Insights",
-      "calibration": "Calibration"
-    },
-    "badges": {
-      "needsReview": "Needs Review",
-      "verified": "Verified",
-      "pinned": "Pinned",
-      "confidence": "Confidence"
-    },
-    "sources": {
-      "agent_explicit": "Agent",
-      "observer_inferred": "Observer",
-      "qa_auto": "QA",
-      "mcp_auto": "MCP",
-      "commit_auto": "Commit",
-      "user_taught": "User"
-    },
-    "confidence": "{{value}}% confidence",
-    "search": {
-      "title": "Search memories",
-      "placeholder": "Search memories...",
-      "resultsCount": "{{count}} result found",
-      "resultsCount_plural": "{{count}} results found",
-      "searching": "Searching..."
-    },
-    "browser": {
-      "title": "Memory browser"
-    },
-    "empty": "No memories yet. Memories are automatically created as agents work on tasks.",
-    "emptyFilter": "No memories match the selected filter.",
-    "showAll": "Show all memories",
-    "expand": "Expand",
-    "collapse": "Collapse",
-    "sections": {
-      "whatWorked": "What Worked",
-      "whatFailed": "What Failed",
-      "approach": "Approach",
-      "recommendations": "Recommendations",
-      "patterns": "Patterns",
-      "gotchas": "Gotchas",
-      "changedFiles": "Changed Files",
-      "fileInsights": "File Insights",
-      "subtasksCompleted": "Subtasks Completed",
-      "relatedFiles": "Related Files",
-      "tags": "Tags",
-      "approachTried": "Approach Tried",
-      "whyItFailed": "Why It Failed",
-      "alternativeUsed": "Alternative Used",
-      "steps": "Steps"
-    },
-    "actions": {
-      "verify": "Verify",
-      "pin": "Pin",
-      "unpin": "Unpin",
-      "deprecate": "Remove"
     }
   },
   "projectsPage": {

@@ -53,6 +53,8 @@ export const taskMock = {
     console.warn('[Browser Mock] stopTask called');
   },
 
+  retryTask: async () => ({ success: true, data: { action: 'started' as const } }),
+
   submitReview: async () => ({ success: true }),
 
   // Task archive operations
@@ -74,7 +76,6 @@ export const taskMock = {
 
   checkTaskRunning: async () => ({ success: true, data: false }),
 
-  resumePausedTask: async () => ({ success: true }),
 
   // Worktree change detection
   checkWorktreeChanges: async (_taskId: string) => ({
@@ -104,8 +105,12 @@ export const taskMock = {
   onTaskLog: () => () => {},
   onTaskStatusChange: () => () => {},
   onTaskRateLimitHoldChange: () => () => {},
+  onTaskClaudeRunUpdate: () => () => {},
+  setQueueOrder: () => {},
   onTaskExecutionProgress: () => () => {},
   onTaskLogsChanged: () => () => {},
   onTaskLogsStream: () => () => {},
-  onMergeProgress: () => () => {}
+  onMergeProgress: () => () => {},
+  onMergePRProgress: () => () => {},
+  onTaskListChanged: () => () => {}
 };

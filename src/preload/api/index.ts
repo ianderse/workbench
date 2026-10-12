@@ -2,11 +2,9 @@ import { ProjectAPI, createProjectAPI } from './project-api';
 import { TerminalAPI, createTerminalAPI } from './terminal-api';
 import { TaskAPI, createTaskAPI } from './task-api';
 import { SettingsAPI, createSettingsAPI } from './settings-api';
-import { FileAPI, createFileAPI } from './file-api';
 import { AgentAPI, createAgentAPI } from './agent-api';
 import type { InsightsAPI } from './modules/insights-api';
 import { AppUpdateAPI, createAppUpdateAPI } from './app-update-api';
-import { DebugAPI, createDebugAPI } from './modules/debug-api';
 import { ClaudeCodeAPI, createClaudeCodeAPI } from './modules/claude-code-api';
 import { GraphifyAPI, createGraphifyAPI } from './modules/graphify-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
@@ -18,11 +16,9 @@ export interface ElectronAPI extends
   TerminalAPI,
   TaskAPI,
   SettingsAPI,
-  FileAPI,
   AgentAPI,
   InsightsAPI,
   AppUpdateAPI,
-  DebugAPI,
   ClaudeCodeAPI,
   GraphifyAPI,
   McpAPI,
@@ -36,10 +32,8 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createTerminalAPI(),
   ...createTaskAPI(),
   ...createSettingsAPI(),
-  ...createFileAPI(),
   ...createAgentAPI(),  // Includes: Insights, Shell
   ...createAppUpdateAPI(),
-  ...createDebugAPI(),
   ...createClaudeCodeAPI(),
   ...createGraphifyAPI(),
   ...createMcpAPI(),
@@ -49,35 +43,6 @@ export const createElectronAPI = (): ElectronAPI => ({
 
 // Export individual API creators for potential use in tests or specialized contexts
 // Note: InsightsAPI is included in AgentAPI
-export {
-  createProjectAPI,
-  createTerminalAPI,
-  createTaskAPI,
-  createSettingsAPI,
-  createFileAPI,
-  createAgentAPI,
-  createAppUpdateAPI,
-  createProfileAPI,
-  createDebugAPI,
-  createClaudeCodeAPI,
-  createGraphifyAPI,
-  createMcpAPI,
-  createQueueAPI
-};
+;
 
-export type {
-  ProjectAPI,
-  TerminalAPI,
-  TaskAPI,
-  SettingsAPI,
-  FileAPI,
-  AgentAPI,
-  InsightsAPI,
-  AppUpdateAPI,
-  ProfileAPI,
-  DebugAPI,
-  ClaudeCodeAPI,
-  GraphifyAPI,
-  McpAPI,
-  QueueAPI
-};
+;

@@ -23,25 +23,10 @@ describe('AgentState - Queue Routing', () => {
     });
 
     it('should group tasks by profile', () => {
-      // Add mock processes
-      state.addProcess('task-1', {
-        taskId: 'task-1',
-        process: { pid: 1001 } as unknown as import('child_process').ChildProcess,
-        startedAt: new Date(),
-        spawnId: 1
-      });
-      state.addProcess('task-2', {
-        taskId: 'task-2',
-        process: { pid: 1002 } as unknown as import('child_process').ChildProcess,
-        startedAt: new Date(),
-        spawnId: 2
-      });
-      state.addProcess('task-3', {
-        taskId: 'task-3',
-        process: { pid: 1003 } as unknown as import('child_process').ChildProcess,
-        startedAt: new Date(),
-        spawnId: 3
-      });
+      // Mark tasks as running
+      state.addRunning('task-1');
+      state.addRunning('task-2');
+      state.addRunning('task-3');
 
       // Assign profiles
       state.assignProfileToTask('task-1', 'profile-1', 'Profile 1', 'proactive');
@@ -56,13 +41,8 @@ describe('AgentState - Queue Routing', () => {
     });
 
     it('should use default profile for unassigned tasks', () => {
-      // Add process without profile assignment
-      state.addProcess('task-1', {
-        taskId: 'task-1',
-        process: { pid: 1001 } as unknown as import('child_process').ChildProcess,
-        startedAt: new Date(),
-        spawnId: 1
-      });
+      // Running task without profile assignment
+      state.addRunning('task-1');
 
       const result = state.getRunningTasksByProfile();
 

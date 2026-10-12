@@ -169,22 +169,6 @@ function extractJsxWrapper(change: SemanticChange): [string, string] | null {
   return null;
 }
 
-function extractNewProps(change: SemanticChange): Array<[string, string]> {
-  const props: Array<[string, string]> = [];
-  if (change.contentAfter && change.contentBefore) {
-    const afterProps = [...change.contentAfter.matchAll(/(\w+)=\{([^}]+)\}/g)].map((m) => [m[1], m[2]] as [string, string]);
-    const beforeProps = new Map(
-      [...change.contentBefore.matchAll(/(\w+)=\{([^}]+)\}/g)].map((m) => [m[1], m[2]]),
-    );
-    for (const [name, value] of afterProps) {
-      if (!beforeProps.has(name)) {
-        props.push([name, value]);
-      }
-    }
-  }
-  return props;
-}
-
 function applyContentChange(content: string, oldContent: string | undefined, newContent: string): string {
   if (oldContent && content.includes(oldContent)) {
     return content.replace(oldContent, newContent);

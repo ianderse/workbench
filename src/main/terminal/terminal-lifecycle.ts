@@ -76,7 +76,7 @@ export async function createTerminal(
     // 3. Custom env from TerminalCreateOptions
     const mergedEnv: Record<string, string> = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
 
-    // Point Claude Code's /graphify command at the project's memory graph (.auto-claude/memory)
+    // Point Claude Code's /graphify command at the project's memory graph (.auto-claude/knowledge)
     // instead of graphify-out in the working directory
     const graphifyOut = projectPath && (await hasGraphifyGraph(projectPath)) ? getGraphifyOutDir(projectPath) : undefined;
     if (graphifyOut) mergedEnv.GRAPHIFY_OUT = graphifyOut;
@@ -233,9 +233,8 @@ export async function restoreTerminal(
   // This handles both: showing labels after recovery AND clearing stale labels when worktrees are deleted
   safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_WORKTREE_CONFIG_CHANGE, session.id, terminal.worktreeConfig);
 
-  // Defer Claude resume until terminal becomes active (is viewed by user)
-  // This prevents all terminals from resuming Claude simultaneously on app startup,
-  // which can cause crashes and resource contention.
+  // Defer Claude resume until the terminal's window is shown; the renderer then resumes the
+  // project's windows one after another, since starting them all at once can crash the app.
   //
   // Use storedIsClaudeMode which comes from the persisted store,
   // not the renderer-passed values (renderer always passes isCLIMode: false)
@@ -244,12 +243,12 @@ export async function restoreTerminal(
     // Without this, storedIsClaudeMode would be false on next restore
     terminal.isCLIMode = true;
     // Mark terminal as having a pending Claude resume
-    // The actual resume will be triggered when the terminal becomes active
+    // The actual resume is triggered by the renderer once the window is shown
     terminal.pendingCLIResume = true;
     debugLog('[TerminalLifecycle] Marking terminal for deferred Claude resume:', terminal.id);
 
     // Notify renderer that this terminal has a pending Claude resume
-    // The renderer will trigger the resume when the terminal tab becomes active
+    // The renderer triggers the resume once the window is shown
     // Use safeSendToRenderer with isDestroyed() check to prevent crashes
     safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_PENDING_RESUME, terminal.id);
 

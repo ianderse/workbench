@@ -9,17 +9,6 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * Calculate progress percentage from subtasks
- * @param subtasks Array of subtasks with status
- * @returns Progress percentage (0-100)
- */
-export function calculateProgress(subtasks: { status: string }[]): number {
-  if (subtasks.length === 0) return 0;
-  const completed = subtasks.filter((s) => s.status === 'completed').length;
-  return Math.round((completed / subtasks.length) * 100);
-}
-
-/**
  * Format a date as a relative time string
  * @param date Date to format
  * @returns Relative time string (e.g., "2 hours ago")

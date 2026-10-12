@@ -60,10 +60,3 @@ export const LIGHT_TERMINAL_THEME = {
 export function getTerminalTheme(): typeof DEFAULT_TERMINAL_THEME | typeof LIGHT_TERMINAL_THEME {
   return document.documentElement.classList.contains('dark') ? DEFAULT_TERMINAL_THEME : LIGHT_TERMINAL_THEME;
 }
-
-/**
- * Type for terminal theme with optional cursorAccent override
- */
-export type TerminalTheme = typeof DEFAULT_TERMINAL_THEME & {
-  cursorAccent?: string;
-};

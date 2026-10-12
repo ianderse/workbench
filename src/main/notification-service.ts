@@ -4,7 +4,7 @@ import { readSettingsFile } from './settings-utils';
 import { DEFAULT_APP_SETTINGS } from '../shared/constants';
 import type { NotificationSettings } from '../shared/types';
 
-export type NotificationType = 'task-complete' | 'task-failed' | 'review-needed';
+type NotificationType = 'task-complete' | 'task-failed' | 'review-needed';
 
 interface NotificationOptions {
   title: string;

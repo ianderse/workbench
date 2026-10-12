@@ -161,39 +161,10 @@ describe('TaskStateManager', () => {
   });
 
   describe('handleUiEvent', () => {
-    it('should send PLAN_APPROVED event correctly', () => {
-      // First, set up the task in plan_review state
-      const planningEvent = {
-        type: 'PLANNING_STARTED',
-        taskId: mockTask.id,
-        specId: mockTask.specId,
-        projectId: mockProject.id,
-        timestamp: new Date().toISOString(),
-        eventId: 'evt-1',
-        sequence: 0
-      };
-
-      const planCompleteEvent = {
-        type: 'PLANNING_COMPLETE',
-        taskId: mockTask.id,
-        specId: mockTask.specId,
-        projectId: mockProject.id,
-        timestamp: new Date().toISOString(),
-        eventId: 'evt-2',
-        sequence: 1,
-        hasSubtasks: true,
-        subtaskCount: 1,
-        requireReviewBeforeCoding: true // This will cause plan_review state
-      };
-
-      manager.handleTaskEvent(mockTask.id, planningEvent, mockTask, mockProject);
-      manager.handleTaskEvent(mockTask.id, planCompleteEvent, mockTask, mockProject);
-
-      // Now send PLAN_APPROVED
-      manager.handleUiEvent(mockTask.id, { type: 'PLAN_APPROVED' }, mockTask, mockProject);
-
-      // The actor should now be in 'coding' state
-      // We can't easily check the state directly, but we can verify no errors occurred
+    it('should send USER_RESUMED from human_review into coding', () => {
+      const reviewTask = createMockTask({ status: 'human_review', reviewReason: 'completed' });
+      manager.handleUiEvent(reviewTask.id, { type: 'USER_RESUMED' }, reviewTask, mockProject);
+      expect(manager.getCurrentState(reviewTask.id)).toBe('coding');
     });
 
     it('should send USER_STOPPED event correctly', () => {
@@ -226,16 +197,7 @@ describe('TaskStateManager', () => {
       expect(result).toBe(true);
     });
 
-    it('should handle in_progress status with plan_review', () => {
-      const taskInPlanReview = createMockTask({
-        status: 'human_review',
-        reviewReason: 'plan_review'
-      });
-      const result = manager.handleManualStatusChange(mockTask.id, 'in_progress', taskInPlanReview, mockProject);
-      expect(result).toBe(true);
-    });
-
-    it('should handle in_progress status without plan_review', () => {
+    it('should handle in_progress status from human_review', () => {
       const stoppedTask = createMockTask({
         status: 'human_review',
         reviewReason: 'stopped'
@@ -398,8 +360,7 @@ describe('TaskStateManager', () => {
       // This should transition to error state
     });
 
-    it('should NOT mark exit code 0 as unexpected (plan_review stays intact)', () => {
-      // Simulate: PLANNING_STARTED → PLANNING_COMPLETE (requireReview) → process exits code 0
+    it('should NOT mark exit code 0 as unexpected', () => {
       const planningStarted = {
         type: 'PLANNING_STARTED',
         taskId: mockTask.id,
@@ -409,70 +370,26 @@ describe('TaskStateManager', () => {
         eventId: 'evt-1',
         sequence: 0
       };
-
-      const planningComplete = {
-        type: 'PLANNING_COMPLETE',
-        taskId: mockTask.id,
-        specId: mockTask.specId,
-        projectId: mockProject.id,
-        timestamp: new Date().toISOString(),
-        eventId: 'evt-2',
-        sequence: 1,
-        hasSubtasks: false,
-        subtaskCount: 0,
-        requireReviewBeforeCoding: true
-      };
-
       manager.handleTaskEvent(mockTask.id, planningStarted, mockTask, mockProject);
-      manager.handleTaskEvent(mockTask.id, planningComplete, mockTask, mockProject);
-
-      // XState should be in plan_review now
-      expect(manager.getCurrentState(mockTask.id)).toBe('plan_review');
-
-      // Process exits with code 0 - should NOT transition to error
       manager.handleProcessExited(mockTask.id, 0, mockTask, mockProject);
-
-      // PLANNING_COMPLETE is a terminal event, so handleProcessExited should skip entirely
-      // Task should remain in plan_review
-      expect(manager.getCurrentState(mockTask.id)).toBe('plan_review');
+      expect(manager.getCurrentState(mockTask.id)).toBe('planning');
     });
 
-    it('should treat PLANNING_COMPLETE as a terminal event', () => {
-      // PLANNING_COMPLETE should prevent handleProcessExited from running
-      const planningStarted = {
-        type: 'PLANNING_STARTED',
+    it('should treat QA_FAILED (validation failed) as a terminal event', () => {
+      const base = {
         taskId: mockTask.id,
         specId: mockTask.specId,
         projectId: mockProject.id,
         timestamp: new Date().toISOString(),
-        eventId: 'evt-1',
-        sequence: 0
       };
+      manager.handleTaskEvent(mockTask.id, { ...base, type: 'PLANNING_STARTED', eventId: 'evt-1', sequence: 0 }, mockTask, mockProject);
+      manager.handleTaskEvent(mockTask.id, { ...base, type: 'QA_STARTED', eventId: 'evt-2', sequence: 1, iteration: 1, maxIterations: 1 }, mockTask, mockProject);
+      manager.handleTaskEvent(mockTask.id, { ...base, type: 'QA_FAILED', eventId: 'evt-3', sequence: 2, iteration: 1, issueCount: 1, issues: ['x'] }, mockTask, mockProject);
+      expect(manager.getCurrentState(mockTask.id)).toBe('human_review');
 
-      const planningComplete = {
-        type: 'PLANNING_COMPLETE',
-        taskId: mockTask.id,
-        specId: mockTask.specId,
-        projectId: mockProject.id,
-        timestamp: new Date().toISOString(),
-        eventId: 'evt-2',
-        sequence: 1,
-        hasSubtasks: true,
-        subtaskCount: 3,
-        requireReviewBeforeCoding: false
-      };
-
-      manager.handleTaskEvent(mockTask.id, planningStarted, mockTask, mockProject);
-      manager.handleTaskEvent(mockTask.id, planningComplete, mockTask, mockProject);
-
-      // XState should be in coding (no review required)
-      expect(manager.getCurrentState(mockTask.id)).toBe('coding');
-
-      // Process exits with code 1 - should still skip because PLANNING_COMPLETE is terminal
+      // A non-zero exit after the terminal event doesn't move the task to error
       manager.handleProcessExited(mockTask.id, 1, mockTask, mockProject);
-
-      // Task should remain in coding, NOT transition to error
-      expect(manager.getCurrentState(mockTask.id)).toBe('coding');
+      expect(manager.getCurrentState(mockTask.id)).toBe('human_review');
     });
   });
 
@@ -525,6 +442,46 @@ describe('TaskStateManager', () => {
     });
   });
 
+  describe('status change listener', () => {
+    afterEach(() => {
+      manager.setStatusChangeListener(null);
+    });
+
+    it('reports every status the machine emits (used by the task queue)', () => {
+      const listener = vi.fn();
+      manager.setStatusChangeListener(listener);
+      const codingTask = createMockTask({
+        status: 'in_progress',
+        executionProgress: { phase: 'coding', phaseProgress: 50, overallProgress: 50 }
+      });
+
+      manager.handleUiEvent(codingTask.id, { type: 'USER_STOPPED', hasPlan: true }, codingTask, mockProject);
+
+      expect(listener).toHaveBeenLastCalledWith(codingTask.id, 'human_review', mockProject.id);
+    });
+
+    it('reports a failed run leaving In Progress', () => {
+      const listener = vi.fn();
+      manager.setStatusChangeListener(listener);
+      const codingTask = createMockTask({
+        status: 'in_progress',
+        executionProgress: { phase: 'coding', phaseProgress: 50, overallProgress: 50 }
+      });
+
+      manager.handleProcessExited(codingTask.id, 1, codingTask, mockProject);
+
+      expect(listener).toHaveBeenLastCalledWith(codingTask.id, 'human_review', mockProject.id);
+    });
+
+    it('keeps emitting when the listener throws', () => {
+      manager.setStatusChangeListener(() => {
+        throw new Error('boom');
+      });
+      expect(() => manager.handleUiEvent(mockTask.id, { type: 'PLANNING_STARTED' }, mockTask, mockProject)).not.toThrow();
+      expect(manager.getCurrentState(mockTask.id)).toBe('planning');
+    });
+  });
+
   describe('actor state restoration', () => {
     it('should restore actor state from task with in_progress status', () => {
       const taskInProgress = createMockTask({
@@ -550,16 +507,10 @@ describe('TaskStateManager', () => {
       // No error should occur
     });
 
-    it('should restore actor state from task with human_review/plan_review', () => {
-      const taskInPlanReview = createMockTask({
-        status: 'human_review',
-        reviewReason: 'plan_review'
-      });
-
-      // Actor should be created in plan_review state
-      manager.handleUiEvent(taskInPlanReview.id, { type: 'PLAN_APPROVED' }, taskInPlanReview, mockProject);
-
-      // Should transition from plan_review to coding without error
+    it('should restore actor state from task with human_review status', () => {
+      const reviewTask = createMockTask({ status: 'human_review', reviewReason: 'qa_rejected' });
+      manager.handleUiEvent(reviewTask.id, { type: 'MARK_DONE' }, reviewTask, mockProject);
+      expect(manager.getCurrentState(reviewTask.id)).toBe('done');
     });
 
     it('should restore actor state from task with error status', () => {

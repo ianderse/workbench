@@ -7,13 +7,11 @@ import type {
   InsightsModelConfig,
   ImageAttachment
 } from '../../shared/types';
-import type { TaskCategory, TaskComplexity, TaskMetadata } from '../../shared/types/task';
-import { InsightsConfig } from './config';
 import { detectRateLimit, createSDKRateLimitInfo } from '../rate-limit-detector';
-import { runInsights } from '../ai/runners/insights-claude-code';
+import { runInsights } from './claude-code-runner';
 import { getGraphifyPromptContext } from '../graphify';
 import { projectStore } from '../project-store';
-import type { ModelShorthand } from '../ai/config/types';
+import { openTaskToolsSession } from './task-tools-server';
 
 /**
  * Message processor result
@@ -25,16 +23,13 @@ interface ProcessorResult {
 }
 
 /**
- * TypeScript executor for insights
- * Handles running the TypeScript insights runner via Vercel AI SDK
+ * Executor for insights: runs each chat turn through Claude Code
  */
 export class InsightsExecutor extends EventEmitter {
-  private config: InsightsConfig;
   private abortControllers: Map<string, AbortController> = new Map();
 
-  constructor(config: InsightsConfig) {
+  constructor() {
     super();
-    this.config = config;
   }
 
   /**
@@ -57,7 +52,7 @@ export class InsightsExecutor extends EventEmitter {
   }
 
   /**
-   * Execute insights query using TypeScript runner (Vercel AI SDK)
+   * Execute an insights query through Claude Code
    */
   async execute(
     projectId: string,
@@ -85,9 +80,8 @@ export class InsightsExecutor extends EventEmitter {
     let accumulatedText = '';
     let allOutput = '';
 
-    // Map InsightsModelConfig to ModelShorthand/ThinkingLevel
-    const modelShorthand: ModelShorthand = (modelConfig?.model as ModelShorthand) ?? 'sonnet';
-    const thinkingLevel: 'low' | 'medium' | 'high' | 'xhigh' = modelConfig?.thinkingLevel ?? 'medium';
+    const model = modelConfig?.model || 'sonnet';
+    const thinkingLevel = modelConfig?.thinkingLevel ?? 'medium';
 
     // Map history to InsightsMessage format
     const history = conversationHistory
@@ -97,9 +91,19 @@ export class InsightsExecutor extends EventEmitter {
         content: m.content,
       }));
 
+    // With the Kanban button on, Claude can manage the project's tasks; the board reloads when a
+    // tool changes them
+    const taskTools = modelConfig?.kanbanTools
+      ? await openTaskToolsSession({
+        projectId,
+        onTasksChanged: () => this.emit('tasks-changed', projectId),
+      }).catch(() => undefined)
+      : undefined;
+
     try {
+      const projectSettings = projectStore.getProject(projectId)?.settings;
       // The project's memory graph, searchable from the chat when its "Use Graphify" setting is on
-      const graphify = projectStore.getProject(projectId)?.settings?.useGraphify
+      const graphify = projectSettings?.useGraphify
         ? (await getGraphifyPromptContext(projectPath)) ?? undefined
         : undefined;
       const result = await runInsights(
@@ -107,11 +111,13 @@ export class InsightsExecutor extends EventEmitter {
           projectDir: projectPath,
           message,
           history,
-          modelShorthand,
+          model,
           thinkingLevel,
           abortSignal: controller.signal,
           attachments: images,
           graphify,
+          profileId: projectSettings?.claudeProfileId,
+          taskTools: taskTools?.mcpServer,
         },
         (event) => {
           switch (event.type) {
@@ -159,13 +165,9 @@ export class InsightsExecutor extends EventEmitter {
 
       // Extract task suggestion from the full result
       if (result.taskSuggestion) {
-        const task: { title: string; description: string; metadata?: TaskMetadata } = {
+        const task = {
           title: result.taskSuggestion.title,
           description: result.taskSuggestion.description,
-          metadata: {
-            category: result.taskSuggestion.metadata.category as TaskCategory,
-            complexity: result.taskSuggestion.metadata.complexity as TaskComplexity,
-          },
         };
         suggestedTasks.push(task);
         this.emit('stream-chunk', projectId, {
@@ -211,6 +213,8 @@ export class InsightsExecutor extends EventEmitter {
 
       this.emit('error', projectId, errorMsg);
       throw error;
+    } finally {
+      taskTools?.close();
     }
   }
 

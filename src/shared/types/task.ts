@@ -2,8 +2,9 @@
  * Task-related types
  */
 
-import type { ThinkingLevel, PhaseModelConfig, PhaseThinkingConfig } from './settings';
+import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
+import type { ClaudeRunInfo } from './claude-code';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -14,8 +15,7 @@ export type TaskOrderState = Record<TaskStatus, string[]>;
 // - 'completed': All subtasks done and QA passed, ready for final approval/merge
 // - 'errors': Subtasks failed during execution
 // - 'qa_rejected': QA found issues that need fixing
-// - 'plan_review': Spec/plan created and awaiting approval before coding starts
-export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'plan_review' | 'stopped';
+export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'stopped';
 
 export type SubtaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
@@ -49,13 +49,13 @@ export interface Subtask {
   };
 }
 
-export interface QAReport {
+interface QAReport {
   status: 'passed' | 'failed' | 'pending';
   issues: QAIssue[];
   timestamp: Date;
 }
 
-export interface QAIssue {
+interface QAIssue {
   id: string;
   severity: 'critical' | 'major' | 'minor';
   description: string;
@@ -65,7 +65,8 @@ export interface QAIssue {
 
 // Task Log Types - for persistent, phase-based logging
 export type TaskLogPhase = 'planning' | 'coding' | 'validation';
-export type TaskLogPhaseStatus = 'pending' | 'active' | 'completed' | 'failed';
+/** `stopped`: the run was stopped (Stop, app quit) before the step finished; not a failure */
+export type TaskLogPhaseStatus = 'pending' | 'active' | 'completed' | 'failed' | 'stopped';
 export type TaskLogEntryType = 'text' | 'tool_start' | 'tool_end' | 'phase_start' | 'phase_end' | 'error' | 'success' | 'info';
 
 export interface TaskLogEntry {
@@ -75,6 +76,8 @@ export interface TaskLogEntry {
   phase: TaskLogPhase;
   tool_name?: string;
   tool_input?: string;
+  /** Claude Code tool call id: pairs a tool_start with its tool_end (newer logs only) */
+  tool_use_id?: string;
   subtask_id?: string;
   session?: number;
   // Fields for expandable detail view
@@ -127,60 +130,23 @@ export interface ImageAttachment {
   thumbnail?: string;   // Base64 thumbnail for preview
 }
 
-// Referenced file types for task creation (files/folders from project)
-export interface ReferencedFile {
-  id: string;           // Unique identifier (UUID)
-  path: string;         // Relative path from project root
-  name: string;         // File or folder name
-  isDirectory: boolean; // True if this is a directory
-  addedAt: Date;        // When the file was added as reference
-}
-
 // Draft state for task creation (auto-saved when dialog closes)
 export interface TaskDraft {
   projectId: string;
   title: string;
   description: string;
-  category: TaskCategory | '';
-  priority: TaskPriority | '';
-  complexity: TaskComplexity | '';
-  impact: TaskImpact | '';
-  profileId?: string;  // Agent profile ID ('auto', 'complex', 'balanced', 'quick', 'custom')
-  model: ModelType | '';
-  thinkingLevel: ThinkingLevel | '';
-  // Auto profile - per-phase configuration
-  phaseModels?: PhaseModelConfig;
-  phaseThinking?: PhaseThinkingConfig;
   images: ImageAttachment[];
-  referencedFiles: ReferencedFile[];
-  requireReviewBeforeCoding?: boolean;
-  fastMode?: boolean;
   mcpConnectors?: string[];
   pushNewBranches?: boolean;
   savedAt: Date;
 }
 
-// Task metadata from ideation or manual entry
-export type TaskComplexity = 'trivial' | 'small' | 'medium' | 'large' | 'complex';
-export type TaskImpact = 'low' | 'medium' | 'high' | 'critical';
-export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 // Re-export ThinkingLevel (defined in settings.ts) for convenience
 export type { ThinkingLevel };
 /** Model identifier — Claude shorthands or concrete model IDs from any provider */
 export type ModelType = string;
-export type TaskCategory =
-  | 'feature'
-  | 'bug_fix'
-  | 'refactoring'
-  | 'documentation'
-  | 'security'
-  | 'performance'
-  | 'ui_ux'
-  | 'infrastructure'
-  | 'testing';
-
 export interface TaskMetadata {
-  // The description the user entered (shown on the task card; spec agents may rewrite requirements.json)
+  // The description the user entered (shown on the task card)
   userDescription?: string;
 
   // Origin tracking
@@ -193,12 +159,6 @@ export interface TaskMetadata {
   githubUrl?: string;  // GitHub issue URL
   githubBatchTheme?: string;  // Theme/title of the GitHub issue batch
 
-  // Classification
-  category?: TaskCategory;
-  complexity?: TaskComplexity;
-  impact?: TaskImpact;
-  priority?: TaskPriority;
-
   // Context
   rationale?: string;  // Why this task matters
   problemSolved?: string;  // What problem this addresses
@@ -209,11 +169,7 @@ export interface TaskMetadata {
   dependencies?: string[];  // Other features/tasks this depends on
   acceptanceCriteria?: string[];  // What defines "done"
 
-  // Effort estimation
-  estimatedEffort?: TaskComplexity;
-
   // Type-specific metadata (from different idea types)
-  securitySeverity?: 'low' | 'medium' | 'high' | 'critical';
   performanceCategory?: string;
   uiuxCategory?: string;
   codeQualitySeverity?: 'suggestion' | 'minor' | 'major' | 'critical';
@@ -221,22 +177,6 @@ export interface TaskMetadata {
   // Image attachments (screenshots, mockups, diagrams)
   attachedImages?: ImageAttachment[];
 
-  // Referenced files (files/folders from project for context)
-  referencedFiles?: ReferencedFile[];
-
-  // Review settings
-  requireReviewBeforeCoding?: boolean;  // Require human review of spec/plan before coding starts
-
-  // Agent configuration (from agent profile or manual selection)
-  model?: ModelType;  // Claude model to use (haiku, sonnet, opus) - used when not auto profile
-  thinkingLevel?: ThinkingLevel;  // Thinking budget level (low, medium, high)
-  provider?: string;  // Active provider when task was created (anthropic, openai, google, etc.)
-  // Auto profile - per-phase model configuration
-  isAutoProfile?: boolean;  // True when using Auto (Optimized) profile
-  phaseModels?: PhaseModelConfig;  // Per-phase model configuration
-  phaseThinking?: PhaseThinkingConfig;  // Per-phase thinking configuration
-  phaseProviders?: Record<string, string>;  // Per-phase provider preference (cross-provider mode)
-  fastMode?: boolean;  // Fast Mode — faster Opus 4.6 output, higher cost per token
   // MCP connectors enabled for this task (ids: context7, memory, electron, puppeteer, custom ids).
   // Copied from the Connectors defaults when the task is created; unset means use the defaults
   mcpConnectors?: string[];
@@ -244,6 +184,7 @@ export interface TaskMetadata {
   // Git/Worktree configuration
   baseBranch?: string;  // Override base branch for this task's worktree
   prUrl?: string;  // GitHub PR URL if task has been submitted as a PR
+  prState?: PullRequestState;  // The PR's last known state (set when created or merged, read once from GitHub otherwise)
   useWorktree?: boolean;  // If false, use direct mode (no worktree isolation) - default is true for safety
   useLocalBranch?: boolean;  // If true, use the local branch directly instead of preferring origin/branch (preserves gitignored files)
   pushNewBranches?: boolean;  // If false, keep the task branch local-only instead of auto-pushing to origin
@@ -289,6 +230,7 @@ export interface Task {
   location?: 'main' | 'worktree';  // Where task was loaded from (main project or worktree)
   specsPath?: string;  // Full path to specs directory for this task
   rateLimitHold?: RateLimitHold;  // Set while the task is queued waiting for a rate-limit reset
+  claudeRun?: ClaudeRunInfo;  // Claude Code run state (claude_run.json): triage, plan, session, phases, validation
   createdAt: Date;
   updatedAt: Date;
 }
@@ -320,7 +262,7 @@ export interface ImplementationPlan {
   rateLimitHold?: RateLimitHold | null;  // Persisted rate-limit hold (see RateLimitHold)
 }
 
-export interface Phase {
+interface Phase {
   phase: number;
   name: string;
   type: string;
@@ -355,23 +297,11 @@ export interface WorktreeStatus {
   deletions?: number;
 }
 
-export interface WorktreeDiff {
-  files: WorktreeDiffFile[];
-  summary: string;
-}
-
-export interface WorktreeDiffFile {
-  path: string;
-  status: 'added' | 'modified' | 'deleted' | 'renamed';
-  additions: number;
-  deletions: number;
-}
-
 // Conflict severity levels from merge system
 export type ConflictSeverity = 'none' | 'low' | 'medium' | 'high' | 'critical';
 
 // Type of conflict
-export type ConflictType = 'semantic' | 'git';
+type ConflictType = 'semantic' | 'git';
 
 // Information about a detected conflict
 export interface MergeConflict {
@@ -386,7 +316,7 @@ export interface MergeConflict {
 }
 
 // Path-mapped file that needs AI merge due to rename
-export interface PathMappedAIMerge {
+interface PathMappedAIMerge {
   oldPath: string;
   newPath: string;
   reason: string;
@@ -397,7 +327,7 @@ export interface PathMappedAIMerge {
 // - 'superseded': Target has newer version of same feature
 // - 'diverged': Standard diverged branches (AI can resolve)
 // - 'normal_conflict': Actual conflicting changes
-export type ConflictScenario = 'already_merged' | 'superseded' | 'diverged' | 'normal_conflict';
+type ConflictScenario = 'already_merged' | 'superseded' | 'diverged' | 'normal_conflict';
 
 // Git-level conflict information (branch divergence)
 export interface GitConflictInfo {
@@ -433,7 +363,7 @@ export interface MergeStats {
 }
 
 // Merge progress tracking (for progress bar during merge operations)
-export type MergeStage = 'analyzing' | 'detecting_conflicts' | 'resolving' | 'validating' | 'complete' | 'error';
+type MergeStage = 'analyzing' | 'detecting_conflicts' | 'resolving' | 'validating' | 'complete' | 'error';
 
 export interface MergeProgress {
   stage: MergeStage;
@@ -444,16 +374,6 @@ export interface MergeProgress {
     conflicts_resolved?: number;
     current_file?: string;
   };
-}
-
-// Merge log entry (for conflict resolution logging)
-export type MergeLogEntryType = 'info' | 'success' | 'warning' | 'error';
-
-export interface MergeLogEntry {
-  timestamp: string;
-  type: MergeLogEntryType;
-  message: string;
-  details?: string;
 }
 
 export interface WorktreeMergeResult {
@@ -499,6 +419,36 @@ export interface WorktreeCreatePROptions {
   draft?: boolean;
 }
 
+/** A pull request's state on GitHub */
+export type PullRequestState = 'open' | 'merged' | 'closed';
+
+/** Options for merging a task's pull request */
+export interface WorktreeMergePROptions {
+  /** Branch to merge into; the PR's current base when omitted */
+  targetBranch?: string;
+}
+
+/** Steps of merging a task's pull request (progress events) */
+export type MergePRStep = 'checking' | 'pulling' | 'resolving' | 'verifying' | 'pushing' | 'merging';
+
+export interface MergePRProgress {
+  step: MergePRStep;
+  params?: Record<string, string | number>;
+}
+
+/** Result of merging a task's pull request */
+export interface WorktreeMergePRResult {
+  success: boolean;
+  /** The PR was already merged */
+  alreadyMerged?: boolean;
+  targetBranch?: string;
+  /** Files whose conflicts Claude Code resolved */
+  conflictedFiles?: string[];
+  /** Claude Code's account of the conflict resolution */
+  summary?: string;
+  error?: string;
+}
+
 /**
  * Result of creating a PR from a worktree
  */
@@ -534,16 +484,6 @@ export interface WorktreeListResult {
   worktrees: WorktreeListItem[];
 }
 
-// Stuck task recovery types
-export interface StuckTaskInfo {
-  taskId: string;
-  specId: string;
-  title: string;
-  status: TaskStatus;
-  isActuallyRunning: boolean;
-  lastUpdated: Date;
-}
-
 export interface TaskRecoveryResult {
   taskId: string;
   recovered: boolean;
@@ -555,12 +495,6 @@ export interface TaskRecoveryResult {
 export interface TaskRecoveryOptions {
   targetStatus?: TaskStatus;
   autoRestart?: boolean;
-}
-
-export interface TaskProgressUpdate {
-  taskId: string;
-  plan: ImplementationPlan;
-  currentSubtask?: string;
 }
 
 export interface TaskStartOptions {

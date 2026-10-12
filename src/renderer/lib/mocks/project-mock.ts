@@ -26,6 +26,17 @@ export const projectMock = {
     data: mockProjects
   }),
 
+  getProjectCostMetrics: async () => ({
+    success: true,
+    data: mockProjects.map((project) => ({
+      projectId: project.id,
+      name: project.name,
+      path: project.path,
+      taskCount: 0,
+      totalCostUsd: 0
+    }))
+  }),
+
   updateProjectSettings: async () => ({ success: true }),
 
   initializeProject: async () => ({
@@ -74,17 +85,6 @@ export const projectMock = {
   }),
 
   getDefaultProjectLocation: async () => '/Users/demo/projects',
-
-  // File explorer operations
-  listDirectory: async () => ({
-    success: true,
-    data: []
-  }),
-
-  readFile: async () => ({
-    success: true,
-    data: ''
-  }),
 
   // Git operations
   getGitBranches: async () => ({

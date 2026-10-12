@@ -14,6 +14,7 @@ import { getClaudeProfileManager } from '../claude-profile-manager';
 import { readSettingsFile } from '../settings-utils';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import type { SupportedTerminal } from '../../shared/types/settings';
+import { withClaudeConfigDir } from '../claude-profile/config-dir-paths';
 
 // Windows shell paths are now imported from the platform module via getWindowsShellPaths()
 
@@ -81,7 +82,7 @@ const PTY_EXIT_TIMEOUT_UNIX = 500;
  * Returns a promise that resolves when the PTY's onExit event fires.
  * Has a timeout fallback in case the exit event never fires.
  */
-export function waitForPtyExit(terminalId: string, timeoutMs?: number): Promise<void> {
+function waitForPtyExit(terminalId: string, timeoutMs?: number): Promise<void> {
   const timeout = timeoutMs ?? (isWindows() ? PTY_EXIT_TIMEOUT_WINDOWS : PTY_EXIT_TIMEOUT_UNIX);
 
   return new Promise<void>((resolve) => {
@@ -186,7 +187,8 @@ export function spawnPtyProcess(
     cols,
     rows,
     cwd: cwd || os.homedir(),
-    env: {
+    // Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR
+    env: withClaudeConfigDir({
       ...cleanEnv,
       ...profileEnv,
       TERM: 'xterm-256color',
@@ -194,7 +196,7 @@ export function spawnPtyProcess(
       // Suppress zsh's partial line indicator (%) that appears when output
       // doesn't end with a newline. This prevents rendering artifacts in the terminal.
       PROMPT_EOL_MARK: '',
-    },
+    }),
   });
 
   return { pty: ptyProcess, shellType };
@@ -223,6 +225,8 @@ export function setupPtyHandlers(
     // can still flush output while it dies; it must not reach the replacement terminal
     // that reuses its id
     if (terminals.get(id) !== terminal) return;
+    // Following a running task's session: the window shows the session, not the idle shell
+    if (terminal.follower) return;
 
     // Append to output buffer (limit to 100KB)
     terminal.outputBuffer = (terminal.outputBuffer + data).slice(-100000);

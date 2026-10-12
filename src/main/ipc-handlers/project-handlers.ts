@@ -10,9 +10,12 @@ import type {
   InitializationResult,
   AutoBuildVersionInfo,
   GitStatus,
-  GitBranchDetail
+  GitBranchDetail,
+  ProjectCostMetrics
 } from '../../shared/types';
 import { projectStore } from '../project-store';
+import { getProjectCostMetrics } from '../project-metrics';
+import { migrateProjectDataDirs } from '../data-dir-migration';
 import {
   initializeProject,
   isInitialized,
@@ -203,12 +206,26 @@ export function registerProjectHandlers(
         }
 
         const project = projectStore.addProject(projectPath);
+        // A project used by an older version may still have the old data folder names
+        await migrateProjectDataDirs(project.path, project.autoBuildPath);
         return { success: true, data: project };
       } catch (error) {
         return {
           success: false,
           error: error instanceof Error ? error.message : 'Unknown error'
         };
+      }
+    }
+  );
+
+  // Spending per initialized project (Settings > Accounts > Metrics)
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECT_COST_METRICS,
+    async (): Promise<IPCResult<ProjectCostMetrics[]>> => {
+      try {
+        return { success: true, data: await getProjectCostMetrics(projectStore.getProjects()) };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
       }
     }
   );

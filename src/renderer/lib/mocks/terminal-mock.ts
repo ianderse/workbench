@@ -26,6 +26,10 @@ export const terminalMock = {
     console.warn('[Browser Mock] invokeCLIInTerminal called');
   },
 
+  resumeTaskSessionInTerminal: () => {
+    console.warn('[Browser Mock] resumeTaskSessionInTerminal called');
+  },
+
   generateTerminalName: async () => ({
     success: true,
     data: 'Mock Terminal'

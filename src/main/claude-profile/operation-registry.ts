@@ -52,7 +52,7 @@ export type OperationType =
  * - Subscribe to 'operation-restarted' events to know when to refresh
  * - If you must hold a reference, listen for 'operation-restarted' and refresh it
  */
-export interface RegisteredOperation {
+interface RegisteredOperation {
   /** Unique operation ID */
   id: string;
   /** Type of operation */
@@ -80,23 +80,6 @@ export interface RegisteredOperation {
    * Called before restart if provided.
    */
   stopFn?: () => void | Promise<void>;
-}
-
-/**
- * Events emitted by the operation registry
- *
- * NOTE: This interface is defined for documentation purposes only. It describes the event types
- * that ClaudeOperationRegistry can emit, but is not currently enforced at the type system level.
- * EventEmitter uses runtime event names, so type-safe event binding would require additional
- * type assertion infrastructure. This interface serves as documentation for consumers of the
- * operation registry to know which events are available and their callback signatures.
- */
-export interface OperationRegistryEvents {
-  'operation-registered': (operation: RegisteredOperation) => void;
-  'operation-unregistered': (operationId: string, type: OperationType) => void;
-  'operation-restarted': (operationId: string, oldProfileId: string, newProfileId: string) => void;
-  'operations-restarted': (count: number, oldProfileId: string, newProfileId: string) => void;
-  'operation-profile-updated': (operationId: string, oldProfileId: string, newProfileId: string) => void;
 }
 
 /**
@@ -479,6 +462,7 @@ export function getOperationRegistry(): ClaudeOperationRegistry {
 
 /**
  * Reset the registry (for testing)
+ * @internal Test hook
  */
 export function resetOperationRegistry(): void {
   if (registryInstance) {

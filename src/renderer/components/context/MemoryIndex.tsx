@@ -11,7 +11,7 @@ import { useMemoryGraphStore } from '../../stores/memory-graph-store';
 import type { GraphifyIndexInfo } from '../../../shared/types/cli';
 
 /**
- * The memory index row: builds a Graphify graph of the project's code into .auto-claude/memory,
+ * The Knowledge index row: builds a Graphify graph of the project's code into .auto-claude/knowledge,
  * placed under the project index in the Project page's Project section.
  */
 export function MemoryIndexRows({ projectId, useGraphify }: { projectId: string; useGraphify: boolean }) {
@@ -97,12 +97,6 @@ export function MemoryIndexRows({ projectId, useGraphify }: { projectId: string;
             </StatusIndicator>
           }
           description={error || undefined}
-        />
-      )}
-
-      {isBuilding && (
-        <SettingsRow
-          label={<StatusIndicator state="loading">{t('projectPages.context.buildingMemoryIndex')}</StatusIndicator>}
         />
       )}
     </>

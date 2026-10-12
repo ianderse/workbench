@@ -4,7 +4,7 @@
  */
 
 import type { ClaudeUsageData } from '../../shared/types';
-import { isValidTimeZone, parseLimitResetTime } from '../ai/session/claude-limit';
+import { isValidTimeZone, parseLimitResetTime } from '../claude-code/limit';
 
 /**
  * Regex to parse /usage command output

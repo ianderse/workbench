@@ -2,25 +2,31 @@
  * IPC (Inter-Process Communication) types for Electron API
  */
 
+/** A task's Claude Code session to resume in an agent window (`claude --resume <sessionId>`) */
+export interface TerminalTaskSessionOptions {
+  /** Claude Code session id of the task run */
+  sessionId: string;
+  /** Directory to resume in (the task's worktree, where the session ran) */
+  cwd: string;
+  /** Claude profile the session ran on */
+  profileId?: string;
+  /** Claude config dir that holds the session transcript */
+  configDir?: string;
+  /** Task the session belongs to: while it runs, the window follows the session read-only */
+  taskId?: string;
+}
+
 import type { IPCResult } from './common';
 import type { KanbanPreferences } from './kanban';
-import type { SupportedIDE, SupportedTerminal } from './settings';
 import type {
   Project,
   ProjectSettings,
   AutoBuildVersionInfo,
   InitializationResult,
   CreateProjectFolderResult,
-  FileNode,
   ProjectContextData,
   ProjectIndex,
-  MemorySystemStatus,
-  ContextSearchResult,
-  RendererMemory,
   ProjectEnvConfig,
-  InfrastructureStatus,
-  MemoryValidationResult,
-  MemoryConnectionTestResult,
   GitStatus,
   CustomMcpServer,
   McpHealthCheckResult,
@@ -34,12 +40,15 @@ import type {
   ImplementationPlan,
   ExecutionProgress,
   WorktreeStatus,
-  WorktreeDiff,
   WorktreeMergeResult,
   WorktreeDiscardResult,
   WorktreeListResult,
   WorktreeCreatePROptions,
   WorktreeCreatePRResult,
+  WorktreeMergePROptions,
+  WorktreeMergePRResult,
+  MergePRProgress,
+  PullRequestState,
   TaskRecoveryResult,
   TaskRecoveryOptions,
   TaskMetadata,
@@ -80,7 +89,6 @@ import type {
   InsightsModelConfig
 } from './insights';
 import type { APIProfile, ProfilesFile, TestConnectionResult, DiscoverModelsResult } from './profile';
-import type { ProviderAccount, ProviderKeyCheckResult } from './provider-account';
 
 // ============================================
 // Branch Types
@@ -89,7 +97,7 @@ import type { ProviderAccount, ProviderKeyCheckResult } from './provider-account
 /**
  * Branch type indicator for distinguishing local from remote branches
  */
-export type GitBranchType = 'local' | 'remote';
+type GitBranchType = 'local' | 'remote';
 
 /**
  * Structured branch information for UI display with type indicators
@@ -112,7 +120,7 @@ export interface GitBranchDetail {
 
 // Electron API exposed via contextBridge
 // Tab state interface (persisted in main process)
-export interface TabState {
+interface TabState {
   openProjectIds: string[];
   activeProjectId: string | null;
   tabOrder: string[];
@@ -123,6 +131,7 @@ export interface ElectronAPI {
   addProject: (projectPath: string) => Promise<IPCResult<Project>>;
   removeProject: (projectId: string) => Promise<IPCResult>;
   getProjects: () => Promise<IPCResult<Project[]>>;
+  getProjectCostMetrics: () => Promise<IPCResult<import('./project').ProjectCostMetrics[]>>;
   updateProjectSettings: (projectId: string, settings: Partial<ProjectSettings>) => Promise<IPCResult>;
   initializeProject: (projectId: string) => Promise<IPCResult<InitializationResult>>;
   checkProjectVersion: (projectId: string) => Promise<IPCResult<AutoBuildVersionInfo>>;
@@ -142,11 +151,11 @@ export interface ElectronAPI {
   updateTask: (taskId: string, updates: { title?: string; description?: string }) => Promise<IPCResult<Task>>;
   startTask: (taskId: string, options?: TaskStartOptions) => void;
   stopTask: (taskId: string) => void;
+  retryTask: (taskId: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
   submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[]) => Promise<IPCResult>;
   updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean }) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
   recoverStuckTask: (taskId: string, options?: TaskRecoveryOptions) => Promise<IPCResult<TaskRecoveryResult>>;
   checkTaskRunning: (taskId: string) => Promise<IPCResult<boolean>>;
-  resumePausedTask: (taskId: string) => Promise<IPCResult>;
 
   // Image operations
   loadImageThumbnail: (projectPath: string, specId: string, imagePath: string) => Promise<IPCResult<string>>;
@@ -157,16 +166,14 @@ export interface ElectronAPI {
   // Workspace management (for human review)
   // Per-spec architecture: Each spec has its own worktree at .worktrees/{spec-name}/
   getWorktreeStatus: (taskId: string) => Promise<IPCResult<WorktreeStatus>>;
-  getWorktreeDiff: (taskId: string) => Promise<IPCResult<WorktreeDiff>>;
   mergeWorktree: (taskId: string, options?: { noCommit?: boolean }) => Promise<IPCResult<WorktreeMergeResult>>;
   mergeWorktreePreview: (taskId: string) => Promise<IPCResult<WorktreeMergeResult>>;
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
+  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
+  getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
   discardWorktree: (taskId: string, skipStatusChange?: boolean) => Promise<IPCResult<WorktreeDiscardResult>>;
   clearStagedState: (taskId: string) => Promise<IPCResult<{ cleared: boolean }>>;
   listWorktrees: (projectId: string, options?: { includeStats?: boolean }) => Promise<IPCResult<WorktreeListResult>>;
-  worktreeOpenInIDE: (worktreePath: string, ide: SupportedIDE, customPath?: string) => Promise<IPCResult<{ opened: boolean }>>;
-  worktreeOpenInTerminal: (worktreePath: string, terminal: SupportedTerminal, customPath?: string) => Promise<IPCResult<{ opened: boolean }>>;
-  worktreeDetectTools: () => Promise<IPCResult<{ ides: Array<{ id: string; name: string; path: string; installed: boolean }>; terminals: Array<{ id: string; name: string; path: string; installed: boolean }> }>>;
 
   // Task archive operations
   archiveTasks: (projectId: string, taskIds: string[], version?: string) => Promise<IPCResult<boolean>>;
@@ -178,6 +185,8 @@ export interface ElectronAPI {
   onTaskLog: (callback: (taskId: string, log: string, projectId?: string) => void) => () => void;
   onTaskStatusChange: (callback: (taskId: string, status: TaskStatus, projectId?: string, reviewReason?: ReviewReason) => void) => () => void;
   onTaskRateLimitHoldChange: (callback: (taskId: string, hold: RateLimitHold | null, projectId?: string) => void) => () => void;
+  setQueueOrder: (projectId: string, order: string[]) => void;
+  onTaskClaudeRunUpdate: (callback: (taskId: string, run: import('./claude-code').ClaudeRunInfo, projectId?: string) => void) => () => void;
   onTaskExecutionProgress: (callback: (taskId: string, progress: ExecutionProgress, projectId?: string) => void) => () => void;
 
   // Terminal operations
@@ -186,6 +195,7 @@ export interface ElectronAPI {
   sendTerminalInput: (id: string, data: string) => void;
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<IPCResult<{ success: boolean }>>;
   invokeCLIInTerminal: (id: string, cwd?: string) => void;
+  resumeTaskSessionInTerminal: (id: string, options: TerminalTaskSessionOptions) => void;
   generateTerminalName: (command: string, cwd?: string) => Promise<IPCResult<string>>;
   setTerminalTitle: (id: string, title: string) => void;
   setTerminalWorktreeConfig: (id: string, config: TerminalWorktreeConfig | undefined) => void;
@@ -237,7 +247,7 @@ export interface ElectronAPI {
   onTerminalClaudeBusy: (callback: (id: string, isBusy: boolean) => void) => () => void;
   /** Listen for Claude exit (user closed Claude within terminal, returned to shell) */
   onTerminalClaudeExit: (callback: (id: string) => void) => () => void;
-  /** Listen for pending Claude resume notifications (for deferred resume on tab activation) */
+  /** Listen for pending Claude resume notifications (resumed once the window is shown) */
   onTerminalPendingResume: (callback: (id: string) => void) => () => void;
   /** Listen for profile change events - terminals need to be recreated with new profile env vars */
   onTerminalProfileChanged: (callback: (event: TerminalProfileChangedEvent) => void) => () => void;
@@ -254,6 +264,8 @@ export interface ElectronAPI {
   getClaudeProfiles: () => Promise<IPCResult<ClaudeProfileSettings>>;
   saveClaudeProfile: (profile: ClaudeProfile) => Promise<IPCResult<ClaudeProfile>>;
   deleteClaudeProfile: (profileId: string) => Promise<IPCResult>;
+  loginClaudeAccount: (profileId?: string) => Promise<IPCResult>;
+  redetectClaudeAccounts: () => Promise<IPCResult<ClaudeProfileSettings>>;
   renameClaudeProfile: (profileId: string, newName: string) => Promise<IPCResult>;
   setActiveClaudeProfile: (profileId: string) => Promise<IPCResult>;
   /** Switch terminal to use a different Claude profile (restarts Claude with new config) */
@@ -268,16 +280,14 @@ export interface ElectronAPI {
   verifyClaudeProfileAuth: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
   /** Run `claude auth login` as a subprocess (no terminal needed) */
   claudeAuthLoginSubprocess: (profileId: string) => Promise<IPCResult<{ authenticated: boolean; email?: string }>>;
+  /** Stop a running `claude auth login` (sign-in cancelled or its dialog closed) */
+  cancelClaudeAuthLogin: (profileId: string) => Promise<IPCResult>;
   /** Listen for OAuth subprocess progress events */
   onClaudeAuthLoginProgress: (callback: (data: { status: string; message?: string }) => void) => () => void;
   /** Get auto-switch settings */
   getAutoSwitchSettings: () => Promise<IPCResult<ClaudeAutoSwitchSettings>>;
   /** Update auto-switch settings */
   updateAutoSwitchSettings: (settings: Partial<ClaudeAutoSwitchSettings>) => Promise<IPCResult>;
-  /** Get unified account priority order (both OAuth and API profiles) */
-  getAccountPriorityOrder: () => Promise<IPCResult<string[]>>;
-  /** Set unified account priority order */
-  setAccountPriorityOrder: (order: string[]) => Promise<IPCResult>;
   /** Request usage fetch from a terminal (sends /usage command) */
   fetchClaudeUsage: (terminalId: string) => Promise<IPCResult>;
   /** Get the best available profile (for manual switching) */
@@ -314,7 +324,6 @@ export interface ElectronAPI {
   // Spell check
   setSpellCheckLanguages: (language: string) => Promise<IPCResult<{ success: boolean }>>;
 
-
   getCliToolsInfo: () => Promise<IPCResult<{
     python: import('./cli').ToolDetectionResult;
     git: import('./cli').ToolDetectionResult;
@@ -323,7 +332,6 @@ export interface ElectronAPI {
     claude: import('./cli').ToolDetectionResult;
   }>>;
   /** Check if Claude Code onboarding is complete (reads ~/.claude.json) */
-  getClaudeCodeOnboardingStatus: () => Promise<IPCResult<{ hasCompletedOnboarding: boolean }>>;
 
   // API Profile management (custom Anthropic-compatible endpoints)
   getAPIProfiles: () => Promise<IPCResult<ProfilesFile>>;
@@ -334,22 +342,6 @@ export interface ElectronAPI {
   // Note: AbortSignal is handled in preload via separate cancel IPC channels, not passed through IPC
   testConnection: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<IPCResult<TestConnectionResult>>;
   discoverModels: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<IPCResult<DiscoverModelsResult>>;
-
-  // Provider Account management (unified multi-provider credentials)
-  getProviderAccounts: () => Promise<IPCResult<{ accounts: ProviderAccount[] }>>;
-  saveProviderAccount: (account: Omit<ProviderAccount, 'id' | 'createdAt' | 'updatedAt'>) => Promise<IPCResult<ProviderAccount>>;
-  updateProviderAccount: (id: string, updates: Partial<ProviderAccount>) => Promise<IPCResult<ProviderAccount>>;
-  deleteProviderAccount: (id: string) => Promise<IPCResult>;
-  setProviderAccountQueueOrder: (order: string[]) => Promise<IPCResult>;
-  setCrossProviderQueueOrder: (order: string[]) => Promise<IPCResult>;
-  saveModelOverrides: (overrides: Record<string, unknown>) => Promise<IPCResult>;
-  testProviderConnection: (provider: string, config: { apiKey?: string; baseUrl?: string; region?: string }) => Promise<IPCResult<ProviderKeyCheckResult>>;
-  checkEnvCredentials: () => Promise<IPCResult<Record<string, boolean>>>;
-
-  // Codex OAuth authentication
-  codexAuthLogin: () => Promise<{ success: boolean; data?: { accessToken: string; refreshToken: string; expiresAt: number; email?: string }; error?: string }>;
-  codexAuthStatus: () => Promise<{ success: boolean; data?: { isAuthenticated: boolean; expiresAt?: number }; error?: string }>;
-  codexAuthLogout: () => Promise<{ success: boolean; error?: string }>;
 
   // Dialog operations
   selectDirectory: () => Promise<string | null>;
@@ -362,24 +354,10 @@ export interface ElectronAPI {
   // Context operations
   getProjectContext: (projectId: string) => Promise<IPCResult<ProjectContextData>>;
   refreshProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndex>>;
-  getMemoryStatus: (projectId: string) => Promise<IPCResult<MemorySystemStatus>>;
-  searchMemories: (projectId: string, query: string) => Promise<IPCResult<ContextSearchResult[]>>;
-  getRecentMemories: (projectId: string, limit?: number) => Promise<IPCResult<RendererMemory[]>>;
-
-  // Memory Management
-  verifyMemory: (memoryId: string) => Promise<IPCResult<void>>;
-  pinMemory: (memoryId: string, pinned: boolean) => Promise<IPCResult<void>>;
-  deprecateMemory: (memoryId: string) => Promise<IPCResult<void>>;
-  deleteMemory: (memoryId: string) => Promise<IPCResult<void>>;
 
   // Environment configuration operations
   getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
   updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
-
-  // Memory Infrastructure operations (libSQL - no Docker required)
-  getMemoryInfrastructureStatus: (dbPath?: string) => Promise<IPCResult<InfrastructureStatus>>;
-  listMemoryDatabases: (dbPath?: string) => Promise<IPCResult<string[]>>;
-  testMemoryConnection: (dbPath?: string, database?: string) => Promise<IPCResult<MemoryValidationResult>>;
 
   // Electron app update operations
   checkAppUpdate: () => Promise<IPCResult<AppUpdateCheckResult>>;
@@ -469,10 +447,11 @@ export interface ElectronAPI {
   onMergeProgress: (
     callback: (taskId: string, progress: MergeProgress) => void
   ) => () => void;
-
-  // File explorer operations
-  listDirectory: (dirPath: string) => Promise<IPCResult<FileNode[]>>;
-  readFile: (filePath: string) => Promise<IPCResult<string>>;
+  onMergePRProgress: (
+    callback: (taskId: string, progress: MergePRProgress) => void
+  ) => () => void;
+  /** Tasks changed outside the board (e.g. by the Claude chat's task tools) */
+  onTaskListChanged: (callback: (projectId: string) => void) => () => void;
 
   // Git operations
   /** @deprecated Will return GitBranchDetail[] in future - see getGitBranchesWithInfo */
@@ -483,58 +462,6 @@ export interface ElectronAPI {
   detectMainBranch: (projectPath: string) => Promise<IPCResult<string | null>>;
   checkGitStatus: (projectPath: string) => Promise<IPCResult<GitStatus>>;
   initializeGit: (projectPath: string) => Promise<IPCResult<InitializationResult>>;
-
-  // Ollama model detection operations
-  checkOllamaStatus: (baseUrl?: string) => Promise<IPCResult<{
-    running: boolean;
-    url: string;
-    version?: string;
-    message?: string;
-  }>>;
-  checkOllamaInstalled: () => Promise<IPCResult<{
-    installed: boolean;
-    path?: string;
-    version?: string;
-  }>>;
-  installOllama: () => Promise<IPCResult<{ command: string }>>;
-  listOllamaModels: (baseUrl?: string) => Promise<IPCResult<{
-    models: Array<{
-      name: string;
-      size_bytes: number;
-      size_gb: number;
-      modified_at: string;
-      is_embedding: boolean;
-      embedding_dim?: number | null;
-      description?: string;
-    }>;
-    count: number;
-  }>>;
-  listOllamaEmbeddingModels: (baseUrl?: string) => Promise<IPCResult<{
-    embedding_models: Array<{
-      name: string;
-      embedding_dim: number | null;
-      description: string;
-      size_bytes: number;
-      size_gb: number;
-    }>;
-    count: number;
-  }>>;
-  pullOllamaModel: (modelName: string, baseUrl?: string) => Promise<IPCResult<{
-    model: string;
-    status: 'completed' | 'failed';
-    output: string[];
-  }>>;
-
-  // Ollama download progress listener
-  onDownloadProgress: (
-    callback: (data: {
-      modelName: string;
-      status: string;
-      completed: number;
-      total: number;
-      percentage: number;
-    }) => void
-  ) => () => void;
 
   // Claude Code CLI operations
   checkClaudeCodeVersion: (forceRefresh?: boolean) => Promise<IPCResult<import('./cli').ClaudeCodeVersionInfo>>;
@@ -547,29 +474,11 @@ export interface ElectronAPI {
   // Graphify CLI (memory graph)
   checkGraphifyVersion: (forceRefresh?: boolean) => Promise<IPCResult<import('./cli').GraphifyVersionInfo>>;
   installGraphify: () => Promise<IPCResult<{ command: string }>>;
-  installGraphifyClaudeCommand: () => Promise<IPCResult<{ configDirs: number; missing: number }>>;
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo | null>>;
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyGraph | null>>;
   onGraphifyIndexUpdated: (callback: (projectId: string, info: import('./cli').GraphifyIndexInfo) => void) => () => void;
-
-  // Debug operations
-  getDebugInfo: () => Promise<{
-    systemInfo: Record<string, string>;
-    recentErrors: string[];
-    logsPath: string;
-    debugReport: string;
-  }>;
-  openLogsFolder: () => Promise<{ success: boolean; error?: string }>;
-  copyDebugInfo: () => Promise<{ success: boolean; error?: string }>;
-  getRecentErrors: (maxCount?: number) => Promise<string[]>;
-  listLogFiles: () => Promise<Array<{
-    name: string;
-    path: string;
-    size: number;
-    modified: string;
-  }>>;
 
   // MCP Server health check operations
   checkMcpHealth: (server: CustomMcpServer) => Promise<IPCResult<McpHealthCheckResult>>;
@@ -580,7 +489,7 @@ export interface ElectronAPI {
 }
 
 /** Platform information exposed via contextBridge for platform-specific behavior */
-export interface PlatformInfo {
+interface PlatformInfo {
   isWindows: boolean;
   isMacOS: boolean;
   isLinux: boolean;

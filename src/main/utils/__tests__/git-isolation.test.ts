@@ -5,8 +5,7 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
   GIT_ENV_VARS_TO_CLEAR,
-  getIsolatedGitEnv,
-  getIsolatedGitSpawnOptions,
+  getIsolatedGitEnv
 } from '../git-isolation';
 
 describe('GIT_ENV_VARS_TO_CLEAR', () => {
@@ -140,41 +139,3 @@ describe('getIsolatedGitEnv', () => {
   });
 });
 
-describe('getIsolatedGitSpawnOptions', () => {
-  it('should return options with cwd and isolated env', () => {
-    const opts = getIsolatedGitSpawnOptions('/project/path');
-
-    expect(opts.cwd).toBe('/project/path');
-    expect(opts.env).toBeDefined();
-    expect((opts.env as Record<string, string>).HUSKY).toBe('0');
-    expect(opts.encoding).toBe('utf-8');
-  });
-
-  it('should merge additional options', () => {
-    const opts = getIsolatedGitSpawnOptions('/project/path', {
-      timeout: 5000,
-      windowsHide: true,
-    });
-
-    expect(opts.cwd).toBe('/project/path');
-    expect(opts.timeout).toBe(5000);
-    expect(opts.windowsHide).toBe(true);
-  });
-
-  it('should allow additional options to override defaults', () => {
-    const opts = getIsolatedGitSpawnOptions('/project/path', {
-      encoding: 'ascii',
-    });
-
-    expect(opts.encoding).toBe('ascii');
-  });
-
-  it('should not include git env vars in the returned env', () => {
-    const opts = getIsolatedGitSpawnOptions('/project/path');
-    const env = opts.env as Record<string, string | undefined>;
-
-    for (const varName of GIT_ENV_VARS_TO_CLEAR) {
-      expect(env[varName]).toBeUndefined();
-    }
-  });
-});

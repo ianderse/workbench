@@ -184,34 +184,3 @@ export function sanitizeEnvVars(
   return sanitized;
 }
 
-/**
- * Check if an environment variable is considered dangerous.
- * Useful for validation and testing.
- */
-export function isDangerousEnvVar(key: string): boolean {
-  return DANGEROUS_ENV_VARS.has(key.toUpperCase());
-}
-
-/**
- * Check if an environment variable should trigger a warning when set from
- * project-level settings.
- */
-export function isWarningEnvVar(key: string): boolean {
-  return WARNING_ENV_VARS.has(key.toUpperCase());
-}
-
-/**
- * Get the complete list of blocked environment variable names.
- * Useful for documentation and testing.
- */
-export function getDangerousEnvVars(): string[] {
-  return Array.from(DANGEROUS_ENV_VARS).sort();
-}
-
-/**
- * Get the complete list of warning environment variable names.
- * Useful for documentation and testing.
- */
-export function getWarningEnvVars(): string[] {
-  return Array.from(WARNING_ENV_VARS).sort();
-}

@@ -5,7 +5,7 @@ import {
   RefreshCw,
   PanelLeft
 } from 'lucide-react';
-import { AgentsIcon, InsightsIcon, KanbanIcon, MemoryIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
+import { AgentsIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
 import { useMemoryGraphStore } from '../stores/memory-graph-store';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -26,7 +26,6 @@ import {
 import { cn } from '../lib/utils';
 import {
   useProjectStore,
-  removeProject,
   initializeProject
 } from '../stores/project-store';
 import { useSettingsStore, saveSettings } from '../stores/settings-store';
@@ -57,10 +56,9 @@ const navItems: NavItem[] = [
   { id: 'kanban', labelKey: 'navigation:items.kanban', icon: KanbanIcon },
   { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentsIcon },
   { id: 'insights', labelKey: 'navigation:items.insights', icon: InsightsIcon },
-  // Only shown when the project has a memory graph (.auto-claude/memory)
-  { id: 'memory', labelKey: 'navigation:items.memory', icon: MemoryIcon },
+  // Only shown when the project has a memory graph (.auto-claude/knowledge)
+  { id: 'memory', labelKey: 'navigation:items.memory', icon: GraphIcon },
 ];
-
 
 export function Sidebar({
   onSettingsClick,
@@ -197,13 +195,6 @@ export function Sidebar({
     }
   };
 
-  const _handleRemoveProject = async (projectId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    await removeProject(projectId);
-  };
-
-
   const handleNavClick = (view: SidebarView) => {
     onViewChange?.(view);
   };
@@ -260,7 +251,6 @@ export function Sidebar({
   const newTaskDisabled = !selectedProjectId || !selectedProject?.autoBuildPath;
   // The Projects row shows the active project's name (falls back to "Projects")
   const projectsLabel = selectedProject?.name ?? t('items.projects');
-
 
   return (
     <TooltipProvider>
@@ -376,18 +366,9 @@ export function Sidebar({
               <p className="text-foreground mb-2">{t('dialogs:initialize.willDo')}</p>
               <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                 <li>{t('dialogs:initialize.createFolder')}</li>
-                <li>{t('dialogs:initialize.copyFramework')}</li>
                 <li>{t('dialogs:initialize.setupSpecs')}</li>
               </ul>
             </div>
-            {!settings.autoBuildPath && (
-              <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
-                <p className="text-foreground">{t('dialogs:initialize.sourcePathNotConfigured')}</p>
-                <p className="text-muted-foreground mt-1">
-                  {t('dialogs:initialize.sourcePathNotConfiguredDescription')}
-                </p>
-              </div>
-            )}
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={handleSkipInit} disabled={isInitializing}>
@@ -396,7 +377,7 @@ export function Sidebar({
             <Button
               size="sm"
               onClick={handleInitialize}
-              disabled={isInitializing || !settings.autoBuildPath}
+              disabled={isInitializing}
             >
               {isInitializing ? (
                 <>

@@ -920,13 +920,3 @@ export class ConflictDetector {
     return explainConflict(conflict);
   }
 }
-
-// Convenience function
-export function analyzeChangeCompatibility(
-  changeA: SemanticChange,
-  changeB: SemanticChange,
-  detector?: ConflictDetector,
-): [boolean, MergeStrategy | undefined, string] {
-  const d = detector ?? new ConflictDetector();
-  return d.analyzeCompatibility(changeA, changeB);
-}

@@ -36,7 +36,4 @@ export const createAgentAPI = (): AgentAPI => {
 };
 
 // Re-export individual API interfaces for consumers who need them
-export type {
-  InsightsAPI,
-  ShellAPI
-};
+;

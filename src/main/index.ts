@@ -2,23 +2,10 @@
 // This MUST be at the very top, before any imports that load CommonJS native
 // modules. Without this, node-pty native module loading fails with
 // "ReferenceError: require is not defined".
-import Module, { createRequire } from 'module';
+import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
 // Make require globally available to dependencies that expect it
 globalThis.require = require;
-
-// In packaged Electron apps, native modules (e.g. @libsql/client) are placed in
-// Resources/node_modules/ via extraResources. Add that path to CJS resolution so
-// globalThis.require() can find them at runtime.
-if (process.resourcesPath) {
-  const nativeModulesPath = require('path').join(process.resourcesPath, 'node_modules');
-  // Module.globalPaths is an undocumented but stable Node.js internal used for
-  // CJS module resolution. It's not in @types/node, hence the cast.
-  const globalPaths = (Module as unknown as { globalPaths: string[] }).globalPaths;
-  if (!globalPaths.includes(nativeModulesPath)) {
-    globalPaths.push(nativeModulesPath);
-  }
-}
 
 // Load .env file FIRST before any other imports that might use process.env
 import { config } from 'dotenv';
@@ -47,10 +34,11 @@ for (const envPath of possibleEnvPaths) {
 
 import { app, BrowserWindow, ipcMain, shell, nativeImage, session, screen, Menu, MenuItem } from 'electron';
 import { join } from 'path';
-import { accessSync, readFileSync, writeFileSync, rmSync, cpSync } from 'fs';
+import { writeFileSync, rmSync, cpSync } from 'fs';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { setupIpcHandlers } from './ipc-setup';
 import { rateLimitResumeScheduler } from './services/rate-limit-resume-scheduler';
+import { taskQueue } from './services/task-queue';
 import { AgentManager } from './agent';
 import { TerminalManager } from './terminal-manager';
 import { getUsageMonitor } from './claude-profile/usage-monitor';
@@ -59,7 +47,6 @@ import { initializeAppUpdater, stopPeriodicUpdates } from './app-updater';
 import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, ADD_TO_DICTIONARY_LABELS } from '../shared/constants';
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
-import { registerSettingsAccessor } from './ai/auth/resolver';
 import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
@@ -69,6 +56,8 @@ import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
 import { AppTray, isWindowCloseAllowed } from './app-tray';
 import type { AppSettings, AuthFailureInfo } from '../shared/types';
+import { projectStore } from './project-store';
+import { migrateProjectDataDirs } from './data-dir-migration';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Migrate userData from previous app names (aperant, then auto-claude-ui → auto-claude)
@@ -109,14 +98,6 @@ const DEFAULT_SCREEN_HEIGHT: number = 1080;
 
 // Setup error logging early (captures uncaught exceptions)
 setupErrorLogging();
-
-// Wire up settings accessor for the AI auth resolver.
-// This lets resolveAuth() / buildDefaultQueueConfig() read provider accounts
-// and priority order from app settings without a circular dependency on the settings store.
-registerSettingsAccessor((key: string) => {
-  const settings = readSettingsFile();
-  return settings?.[key] as string | undefined;
-});
 
 /**
  * Load app settings synchronously (for use during startup).
@@ -500,7 +481,7 @@ if (isWindows()) {
 }
 
 // Initialize the application
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Set app user model id for Windows
   electronApp.setAppUserModelId(is.dev ? 'com.autoclaude.app.dev' : 'com.autoclaude.app');
 
@@ -543,96 +524,15 @@ app.whenReady().then(() => {
     optimizer.watchWindowShortcuts(window);
   });
 
+  // Move projects' data folders to their current names (specs -> tasks, memory -> knowledge,
+  // insights -> chats) before anything reads tasks
+  await Promise.all(
+    projectStore.getProjects().map((project) => migrateProjectDataDirs(project.path, project.autoBuildPath))
+  );
+
   // Initialize agent manager
   agentManager = new AgentManager();
 
-  // Load settings and configure agent manager with Python and auto-claude paths
-  // Uses EAFP pattern (try/catch) instead of LBYL (existsSync) to avoid TOCTOU race conditions
-  const settingsPath = join(app.getPath('userData'), 'settings.json');
-  try {
-    const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-
-    // Validate and migrate autoBuildPath - must contain planner.md (prompts directory)
-    // Uses EAFP pattern (try/catch with accessSync) instead of existsSync to avoid TOCTOU race conditions
-    let validAutoBuildPath = settings.autoBuildPath;
-    if (validAutoBuildPath) {
-      const plannerMdPath = join(validAutoBuildPath, 'planner.md');
-      let plannerExists = false;
-      try {
-        accessSync(plannerMdPath);
-        plannerExists = true;
-      } catch {
-        // File doesn't exist or isn't accessible
-      }
-
-      if (!plannerExists) {
-        // Migration: Try to fix stale paths from old project structures
-        // Old structures: /path/to/project/prompts, auto-claude, apps/backend
-        // New structure: /path/to/project/prompts
-        let migrated = false;
-        const possibleCorrections = [
-          join(validAutoBuildPath.replace(/[/\\]apps[/\\]desktop[/\\]prompts[/\\]*$/, ''), 'prompts'),
-          join(validAutoBuildPath.replace(/[/\\]auto-claude[/\\]*$/, ''), 'prompts'),
-          join(validAutoBuildPath.replace(/[/\\]apps[/\\]backend[/\\]*$/, ''), 'prompts'),
-        ];
-        for (const correctedPath of possibleCorrections) {
-          const correctedPlannerPath = join(correctedPath, 'planner.md');
-          let correctedPathExists = false;
-          try {
-            accessSync(correctedPlannerPath);
-            correctedPathExists = true;
-          } catch {
-            // Corrected path doesn't exist
-          }
-
-          if (correctedPathExists) {
-            console.log('[main] Migrating autoBuildPath from old structure:', validAutoBuildPath, '->', correctedPath);
-            settings.autoBuildPath = correctedPath;
-            validAutoBuildPath = correctedPath;
-            migrated = true;
-
-            // Save the corrected setting - we're the only process modifying settings at startup
-            try {
-              writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-              console.log('[main] Successfully saved migrated autoBuildPath to settings');
-            } catch (writeError) {
-              console.warn('[main] Failed to save migrated autoBuildPath:', writeError);
-            }
-            break;
-          }
-        }
-
-        if (!migrated) {
-          console.warn('[main] Configured autoBuildPath is invalid (missing planner.md), will use auto-detection:', validAutoBuildPath);
-          validAutoBuildPath = undefined; // Let auto-detection find the correct path
-
-          // Clear the stale setting so this warning doesn't repeat every startup
-          try {
-            delete settings.autoBuildPath;
-            writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
-            console.log('[main] Cleared stale autoBuildPath from settings');
-          } catch {
-            // Non-critical - warning will just repeat next startup
-          }
-        }
-      }
-    }
-
-    if (settings.pythonPath || validAutoBuildPath) {
-      console.warn('[main] Configuring AgentManager with settings:', {
-        pythonPath: settings.pythonPath,
-        autoBuildPath: validAutoBuildPath
-      });
-      agentManager.configure(settings.pythonPath, validAutoBuildPath);
-    }
-  } catch (error: unknown) {
-    // ENOENT means no settings file yet - that's fine, use defaults
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      // No settings file, use defaults - this is expected on first run
-    } else {
-      console.warn('[main] Failed to load settings for agent configuration:', error);
-    }
-  }
 
   // Initialize terminal manager
   terminalManager = new TerminalManager(() => mainWindow);
@@ -647,6 +547,8 @@ app.whenReady().then(() => {
     if (scheduled > 0) {
       console.warn(`[main] Scheduled ${scheduled} rate-limit-held task(s) for resume`);
     }
+    // Start queued tasks that fit the parallel task limit (e.g. queued before a restart)
+    taskQueue.request();
   });
 
   // Create window
@@ -832,6 +734,7 @@ app.on('before-quit', (event) => {
   // Stop synchronous services immediately
   stopPeriodicUpdates();
   rateLimitResumeScheduler.dispose();
+  taskQueue.dispose();
 
   const usageMonitor = getUsageMonitor();
   usageMonitor.stop();

@@ -70,26 +70,6 @@ export function validateApiKey(apiKey: string): boolean {
 }
 
 /**
- * Validate that profile name is unique (case-insensitive, trimmed)
- *
- * WARNING: This is for UX feedback only. Do NOT rely on this for correctness.
- * The actual uniqueness check happens atomically inside create/update operations
- * to prevent TOCTOU race conditions.
- */
-export async function validateProfileNameUnique(name: string): Promise<boolean> {
-  const trimmed = name.trim().toLowerCase();
-
-  const file = await loadProfilesFile();
-
-  // Check if any profile has the same name (case-insensitive)
-  const exists = file.profiles.some(
-    (p) => p.name.trim().toLowerCase() === trimmed
-  );
-
-  return !exists;
-}
-
-/**
  * Delete a profile with validation
  * Throws errors for validation failures
  * Uses atomic operation to prevent race conditions

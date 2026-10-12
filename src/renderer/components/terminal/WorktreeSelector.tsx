@@ -1,5 +1,5 @@
 import { useId, useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { Plus, ChevronDown, Loader2, Trash2, Search } from 'lucide-react';
+import { Plus, ChevronDown, FolderTree, Loader2, Trash2, Search } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { TerminalWorktreeConfig, WorktreeListItem, OtherWorktreeInfo } from '../../../shared/types';
 import {
@@ -17,7 +17,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '../ui/alert-dialog';
-import { WorktreeIcon } from '../icons/app-icons';
 import { cn } from '../../lib/utils';
 import { buttonVariants } from '../ui/button';
 import { useProjectStore } from '../../stores/project-store';
@@ -401,7 +400,7 @@ export function WorktreeSelector({
           )}
           onClick={(e) => e.stopPropagation()}
         >
-          <WorktreeIcon className="h-4 w-4 shrink-0" />
+          <FolderTree className="h-4 w-4 shrink-0" strokeWidth={1.75} />
           <span className={cn('truncate', labelClassName)} title={currentWorktree?.name}>
             {currentWorktree?.name ?? t('terminal:worktree.create')}
           </span>
@@ -447,7 +446,7 @@ export function WorktreeSelector({
             onChange={(e) => setSearchQuery(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={t('terminal:worktree.searchPlaceholder')}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-(--nav-label-color)"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-(--field-placeholder)"
           />
         </div>
 

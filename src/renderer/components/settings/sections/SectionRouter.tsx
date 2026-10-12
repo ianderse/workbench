@@ -1,10 +1,8 @@
-import { useTranslation } from 'react-i18next';
 import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig } from '../../../../shared/types';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
-import { SecuritySettings } from '../../project-settings/SecuritySettings';
-import { ProjectMemorySections } from '../../context/ProjectMemorySections';
+import { KnowledgeSettings } from '../../project-settings/KnowledgeSettings';
+import { ProjectTaskSettings } from '../../project-settings/ProjectTaskSettings';
 import { BranchSettings } from '../../project-settings/BranchSettings';
-import { InitializationGuard } from '../common/InitializationGuard';
 import type { ProjectSettingsSection } from '../ProjectSettingsContent';
 
 interface SectionRouterProps {
@@ -19,8 +17,6 @@ interface SectionRouterProps {
   isLoadingEnv: boolean;
   envError: string | null;
   updateEnvConfig: (updates: Partial<ProjectEnvConfig>) => void;
-  showOpenAIKey: boolean;
-  setShowOpenAIKey: React.Dispatch<React.SetStateAction<boolean>>;
   handleInitialize: () => Promise<void>;
 }
 
@@ -40,12 +36,8 @@ export function SectionRouter({
   isLoadingEnv,
   envError,
   updateEnvConfig,
-  showOpenAIKey,
-  setShowOpenAIKey,
   handleInitialize
 }: SectionRouterProps) {
-  const { t } = useTranslation('settings');
-
   switch (activeSection) {
     case 'general':
       return (
@@ -59,37 +51,21 @@ export function SectionRouter({
             isUpdating={isUpdating}
             handleInitialize={handleInitialize}
           />
+          {/* Kept in the project's .auto-claude folder, so they need an initialized project */}
           {project.autoBuildPath && (
-            <BranchSettings
-              projectPath={project.path}
-              settings={settings}
-              setSettings={setSettings}
-              envConfig={envConfig}
-              updateEnvConfig={updateEnvConfig}
-            />
+            <>
+              <KnowledgeSettings settings={settings} setSettings={setSettings} />
+              <ProjectTaskSettings settings={settings} setSettings={setSettings} />
+              <BranchSettings
+                projectPath={project.path}
+                settings={settings}
+                setSettings={setSettings}
+                envConfig={envConfig}
+                updateEnvConfig={updateEnvConfig}
+              />
+            </>
           )}
         </>
-      );
-
-    case 'memory':
-      return (
-        <InitializationGuard
-          initialized={!!project.autoBuildPath}
-          title={t('projectSections.memory.title')}
-          description={t('projectSections.memory.syncDescription')}
-        >
-          <SecuritySettings
-            envConfig={envConfig}
-            settings={settings}
-            setSettings={setSettings}
-            updateEnvConfig={updateEnvConfig}
-            showOpenAIKey={showOpenAIKey}
-            setShowOpenAIKey={setShowOpenAIKey}
-            expanded={true}
-            onToggle={() => {}}
-          />
-          <ProjectMemorySections projectId={project.id} />
-        </InitializationGuard>
       );
 
     default:

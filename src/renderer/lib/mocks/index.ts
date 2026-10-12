@@ -2,7 +2,7 @@
  * Central export point for all mock modules
  */
 
-export { mockProjects, mockInsightsSessions, mockTasks } from './mock-data';
+;
 export { projectMock } from './project-mock';
 export { taskMock } from './task-mock';
 export { workspaceMock } from './workspace-mock';

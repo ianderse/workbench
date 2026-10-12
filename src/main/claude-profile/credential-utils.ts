@@ -21,6 +21,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { homedir, userInfo } from 'os';
 import { dirname, join } from 'path';
 import { isMacOS, isWindows, isLinux } from '../platform';
+import { isDefaultClaudeConfigDir } from './config-dir-paths';
 
 /**
  * Create a safe fingerprint of a token for debug logging.
@@ -69,9 +70,6 @@ export interface PlatformCredentials {
   email: string | null;
   error?: string;  // Set when credential access fails (locked, permission denied, etc.)
 }
-
-// Legacy alias for backwards compatibility
-export type KeychainCredentials = PlatformCredentials;
 
 /**
  * Full OAuth credentials including refresh token and expiry info
@@ -208,8 +206,12 @@ export function getKeychainServiceName(configDir?: string): string {
       : configDir
   );
 
-  // ALL profiles now use hash-based keychain entries for isolation
-  // This prevents interference with external Claude Code CLI
+  // Claude Code's default ~/.claude (run without CLAUDE_CONFIG_DIR) uses its plain entry
+  if (isDefaultClaudeConfigDir(normalizedConfigDir)) {
+    return 'Claude Code-credentials';
+  }
+
+  // Every other config dir has a hash-based entry, like Claude Code keys it
   const hash = calculateConfigDirHash(normalizedConfigDir);
   return `Claude Code-credentials-${hash}`;
 }
@@ -612,7 +614,6 @@ function getFullCredentialsFromFile(
 function getCredentialsFromMacOSKeychain(configDir?: string, forceRefresh = false): PlatformCredentials {
   const serviceName = getKeychainServiceName(configDir);
   const cacheKey = `macos:${serviceName}`;
-  const isDebug = process.env.DEBUG === 'true';
   const now = Date.now();
 
   // Return cached credentials if available and fresh
@@ -1168,11 +1169,6 @@ export function getCredentialsFromKeychain(configDir?: string, forceRefresh = fa
 }
 
 /**
- * Alias for getCredentialsFromKeychain for semantic clarity on non-macOS platforms
- */
-export const getCredentials = getCredentialsFromKeychain;
-
-/**
  * Clear the credentials cache for a specific profile or all profiles.
  * Useful when you know the credentials have changed (e.g., after running claude /login)
  *
@@ -1197,11 +1193,6 @@ export function clearKeychainCache(configDir?: string): void {
   }
 }
 
-/**
- * Alias for clearKeychainCache for semantic clarity
- */
-export const clearCredentialCache = clearKeychainCache;
-
 // =============================================================================
 // Extended Credential Operations (Token Refresh Support)
 // =============================================================================
@@ -1211,7 +1202,6 @@ export const clearCredentialCache = clearKeychainCache;
  */
 function getFullCredentialsFromMacOSKeychain(configDir?: string): FullOAuthCredentials {
   const serviceName = getKeychainServiceName(configDir);
-  const isDebug = process.env.DEBUG === 'true';
 
   // Locate the security executable
   let securityPath: string | null = null;
@@ -1665,7 +1655,7 @@ function updateMacOSKeychainCredentials(
     }
 
     // Clear cached credentials to ensure fresh values are read
-    clearCredentialCache(configDir);
+    clearKeychainCache(configDir);
 
     return { success: true };
   } catch (error) {
@@ -1739,7 +1729,7 @@ function updateLinuxSecretServiceCredentials(
     }
 
     // Clear cached credentials to ensure fresh values are read
-    clearCredentialCache(configDir);
+    clearKeychainCache(configDir);
 
     return { success: true };
   } catch (error) {
@@ -1794,7 +1784,6 @@ function updateLinuxFileCredentials(
   const credentialsPath = getLinuxCredentialsPath(configDir);
   const isDebug = process.env.DEBUG === 'true';
 
-
   // Defense-in-depth: Validate credentials path
   if (!isValidCredentialsPath(credentialsPath)) {
     return { success: false, error: 'Invalid credentials path' };
@@ -1838,7 +1827,7 @@ function updateLinuxFileCredentials(
     }
 
     // Clear cached credentials to ensure fresh values are read
-    clearCredentialCache(configDir);
+    clearKeychainCache(configDir);
 
     return { success: true };
   } catch (error) {
@@ -1977,7 +1966,7 @@ function updateWindowsCredentialManagerCredentials(
     }
 
     // Clear cached credentials to ensure fresh values are read
-    clearCredentialCache(configDir);
+    clearKeychainCache(configDir);
 
     return { success: true };
   } catch (error) {
@@ -2118,7 +2107,7 @@ function updateWindowsFileCredentials(
     }
 
     // Clear cached credentials to ensure fresh values are read
-    clearCredentialCache(configDir);
+    clearKeychainCache(configDir);
 
     return { success: true };
   } catch (error) {

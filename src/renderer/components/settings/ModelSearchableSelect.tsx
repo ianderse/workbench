@@ -16,7 +16,7 @@
  * - Request cancellation: aborts pending fetch when closed
  */
 import { useState, useEffect, useRef } from 'react';
-import { Loader2, ChevronDown, Search, Check, Info } from 'lucide-react';
+import { Loader2, ChevronDown, Search, Check } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -310,8 +310,7 @@ export function ModelSearchableSelect({
 
       {/* Info/error messages below input */}
       {modelDiscoveryNotSupported && (
-        <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
-          <Info className="h-3 w-3" />
+        <p className="text-sm text-muted-foreground mt-1">
           {t('settings:modelSelect.discoveryNotAvailable')}
         </p>
       )}

@@ -12,7 +12,6 @@ on:
     branches: [main, develop]
     paths:
       - 'src/**'
-      - 'prompts/**'
       - 'resources/**'
       - '.github/scripts/**'
       - 'electron.vite.config.ts'
@@ -24,7 +23,6 @@ on:
     branches: [main, develop]
     paths:
       - 'src/**'
-      - 'prompts/**'
       - 'resources/**'
       - '.github/scripts/**'
       - 'electron.vite.config.ts'
@@ -95,8 +93,8 @@ jobs:
           echo ""
 
           if [[ "${{ needs.test-frontend.result }}" != "success" ]]; then
-            echo "❌ One or more CI jobs failed"
+            echo "One or more CI jobs failed"
             exit 1
           fi
 
-          echo "✅ All CI checks passed"
+          echo "All CI checks passed"

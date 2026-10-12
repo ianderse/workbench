@@ -3,11 +3,6 @@
     "expand": "Expand terminal",
     "collapse": "Collapse terminal"
   },
-  "resume": {
-    "pending": "Resume Available",
-    "pendingTooltip": "Click to resume previous Claude session",
-    "resumeAllSessions": "Resume All"
-  },
   "auth": {
     "terminalTitle": "Auth: {{profileName}}",
     "maxTerminalsReached": "Cannot open auth terminal: maximum terminals reached. Close a terminal first."
@@ -17,8 +12,7 @@
     "resumingSession": "Resuming Claude session...",
     "sessionResumed": "Session resumed under new profile",
     "resumeFailed": "Could not resume session. You can start a new session.",
-    "noSession": "Profile switched. No active session to resume.",
-    "migrationFailed": "Profile switched, but session migration failed. Starting fresh terminal."
+    "noSession": "Profile switched. No active session to resume."
   },
   "worktree": {
     "create": "Worktree",
@@ -52,14 +46,14 @@
     "deleteTitle": "Delete worktree?",
     "deleteDescription": "This will permanently delete the worktree and its branch. Any uncommitted changes will be lost.",
     "detached": "(detached)",
-    "remotePushFailed": "Remote Tracking Not Set Up",
-    "remotePushFailedDescription": "Worktree created but the branch could not be pushed to remote. You may need to run git push -u manually."
+    "remotePushFailed": "Remote Tracking Not Set Up"
   },
   "grid": {
     "emptyTitle": "Agents",
     "emptyDescription": "Run Claude agents side by side, each in its own terminal.",
     "newTerminal": "New terminal",
     "count": "{{count}} / {{max}} windows",
+    "settingsAriaLabel": "Agent window limit settings",
     "newAgent": "New agent"
   },
   "taskSelector": {
@@ -69,7 +63,9 @@
     "noTasks": "No tasks available",
     "newTask": "New task",
     "searchPlaceholder": "Search tasks...",
-    "noResults": "No matching tasks"
+    "noResults": "No matching tasks",
+    "resumeSession": "Resume session",
+    "followSession": "Follow session"
   },
   "header": {
     "agent": "Agent",

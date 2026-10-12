@@ -227,7 +227,7 @@ jobs:
               Write-Host "::error::Status Message: $($sig.StatusMessage)"
               exit 1
             }
-            Write-Host "✅ Signature verified successfully"
+            Write-Host "Signature verified successfully"
             Write-Host "  Subject: $($sig.SignerCertificate.Subject)"
             Write-Host "  Issuer: $($sig.SignerCertificate.Issuer)"
             Write-Host "  Thumbprint: $($sig.SignerCertificate.Thumbprint)"
@@ -297,7 +297,7 @@ jobs:
           }
 
           Set-Content -Path $ymlFile -Value $content -NoNewline
-          Write-Host "✅ Updated $ymlFile with new base64 hash and size for $($primaryExe.Name)"
+          Write-Host "Updated $ymlFile with new base64 hash and size for $($primaryExe.Name)"
 
       - name: Skip signing notice
         if: env.AZURE_CLIENT_ID == ''

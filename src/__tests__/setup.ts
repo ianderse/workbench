@@ -55,10 +55,6 @@ beforeEach(() => {
   // Clear localStorage
   localStorageMock.clear();
 
-  // Use a unique subdirectory per test to avoid race conditions in parallel tests
-  const testId = `test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-  const _testDir = path.join(TEST_DATA_DIR, testId);
-
   try {
     if (existsSync(TEST_DATA_DIR)) {
       rmSync(TEST_DATA_DIR, { recursive: true, force: true });

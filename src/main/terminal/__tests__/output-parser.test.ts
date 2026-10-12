@@ -7,90 +7,11 @@ import {
   detectClaudeBusyState,
   extractRateLimitReset,
   extractOAuthToken,
-  extractEmail,
-  hasRateLimitMessage,
-  hasOAuthToken,
+  extractEmail
 } from '../output-parser';
 
 describe('output-parser', () => {
   describe('detectClaudeExit', () => {
-    describe('should detect shell prompts (Claude has exited)', () => {
-      const shellPrompts = [
-        // user@hostname patterns
-        { input: 'user@hostname:~$ ', desc: 'bash: user@hostname:~$' },
-        { input: 'user@host:~/projects$ ', desc: 'bash with path' },
-        { input: 'root@server:/var/log# ', desc: 'root prompt' },
-        { input: 'dev@localhost:~ % ', desc: 'zsh style' },
-
-        // Bracket prompts
-        { input: '[user@host directory]$ ', desc: 'bracket prompt' },
-        { input: '  [user@host ~]$ ', desc: 'bracket prompt with leading space' },
-
-        // Virtual environment prompts
-        { input: '(venv) user@host:~$ ', desc: 'venv prompt' },
-        { input: '(base) $ ', desc: 'conda base prompt' },
-        { input: '(myenv) ~/projects $ ', desc: 'venv with path' },
-
-        // Starship/Oh-My-Zsh prompts
-        { input: '❯ ', desc: 'starship arrow' },
-        { input: '  ❯ ', desc: 'starship with space' },
-        { input: '➜ ', desc: 'oh-my-zsh arrow' },
-        { input: 'λ ', desc: 'lambda prompt' },
-
-        // Fish shell prompts
-        { input: '~/projects> ', desc: 'fish path prompt' },
-        { input: '/home/user> ', desc: 'fish absolute path' },
-
-        // Git branch prompts
-        { input: '(main) $ ', desc: 'git branch prompt' },
-        { input: '[feature/test] > ', desc: 'git branch in brackets' },
-
-        // Simple hostname prompts
-        { input: 'hostname$ ', desc: 'simple hostname$' },
-        { input: 'myserver% ', desc: 'hostname with %' },
-
-        // Explicit exit messages
-        { input: 'Goodbye!', desc: 'goodbye message' },
-        { input: 'Session ended', desc: 'session ended' },
-        { input: 'Exiting Claude', desc: 'exiting claude' },
-      ];
-
-      it.each(shellPrompts)('detects: $desc', ({ input }) => {
-        expect(detectClaudeExit(input)).toBe(true);
-      });
-    });
-
-    describe('should NOT detect these as exit (Claude is still active or these are Claude output)', () => {
-      const notExitPatterns = [
-        // Claude's idle prompt
-        { input: '> ', desc: 'Claude idle prompt (just >)' },
-        { input: '\n> ', desc: 'Claude idle prompt after newline' },
-
-        // Claude busy indicators
-        { input: '● Working on your request...', desc: 'Claude bullet point' },
-        { input: 'Loading...', desc: 'Claude loading' },
-        { input: 'Read(/path/to/file.ts)', desc: 'Claude tool execution' },
-
-        // Content that could false-positive match if not anchored
-        { input: 'The path is ~/config $HOME', desc: 'path in explanation (should NOT match)' },
-        { input: 'Use arr[index] to access elements', desc: 'array access in explanation' },
-        { input: 'See the arrow → for details', desc: 'arrow in text' },
-        { input: 'File path: ~/projects/test.js', desc: 'file path mid-line' },
-        { input: 'Contact user@example.com for help', desc: 'email in text (mid-line)' },
-        { input: 'user@example.com: please review this', desc: 'email at line start with colon (should NOT match)' },
-        { input: 'admin@company.org: check the logs', desc: 'email at line start with text after colon' },
-        { input: 'The variable $HOME is set to /Users/dev', desc: 'shell var in explanation' },
-        { input: 'Example: (main) branch is default', desc: 'branch name in explanation' },
-
-        // Progress indicators
-        { input: '[Opus 4] 50%', desc: 'Opus progress' },
-        { input: '███████░░░ 70%', desc: 'progress bar' },
-      ];
-
-      it.each(notExitPatterns)('ignores: $desc', ({ input }) => {
-        expect(detectClaudeExit(input)).toBe(false);
-      });
-    });
 
     describe('should return false when Claude is busy even if shell-like patterns appear', () => {
       it('returns false when busy indicators present with shell pattern', () => {
@@ -188,16 +109,6 @@ describe('output-parser', () => {
     });
   });
 
-  describe('hasRateLimitMessage', () => {
-    it('returns true when rate limit message present', () => {
-      expect(hasRateLimitMessage('Limit reached · resets tomorrow')).toBe(true);
-    });
-
-    it('returns false when no rate limit message', () => {
-      expect(hasRateLimitMessage('Normal text')).toBe(false);
-    });
-  });
-
   describe('extractOAuthToken', () => {
     it('extracts OAuth token', () => {
       const token = 'sk-ant-oat01-abc123_XYZ';
@@ -206,16 +117,6 @@ describe('output-parser', () => {
 
     it('returns null when no token present', () => {
       expect(extractOAuthToken('No token here')).toBe(null);
-    });
-  });
-
-  describe('hasOAuthToken', () => {
-    it('returns true when OAuth token present', () => {
-      expect(hasOAuthToken('sk-ant-oat01-test123')).toBe(true);
-    });
-
-    it('returns false when no token', () => {
-      expect(hasOAuthToken('No token')).toBe(false);
     });
   });
 

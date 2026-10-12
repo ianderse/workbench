@@ -3,7 +3,8 @@ import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import { v4 as uuid } from 'uuid';
 import { arrayMove } from '@dnd-kit/sortable';
-import type { TerminalSession, TerminalWorktreeConfig } from '../../shared/types';
+import type { Task, TerminalSession, TerminalTaskSessionOptions, TerminalWorktreeConfig } from '../../shared/types';
+import { getTaskWorktreeBranch } from '../../shared/utils/claude-run';
 import { terminalMachine, type TerminalEvent } from '@shared/state-machines';
 import { terminalBufferManager } from '../lib/terminal-buffer-manager';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
@@ -23,7 +24,7 @@ const terminalActors = new Map<string, TerminalActor>();
  * Get or create an XState terminal actor for a given terminal ID.
  * Actors are lazily created on first access and cached for the terminal's lifetime.
  */
-export function getOrCreateTerminalActor(terminalId: string): TerminalActor {
+function getOrCreateTerminalActor(terminalId: string): TerminalActor {
   let actor = terminalActors.get(terminalId);
   if (!actor) {
     actor = createActor(terminalMachine);
@@ -38,7 +39,7 @@ export function getOrCreateTerminalActor(terminalId: string): TerminalActor {
  * Send an event to a terminal's XState machine.
  * Creates the actor if it doesn't exist yet.
  */
-export function sendTerminalMachineEvent(terminalId: string, event: TerminalEvent): void {
+function sendTerminalMachineEvent(terminalId: string, event: TerminalEvent): void {
   const actor = getOrCreateTerminalActor(terminalId);
   const stateBefore = String(actor.getSnapshot().value);
   actor.send(event);
@@ -61,6 +62,10 @@ export function sendTerminalMachineEvent(terminalId: string, event: TerminalEven
  * still buffering when the terminal is not rendered (project switched away).
  */
 const xtermCallbacks = new Map<string, (data: string) => void>();
+
+// Restored agent windows waiting to resume their Claude Code session, resumed one at a time
+const claudeResumeQueue: string[] = [];
+let claudeResumeRunning = false;
 
 /**
  * Register an xterm write callback for a terminal.
@@ -119,6 +124,71 @@ export function writeToTerminal(terminalId: string, data: string): void {
 
 export type TerminalStatus = 'idle' | 'running' | 'claude-active' | 'exited';
 
+/** A task's Claude Code session to resume once the agent window's shell is ready */
+export type PendingTaskSession = Omit<TerminalTaskSessionOptions, 'cwd'>;
+
+/** Everything needed to open a task's Claude Code session in an agent window */
+export interface TaskSessionRequest {
+  /** Project the task belongs to (the agent window is opened there) */
+  projectPath: string;
+  taskId: string;
+  specId: string;
+  /** Window title (the task title) */
+  title: string;
+  sessionId: string;
+  /** The task's git worktree (the session's working directory) */
+  worktreePath: string;
+  profileId?: string;
+  configDir?: string;
+  baseBranch?: string;
+}
+
+/**
+ * The session request for a task, or null when it has no Claude Code session.
+ * The worktree is the one the session ran in, else the task's default worktree path.
+ */
+export function getTaskSessionRequest(task: Task, projectPath: string): TaskSessionRequest | null {
+  const run = task.claudeRun;
+  if (!run?.sessionId) return null;
+  const separator = projectPath.includes('\\') && !projectPath.includes('/') ? '\\' : '/';
+  const worktreePath =
+    run.worktreePath ||
+    run.init?.cwd ||
+    [projectPath.replace(/[\\/]+$/, ''), '.auto-claude', 'worktrees', 'tasks', task.specId].join(separator);
+  return {
+    projectPath,
+    taskId: task.id,
+    specId: task.specId,
+    title: task.title,
+    sessionId: run.sessionId,
+    worktreePath,
+    profileId: run.profileId,
+    configDir: run.configDir,
+    baseBranch: task.metadata?.baseBranch
+  };
+}
+
+/** Worktree config that shows a task's worktree in an agent window's worktree selector */
+export function buildTaskWorktreeConfig(request: TaskSessionRequest, terminalId: string): TerminalWorktreeConfig {
+  return {
+    name: request.specId,
+    worktreePath: request.worktreePath,
+    branchName: getTaskWorktreeBranch(request.specId),
+    baseBranch: request.baseBranch ?? '',
+    hasGitBranch: true,
+    taskId: request.taskId,
+    createdAt: new Date().toISOString(),
+    terminalId
+  };
+}
+
+/** Ask the app to show the Agents page of a project (e.g. after opening a task's session) */
+interface AgentsViewRequest {
+  projectPath: string;
+  /** Increases with every request, so the same project can be requested again */
+  seq: number;
+}
+
 export interface Terminal {
   id: string;
   title: string;
@@ -132,8 +202,9 @@ export interface Terminal {
   projectPath?: string;  // Project this terminal belongs to (for multi-project support)
   worktreeConfig?: TerminalWorktreeConfig;  // Associated worktree for isolated development
   isClaudeBusy?: boolean;  // Whether Claude Code is actively processing (for visual indicator)
-  pendingCLIResume?: boolean;  // Whether this terminal has a pending Claude resume (deferred until tab activated)
+  pendingCLIResume?: boolean;  // Whether this terminal has a Claude Code session to resume (resumed once its window is shown)
   launchCLIOnCreate?: boolean;  // Start Claude Code as soon as the PTY is ready ("New agent")
+  pendingTaskSession?: PendingTaskSession;  // With launchCLIOnCreate: resume this task session instead of starting a new one
   displayOrder?: number;  // Display order for tab persistence (lower = further left)
   cliNamedOnce?: boolean;  // Whether this Claude terminal has been auto-named based on initial message (prevents repeated naming)
 }
@@ -152,6 +223,7 @@ interface TerminalState {
   activeTerminalId: string | null;
   maxTerminals: number;
   hasRestoredSessions: boolean;  // Track if we've restored sessions for this project
+  agentsViewRequest: AgentsViewRequest | null;  // Latest request to show the Agents page (App switches view)
 
   // Actions
   addTerminal: (cwd?: string, projectPath?: string, options?: { launchCLI?: boolean }) => Terminal | null;
@@ -172,7 +244,14 @@ interface TerminalState {
   clearAllTerminals: () => void;
   setHasRestoredSessions: (value: boolean) => void;
   reorderTerminals: (activeId: string, overId: string) => void;
-  resumeAllPendingClaude: () => Promise<void>;
+  /** Resume a restored agent window's Claude Code session (queued: one window at a time) */
+  queueClaudeResume: (id: string) => void;
+  /**
+   * Open a task's Claude Code session in a new agent window of its project: the window starts in
+   * the task's worktree, resumes the session and is titled after the task. Also asks the app to
+   * show the Agents page. Returns null when the project has no room for another window.
+   */
+  openTaskSession: (request: TaskSessionRequest) => Terminal | null;
 
   // Selectors
   getTerminal: (id: string) => Terminal | undefined;
@@ -203,6 +282,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   // and PTY process resource exhaustion.
   maxTerminals: DEFAULT_MAX_TERMINALS,
   hasRestoredSessions: false,
+  agentsViewRequest: null,
 
   addTerminal: (cwd?: string, projectPath?: string, options?: { launchCLI?: boolean }) => {
     const state = get();
@@ -531,36 +611,49 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     });
   },
 
-  resumeAllPendingClaude: async () => {
-    const state = get();
-
-    // Filter terminals with pending Claude resume
-    const pendingTerminals = state.terminals.filter(t => t.pendingCLIResume === true);
-
-    if (pendingTerminals.length === 0) {
-      debugLog('[TerminalStore] No terminals with pending Claude resume');
-      return;
-    }
-
-    debugLog(`[TerminalStore] Resuming ${pendingTerminals.length} pending Claude sessions with 500ms stagger`);
-
-    // Iterate through terminals with staggered delays
-    for (let i = 0; i < pendingTerminals.length; i++) {
-      const terminal = pendingTerminals[i];
-      // Clear the pending flag BEFORE IPC call to prevent race condition
-      // with auto-resume effect in Terminal.tsx (which checks this flag on a 100ms timeout)
-      get().setPendingClaudeResume(terminal.id, false);
-
-      debugLog(`[TerminalStore] Activating deferred Claude resume for terminal: ${terminal.id}`);
-      window.electronAPI.activateDeferredClaudeResume(terminal.id);
-
-      // Wait 500ms before processing next terminal (staggered delay)
-      if (i < pendingTerminals.length - 1) {
-        await new Promise(resolve => setTimeout(resolve, 500));
+  queueClaudeResume: (id: string) => {
+    if (!claudeResumeQueue.includes(id)) claudeResumeQueue.push(id);
+    if (claudeResumeRunning) return;
+    claudeResumeRunning = true;
+    void (async () => {
+      try {
+        while (claudeResumeQueue.length > 0) {
+          const terminalId = claudeResumeQueue.shift() as string;
+          // Skip windows closed or already resumed while waiting
+          if (!get().terminals.find((t) => t.id === terminalId)?.pendingCLIResume) continue;
+          debugLog(`[TerminalStore] Resuming Claude Code in terminal: ${terminalId}`);
+          get().setPendingClaudeResume(terminalId, false);
+          window.electronAPI.activateDeferredClaudeResume(terminalId);
+          // The terminal now runs `claude --continue` in the project: show it in Claude mode
+          get().setCLIMode(terminalId, true);
+          // Stagger the starts: many Claude Code processes starting at once can crash the app
+          if (claudeResumeQueue.length > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+        }
+      } finally {
+        claudeResumeRunning = false;
       }
-    }
+    })();
+  },
 
-    debugLog('[TerminalStore] Completed resuming all pending Claude sessions');
+  openTaskSession: (request: TaskSessionRequest) => {
+    const terminal = get().addTerminal(request.worktreePath, request.projectPath, { launchCLI: true });
+    if (terminal) {
+      get().updateTerminal(terminal.id, {
+        title: request.title,
+        associatedTaskId: request.taskId,
+        worktreeConfig: buildTaskWorktreeConfig(request, terminal.id),
+        pendingTaskSession: {
+          taskId: request.taskId,
+          sessionId: request.sessionId,
+          profileId: request.profileId,
+          configDir: request.configDir
+        }
+      });
+    }
+    set((state) => ({
+      agentsViewRequest: { projectPath: request.projectPath, seq: (state.agentsViewRequest?.seq ?? 0) + 1 }
+    }));
+    return terminal ? get().getTerminal(terminal.id) ?? null : null;
   },
 
   getTerminal: (id: string) => {

@@ -158,9 +158,9 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
       expect(result.data).toEqual(mockLogs);
       expect(projectStore.getProject).toHaveBeenCalledWith('project-123');
       expect(taskLogService.loadLogs).toHaveBeenCalledWith(
-        path.join('/absolute/path/to/project', '.auto-claude/specs', '001-test-task'),
+        path.join('/absolute/path/to/project', '.auto-claude/tasks', '001-test-task'),
         '/absolute/path/to/project',
-        '.auto-claude/specs',
+        '.auto-claude/tasks',
         '001-test-task'
       );
     });
@@ -310,9 +310,9 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
       expect(result.success).toBe(true);
       expect(taskLogService.startWatching).toHaveBeenCalledWith(
         '001-test-task',
-        path.join('/absolute/path/to/project', '.auto-claude/specs', '001-test-task'),
+        path.join('/absolute/path/to/project', '.auto-claude/tasks', '001-test-task'),
         '/absolute/path/to/project',
-        '.auto-claude/specs'
+        '.auto-claude/tasks'
       );
     });
 
@@ -355,9 +355,9 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
       expect(result.success).toBe(true);
       expect(taskLogService.startWatching).toHaveBeenCalledWith(
         'nonexistent-spec',
-        path.join('/absolute/path/to/project', '.auto-claude/specs', 'nonexistent-spec'),
+        path.join('/absolute/path/to/project', '.auto-claude/tasks', 'nonexistent-spec'),
         '/absolute/path/to/project',
-        '.auto-claude/specs'
+        '.auto-claude/tasks'
       );
     });
 

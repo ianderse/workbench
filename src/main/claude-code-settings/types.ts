@@ -9,7 +9,7 @@
 /**
  * Permission configuration for Claude Code tool usage.
  */
-export interface ClaudeCodePermissions {
+interface ClaudeCodePermissions {
   /** Tool patterns that are always allowed without prompting */
   allow?: string[];
   /** Tool patterns that are always denied */

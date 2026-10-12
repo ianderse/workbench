@@ -6,18 +6,15 @@
 import { getClaudeProfileManager } from './claude-profile-manager';
 import { getUsageMonitor } from './claude-profile/usage-monitor';
 import { debugLog } from '../shared/utils/debug-logger';
+import { findStandaloneLimitReset } from './claude-profile/rate-limit-manager';
+
+;
 
 /**
  * Regex pattern to detect Claude Code rate limit messages
  * Matches: "Limit reached · resets Dec 17 at 6am (Europe/Oslo)"
  */
 const RATE_LIMIT_PATTERN = /Limit reached\s*[·•]\s*resets\s+(.+?)(?:\s*$|\n)/im;
-
-/**
- * Regex pattern to detect Codex/OpenAI rate limit messages
- * Matches: "Usage limit exceeded" or "UsageLimitExceeded" with optional reset info
- */
-const CODEX_RATE_LIMIT_PATTERN = /(?:usage_limit_exceeded|UsageLimitExceeded)(?:.*?reset(?:s|_at)?\s*[:\s]*(.+?))?(?:\s*$|\n)/im;
 
 /**
  * Additional patterns that might indicate rate limiting
@@ -28,79 +25,6 @@ const RATE_LIMIT_INDICATORS = [
   /limit\s*reached/i,
   /exceeded.*limit/i,
   /too\s*many\s*requests/i,
-  // Codex-specific rate limit patterns
-  /usage_limit_exceeded/i,
-  /UsageLimitExceeded/,
-  /codex.*rate\s*limit/i,
-];
-
-/**
- * Patterns that indicate authentication failures
- * These patterns detect when Claude CLI/SDK fails due to missing or invalid auth
- *
- * IMPORTANT: These patterns must be specific enough to NOT match on AI response
- * content that discusses authentication topics (e.g., PRs about auth features).
- * The patterns should only match actual API error messages.
- */
-const AUTH_FAILURE_PATTERNS = [
-  // Match Claude API authentication_error type in JSON responses (most reliable)
-  /["']?type["']?\s*:\s*["']?authentication_error["']?/i,
-  // Match plain "API Error: 401" - this is a structured error format
-  /API\s*Error:\s*401/i,
-  // Match "OAuth token has expired" format from Claude API (specific phrasing)
-  /oauth\s*token\s+has\s+expired/i,
-  // Match "Please obtain a new token" or "refresh your existing token" - API specific
-  /please\s+(obtain\s+a\s+new|refresh\s+your)\s+(existing\s+)?token/i,
-  // Match Claude CLI specific auth messages (with context markers)
-  /\[.*\]\s*authentication\s*(is\s*)?required/i,
-  /\[.*\]\s*not\s*(yet\s*)?authenticated/i,
-  /\[.*\]\s*login\s*(is\s*)?required/i,
-  // Match 401 status codes in structured error output
-  /status[:\s]+401/i,
-  /HTTP\s*401/i,
-  // Match specific error prefixes that indicate actual errors (not AI discussion)
-  /Error:\s*.*(?:unauthorized|authentication|invalid\s*token)/i,
-  // Match · Please run /login format from Claude CLI
-  /·\s*Please\s+run\s+\/login/i,
-];
-
-/**
- * Patterns that indicate billing/credit failures
- * These patterns detect when Claude API fails due to insufficient credits or billing issues
- */
-const BILLING_FAILURE_PATTERNS = [
-  // Credit balance patterns
-  /credit\s*balance\s*(is\s+)?(too\s+)?(insufficient|low|empty|zero|exhausted)/i,
-  /insufficient\s*credit(s)?/i,
-  /no\s*(remaining\s*)?credit(s)?/i,
-  /credit(s)?\s*(are\s*)?(exhausted|depleted|used\s*up)/i,
-  /out\s*of\s*credit(s)?/i,
-  /credit\s*limit\s*(reached|exceeded)/i,
-  // Billing error patterns
-  /billing\s*(error|issue|problem|failure)/i,
-  /payment\s*(required|failed|issue|problem)/i,
-  /subscription\s*(expired|inactive|cancelled|canceled)/i,
-  /account\s*(suspended|inactive)\s*(due\s*to\s*billing)?/i,
-  // Usage limit patterns (billing-related, not rate limits)
-  /usage\s*quota\s*(exceeded|reached)/i,
-  /monthly\s*(usage\s*)?(limit|quota)\s*(exceeded|reached)/i,
-  /plan\s*(limit|quota)\s*(exceeded|reached)/i,
-  // API error patterns for billing
-  /["']?type["']?\s*:\s*["']?billing_error["']?/i,
-  /["']?type["']?\s*:\s*["']?insufficient_credits["']?/i,
-  /["']?error["']?\s*:\s*["']?insufficient_credits["']?/i,
-  // extra_usage patterns from Claude API
-  /extra_usage\s*(exceeded|limit|error)?/i,
-  // Match HTTP 402 Payment Required (require context to avoid false positives on "line 402" etc.)
-  /(?:HTTP|status|code|error)\s*:?\s*402\b/i,
-  /\b402\s+payment\s+required/i,
-  /API\s*Error:\s*402/i,
-  // Balance/funds patterns
-  /insufficient\s*(funds|balance)/i,
-  /balance\s*(is\s*)?(zero|empty|insufficient)/i,
-  // Add funds/credits messages
-  /please\s*(add|purchase)\s*(more\s*)?(credits?|funds)/i,
-  /top\s*up\s*(your\s*)?(account|credits|balance)/i
 ];
 
 /**
@@ -144,38 +68,6 @@ export interface RateLimitDetectionResult {
 }
 
 /**
- * Result of authentication failure detection
- */
-export interface AuthFailureDetectionResult {
-  /** Whether an authentication failure was detected */
-  isAuthFailure: boolean;
-  /** The profile ID that failed to authenticate (if known) */
-  profileId?: string;
-  /** The type of auth failure detected */
-  failureType?: 'missing' | 'invalid' | 'expired' | 'unknown';
-  /** User-friendly message describing the failure */
-  message?: string;
-  /** Original error message from the process output */
-  originalError?: string;
-}
-
-/**
- * Result of billing failure detection
- */
-export interface BillingFailureDetectionResult {
-  /** Whether a billing failure was detected */
-  isBillingFailure: boolean;
-  /** The profile ID that has billing issues (if known) */
-  profileId?: string;
-  /** The type of billing failure detected */
-  failureType?: 'insufficient_credits' | 'payment_required' | 'subscription_inactive' | 'unknown';
-  /** User-friendly message describing the failure */
-  message?: string;
-  /** Original error message from the process output */
-  originalError?: string;
-}
-
-/**
  * Classify rate limit type based on reset time string
  */
 function classifyLimitType(resetTimeStr: string): 'session' | 'weekly' {
@@ -194,11 +86,11 @@ export function detectRateLimit(
   output: string,
   profileId?: string
 ): RateLimitDetectionResult {
-  // Check for the primary rate limit pattern
-  const match = output.match(RATE_LIMIT_PATTERN);
+  // Check for the primary rate limit pattern. It only counts when the message stands on its own
+  // line: the same words quoted in model output or code must not mark the account as limited.
+  const resetTime = RATE_LIMIT_PATTERN.test(output) ? findStandaloneLimitReset(output) : null;
 
-  if (match) {
-    const resetTime = match[1].trim();
+  if (resetTime) {
     const limitType = classifyLimitType(resetTime);
 
     // Record the rate limit event in the profile manager
@@ -212,38 +104,6 @@ export function detectRateLimit(
     }
 
     // Find best alternative profile
-    const bestProfile = profileManager.getBestAvailableProfile(effectiveProfileId);
-
-    return {
-      isRateLimited: true,
-      resetTime,
-      limitType,
-      profileId: effectiveProfileId,
-      suggestedProfile: bestProfile ? {
-        id: bestProfile.id,
-        name: bestProfile.name
-      } : undefined,
-      originalError: sanitizeErrorOutput(output)
-    };
-  }
-
-  // Check for Codex-specific rate limit pattern
-  const codexMatch = output.match(CODEX_RATE_LIMIT_PATTERN);
-  if (codexMatch) {
-    const resetTime = codexMatch[1]?.trim();
-    const limitType = resetTime ? classifyLimitType(resetTime) : 'session';
-
-    const profileManager = getClaudeProfileManager();
-    const effectiveProfileId = profileId || profileManager.getActiveProfile().id;
-
-    try {
-      if (resetTime) {
-        profileManager.recordRateLimitEvent(effectiveProfileId, resetTime);
-      }
-    } catch (err) {
-      console.error('[RateLimitDetector] Failed to record Codex rate limit event:', err);
-    }
-
     const bestProfile = profileManager.getBestAvailableProfile(effectiveProfileId);
 
     return {
@@ -282,199 +142,20 @@ export function detectRateLimit(
 }
 
 /**
- * Check if output contains rate limit error
+ * Environment for a specific profile, or null when that profile no longer exists or has no
+ * credentials (callers then fall back to the best available profile).
  */
-export function isRateLimitError(output: string): boolean {
-  return detectRateLimit(output).isRateLimited;
+/** Whether an account is a Claude Code setup found in its own configuration */
+export function isDetectedClaudeCodeProfile(profileId: string): boolean {
+  return !!getClaudeProfileManager().getProfile(profileId)?.detected;
 }
 
-/**
- * Extract reset time from rate limit message
- */
-export function extractResetTime(output: string): string | null {
-  const match = output.match(RATE_LIMIT_PATTERN);
-  return match ? match[1].trim() : null;
-}
-
-/**
- * Classify the type of authentication failure based on the error message
- */
-function classifyAuthFailureType(output: string): 'missing' | 'invalid' | 'expired' | 'unknown' {
-  const lowerOutput = output.toLowerCase();
-
-  if (/missing|not\s*(yet\s*)?authenticated|required/.test(lowerOutput)) {
-    return 'missing';
-  }
-  // Check for expired tokens - includes "has expired", "obtain a new token", etc.
-  if (/expired|session\s*expired|obtain\s*(a\s*)?new\s*token|refresh\s*(your\s*)?(existing\s*)?token/.test(lowerOutput)) {
-    return 'expired';
-  }
-  // Check for invalid auth - includes 401, authentication_error, unauthorized
-  if (/invalid|unauthorized|denied|401|authentication_error/.test(lowerOutput)) {
-    return 'invalid';
-  }
-  return 'unknown';
-}
-
-/**
- * Get a user-friendly message for the authentication failure
- */
-function getAuthFailureMessage(failureType: 'missing' | 'invalid' | 'expired' | 'unknown'): string {
-  switch (failureType) {
-    case 'missing':
-      return 'Claude authentication required. Please go to Settings > Claude Profiles and authenticate your account.';
-    case 'expired':
-      return 'Your Claude session has expired. Please re-authenticate in Settings > Claude Profiles.';
-    case 'invalid':
-      return 'Invalid Claude credentials. Please check your OAuth token or re-authenticate in Settings > Claude Profiles.';
-    default:
-      return 'Claude authentication failed. Please verify your authentication in Settings > Claude Profiles.';
-  }
-}
-
-/**
- * Classify the type of billing failure based on the error message
- */
-function classifyBillingFailureType(output: string): 'insufficient_credits' | 'payment_required' | 'subscription_inactive' | 'unknown' {
-  const lowerOutput = output.toLowerCase();
-
-  // Check for credit-related failures (including extra_usage which indicates usage exhaustion)
-  if (/credit\s*(balance|s)?|insufficient\s*(credit|funds|balance)|out\s*of\s*credit|no\s*(remaining\s*)?credit|extra_usage/.test(lowerOutput)) {
-    return 'insufficient_credits';
-  }
-  // Check for subscription-related failures
-  if (/subscription\s*(expired|inactive|cancelled|canceled)|account\s*(suspended|inactive)/.test(lowerOutput)) {
-    return 'subscription_inactive';
-  }
-  // Check for payment-related failures
-  if (/payment\s*(required|failed)|402|billing\s*(error|issue|problem|failure)/.test(lowerOutput)) {
-    return 'payment_required';
-  }
-  return 'unknown';
-}
-
-/**
- * Get a user-friendly message for the billing failure
- */
-function getBillingFailureMessage(failureType: 'insufficient_credits' | 'payment_required' | 'subscription_inactive' | 'unknown'): string {
-  switch (failureType) {
-    case 'insufficient_credits':
-      return 'Your Claude API credit balance is too low. Please add credits to your account or switch to another profile in Settings > Claude Profiles.';
-    case 'payment_required':
-      return 'A billing error occurred with your Claude API account. Please check your payment method or switch to another profile in Settings > Claude Profiles.';
-    case 'subscription_inactive':
-      return 'Your Claude API subscription is inactive or expired. Please renew your subscription or switch to another profile in Settings > Claude Profiles.';
-    default:
-      return 'A billing issue was detected with your Claude API account. Please check your account status or switch to another profile in Settings > Claude Profiles.';
-  }
-}
-
-/**
- * Detect authentication failure from output (stdout + stderr combined)
- */
-export function detectAuthFailure(
-  output: string,
-  profileId?: string
-): AuthFailureDetectionResult {
-  // First, make sure this isn't a rate limit error (those should be handled separately)
-  if (detectRateLimit(output).isRateLimited) {
-    return { isAuthFailure: false };
-  }
-
-  // Check for authentication failure patterns
-  for (const pattern of AUTH_FAILURE_PATTERNS) {
-    if (pattern.test(output)) {
-      const profileManager = getClaudeProfileManager();
-      const effectiveProfileId = profileId || profileManager.getActiveProfile().id;
-      const failureType = classifyAuthFailureType(output);
-
-      return {
-        isAuthFailure: true,
-        profileId: effectiveProfileId,
-        failureType,
-        message: getAuthFailureMessage(failureType),
-        originalError: sanitizeErrorOutput(output)
-      };
-    }
-  }
-
-  return { isAuthFailure: false };
-}
-
-/**
- * Check if output contains authentication failure error
- */
-export function isAuthFailureError(output: string): boolean {
-  return detectAuthFailure(output).isAuthFailure;
-}
-
-/**
- * Detect billing failure from output (stdout + stderr combined)
- */
-export function detectBillingFailure(
-  output: string,
-  profileId?: string
-): BillingFailureDetectionResult {
-  // First, make sure this isn't a rate limit or auth error (those should be handled separately)
-  if (detectRateLimit(output).isRateLimited) {
-    return { isBillingFailure: false };
-  }
-  if (detectAuthFailure(output).isAuthFailure) {
-    return { isBillingFailure: false };
-  }
-
-  // Check for billing failure patterns
-  for (const pattern of BILLING_FAILURE_PATTERNS) {
-    if (pattern.test(output)) {
-      const profileManager = getClaudeProfileManager();
-      const effectiveProfileId = profileId || profileManager.getActiveProfile().id;
-      const failureType = classifyBillingFailureType(output);
-
-      return {
-        isBillingFailure: true,
-        profileId: effectiveProfileId,
-        failureType,
-        message: getBillingFailureMessage(failureType),
-        originalError: sanitizeErrorOutput(output)
-      };
-    }
-  }
-
-  return { isBillingFailure: false };
-}
-
-/**
- * Check if output contains billing failure error
- */
-export function isBillingFailureError(output: string): boolean {
-  return detectBillingFailure(output).isBillingFailure;
-}
-
-/**
- * Get environment variables for a specific Claude profile.
- *
- * IMPORTANT: Always uses CLAUDE_CONFIG_DIR to let Claude CLI read fresh tokens from Keychain.
- * We do NOT use cached OAuth tokens (CLAUDE_CODE_OAUTH_TOKEN) because:
- * 1. OAuth tokens expire in 8-12 hours
- * 2. Claude CLI's token refresh mechanism works (updates Keychain)
- * 3. Cached tokens don't benefit from Claude CLI's automatic refresh
- *
- * By using CLAUDE_CONFIG_DIR, Claude CLI reads fresh tokens from Keychain each time,
- * which includes any refreshed tokens. This solves the 401 errors after a few hours.
- *
- * See: docs/LONG_LIVED_AUTH_PLAN.md for full context.
- *
- * @param profileId - Optional profile ID. If not provided, uses active profile.
- * @returns Environment variables for Claude CLI invocation
- */
-export function getProfileEnv(profileId?: string): Record<string, string> {
+export function getUsableProfileEnv(profileId: string): Record<string, string> | null {
   const profileManager = getClaudeProfileManager();
-
-  // Delegate to profile manager's implementation to avoid code duplication
-  if (profileId) {
-    return profileManager.getProfileEnv(profileId);
+  if (!profileManager.getProfile(profileId) || !profileManager.hasValidAuth(profileId)) {
+    return null;
   }
-  return profileManager.getActiveProfileEnv();
+  return profileManager.getProfileEnv(profileId);
 }
 
 /**
@@ -490,7 +171,7 @@ export interface BestProfileEnvResult {
   /** Whether a swap was performed (true if different from active profile) */
   wasSwapped: boolean;
   /** Reason for the swap if one occurred */
-  swapReason?: 'rate_limited' | 'at_capacity' | 'proactive';
+  swapReason?: 'rate_limited' | 'at_capacity' | 'proactive' | 'not_authenticated';
   /** The original active profile if a swap occurred */
   originalProfile?: {
     id: string;
@@ -534,13 +215,20 @@ export function getBestAvailableProfileEnv(): BestProfileEnvResult {
   const isAtCapacity = activeProfile.usage?.weeklyUsagePercent !== undefined &&
                        activeProfile.usage.weeklyUsagePercent >= 100;
 
+  // An account without credentials can't run anything (e.g. an "Add account" sign-in that
+  // never finished): move to one that is signed in
+  // (A profile without a config dir uses the default credentials and is left alone.)
+  const isSignedOut = !!activeProfile.configDir && !profileManager.hasValidAuth(activeProfile.id);
+
   // Determine if we need to find an alternative
-  const needsSwap = rateLimitStatus.limited || isAtCapacity;
-  const swapReason: BestProfileEnvResult['swapReason'] = rateLimitStatus.limited
-    ? 'rate_limited'
-    : isAtCapacity
-      ? 'at_capacity'
-      : undefined;
+  const needsSwap = rateLimitStatus.limited || isAtCapacity || isSignedOut;
+  const swapReason: BestProfileEnvResult['swapReason'] = isSignedOut
+    ? 'not_authenticated'
+    : rateLimitStatus.limited
+      ? 'rate_limited'
+      : isAtCapacity
+        ? 'at_capacity'
+        : undefined;
 
   if (needsSwap) {
     debugLog('[RateLimitDetector] Active profile needs swap:', {
@@ -552,8 +240,10 @@ export function getBestAvailableProfileEnv(): BestProfileEnvResult {
       resetAt: rateLimitStatus.resetAt
     });
 
-    // Try to find a better profile
-    const bestProfile = profileManager.getBestAvailableProfile(activeProfile.id);
+    // Try to find a better profile. Never switch to one without credentials: it would fail
+    // every run and become the active account.
+    const candidate = profileManager.getBestAvailableProfile(activeProfile.id);
+    const bestProfile = candidate && profileManager.hasValidAuth(candidate.id) ? candidate : null;
 
     if (bestProfile) {
       debugLog('[RateLimitDetector] Using alternative profile:', {
@@ -708,13 +398,6 @@ export function ensureCleanProfileEnv(env: Record<string, string>): Record<strin
     return cleanedEnv;
   }
   return env;
-}
-
-/**
- * Get the active Claude profile ID
- */
-export function getActiveProfileId(): string {
-  return getClaudeProfileManager().getActiveProfile().id;
 }
 
 /**

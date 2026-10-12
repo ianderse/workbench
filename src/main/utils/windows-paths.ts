@@ -66,7 +66,7 @@ export function isSecurePath(pathStr: string): boolean {
   return true;
 }
 
-export function expandWindowsPath(pathPattern: string): string | null {
+function expandWindowsPath(pathPattern: string): string | null {
   const envVars: Record<string, string | undefined> = {
     '%PROGRAMFILES%': process.env.ProgramFiles || 'C:\\Program Files',
     '%PROGRAMFILES(X86)%': process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)',
@@ -134,7 +134,7 @@ export function getWindowsExecutablePaths(
  * Get the Windows system root directory (e.g., C:\Windows).
  * Checks both casing variants of the environment variable with a safe fallback.
  */
-export function getSystemRoot(): string {
+function getSystemRoot(): string {
   return process.env.SystemRoot || process.env.SYSTEMROOT || 'C:\\Windows';
 }
 

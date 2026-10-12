@@ -8,6 +8,7 @@ export const IPC_CHANNELS = {
   PROJECT_ADD: 'project:add',
   PROJECT_REMOVE: 'project:remove',
   PROJECT_LIST: 'project:list',
+  PROJECT_COST_METRICS: 'project:costMetrics',  // Task count and total run cost per initialized project
   PROJECT_UPDATE_SETTINGS: 'project:updateSettings',
   PROJECT_INITIALIZE: 'project:initialize',
   PROJECT_CHECK_VERSION: 'project:checkVersion',
@@ -27,25 +28,24 @@ export const IPC_CHANNELS = {
   TASK_UPDATE: 'task:update',
   TASK_START: 'task:start',
   TASK_STOP: 'task:stop',
+  TASK_RETRY: 'task:retry',  // Start a task over: revert its worktree, reset its spec files, start (or queue) it
   TASK_REVIEW: 'task:review',
   TASK_UPDATE_STATUS: 'task:updateStatus',
   TASK_RECOVER_STUCK: 'task:recoverStuck',
   TASK_CHECK_RUNNING: 'task:checkRunning',
-  TASK_RESUME_PAUSED: 'task:resumePaused',  // Resume a rate-limited or auth-paused task
   TASK_LOAD_IMAGE_THUMBNAIL: 'task:loadImageThumbnail',
   TASK_CHECK_WORKTREE_CHANGES: 'task:checkWorktreeChanges',
 
   // Workspace management (for human review)
   // Per-spec architecture: Each spec has its own worktree at .worktrees/{spec-name}/
   TASK_WORKTREE_STATUS: 'task:worktreeStatus',
-  TASK_WORKTREE_DIFF: 'task:worktreeDiff',
   TASK_WORKTREE_MERGE: 'task:worktreeMerge',
   TASK_WORKTREE_MERGE_PREVIEW: 'task:worktreeMergePreview',  // Preview merge conflicts before merging
   TASK_WORKTREE_DISCARD: 'task:worktreeDiscard',
   TASK_WORKTREE_CREATE_PR: 'task:worktreeCreatePR',
-  TASK_WORKTREE_OPEN_IN_IDE: 'task:worktreeOpenInIDE',
-  TASK_WORKTREE_OPEN_IN_TERMINAL: 'task:worktreeOpenInTerminal',
-  TASK_WORKTREE_DETECT_TOOLS: 'task:worktreeDetectTools',  // Detect installed IDEs/terminals
+  TASK_WORKTREE_MERGE_PR: 'task:worktreeMergePR',  // Pull the target into the task branch (Claude Code resolves conflicts), push, merge the PR
+  TASK_WORKTREE_PR_STATE: 'task:worktreePRState',  // Read a task's PR state from GitHub and store it in the task metadata
+  TASK_MERGE_PR_PROGRESS: 'task:mergePRProgress',  // Event: merging a task's PR moved to another step (main -> renderer)
   TASK_LIST_WORKTREES: 'task:listWorktrees',
   TASK_ARCHIVE: 'task:archive',
   TASK_UNARCHIVE: 'task:unarchive',
@@ -56,8 +56,11 @@ export const IPC_CHANNELS = {
   TASK_ERROR: 'task:error',
   TASK_LOG: 'task:log',
   TASK_STATUS_CHANGE: 'task:statusChange',
+  TASK_LIST_CHANGED: 'task:listChanged',  // Event: tasks were created, edited or moved outside the board, e.g. by the Claude chat (main -> renderer): (projectId)
   TASK_RATE_LIMIT_HOLD_CHANGE: 'task:rateLimitHoldChange',  // Rate-limit hold set/cleared (main -> renderer)
   TASK_EXECUTION_PROGRESS: 'task:executionProgress',
+  TASK_QUEUE_ORDER_SET: 'task:queueOrderSet',  // Board's saved Queue column order (renderer -> main), used to start the top queued task first
+  TASK_CLAUDE_RUN_UPDATE: 'task:claudeRunUpdate',  // Claude Code run state changed (main -> renderer): (taskId, ClaudeRunInfo, projectId)
 
   // Task phase logs (persistent, collapsible logs by phase)
   TASK_LOGS_GET: 'task:logsGet',           // Load logs from spec dir
@@ -82,7 +85,8 @@ export const IPC_CHANNELS = {
   TERMINAL_RESTORE_SESSION: 'terminal:restoreSession',
   TERMINAL_CLEAR_SESSIONS: 'terminal:clearSessions',
   TERMINAL_RESUME_CLAUDE: 'terminal:resumeClaude',
-  TERMINAL_ACTIVATE_DEFERRED_RESUME: 'terminal:activateDeferredResume',  // Trigger deferred Claude resume when terminal becomes active
+  TERMINAL_RESUME_TASK_SESSION: 'terminal:resumeTaskSession',  // Resume a task's Claude Code session in an agent window
+  TERMINAL_ACTIVATE_DEFERRED_RESUME: 'terminal:activateDeferredResume',  // Resume a restored terminal's Claude Code session once its window is shown
   TERMINAL_GET_SESSION_DATES: 'terminal:getSessionDates',
   TERMINAL_GET_SESSIONS_FOR_DATE: 'terminal:getSessionsForDate',
   TERMINAL_RESTORE_FROM_DATE: 'terminal:restoreFromDate',
@@ -100,7 +104,7 @@ export const IPC_CHANNELS = {
   TERMINAL_EXIT: 'terminal:exit',
   TERMINAL_TITLE_CHANGE: 'terminal:titleChange',
   TERMINAL_WORKTREE_CONFIG_CHANGE: 'terminal:worktreeConfigChange',  // Worktree config restored/changed (for sync on recovery)
-  TERMINAL_PENDING_RESUME: 'terminal:pendingResume',  // Terminal has pending Claude resume (for deferred activation)
+  TERMINAL_PENDING_RESUME: 'terminal:pendingResume',  // Terminal has a Claude Code session to resume (resumed once its window is shown)
   TERMINAL_RATE_LIMIT: 'terminal:rateLimit',  // Claude Code rate limit detected
   TERMINAL_OAUTH_TOKEN: 'terminal:oauthToken',  // OAuth token captured from setup-token output
   TERMINAL_AUTH_CREATED: 'terminal:authCreated',  // Auth terminal created for OAuth flow
@@ -114,6 +118,8 @@ export const IPC_CHANNELS = {
   CLAUDE_PROFILES_GET: 'claude:profilesGet',
   CLAUDE_PROFILE_SAVE: 'claude:profileSave',
   CLAUDE_PROFILE_DELETE: 'claude:profileDelete',
+  CLAUDE_ACCOUNTS_LOGIN: 'claude:accountsLogin',  // Claude Code's sign-in in the user's terminal
+  CLAUDE_ACCOUNTS_REDETECT: 'claude:accountsRedetect',  // Detect Claude Code's setups again after a sign-in
   CLAUDE_PROFILE_RENAME: 'claude:profileRename',
   CLAUDE_PROFILE_SET_ACTIVE: 'claude:profileSetActive',
   CLAUDE_PROFILE_SWITCH: 'claude:profileSwitch',
@@ -123,14 +129,11 @@ export const IPC_CHANNELS = {
   CLAUDE_PROFILE_VERIFY_AUTH: 'claude:profileVerifyAuth',  // Check if profile has been authenticated
   CLAUDE_AUTH_LOGIN_SUBPROCESS: 'claude:authLoginSubprocess',  // Run `claude auth login` as subprocess
   CLAUDE_AUTH_LOGIN_PROGRESS: 'claude:authLoginProgress',      // Main → Renderer progress events
+  CLAUDE_AUTH_LOGIN_CANCEL: 'claude:authLoginCancel',          // Stop a running `claude auth login`
   CLAUDE_PROFILE_AUTO_SWITCH_SETTINGS: 'claude:autoSwitchSettings',
   CLAUDE_PROFILE_UPDATE_AUTO_SWITCH: 'claude:updateAutoSwitch',
   CLAUDE_PROFILE_FETCH_USAGE: 'claude:fetchUsage',
   CLAUDE_PROFILE_GET_BEST_PROFILE: 'claude:getBestProfile',
-
-  // Account priority order (unified OAuth + API profile ordering)
-  ACCOUNT_PRIORITY_GET: 'account:priorityGet',
-  ACCOUNT_PRIORITY_SET: 'account:prioritySet',
 
   // SDK/CLI rate limit event (for non-terminal Claude invocations)
   CLAUDE_SDK_RATE_LIMIT: 'claude:sdkRateLimit',
@@ -150,7 +153,6 @@ export const IPC_CHANNELS = {
   SETTINGS_GET: 'settings:get',
   SETTINGS_SAVE: 'settings:save',
   SETTINGS_GET_CLI_TOOLS_INFO: 'settings:getCliToolsInfo',
-  SETTINGS_CLAUDE_CODE_GET_ONBOARDING_STATUS: 'settings:claudeCode:getOnboardingStatus',  // Check hasCompletedOnboarding from ~/.claude.json
 
   // API Profile management (custom Anthropic-compatible endpoints)
   PROFILES_GET: 'profiles:get',
@@ -162,17 +164,6 @@ export const IPC_CHANNELS = {
   PROFILES_TEST_CONNECTION_CANCEL: 'profiles:test-connection-cancel',
   PROFILES_DISCOVER_MODELS: 'profiles:discover-models',
   PROFILES_DISCOVER_MODELS_CANCEL: 'profiles:discover-models-cancel',
-
-  // Provider Account management (unified multi-provider)
-  PROVIDER_ACCOUNTS_GET: 'provider-accounts:get',
-  PROVIDER_ACCOUNTS_SAVE: 'provider-accounts:save',
-  PROVIDER_ACCOUNTS_UPDATE: 'provider-accounts:update',
-  PROVIDER_ACCOUNTS_DELETE: 'provider-accounts:delete',
-  PROVIDER_ACCOUNTS_SET_QUEUE_ORDER: 'provider-accounts:set-queue-order',
-  PROVIDER_ACCOUNTS_SET_CROSS_PROVIDER_QUEUE_ORDER: 'provider-accounts:set-cross-provider-queue-order',
-  PROVIDER_ACCOUNTS_TEST_CONNECTION: 'provider-accounts:test-connection',
-  PROVIDER_ACCOUNTS_CHECK_ENV: 'provider-accounts:check-env',
-  MODEL_OVERRIDES_SAVE: 'model-overrides:save',
 
   // Dialogs
   DIALOG_SELECT_DIRECTORY: 'dialog:selectDirectory',
@@ -190,26 +181,10 @@ export const IPC_CHANNELS = {
   // Context operations
   CONTEXT_GET: 'context:get',
   CONTEXT_REFRESH_INDEX: 'context:refreshIndex',
-  CONTEXT_MEMORY_STATUS: 'context:memoryStatus',
-  CONTEXT_SEARCH_MEMORIES: 'context:searchMemories',
-  CONTEXT_GET_MEMORIES: 'context:getMemories',
-  CONTEXT_MEMORY_VERIFY: 'context:memory:verify',
-  CONTEXT_MEMORY_PIN: 'context:memory:pin',
-  CONTEXT_MEMORY_DEPRECATE: 'context:memory:deprecate',
-  CONTEXT_MEMORY_DELETE: 'context:memory:delete',
 
   // Environment configuration
   ENV_GET: 'env:get',
   ENV_UPDATE: 'env:update',
-
-  // Ollama model detection and management
-  OLLAMA_CHECK_STATUS: 'ollama:checkStatus',
-  OLLAMA_CHECK_INSTALLED: 'ollama:checkInstalled',
-  OLLAMA_INSTALL: 'ollama:install',
-  OLLAMA_LIST_MODELS: 'ollama:listModels',
-  OLLAMA_LIST_EMBEDDING_MODELS: 'ollama:listEmbeddingModels',
-  OLLAMA_PULL_MODEL: 'ollama:pullModel',
-  OLLAMA_PULL_PROGRESS: 'ollama:pullProgress',
 
   // Insights operations
   INSIGHTS_GET_SESSION: 'insights:getSession',
@@ -233,10 +208,6 @@ export const IPC_CHANNELS = {
   INSIGHTS_STATUS: 'insights:status',
   INSIGHTS_ERROR: 'insights:error',
   INSIGHTS_SESSION_UPDATED: 'insights:sessionUpdated',  // Event: session updated (main -> renderer)
-
-  // File explorer operations
-  FILE_EXPLORER_LIST: 'fileExplorer:list',
-  FILE_EXPLORER_READ: 'fileExplorer:read',
 
   // Git operations
   GIT_GET_BRANCHES: 'git:getBranches',
@@ -266,12 +237,6 @@ export const IPC_CHANNELS = {
   APP_UPDATE_READONLY_VOLUME: 'app-update:readonly-volume',  // App running from read-only volume (DMG), needs to be moved
 
   // Debug operations
-  DEBUG_GET_INFO: 'debug:getInfo',
-  DEBUG_OPEN_LOGS_FOLDER: 'debug:openLogsFolder',
-  DEBUG_COPY_DEBUG_INFO: 'debug:copyDebugInfo',
-  DEBUG_GET_RECENT_ERRORS: 'debug:getRecentErrors',
-  DEBUG_LIST_LOG_FILES: 'debug:listLogFiles',
-  DEBUG_SIMULATE_RATE_LIMIT: 'debug:simulateRateLimit',  // Simulate rate limit for testing auto-swap
 
   // Claude Code CLI operations
   CLAUDE_CODE_CHECK_VERSION: 'claudeCode:checkVersion',
@@ -284,7 +249,6 @@ export const IPC_CHANNELS = {
   // Graphify CLI (memory graph)
   GRAPHIFY_CHECK_VERSION: 'graphify:checkVersion',
   GRAPHIFY_INSTALL: 'graphify:install',
-  GRAPHIFY_INSTALL_CLAUDE_COMMAND: 'graphify:installClaudeCommand',
   GRAPHIFY_GET_INDEX: 'graphify:getIndex',
   GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
   GRAPHIFY_HAS_GRAPH: 'graphify:hasGraph',

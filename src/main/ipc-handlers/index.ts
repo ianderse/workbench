@@ -15,19 +15,15 @@ import { registerTaskHandlers } from './task-handlers';
 import { registerTerminalHandlers } from './terminal-handlers';
 import { registerAgenteventsHandlers } from './agent-events-handlers';
 import { registerSettingsHandlers } from './settings-handlers';
-import { registerFileHandlers } from './file-handlers';
 import { registerContextHandlers } from './context-handlers';
 import { registerEnvHandlers } from './env-handlers';
 import { registerInsightsHandlers } from './insights-handlers';
-import { registerMemoryHandlers } from './memory-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
-import { registerDebugHandlers } from './debug-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
 import { registerGraphifyHandlers } from './graphify-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
-import { registerCodexAuthHandlers } from './codex-auth-handlers';
 import { notificationService } from '../notification-service';
 import { setAgentManagerRef } from './utils';
 
@@ -56,7 +52,7 @@ export function setupIpcHandlers(
   registerTaskHandlers(agentManager, getMainWindow);
 
   // Terminal and Claude profile handlers
-  registerTerminalHandlers(terminalManager, getMainWindow);
+  registerTerminalHandlers(terminalManager, getMainWindow, agentManager);
 
   // Terminal worktree handlers (isolated development in worktrees)
   registerTerminalWorktreeIpcHandlers();
@@ -67,10 +63,7 @@ export function setupIpcHandlers(
   // Settings and dialog handlers
   registerSettingsHandlers(agentManager, getMainWindow);
 
-  // File explorer handlers
-  registerFileHandlers();
-
-  // Context and memory handlers
+  // Project context handlers (project index)
   registerContextHandlers(getMainWindow);
 
   // Environment configuration handlers
@@ -79,14 +72,8 @@ export function setupIpcHandlers(
   // Insights handlers
   registerInsightsHandlers(getMainWindow);
 
-  // Memory & infrastructure handlers (local libSQL memory store)
-  registerMemoryHandlers();
-
   // App auto-update handlers
   registerAppUpdateHandlers();
-
-  // Debug handlers (logs, debug info, etc.)
-  registerDebugHandlers();
 
   // Claude Code CLI handlers (version checking, installation)
   registerClaudeCodeHandlers();
@@ -100,30 +87,8 @@ export function setupIpcHandlers(
   // API Profile handlers (custom Anthropic-compatible endpoints)
   registerProfileHandlers();
 
-  // Codex OAuth authentication handlers
-  registerCodexAuthHandlers();
-
   console.warn('[IPC] All handler modules registered successfully');
 }
 
 // Re-export all individual registration functions for potential custom usage
-export {
-  registerProjectHandlers,
-  registerTaskHandlers,
-  registerTerminalHandlers,
-  registerTerminalWorktreeIpcHandlers,
-  registerAgenteventsHandlers,
-  registerSettingsHandlers,
-  registerFileHandlers,
-  registerContextHandlers,
-  registerEnvHandlers,
-  registerInsightsHandlers,
-  registerMemoryHandlers,
-  registerAppUpdateHandlers,
-  registerDebugHandlers,
-  registerClaudeCodeHandlers,
-  registerGraphifyHandlers,
-  registerMcpHandlers,
-  registerProfileHandlers,
-  registerCodexAuthHandlers
-};
+;

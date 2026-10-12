@@ -195,14 +195,8 @@ export function safeSendToRenderer(
 }
 
 /**
- * Clear the warning timestamps Map (for testing only)
- */
-export function _clearWarnTimestampsForTest(): void {
-  warnTimestamps.clear();
-}
-
-/**
  * Reset all safe-send module state (for testing only)
+ * @internal Test hook
  */
 export function _resetSafeSendStateForTest(): void {
   warnTimestamps.clear();

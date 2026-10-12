@@ -23,6 +23,7 @@ import { Button } from './ui/button';
 import { useTerminalStore } from '../stores/terminal-store';
 import { useTaskStore } from '../stores/task-store';
 import { TERMINAL_DOM_UPDATE_DELAY_MS, PANEL_CLEANUP_GRACE_PERIOD_MS } from '../../shared/constants';
+import { computeTerminalGridLayout } from '../lib/terminal-grid-layout';
 
 interface TerminalGridProps {
   projectPath?: string;
@@ -232,15 +233,8 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
     }
   }, [reorderTerminals, terminals, projectPath]);
 
-  // Calculate grid layout based on number of terminals
-  const gridLayout = useMemo(() => {
-    const count = terminals.length;
-    if (count === 0) return { rows: 0, cols: 0 };
-    if (count === 2) return { rows: 1, cols: 2 };
-    // Near-square grid: 1x1, 2x2, 3x2, 3x3, 4x3, 4x4, 5x4, 5x5 (up to MAX_TERMINALS_LIMIT)
-    const cols = Math.ceil(Math.sqrt(count));
-    return { rows: Math.ceil(count / cols), cols };
-  }, [terminals.length]);
+  // Near-square grid without empty cells: the newest row or column is shared by its windows
+  const gridLayout = useMemo(() => computeTerminalGridLayout(terminals.length), [terminals.length]);
 
   // Terminal IDs for SortableContext
   const terminalIds = useMemo(() => terminals.map(t => t.id), [terminals]);
@@ -282,23 +276,25 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
       <div className="flex h-full flex-col">
         {/* Toolbar */}
         <div className="flex h-12 shrink-0 items-center justify-between px-3">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1">
             <span className="px-1 text-[0.8125rem] text-muted-foreground">
               {t('terminal:grid.count', { count: terminals.length, max: maxTerminals })}
             </span>
-          </div>
-          <div className="flex items-center gap-0.5">
+            {/* Settings > Agents at the window limit */}
             <Button
               variant="ghost"
-              size="sm"
-              className="h-8 gap-1.5 text-[0.8125rem] text-muted-foreground hover:bg-nav-hover hover:text-foreground"
+              size="icon"
+              className="h-6 w-6 text-muted-foreground hover:bg-nav-hover hover:text-foreground transition-colors"
               onClick={() => {
                 window.dispatchEvent(new CustomEvent('open-app-settings', { detail: { section: 'agent', focusId: 'maxTerminals' } }));
               }}
+              aria-label={t('terminal:grid.settingsAriaLabel')}
+              title={t('terminal:grid.settingsAriaLabel')}
             >
-              <Settings className="h-3.5 w-3.5" />
-              {t('actions.settings')}
+              <Settings className="h-3 w-3" />
             </Button>
+          </div>
+          <div className="flex items-center gap-0.5">
             <Button
               variant="ghost"
               size="sm"
@@ -360,12 +356,19 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
                 <div
                   className="h-full grid"
                   style={{
-                    gridTemplateColumns: `repeat(${gridLayout.cols}, 1fr)`,
+                    gridTemplateColumns: `repeat(${gridLayout.columns}, 1fr)`,
                     gridTemplateRows: `repeat(${gridLayout.rows}, 1fr)`,
                   }}
                 >
-                  {terminals.map((terminal) => (
-                    <div key={terminal.id} className="p-1 min-h-0 min-w-0">
+                  {terminals.map((terminal, index) => (
+                    <div
+                      key={terminal.id}
+                      className="p-1 min-h-0 min-w-0"
+                      style={{
+                        gridRow: `${gridLayout.cells[index].row} / span ${gridLayout.cells[index].rowSpan}`,
+                        gridColumn: `${gridLayout.cells[index].column} / span ${gridLayout.cells[index].columnSpan}`,
+                      }}
+                    >
                       <SortableTerminalWrapper
                         id={terminal.id}
                         cwd={terminal.cwd || projectPath}

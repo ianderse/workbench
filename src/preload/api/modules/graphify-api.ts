@@ -13,13 +13,11 @@ export interface GraphifyAPI {
   checkGraphifyVersion: (forceRefresh?: boolean) => Promise<IPCResult<GraphifyVersionInfo>>;
   /** Open a terminal that installs or updates Graphify */
   installGraphify: () => Promise<IPCResult<{ command: string }>>;
-  /** Make the /graphify command available in Claude Code (each config directory lacking it) */
-  installGraphifyClaudeCommand: () => Promise<IPCResult<{ configDirs: number; missing: number }>>;
   /** The project's memory graph, or null when it has not been built */
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo | null>>;
-  /** Build (or rebuild) the project's memory graph in .auto-claude/memory */
+  /** Build (or rebuild) the project's memory graph in .auto-claude/knowledge */
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo>>;
-  /** Whether the project has a memory graph (.auto-claude/memory) */
+  /** Whether the project has a memory graph (.auto-claude/knowledge) */
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   /** The project's memory graph for the graph view */
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<GraphifyGraph | null>>;
@@ -30,7 +28,6 @@ export interface GraphifyAPI {
 export const createGraphifyAPI = (): GraphifyAPI => ({
   checkGraphifyVersion: (forceRefresh?: boolean) => invokeIpc(IPC_CHANNELS.GRAPHIFY_CHECK_VERSION, forceRefresh),
   installGraphify: () => invokeIpc(IPC_CHANNELS.GRAPHIFY_INSTALL),
-  installGraphifyClaudeCommand: () => invokeIpc(IPC_CHANNELS.GRAPHIFY_INSTALL_CLAUDE_COMMAND),
   getGraphifyIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_GET_INDEX, projectId),
   buildGraphifyIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_BUILD_INDEX, projectId),
   hasGraphifyGraph: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_HAS_GRAPH, projectId),

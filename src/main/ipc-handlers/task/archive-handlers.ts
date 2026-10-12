@@ -1,7 +1,8 @@
-import { ipcMain } from 'electron';
+import { handleIpc } from '../ipc-registry';
 import { IPC_CHANNELS } from '../../../shared/constants';
 import type { IPCResult } from '../../../shared/types';
 import { projectStore } from '../../project-store';
+import { taskQueue } from '../../services/task-queue';
 
 /**
  * Register task archive handlers
@@ -10,7 +11,7 @@ export function registerTaskArchiveHandlers(): void {
   /**
    * Archive tasks
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_ARCHIVE,
     async (
       _,
@@ -24,6 +25,8 @@ export function registerTaskArchiveHandlers(): void {
 
       if (result) {
         console.warn('[IPC] TASK_ARCHIVE success');
+        // Leaving or re-entering Queue / In Progress may free a slot or queue a task
+        taskQueue.request(projectId);
         return { success: true, data: true };
       } else {
         console.error('[IPC] TASK_ARCHIVE failed');
@@ -35,7 +38,7 @@ export function registerTaskArchiveHandlers(): void {
   /**
    * Unarchive tasks
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_UNARCHIVE,
     async (_, projectId: string, taskIds: string[]): Promise<IPCResult<boolean>> => {
       console.warn('[IPC] TASK_UNARCHIVE called with projectId:', projectId, 'taskIds:', taskIds);
@@ -44,6 +47,8 @@ export function registerTaskArchiveHandlers(): void {
 
       if (result) {
         console.warn('[IPC] TASK_UNARCHIVE success');
+        // Leaving or re-entering Queue / In Progress may free a slot or queue a task
+        taskQueue.request(projectId);
         return { success: true, data: true };
       } else {
         console.error('[IPC] TASK_UNARCHIVE failed');

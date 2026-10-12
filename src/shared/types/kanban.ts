@@ -6,7 +6,7 @@
 /**
  * Column preferences for a single kanban column
  */
-export interface KanbanColumnPreference {
+interface KanbanColumnPreference {
   /** Column width in pixels (180-600px range) */
   width: number;
   /** Whether the column is collapsed (narrow vertical strip) */

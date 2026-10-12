@@ -10,7 +10,7 @@
 /**
  * Type discriminator for unified accounts
  */
-export type UnifiedAccountType = 'oauth' | 'api';
+type UnifiedAccountType = 'oauth' | 'api';
 
 /**
  * Type of rate limit that was hit

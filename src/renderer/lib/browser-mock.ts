@@ -109,77 +109,6 @@ const browserMockAPI: ElectronAPI = {
     }
   }),
 
-  // Provider Account management (unified multi-provider credentials)
-  getProviderAccounts: async () => ({
-    success: true,
-    data: { accounts: [] }
-  }),
-
-  saveProviderAccount: async (account) => ({
-    success: true,
-    data: {
-      id: `mock-account-${Date.now()}`,
-      ...account,
-      createdAt: Date.now(),
-      updatedAt: Date.now()
-    }
-  }),
-
-  updateProviderAccount: async (_id, updates) => ({
-    success: true,
-    data: {
-      id: _id,
-      provider: 'anthropic' as const,
-      name: 'Mock Account',
-      authType: 'api-key' as const,
-      billingModel: 'pay-per-use' as const,
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-      ...updates
-    }
-  }),
-
-  deleteProviderAccount: async (_id: string) => ({
-    success: true
-  }),
-
-  setProviderAccountQueueOrder: async (_order: string[]) => ({
-    success: true
-  }),
-
-  setCrossProviderQueueOrder: async (_order: string[]) => ({
-    success: true
-  }),
-
-  saveModelOverrides: async (_overrides: Record<string, unknown>) => ({
-    success: true
-  }),
-
-  testProviderConnection: async (_provider: string, _config) => ({
-    success: true,
-    data: { status: 'valid' as const }
-  }),
-
-  checkEnvCredentials: async () => ({
-    success: true,
-    data: {}
-  }),
-
-  // Codex OAuth authentication (mock)
-  codexAuthLogin: async () => ({
-    success: false,
-    error: 'Codex OAuth not available in browser mock'
-  }),
-
-  codexAuthStatus: async () => ({
-    success: true,
-    data: { isAuthenticated: false }
-  }),
-
-  codexAuthLogout: async () => ({
-    success: true
-  }),
-
   // Queue Routing API (rate limit recovery)
   queue: {
     getRunningTasksByProfile: async () => ({ success: true, data: { byProfile: {}, totalRunning: 0 } }),
@@ -197,10 +126,9 @@ const browserMockAPI: ElectronAPI = {
   // Graphify CLI (memory graph)
   checkGraphifyVersion: async () => ({
     success: true,
-    data: { installed: null, latest: null, isOutdated: false, claudeCommand: null }
+    data: { installed: null, latest: null, isOutdated: false }
   }),
   installGraphify: async () => ({ success: true, data: { command: 'uv tool install graphifyy' } }),
-  installGraphifyClaudeCommand: async () => ({ success: true, data: { configDirs: 1, missing: 0 } }),
   getGraphifyIndex: async () => ({ success: true, data: null }),
   buildGraphifyIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
   hasGraphifyGraph: async () => ({ success: true, data: false }),
@@ -297,29 +225,13 @@ const browserMockAPI: ElectronAPI = {
       success: false,
       message: 'Connection test not available in browser mode'
     }
-  }),
-
-  // Debug Operations
-  getDebugInfo: async () => ({
-    systemInfo: {
-      appVersion: '0.0.0-browser-mock',
-      platform: 'browser',
-      isPackaged: 'false'
-    },
-    recentErrors: [],
-    logsPath: '/mock/logs',
-    debugReport: '[Browser Mock] Debug report not available in browser mode'
-  }),
-  openLogsFolder: async () => ({ success: false, error: 'Not available in browser mode' }),
-  copyDebugInfo: async () => ({ success: false, error: 'Not available in browser mode' }),
-  getRecentErrors: async () => [],
-  listLogFiles: async () => []
+  })
 };
 
 /**
  * Initialize browser mock if not running in Electron
  */
-export function initBrowserMock(): void {
+function initBrowserMock(): void {
   if (!isElectron) {
     console.warn('%c[Browser Mock] Initializing mock electronAPI for browser preview', 'color: #f0ad4e; font-weight: bold;');
     (window as Window & { electronAPI: ElectronAPI }).electronAPI = browserMockAPI;

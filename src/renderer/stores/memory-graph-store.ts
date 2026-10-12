@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 interface MemoryGraphState {
-  /** Whether each project has a memory graph (.auto-claude/memory), by project id */
+  /** Whether each project has a memory graph (.auto-claude/knowledge), by project id */
   available: Record<string, boolean>;
   /** Bumped when a project's graph is rebuilt, so an open graph view reloads it */
   revision: Record<string, number>;

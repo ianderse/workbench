@@ -36,6 +36,7 @@ vi.mock('../claude-profile-manager', () => ({
       { id: 'profile-3', name: 'Profile 3' }
     ]),
     setActiveProfile: vi.fn(),
+    hasValidAuth: vi.fn(() => true),
     getProfileToken: vi.fn(() => 'mock-decrypted-token')
   }))
 }));
@@ -70,18 +71,6 @@ vi.mock('../settings-utils', () => ({
   readSettingsFileAsync: vi.fn(async () => undefined),
   readSettingsFile: vi.fn(() => undefined),
   getSettingsPath: vi.fn(() => '/tmp/test-settings.json'),
-}));
-
-// Mock codex-oauth to prevent real OAuth token reads
-vi.mock('../ai/auth/codex-oauth', () => ({
-  ensureValidCodexToken: vi.fn(async () => null),
-}));
-
-// Mock codex-usage-fetcher
-vi.mock('./codex-usage-fetcher', () => ({
-  fetchCodexUsage: vi.fn(async () => null),
-  normalizeCodexResponse: vi.fn(() => null),
-  getCodexAccountId: vi.fn(() => undefined),
 }));
 
 // Mock global fetch
@@ -1075,70 +1064,6 @@ describe('usage-monitor', () => {
   });
 
   describe('backward compatibility', () => {
-    describe('Legacy OAuth-only profile support', () => {
-      it('should work with legacy OAuth profiles (no API profile support)', async () => {
-        // Mock loadProfilesFile to return empty profiles (API profiles not configured)
-        mockLoadProfilesFile.mockResolvedValueOnce({
-          profiles: [],
-          activeProfileId: null,
-          version: 1
-        });
-
-        const monitor = getUsageMonitor();
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        // Should fall back to OAuth profile
-        const credential = await monitor['getCredential']();
-
-        // Should get OAuth token from profile manager
-        expect(credential).toBe('mock-decrypted-token');
-
-        consoleSpy.mockRestore();
-      });
-
-      it('should prioritize API profile when available', async () => {
-        // Mock API profile is configured
-        mockLoadProfilesFile.mockResolvedValueOnce({
-          profiles: [{
-            id: 'api-profile-1',
-            name: 'API Profile',
-            baseUrl: 'https://api.anthropic.com',
-            apiKey: 'sk-ant-api-key'
-          }],
-          activeProfileId: 'api-profile-1',
-          version: 1
-        });
-
-        const monitor = getUsageMonitor();
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        const credential = await monitor['getCredential']();
-
-        // Should prefer API key over OAuth token
-        expect(credential).toBe('sk-ant-api-key');
-
-        consoleSpy.mockRestore();
-      });
-
-      it('should handle missing API profile gracefully', async () => {
-        // Mock activeProfileId points to non-existent profile
-        mockLoadProfilesFile.mockResolvedValueOnce({
-          profiles: [],
-          activeProfileId: 'nonexistent-profile',
-          version: 1
-        });
-
-        const monitor = getUsageMonitor();
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        const credential = await monitor['getCredential']();
-
-        // Should fall back to OAuth
-        expect(credential).toBe('mock-decrypted-token');
-
-        consoleSpy.mockRestore();
-      });
-    });
 
     describe('Settings backward compatibility', () => {
       it('should handle settings with missing optional fields', async () => {
@@ -1351,72 +1276,6 @@ describe('usage-monitor', () => {
         // OAuth profiles don't have baseUrl, should default to Anthropic
         const endpoint = getUsageEndpoint('anthropic', 'https://api.anthropic.com');
         expect(endpoint).toBe('https://api.anthropic.com/api/oauth/usage');
-      });
-    });
-
-    describe('Mixed OAuth/API profile environments', () => {
-      it('should handle environment with both OAuth and API profiles', async () => {
-        const monitor = getUsageMonitor();
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        // Mock both OAuth and API profiles
-        mockLoadProfilesFile.mockResolvedValueOnce({
-          profiles: [
-            {
-              id: 'api-profile-1',
-              name: 'API Profile',
-              baseUrl: 'https://api.anthropic.com',
-              apiKey: 'sk-ant-api-key'
-            },
-            {
-              id: 'api-profile-2',
-              name: 'z.ai API Profile',
-              baseUrl: 'https://api.z.ai/api/anthropic',
-              apiKey: 'zai-api-key'
-            }
-          ],
-          activeProfileId: 'api-profile-1',
-          version: 1
-        });
-
-        const credential = await monitor['getCredential']();
-
-        // Should use API profile when active
-        expect(credential).toBe('sk-ant-api-key');
-
-        consoleSpy.mockRestore();
-      });
-
-      it('should switch from API profile back to OAuth profile', async () => {
-        const monitor = getUsageMonitor();
-        const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-        // First, active API profile
-        mockLoadProfilesFile.mockResolvedValueOnce({
-          profiles: [{
-            id: 'api-profile-1',
-            name: 'API Profile',
-            baseUrl: 'https://api.anthropic.com',
-            apiKey: 'sk-ant-api-key'
-          }],
-          activeProfileId: 'api-profile-1',
-          version: 1
-        });
-
-        let credential = await monitor['getCredential']();
-        expect(credential).toBe('sk-ant-api-key');
-
-        // Then, no active API profile (should fall back to OAuth)
-        mockLoadProfilesFile.mockResolvedValueOnce({
-          profiles: [],
-          activeProfileId: null,
-          version: 1
-        });
-
-        credential = await monitor['getCredential']();
-        expect(credential).toBe('mock-decrypted-token');
-
-        consoleSpy.mockRestore();
       });
     });
 

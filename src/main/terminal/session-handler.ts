@@ -120,20 +120,6 @@ export async function persistAllSessionsAsync(terminals: Map<string, TerminalPro
 }
 
 /**
- * Persist all active sessions (blocking sync version)
- *
- * @deprecated Use persistAllSessionsAsync for non-blocking persistence.
- * This function is kept for backwards compatibility with existing callers.
- */
-export function persistAllSessions(terminals: Map<string, TerminalProcess>): void {
-  terminals.forEach((terminal) => {
-    if (terminal.projectPath) {
-      persistSession(terminal);
-    }
-  });
-}
-
-/**
  * Clear a terminal ID from pendingDelete, allowing session saves to proceed.
  *
  * Must be called when re-creating a terminal with a previously-used ID

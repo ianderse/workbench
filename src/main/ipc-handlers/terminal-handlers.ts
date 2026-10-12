@@ -1,10 +1,12 @@
 import { ipcMain } from 'electron';
+import path from 'path';
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
-import type { IPCResult, TerminalCreateOptions, ClaudeProfile, ClaudeProfileSettings, ClaudeUsageSnapshot, AllProfilesUsage } from '../../shared/types';
+import type { IPCResult, TerminalCreateOptions, TerminalTaskSessionOptions, ClaudeProfile, ClaudeProfileSettings, ClaudeUsageSnapshot, AllProfilesUsage } from '../../shared/types';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { TerminalManager } from '../terminal-manager';
+import type { AgentManager } from '../agent/agent-manager';
 import { projectStore } from '../project-store';
 import { terminalNameGenerator } from '../terminal-name-generator';
 import { readSettingsFileAsync } from '../settings-utils';
@@ -13,6 +15,10 @@ import { migrateSession } from '../claude-profile/session-utils';
 import { findMostRecentClaudeSession } from '../terminal/session-handler';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
 import { isValidConfigDir } from '../utils/config-path-validator';
+import { getToolInfo } from '../cli-tool-manager';
+import { isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
+import { getPathDelimiter, isWindows } from '../platform';
+import { openTerminalWithCommand } from './claude-code-handlers';
 
 
 /**
@@ -20,7 +26,8 @@ import { isValidConfigDir } from '../utils/config-path-validator';
  */
 export function registerTerminalHandlers(
   terminalManager: TerminalManager,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  agentManager?: Pick<AgentManager, 'isRunning' | 'getRunSession'>
 ): void {
 
   // ============================================
@@ -77,6 +84,36 @@ export function registerTerminalHandlers(
         await terminalManager.invokeCLIAsync(id, cwd, undefined, dangerouslySkipPermissions);
       })().catch((error) => {
         console.warn('[terminal-handlers] Failed to invoke Claude:', error);
+      });
+    }
+  );
+
+  // Resume a task's Claude Code session in an agent window (`claude --resume <id>` in the task's
+  // worktree, on the profile the session ran on). While the task runs, its run is writing to the
+  // session, so the window follows it read-only and resumes once the task stops.
+  ipcMain.on(
+    IPC_CHANNELS.TERMINAL_RESUME_TASK_SESSION,
+    (_, id: string, options: TerminalTaskSessionOptions) => {
+      (async () => {
+        if (!options?.sessionId || !options.cwd) return;
+        const settings = await readSettingsFileAsync();
+        const dangerouslySkipPermissions = settings?.dangerouslySkipPermissions === true;
+        const taskId = options.taskId;
+        if (taskId && agentManager?.isRunning(taskId)) {
+          terminalManager.followTaskSession(
+            id,
+            options,
+            {
+              isRunning: () => agentManager.isRunning(taskId),
+              getSession: () => agentManager.getRunSession(taskId),
+            },
+            dangerouslySkipPermissions
+          );
+          return;
+        }
+        await terminalManager.resumeTaskSessionAsync(id, options, dangerouslySkipPermissions);
+      })().catch((error) => {
+        console.warn('[terminal-handlers] Failed to resume the task session:', error);
       });
     }
   );
@@ -141,6 +178,20 @@ export function registerTerminalHandlers(
 
         // If this is a new profile without an ID, generate one
         if (!profile.id) {
+          // Adding an account with the name of an existing one would create `<name>-1`, a
+          // second entry that looks the same. Reuse an unfinished sign-in with that name (left
+          // behind when the app closed mid sign-in), refuse anything else.
+          const abandoned = profileManager.findAbandonedProfileByName(profile.name);
+          if (abandoned) {
+            return { success: true, data: abandoned };
+          }
+          const existing = profileManager.findProfileByName(profile.name);
+          if (existing) {
+            return {
+              success: false,
+              error: `An account named "${existing.name}" already exists. Choose another name, or use Sign in again on that account.`
+            };
+          }
           profile.id = profileManager.generateProfileId(profile.name);
         }
 
@@ -182,11 +233,56 @@ export function registerTerminalHandlers(
     }
   );
 
+  // Claude Code's own sign-in (`claude auth login`) in the user's terminal, like the Claude Code
+  // and Graphify installs: on the account's config dir to sign it in again, else on a new one
+  ipcMain.handle(
+    IPC_CHANNELS.CLAUDE_ACCOUNTS_LOGIN,
+    async (_, profileId?: string): Promise<IPCResult> => {
+      try {
+        const claude = getToolInfo('claude');
+        if (!claude.found || !claude.path) return { success: false, error: 'Claude Code CLI not found' };
+        const configDir = getClaudeProfileManager().getLoginConfigDir(profileId);
+        const isDefault = isDefaultClaudeConfigDir(configDir);
+        if (isWindows()) {
+          // PowerShell: claude from its own folder, the config dir through the environment
+          const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
+          if (isDefault) delete env.CLAUDE_CONFIG_DIR;
+          env.PATH = [path.dirname(claude.path), process.env.PATH].filter(Boolean).join(getPathDelimiter());
+          await openTerminalWithCommand('claude auth login', env);
+        } else {
+          // The terminal starts its own shell, so `env` sets the config dir in the command
+          // (Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR)
+          const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+          const configEnv = isDefault ? '-u CLAUDE_CONFIG_DIR' : `CLAUDE_CONFIG_DIR=${quote(configDir)}`;
+          await openTerminalWithCommand(`env ${configEnv} ${quote(claude.path)} auth login`);
+        }
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to open a terminal' };
+      }
+    }
+  );
+
+  // After Claude Code's own sign-in in a terminal: list the account it signed in
+  ipcMain.handle(
+    IPC_CHANNELS.CLAUDE_ACCOUNTS_REDETECT,
+    async (): Promise<IPCResult<ClaudeProfileSettings>> => {
+      try {
+        return { success: true, data: getClaudeProfileManager().redetectAccounts() };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to detect accounts' };
+      }
+    }
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.CLAUDE_PROFILE_DELETE,
     async (_, profileId: string): Promise<IPCResult> => {
       try {
         const profileManager = getClaudeProfileManager();
+        if (profileManager.getProfile(profileId)?.detected) {
+          return { success: false, error: "This account comes from Claude Code's configuration and can't be removed" };
+        }
         const success = profileManager.deleteProfile(profileId);
         if (!success) {
           return { success: false, error: 'Cannot delete default or last profile' };
@@ -410,40 +506,6 @@ export function registerTerminalHandlers(
     }
   );
 
-  // Get account priority order
-  ipcMain.handle(
-    IPC_CHANNELS.ACCOUNT_PRIORITY_GET,
-    async (): Promise<IPCResult<string[]>> => {
-      try {
-        const profileManager = getClaudeProfileManager();
-        const order = profileManager.getAccountPriorityOrder();
-        return { success: true, data: order };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to get account priority order'
-        };
-      }
-    }
-  );
-
-  // Set account priority order
-  ipcMain.handle(
-    IPC_CHANNELS.ACCOUNT_PRIORITY_SET,
-    async (_, order: string[]): Promise<IPCResult> => {
-      try {
-        const profileManager = getClaudeProfileManager();
-        profileManager.setAccountPriorityOrder(order);
-        return { success: true };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to set account priority order'
-        };
-      }
-    }
-  );
-
   // Fetch usage by sending /usage command to terminal
   ipcMain.handle(
     IPC_CHANNELS.CLAUDE_PROFILE_FETCH_USAGE,
@@ -617,8 +679,8 @@ export function registerTerminalHandlers(
     }
   );
 
-  // Activate deferred Claude resume when terminal becomes active
-  // This is triggered by the renderer when a terminal with pendingCLIResume becomes the active tab
+  // Resume a restored terminal's Claude Code session
+  // The renderer sends this once the terminal's window is shown (queued, one window at a time)
   ipcMain.on(
     IPC_CHANNELS.TERMINAL_ACTIVATE_DEFERRED_RESUME,
     (_, id: string) => {

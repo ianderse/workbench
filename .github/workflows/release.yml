@@ -160,7 +160,7 @@ jobs:
               Write-Host "::error::Status Message: $($sig.StatusMessage)"
               exit 1
             }
-            Write-Host "✅ Signature verified successfully"
+            Write-Host "Signature verified successfully"
             Write-Host "  Subject: $($sig.SignerCertificate.Subject)"
             Write-Host "  Issuer: $($sig.SignerCertificate.Issuer)"
             Write-Host "  Thumbprint: $($sig.SignerCertificate.Thumbprint)"
@@ -230,7 +230,7 @@ jobs:
           }
 
           Set-Content -Path $ymlFile -Value $content -NoNewline
-          Write-Host "✅ Updated $ymlFile with new base64 hash and size for $($primaryExe.Name)"
+          Write-Host "Updated $ymlFile with new base64 hash and size for $($primaryExe.Name)"
 
       - name: Skip signing notice
         if: env.AZURE_CLIENT_ID == ''
@@ -431,7 +431,7 @@ jobs:
           VERSION=${GITHUB_REF_NAME#v}
           CHANGELOG_FILE="CHANGELOG.md"
 
-          echo "📋 Extracting release notes for version $VERSION from CHANGELOG.md..."
+          echo "Extracting release notes for version $VERSION from CHANGELOG.md..."
 
           if [ ! -f "$CHANGELOG_FILE" ]; then
             echo "::warning::CHANGELOG.md not found, using minimal release notes"
@@ -470,7 +470,7 @@ jobs:
             CHANGELOG_CONTENT="Release v$VERSION"$'\n\n'"See [CHANGELOG.md](https://github.com/${REPO}/blob/main/CHANGELOG.md) for details."
           fi
 
-          echo "✅ Extracted changelog content"
+          echo "Extracted changelog content"
 
           # Save to file first (more reliable for multiline)
           echo "$CHANGELOG_CONTENT" > changelog-body.md

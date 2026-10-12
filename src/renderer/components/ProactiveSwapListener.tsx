@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { RefreshCw, X } from 'lucide-react';
+import { X } from 'lucide-react';
 import { Button } from './ui/button';
 
 interface SwapNotification {
@@ -57,11 +57,6 @@ export function ProactiveSwapListener() {
     <div className="fixed top-4 right-4 z-50 animate-in slide-in-from-top-2 fade-in duration-300">
       <div className="bg-card border border-border shadow-lg rounded-lg p-4 max-w-sm">
         <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 mt-0.5">
-            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
-              <RefreshCw className="h-4 w-4 text-primary" />
-            </div>
-          </div>
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold text-foreground">{t('notification.accountSwitched')}</p>
             <p className="text-xs text-muted-foreground mt-1">

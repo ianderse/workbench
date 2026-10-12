@@ -4,35 +4,44 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Product Overview
 
-Auto Claude is a TypeScript Electron desktop app where users describe a goal and AI agents autonomously handle planning,
-implementation, and QA validation. All work happens in isolated git worktrees so the main branch stays safe.
+Auto Claude is a TypeScript Electron desktop app where users describe a goal and the **Claude Code CLI** does the work
+autonomously. Every task runs in its own git worktree so the main branch stays safe.
 
-**Core workflow:** User creates a task → Spec creation pipeline assesses complexity and writes a specification → Planner
-agent breaks it into subtasks → Coder agent implements (can spawn parallel subagents) → QA reviewer validates → QA fixer
-resolves issues → User reviews and merges.
+**Core workflow:** User creates a task (description, images, connectors, git options) → a short Claude Code **triage**
+run picks model, effort and whether to plan → Claude Code **plans** (plan mode, optional) → **implements** in the task's
+worktree (same session, permission checks off) → **validates** (project checks + fresh-context review + commit) → user
+reviews, requests changes (same session continues) or merges.
 
 **Main features:**
 
-- **Autonomous Tasks** — Multi-agent pipeline (planner, coder, QA) that builds features end-to-end
+- **Autonomous Tasks** — Each task is delegated to Claude Code (`claude -p`) in its worktree; Claude Code decides
+  when to use subagents, skills, MCP tools and its task list
 - **Kanban Board** — Visual task management from planning through completion
 - **Agent Terminals** — Parallel AI-powered terminals (12 by default, up to 24) with task context injection
-- **Insights** — AI chat interface for exploring and understanding a codebase
-- **Pull Requests** — Create a GitHub pull request from a task's worktree (via the `gh` CLI)
-- **Memory** — Local knowledge store that retains insights across sessions
-- **Connectors** — MCP servers for agents (Context7, Electron/Puppeteer for QA, user-added servers) with
-  app-wide defaults in Settings and per-task choices in the task dialog
+- **Insights** — Chat for exploring a codebase (runs through Claude Code; can't change files) that can also manage
+  the project's tasks: Auto Claude's task tools (`src/main/insights/task-tools.ts`, served over local MCP HTTP by
+  `task-tools-server.ts` with a token per chat turn) create, edit, start, stop, retry, move, review, PR, merge, archive
+  and delete tasks through the same IPC handlers as the UI (`ipc-handlers/ipc-registry.ts`); ideas the user didn't ask
+  for stay task suggestions (`__TASK_SUGGESTION__`)
+- **Pull Requests** — Create a GitHub pull request from a task's worktree and merge it (via the `gh` CLI). A task with
+  an open PR stays in Human Review (PR Created); Merge PR (`src/main/ai/runners/github/pr-merger.ts`) pulls the target
+  branch into the task branch, lets the merge agent (`src/main/ai/runners/merge-agent.ts`, Claude Code) resolve
+  conflicts, checks that no line the target added was lost, pushes and merges the PR, then moves the task to Done
+- **Connectors** — MCP servers added to a task's Claude Code session (`--mcp-config`: Context7, Electron, Puppeteer,
+  user-added servers) with app-wide defaults in Settings and per-task choices in the task dialog
 - **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
-  project's code, built into `.auto-claude/memory` and offered to agents
+  project's code, built into `.auto-claude/knowledge` and offered to agents
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
-- **Flexible Authentication** — Claude Code subscription (OAuth) or API profiles with any Anthropic-compatible endpoint
+- **Authentication** — Claude subscription accounts (each a `CLAUDE_CONFIG_DIR`) or API profiles with any
+  Anthropic-compatible endpoint
 - **Multi-Account Swapping** — When one Claude account hits a rate limit, switch to an available one automatically
 - **Cross-Platform** — Windows, macOS, and Linux with auto-updates
 
 ## Critical Rules
 
-**Vercel AI SDK only** — All AI interactions use the Vercel AI SDK v6 (`ai` package) via the agent layer in
-`src/main/ai/`. NEVER use `@anthropic-ai/sdk` or `anthropic.Anthropic()` directly. Use `createProvider()` from
-`src/main/ai/providers/factory.ts` and `streamText()`/`generateText()` from the `ai` package.
+**Claude Code CLI only** — All AI work (tasks, triage, Insights, titles, PR text, commit messages, merge conflict help)
+runs through the locally installed Claude Code CLI via `src/main/claude-code/`. Use `ClaudeTaskRun` for tasks and
+`runClaudeText()` for one-shot calls; never call the Anthropic API or an AI SDK directly for these.
 
 **i18n required** — All user-facing text uses `react-i18next` translation keys (see [i18n](#i18n)).
 
@@ -53,7 +62,7 @@ whole app every time a dialog opened.
 
 **Don't re-fetch on open** — Pages and dialogs show stored values (Zustand stores, settings, or
 `src/renderer/lib/refresh-cache.ts` for results of slow checks) and only fetch when the user presses a refresh
-button, or once when nothing was fetched before. Shared hooks: `useProjectBranches()`, `useOllamaLlmModels()`.
+button, or once when nothing was fetched before. Shared hook: `useProjectBranches()`.
 
 ## Work Approach: Orchestrator-First
 
@@ -133,120 +142,93 @@ manually via `beta-release.yml`.
 auto-claude/
 ├── src/
 │   ├── main/                # Electron main process
-│   │   ├── ai/              # AI agent layer (Vercel AI SDK v6)
-│   │   │   ├── providers/       # Provider registry + factory
-│   │   │   ├── session/         # streamText() agent loop, error classification, progress
-│   │   │   ├── agent/           # Worker thread executor + bridge
-│   │   │   ├── orchestration/   # Build pipeline (planner → coder → QA)
-│   │   │   ├── tools/           # Builtin tools
-│   │   │   ├── security/        # Bash validator, command parser, path containment
-│   │   │   ├── config/          # Agent configs, phase config, model resolution
-│   │   │   ├── prompts/         # Prompt loading and assembly
-│   │   │   ├── runners/         # Insights, PR creation, commit messages, etc.
-│   │   │   ├── memory/          # Local memory store (libSQL)
-│   │   │   ├── mcp/             # MCP client integration
-│   │   │   └── auth/            # Token resolution (reuses claude-profile/)
-│   │   ├── agent/           # Agent manager, process, state, events
+│   │   ├── claude-code/     # Claude Code CLI integration (task runner, triage, one-shot calls, inventory)
+│   │   ├── ai/              # Remaining helpers: runners (PR, commit, merge help), merge/, project/
+│   │   ├── worktree/        # Task worktree creation
+│   │   ├── insights/        # Insights chat through Claude Code
+│   │   ├── agent/           # AgentManager: starts/stops Claude Code task runs, relays events
 │   │   ├── claude-profile/  # Multi-profile credentials, token refresh, usage
 │   │   ├── terminal/        # PTY daemon, lifecycle, CLI integration
 │   │   ├── platform/        # Cross-platform abstraction
 │   │   ├── ipc-handlers/    # IPC handler modules by domain
-│   │   └── services/        # App services (session recovery, rate-limit resume, provider API key check)
+│   │   └── services/        # App services (session recovery, rate-limit resume)
 │   ├── preload/             # Preload scripts (electronAPI bridge)
 │   ├── renderer/            # React UI (components, stores, contexts, hooks, styles)
 │   └── shared/              # Shared types, i18n, constants, utils
-├── prompts/                 # Agent system prompts (.md)
 ├── resources/               # App and tray icons, macOS entitlements
 └── .github/                 # Workflows and scripts (postinstall, prebuilds, deb check, bump-version)
 ```
 
-## AI Agent Layer (`src/main/ai/`)
+## Claude Code Layer (`src/main/claude-code/`)
 
-- **Providers** (`providers/`) — `createProviderRegistry()` supports Anthropic, OpenAI, Google, Bedrock, Azure, Mistral,
-  Groq, xAI, OpenRouter, Z.AI, and Ollama. Transforms handle thinking-token normalization and prompt caching.
-- **Session runtime** (`session/`) — `runAgentSession()` uses `streamText()` with `stopWhen: stepCountIs(N)` for
-  tool-use loops, with error classification (429/401/400) and progress tracking.
-- **Worker threads** (`agent/`) — Sessions run in `worker_threads` so the main process stays responsive; `WorkerBridge`
-  relays `postMessage()` events to `AgentManagerEvents`.
-- **Build orchestration** (`orchestration/`) — Planner → coder → QA pipeline with parallel subagents.
-- **Tools** (`tools/builtin/`) — Read, Write, Edit, Bash, Glob, Grep, WebFetch, WebSearch, and SpawnSubagent, defined
-  with Zod schemas via AI SDK `tool()`.
-- **Config** (`config/`) — `AGENT_CONFIGS` registry, phase-aware model resolution, thinking budgets.
+- **Task runner** (`task-runner.ts`, `ClaudeTaskRun`) — runs one task in its worktree:
+  - `triage` (`triage.ts`): read-only `claude -p --json-schema` run → `TaskTriage` (model `haiku|sonnet|opus|fable`,
+    effort `low…max`, needsPlan, scope, title, verification commands). Rules follow Claude Code's model-config and
+    best-practices docs; Settings > Claude Code can fix model/effort or force planning on/off.
+  - `plan`: `--permission-mode plan` + structured plan (headless plan mode has no `ExitPlanMode`), saved to `plan.md`.
+  - `implement`: resumes the same session (`--resume`) with `--dangerously-skip-permissions` (worktree isolation;
+    without a worktree it uses `--permission-mode auto`) and the triage model/effort.
+  - `validate`: same session runs checks, reviews the diff with fresh eyes (`/code-review` or a subagent), commits,
+    returns a structured `ValidationReport`. `revise` mode applies "request changes" feedback, then validates again.
+  - State in `<specDir>/claude_run.json` (`ClaudeRunInfo`: session id, triage, plan, phases with cost, `system/init`
+    info, subagents, validation) so stopped / rate-limited runs continue; logs in `task_logs.json`. Claude Code's
+    task list (TaskCreate/TaskUpdate, enabled with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`) is mirrored as the task's subtasks.
+- **One-shot calls** (`run-text.ts`, `runClaudeText`) — `claude -p --output-format json --no-session-persistence`, tools
+  off unless asked, optional `--json-schema`.
+- **Process + env** (`process.ts`, `env.ts`) — async spawn, stream-json parsing (`stream-types.ts`), best available
+  Claude profile (rate-limit aware) or the active API profile.
+- **Inventory** (`inventory.ts`) — subagents, skills, commands, hooks, MCP servers, CLAUDE.md and settings files that
+  Claude Code loads for a project (Settings > Claude Code).
+- **AgentManager** (`src/main/agent/agent-manager.ts`) — creates the worktree, builds the run config (attachments,
+  connectors, Graphify, settings) and relays run events (`log`, `execution-progress`, `task-event`, `run-info`,
+  `subtasks`, `run-finished`) to the IPC layer and the XState task machine.
 
-```typescript
-import { streamText, stepCountIs, tool } from 'ai';
-import { z } from 'zod';
+Claude Code docs: https://code.claude.com/docs/en/ (CLI reference, headless mode, sub-agents, model config,
+permission modes, worktrees, hooks, skills).
 
-// Agent session
-const result = streamText({
-  model: provider,
-  system: systemPrompt,
-  messages: conversationHistory,
-  tools: toolRegistry.getToolsForAgent(agentType),
-  stopWhen: stepCountIs(1000),
-  onStepFinish: ({ toolCalls, text }) => progressTracker.update(toolCalls, text),
-});
+### Task Directory
 
-// Tool definition
-const readTool = tool({
-  description: 'Read a file from the filesystem',
-  inputSchema: z.object({ file_path: z.string(), offset: z.number().optional(), limit: z.number().optional() }),
-  execute: async ({ file_path, offset, limit }) => { /* ... */ },
-});
-```
+Each task's `.auto-claude/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and
+mirrored task list), `claude_run.json`, `task_logs.json`, `plan.md` (when planned) and `attachments/`.
 
-### Agent Prompts (`prompts/`)
+### Task Changelog (parallel tasks)
 
-| Prompt                                                | Purpose                                         |
-|-------------------------------------------------------|-------------------------------------------------|
-| `spec_gatherer/researcher/writer/critic.md`           | Spec creation pipeline                          |
-| `spec_quick.md`, `spec_orchestrator_agentic.md`       | Quick spec / agentic spec orchestration         |
-| `complexity_assessor.md`                              | Complexity assessment                           |
-| `planner.md`, `coder.md`                              | Implementation plan / subtask implementation    |
-| `qa_reviewer.md`, `qa_fixer.md`                       | Acceptance validation / issue fixes             |
-| `mcp_tools/*.md`                                      | Tool guidance injected for MCP-enabled projects |
-
-In dev, prompts load from `prompts/`; packaged builds load them from `process.resourcesPath/prompts` (extraResources).
-
-### Spec Directory
-
-Each spec in `.auto-claude/specs/XXX-name/` contains `spec.md`, `requirements.json`, `context.json`,
-`implementation_plan.json`, `qa_report.md`, and `QA_FIX_REQUEST.md`, plus runtime files such as `task_metadata.json`,
-`task_logs.json`, and `build-progress.txt`.
+Task hooks (`src/main/task-hooks.ts`, `taskHooks.on('state' | 'files-edited', ...)`) run on every state a task
+enters (state machine transitions and manual moves) and on the files its Claude Code session edits (Edit, Write,
+MultiEdit, NotebookEdit tool calls). `src/main/task-changelog-writer.ts` turns them into the project's
+`.auto-claude/changelog.jsonl` (one JSON entry per line; state entries carry every file the task's branch changes).
+At every phase, `buildParallelTasksPrompt()` (`src/main/task-changelog.ts`) adds a "Parallel tasks" section to the
+task's system prompt: the other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
+them and avoid merge conflicts.
 
 ### MCP Connectors
 
 Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and
-Puppeteer (QA agents only), plus custom servers, which must pass a connection test before they can be switched on.
-New tasks copy the enabled ids into `TaskMetadata.mcpConnectors` and can change them in the task dialog. When a task
-starts, `AgentManager.resolveTaskMcpOptions()` passes that task's connectors to its worker (so concurrent tasks don't
-affect each other); `getRequiredMcpServers()` gives every MCP-using agent all enabled connectors and
-`src/main/ai/mcp/registry.ts` builds configs for built-in and custom servers. Helpers live in
-`src/shared/utils/mcp-connectors.ts`.
+Puppeteer, plus custom servers, which must pass a connection test before they can be switched on. New tasks copy the
+enabled ids into `TaskMetadata.mcpConnectors` and can change them in the task dialog. When a task runs,
+`buildMcpConfig()` (`src/main/claude-code/mcp-config.ts`) turns that task's ids into `--mcp-config` for its Claude Code
+session, on top of the user's own Claude Code MCP configuration. Helpers live in `src/shared/utils/mcp-connectors.ts`.
 
 ### Graphify Memory Graph
 
 `src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
 Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
-.auto-claude/memory` (Settings > Project > Memory index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
-`index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Memory page) is on,
-`AgentManager.resolveGraphifyContext()` passes the graph to the worker: agents that search code (they have Grep) get
-the `CodebaseGraph` tool (`tools/builtin/codebase-graph.ts`: query, explain, path, affected, hubs) and a prompt
-section about it; the Claude page (Insights) gets the same tool, or, when it runs through Claude Code, Bash limited to
-graphify's search commands. Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
-`~/.claude` and each Claude profile's config dir; "Claude Code command" row on Settings > Updates), and agent windows
-get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/memory`. Project memory
-settings in `.env` use `MEMORY_*` names (older `GRAPHITI_*` names are still read).
+.auto-claude/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
+`index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Project page) is on,
+task runs and the Claude page (Insights) get `GRAPHIFY_OUT`, the graphify CLI on `PATH` and a prompt section about
+graphify's search commands (Insights limits Bash to those commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
+`~/.claude` and each Claude profile's config dir, after an install or update), and agent windows
+get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/knowledge`.
 
-### Electron MCP (agent QA of the app)
+### Electron MCP (testing the app from a task)
 
-Run `npm run dev:mcp` and switch on Electron in Settings > Connectors (or in the task's connectors). QA agents then
-drive the running app over the Chrome DevTools Protocol with `get_electron_window_info`, `take_screenshot`,
+Run `npm run dev:mcp` and switch on Electron in Settings > Connectors (or in the task's connectors). Claude Code can
+then drive the running app over the Chrome DevTools Protocol with `get_electron_window_info`, `take_screenshot`,
 `send_command_to_electron`, and `read_electron_logs`.
 
 ## Frontend
 
-**Stack:** Electron 40, React 19, TypeScript (strict), Vercel AI SDK v6, Zustand 5, Tailwind CSS v4, Radix UI,
+**Stack:** Electron 40, React 19, TypeScript (strict), Claude Code CLI, Zustand 5, Tailwind CSS v4, Radix UI,
 xterm.js 6, electron-vite 5 (Vite 7), Vitest 4 + React Testing Library + jsdom, Motion.
 
 **Path aliases:** `@/*` → `src/renderer/*`, `@shared/*` → `src/shared/*`, `@preload/*` → `src/preload/*`.
@@ -266,7 +248,9 @@ loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "A
 (optional interface font). Settings > General > Appearance picks the interface and command line fonts.
 
 **Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Agents,
-Connectors, Developer, then the selected project's pages (Project, Memory), then Updates. Build pages from `SettingsSection` +
+Project, Connectors, Developer, Updates (Project is the selected project's page: index, Knowledge, Tasks, Branches).
+The project's `useGraphify`, `useClaudeMd`, `maxBudgetUsd` (budget per task) and `claudeProfileId` (its Claude account;
+unset = the account in use) are kept in the project's own `.auto-claude/settings.json` (`src/main/project-store.ts`). Build pages from `SettingsSection` +
 `SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
 `SETTINGS_MENU_TRIGGER_CLASS` (no collapsible rows). UI copy conventions: sentence case, no em dashes, no trailing
 period in setting descriptions, and no green check / red x status icons (state the status in text).
@@ -274,11 +258,16 @@ period in setting descriptions, and no green check / red x status icons (state t
 **IPC** — Handlers in `src/main/ipc-handlers/` (by domain), safe APIs exposed in `src/preload/`, renderer calls
 `window.electronAPI.*`.
 
-**Agent management** (`src/main/agent/`) — `agent-manager.ts` (task lifecycle facade),
-`agent-process.ts` (spawns workers via `WorkerBridge`), `agent-state.ts`, `agent-events.ts`.
+**Agent management** (`src/main/agent/`) — `agent-manager.ts` (starts, stops and restarts Claude Code task runs and
+relays their events), `agent-state.ts` (profile/session assignment for account swapping).
 
 **Claude profiles** (`src/main/claude-profile/`) — `credential-utils.ts` (OS keychain), `token-refresh.ts` (OAuth
-refresh), `usage-monitor.ts` (usage and rate limits), `profile-scorer.ts` (profile selection).
+refresh), `usage-monitor.ts` (usage and rate limits), `profile-scorer.ts` (profile selection). On every start,
+`claude-code-detection.ts` finds Claude Code's own setups (`~/.claude`, `CLAUDE_CONFIG_DIR`, `~/.claude-*`: subscription
+sign-in, cloud provider, API key or gateway, from managed settings, the dir's `settings.json` and the environment) and
+lists them as accounts (`ClaudeProfile.detected`): usable and renamable, never removed. Claude Code's default `~/.claude`
+runs without `CLAUDE_CONFIG_DIR`, keeps its sign-in in `~/.claude.json` and its plain keychain entry
+(`config-dir-paths.ts`).
 
 **Terminals** (`src/main/terminal/`) — `pty-daemon.ts` / `pty-manager.ts` (PTY processes), `terminal-lifecycle.ts`,
 `cli-integration-handler.ts`. Renderer uses xterm.js 6 with WebGL, fit, web-links, and serialize addons.
@@ -288,7 +277,7 @@ refresh), `usage-monitor.ts` (usage and rate limits), `profile-scorer.ts` (profi
 English is the only supported language. Translation files: `src/shared/i18n/locales/en/*.json`.
 
 **Namespaces:** `common`, `navigation`, `settings`, `dialogs`, `tasks`, `taskReview`, `terminal`, `errors`,
-`onboarding`, `welcome`.
+`welcome`.
 
 ```tsx
 import { useTranslation } from 'react-i18next';

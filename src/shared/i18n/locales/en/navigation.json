@@ -27,7 +27,7 @@
   },
   "claudeCode": {
     "title": "Claude Code CLI",
-    "description": "The Claude Code CLI used by agent terminals: status, version and installation",
+    "description": "The Claude Code CLI that runs tasks and agent terminals: status, version and installation",
     "status": "Status",
     "version": "Version",
     "changelog": "Changelog",
@@ -87,12 +87,6 @@
     "latest": "Latest",
     "lastChecked": "Last checked",
     "installFailed": "Failed to open a terminal for the installation",
-    "claudeCommand": "Claude Code command",
-    "claudeCommandReady": "/graphify is available in Claude Code",
-    "claudeCommandMissing_one": "/graphify isn't set up in 1 Claude Code configuration",
-    "claudeCommandMissing_other": "/graphify isn't set up in {{count}} Claude Code configurations",
-    "claudeCommandFailed": "Couldn't add /graphify to Claude Code",
-    "setUp": "Set up",
     "viewChangelog": "View changelog",
     "viewChangelogAriaLabel": "View Graphify changelog (opens in new window)"
   },

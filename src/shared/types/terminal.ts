@@ -22,12 +22,6 @@ export interface TerminalCreateOptions {
   env?: Record<string, string>;
 }
 
-export interface TerminalResizeOptions {
-  id: string;
-  cols: number;
-  rows: number;
-}
-
 /**
  * Persisted terminal session data for restoring sessions on app restart
  */
@@ -74,23 +68,6 @@ export interface SessionDateRestoreResult {
     success: boolean;
     error?: string;
   }>;
-}
-
-/**
- * Rate limit information when Claude Code hits subscription limits
- */
-export interface RateLimitInfo {
-  terminalId: string;
-  resetTime: string;  // e.g., "Dec 17 at 6am (Europe/Oslo)"
-  detectedAt: Date;
-  /** ID of the profile that hit the limit */
-  profileId?: string;
-  /** ID of a suggested alternative profile to switch to */
-  suggestedProfileId?: string;
-  /** Name of the suggested alternative profile */
-  suggestedProfileName?: string;
-  /** Whether auto-switch on rate limit is enabled */
-  autoSwitchEnabled?: boolean;
 }
 
 /**
@@ -151,29 +128,6 @@ export interface AuthFailureInfo {
   /** Original error message from the process output */
   originalError?: string;
   /** Task ID if applicable (for task-related auth failures) */
-  taskId?: string;
-  /** When detected (Note: serialized as ISO string over IPC) */
-  detectedAt: Date;
-}
-
-/**
- * Billing/credit exhaustion failure information for SDK/CLI operations.
- * Emitted when Claude API returns billing-related errors (HTTP 400 with
- * invalid_request_error), indicating the account has insufficient credits,
- * exceeded usage limits, or has a billing configuration issue.
- */
-export interface BillingFailureInfo {
-  /** The profile ID that has billing issues */
-  profileId: string;
-  /** The profile name for display */
-  profileName?: string;
-  /** Type of billing failure */
-  failureType: 'insufficient_credits' | 'payment_required' | 'subscription_inactive' | 'unknown';
-  /** User-friendly message describing the failure */
-  message: string;
-  /** Original error message from the process output */
-  originalError?: string;
-  /** Task ID if applicable (for task-related billing failures) */
   taskId?: string;
   /** When detected (Note: serialized as ISO string over IPC) */
   detectedAt: Date;
