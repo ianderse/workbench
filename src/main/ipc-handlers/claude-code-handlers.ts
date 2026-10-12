@@ -427,8 +427,11 @@ function escapeGitBashCommand(str: string): string {
  * Open a terminal with the given command
  * Uses the user's preferred terminal from settings
  * Supports macOS, Windows, and Linux terminals
+ *
+ * @param env Environment for the terminal on Windows (on macOS and Linux the terminal starts its
+ *   own shell environment, so variables go in the command)
  */
-export async function openTerminalWithCommand(command: string): Promise<void> {
+export async function openTerminalWithCommand(command: string, env?: NodeJS.ProcessEnv): Promise<void> {
   const settings = readSettingsFile();
   const preferredTerminal = settings?.preferredTerminal as string | undefined;
 
@@ -571,6 +574,7 @@ export async function openTerminalWithCommand(command: string): Promise<void> {
           detached: true,
           stdio: 'ignore',
           windowsHide: false,
+          env: env ?? process.env,
         });
 
         // Detach from the child process so it runs independently

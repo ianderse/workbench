@@ -20,8 +20,6 @@ import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeCodeEnv } from '../claude-code-settings';
 import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
-import { getToolInfo } from '../cli-tool-manager';
-import { getClaudeProfileManager } from '../claude-profile-manager';
 
 /**
  * Options for terminal restoration
@@ -46,18 +44,7 @@ export async function createTerminal(
   getWindow: WindowGetter,
   dataHandler: DataHandlerFn
 ): Promise<TerminalOperationResult> {
-  const { id, cwd, cols = 80, rows = 24, projectPath, claudeLogin } = options;
-  // Claude Code's own sign-in runs without the account in use, on the account's config dir
-  const skipOAuthToken = options.skipOAuthToken || !!claudeLogin;
-  let customEnv = options.env;
-  let command: { file: string; args: string[] } | undefined;
-  if (claudeLogin) {
-    const claude = getToolInfo('claude');
-    if (!claude.found || !claude.path) return { success: false, error: 'Claude Code CLI not found' };
-    const configDir = getClaudeProfileManager().getLoginConfigDir(claudeLogin.profileId);
-    customEnv = { ...(customEnv ?? {}), CLAUDE_CONFIG_DIR: configDir };
-    command = { file: claude.path, args: ['auth', 'login'] };
-  }
+  const { id, cwd, cols = 80, rows = 24, projectPath, skipOAuthToken, env: customEnv } = options;
 
   debugLog('[TerminalLifecycle] Creating terminal:', { id, cwd, cols, rows, projectPath, skipOAuthToken, hasCustomEnv: !!customEnv });
 
@@ -115,8 +102,7 @@ export async function createTerminal(
       effectiveCwd || os.homedir(),
       cols,
       rows,
-      mergedEnv,
-      command
+      mergedEnv
     );
 
     debugLog('[TerminalLifecycle] PTY process spawned, pid:', ptyProcess.pid, 'shellType:', shellType);
@@ -145,7 +131,7 @@ export async function createTerminal(
       (term) => handleTerminalExit(term, terminals)
     );
 
-    if (projectPath && !claudeLogin) {
+    if (projectPath) {
       SessionHandler.persistSessionAsync(terminal);
     }
 

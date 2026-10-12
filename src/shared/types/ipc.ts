@@ -264,6 +264,7 @@ export interface ElectronAPI {
   getClaudeProfiles: () => Promise<IPCResult<ClaudeProfileSettings>>;
   saveClaudeProfile: (profile: ClaudeProfile) => Promise<IPCResult<ClaudeProfile>>;
   deleteClaudeProfile: (profileId: string) => Promise<IPCResult>;
+  loginClaudeAccount: (profileId?: string) => Promise<IPCResult>;
   redetectClaudeAccounts: () => Promise<IPCResult<ClaudeProfileSettings>>;
   renameClaudeProfile: (profileId: string, newName: string) => Promise<IPCResult>;
   setActiveClaudeProfile: (profileId: string) => Promise<IPCResult>;

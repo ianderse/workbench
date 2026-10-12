@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron';
+import path from 'path';
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { IPCResult, TerminalCreateOptions, TerminalTaskSessionOptions, ClaudeProfile, ClaudeProfileSettings, ClaudeUsageSnapshot, AllProfilesUsage } from '../../shared/types';
@@ -14,6 +15,10 @@ import { migrateSession } from '../claude-profile/session-utils';
 import { findMostRecentClaudeSession } from '../terminal/session-handler';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
 import { isValidConfigDir } from '../utils/config-path-validator';
+import { getToolInfo } from '../cli-tool-manager';
+import { isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
+import { getPathDelimiter, isWindows } from '../platform';
+import { openTerminalWithCommand } from './claude-code-handlers';
 
 
 /**
@@ -224,6 +229,36 @@ export function registerTerminalHandlers(
           success: false,
           error: error instanceof Error ? error.message : 'Failed to save Claude profile'
         };
+      }
+    }
+  );
+
+  // Claude Code's own sign-in (`claude auth login`) in the user's terminal, like the Claude Code
+  // and Graphify installs: on the account's config dir to sign it in again, else on a new one
+  ipcMain.handle(
+    IPC_CHANNELS.CLAUDE_ACCOUNTS_LOGIN,
+    async (_, profileId?: string): Promise<IPCResult> => {
+      try {
+        const claude = getToolInfo('claude');
+        if (!claude.found || !claude.path) return { success: false, error: 'Claude Code CLI not found' };
+        const configDir = getClaudeProfileManager().getLoginConfigDir(profileId);
+        const isDefault = isDefaultClaudeConfigDir(configDir);
+        if (isWindows()) {
+          // PowerShell: claude from its own folder, the config dir through the environment
+          const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
+          if (isDefault) delete env.CLAUDE_CONFIG_DIR;
+          env.PATH = [path.dirname(claude.path), process.env.PATH].filter(Boolean).join(getPathDelimiter());
+          await openTerminalWithCommand('claude auth login', env);
+        } else {
+          // The terminal starts its own shell, so `env` sets the config dir in the command
+          // (Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR)
+          const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
+          const configEnv = isDefault ? '-u CLAUDE_CONFIG_DIR' : `CLAUDE_CONFIG_DIR=${quote(configDir)}`;
+          await openTerminalWithCommand(`env ${configEnv} ${quote(claude.path)} auth login`);
+        }
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to open a terminal' };
       }
     }
   );

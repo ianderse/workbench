@@ -176,7 +176,7 @@ export function TaskSelector({
             }}
             onKeyDown={handleKeyDown}
             placeholder={t('taskSelector.searchPlaceholder')}
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-(--nav-label-color)"
+            className="flex-1 bg-transparent text-sm outline-none placeholder:text-(--field-placeholder)"
           />
         </div>
 

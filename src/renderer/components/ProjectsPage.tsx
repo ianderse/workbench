@@ -102,7 +102,7 @@ export function ProjectsPage({
                 }}
                 placeholder={t('projectsPage.searchPlaceholder')}
                 aria-label={t('projectsPage.searchPlaceholder')}
-                className="h-8 w-56 rounded-lg border border-border bg-transparent pl-8 pr-8 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-(--input) focus-visible:outline-none [&::-webkit-search-cancel-button]:appearance-none"
+                className="h-8 w-56 rounded-lg border border-border bg-transparent pl-8 pr-8 text-sm text-foreground placeholder:text-(--field-placeholder) focus-visible:border-(--input) focus-visible:outline-none [&::-webkit-search-cancel-button]:appearance-none"
               />
               <button
                 type="button"

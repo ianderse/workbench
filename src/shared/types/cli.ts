@@ -118,6 +118,8 @@ interface GraphifyGraphLink {
   target: string;
   /** e.g. calls, imports, contains */
   relation?: string;
+  /** EXTRACTED, INFERRED, ...; Graphify draws non-extracted links fainter */
+  confidence?: string;
 }
 
 export interface GraphifyGraph {
