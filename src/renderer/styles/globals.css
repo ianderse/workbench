@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* dark: follows the app's theme (the .dark class on <html>, set from Settings > Appearance), not the
+   OS color scheme: otherwise light mode on a dark OS got dark-mode text, e.g. white code in Markdown */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Bundled UI font (shipped with the build, no network needed). Only the Regular cut is bundled,
    so it is declared as weight 400 and the browser synthesizes bold for semibold/bold text.
    Dank Mono, the terminal font, is registered from main.tsx before terminals open. */
