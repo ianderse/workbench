@@ -9,12 +9,22 @@ import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from 'd3-zo
 import { useMemoryGraphStore } from '../../stores/memory-graph-store';
 import type { GraphifyGraph, GraphifyGraphNode } from '../../../shared/types/cli';
 import type { LayoutMessage, LayoutRequest } from './graph-layout.worker';
+import { communityColorIndex, GRAPHIFY_COMMUNITY_COLORS } from './graphify-colors';
 
 interface ViewNode extends GraphifyGraphNode {
   index: number;
   radius: number;
   connections: number;
+  /** Index into Graphify's community palette */
+  colorIndex: number;
 }
+
+/** Graphify's community colors, built once */
+const PALETTE = GRAPHIFY_COMMUNITY_COLORS.map((hex) => new Color(hex));
+/** Graphify's hovered-node fill */
+const HIGHLIGHT_FILL = new Color('#ffffff');
+/** Graphify's link opacity when hovered: extracted links 0.7, inferred (and others) 0.35 */
+const HOVER_LINK_ALPHA = { extracted: 0.7, inferred: 0.35 };
 
 /** Zoom level from which labels show (below it only the hovered neighbourhood's do) */
 const LABEL_ZOOM = 1.2;
@@ -36,18 +46,12 @@ const ZOOM_RESET_MS = 1000;
 /** Theme colors from the page's CSS, re-read when the appearance changes */
 function readColors() {
   const body = getComputedStyle(document.body);
-  const root = getComputedStyle(document.documentElement);
-  const accent = root.getPropertyValue('--primary').trim() || body.color;
-  // Nodes in the muted label grey: in 3D many overlap, and the text color added up too bright
-  const muted = root.getPropertyValue('--nav-label-color').trim() || body.color;
   const text = new Color(body.color);
+  // Node and link colors come from Graphify's palette, the same in light and dark. Links are much
+  // fainter than Graphify's 0.7 / 0.35 (kept as a 2:1 ratio) because thousands overlap in 3D.
   return {
-    node: new Color(muted),
-    nodeAlpha: 0.5,
-    accent: new Color(accent),
-    link: text,
-    linkAlpha: 0.035,
-    dimmedLinkAlpha: 0.02,
+    linkAlpha: { extracted: 0.08, inferred: 0.04 },
+    dimmedLinkAlpha: 0.03,
     text,
     font: body.fontFamily,
   };
@@ -66,7 +70,7 @@ function LoadingDots() {
 /**
  * Obsidian-style graph view of the project's memory graph (Graphify's graph.json). Like Obsidian,
  * the force layout runs in a Web Worker (in 3D, with d3-force-3d) and PixiJS draws the graph with
- * WebGL. Drag the background to turn the graph like a globe (it keeps spinning when flicked), wheel
+ * WebGL. Nodes and links are colored by community with Graphify's own palette. Drag the background to turn the graph like a globe (it keeps spinning when flicked), wheel
  * to zoom, Shift+drag to pan, drag nodes to move them and hover to highlight a node's neighbours.
  * Left alone, the graph turns slowly, and 5 seconds after the last touch the view resets to it.
  */
@@ -116,17 +120,29 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
     const indexById = new Map(graph.nodes.map((node, i) => [node.id, i]));
     const neighbours: Array<Set<number>> = graph.nodes.map(() => new Set());
     const linkPairs: Array<[number, number]> = [];
+    // Like Graphify, a link takes its source node's community color and is fainter unless extracted.
+    // Link indexes grouped by (palette index * 2 + inferred), so each group is stroked once.
+    const linkGroups: number[][] = PALETTE.flatMap(() => [[], []]);
     for (const link of graph.links) {
       const source = indexById.get(link.source);
       const target = indexById.get(link.target);
       if (source === undefined || target === undefined) continue;
+      const group = communityColorIndex(graph.nodes[source].community) * 2
+        + (link.confidence === undefined || link.confidence === 'EXTRACTED' ? 0 : 1);
+      linkGroups[group].push(linkPairs.length);
       linkPairs.push([source, target]);
       neighbours[source].add(target);
       neighbours[target].add(source);
     }
     const nodes: ViewNode[] = graph.nodes.map((node, index) => {
       const connections = neighbours[index].size;
-      return { ...node, index, connections, radius: Math.min(2.5 + Math.sqrt(connections) * 1.1, 16) };
+      return {
+        ...node,
+        index,
+        connections,
+        radius: Math.min(2.5 + Math.sqrt(connections) * 1.1, 16),
+        colorIndex: communityColorIndex(node.community),
+      };
     });
     // Layout positions from the worker [x, y, z, ...], and their projection on screen (world
     // container coordinates), depth (positive toward the viewer) and perspective scale
@@ -180,15 +196,16 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       const nodeGraphics: Graphics[] = [];
       const labels = new Map<number, Text>();
 
-      // Every node is drawn in the muted grey; a hovered node, its neighbours and its links light up
-      // in the primary color at half opacity
-      const isLit = (index: number) =>
-        !!hovered && (hovered.index === index || neighbours[hovered.index].has(index));
+      // Nodes are colored by community like Graphify's graph view; the hovered node turns white with
+      // a ring in its community color (Graphify's highlight), the rest of its neighbourhood stays lit
       const drawNode = (node: ViewNode) => {
-        nodeGraphics[node.index]
-          .clear()
-          .circle(0, 0, node.radius)
-          .fill(isLit(node.index) ? { color: colors.accent, alpha: 0.5 } : { color: colors.node, alpha: colors.nodeAlpha });
+        const color = PALETTE[node.colorIndex];
+        const shape = nodeGraphics[node.index].clear().circle(0, 0, node.radius);
+        if (hovered?.index === node.index) {
+          shape.fill(HIGHLIGHT_FILL).stroke({ width: 1.5, color });
+        } else {
+          shape.fill(color);
+        }
       };
 
       for (const node of nodes) {
@@ -278,22 +295,30 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       const drawLinks = () => {
         linkLayer.clear();
         const width = 1 / transform.k;
+        // One stroke per (community color, extracted or not) group; with a hovered node every link
+        // dims first and the node's own links are drawn on top at Graphify's opacities
+        const strokeGroup = (group: number, only: ((s: number, t: number) => boolean) | null, lineWidth: number, alpha: number) => {
+          let any = false;
+          for (const link of linkGroups[group]) {
+            const [s, t] = linkPairs[link];
+            if (only && !only(s, t)) continue;
+            linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
+            any = true;
+          }
+          if (any) linkLayer.stroke({ width: lineWidth, color: PALETTE[group >> 1], alpha });
+        };
+        for (let group = 0; group < linkGroups.length; group++) {
+          const inferred = group & 1;
+          strokeGroup(group, null, width, hovered
+            ? colors.dimmedLinkAlpha
+            : inferred ? colors.linkAlpha.inferred : colors.linkAlpha.extracted);
+        }
         if (hovered) {
-          // Dim every link, then draw the hovered node's links on top
-          for (const [s, t] of linkPairs) {
-            linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
+          const index = hovered.index;
+          for (let group = 0; group < linkGroups.length; group++) {
+            strokeGroup(group, (s, t) => s === index || t === index, width * 1.5,
+              group & 1 ? HOVER_LINK_ALPHA.inferred : HOVER_LINK_ALPHA.extracted);
           }
-          linkLayer.stroke({ width, color: colors.link, alpha: colors.dimmedLinkAlpha });
-          for (const [s, t] of linkPairs) {
-            if (s !== hovered.index && t !== hovered.index) continue;
-            linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
-          }
-          linkLayer.stroke({ width: width * 1.5, color: colors.accent, alpha: 0.5 });
-        } else {
-          for (const [s, t] of linkPairs) {
-            linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
-          }
-          linkLayer.stroke({ width, color: colors.link, alpha: colors.linkAlpha });
         }
       };
 

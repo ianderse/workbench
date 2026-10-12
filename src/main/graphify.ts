@@ -220,8 +220,8 @@ export async function readGraphifyGraph(projectPath: string): Promise<GraphifyGr
   }
   const data = JSON.parse(raw) as {
     nodes?: Array<{ id: string; label?: string; community?: number; source_file?: string; source_location?: string }>;
-    links?: Array<{ source: string; target: string; relation?: string }>;
-    edges?: Array<{ source: string; target: string; relation?: string }>;
+    links?: Array<{ source: string; target: string; relation?: string; confidence?: string }>;
+    edges?: Array<{ source: string; target: string; relation?: string; confidence?: string }>;
   };
   const nodes = (data.nodes ?? []).map((node) => ({
     id: String(node.id),
@@ -232,7 +232,7 @@ export async function readGraphifyGraph(projectPath: string): Promise<GraphifyGr
   }));
   const ids = new Set(nodes.map((node) => node.id));
   const links = (data.links ?? data.edges ?? [])
-    .map((link) => ({ source: String(link.source), target: String(link.target), relation: link.relation }))
+    .map((link) => ({ source: String(link.source), target: String(link.target), relation: link.relation, confidence: link.confidence }))
     .filter((link) => ids.has(link.source) && ids.has(link.target) && link.source !== link.target);
   return { nodes, links };
 }
