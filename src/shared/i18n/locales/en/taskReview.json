@@ -36,7 +36,7 @@
       "pullRequest": "Pull request"
     },
     "hints": {
-      "targetBranch": "Pulled into the task branch first. Claude Code resolves any conflicts and keeps the changes other tasks merged"
+      "merge": "The branch the pull request targets is pulled into the task branch first. Claude Code resolves any conflicts and keeps the changes other tasks merged"
     },
     "steps": {
       "checking": "Checking the pull request",
@@ -48,6 +48,7 @@
     },
     "success": {
       "merged": "Pull request merged into {{branch}}",
+      "mergedNoBranch": "Pull request merged",
       "alreadyMerged": "The pull request was already merged",
       "conflictsResolved_one": "Claude Code resolved the conflicts in {{count}} file",
       "conflictsResolved_other": "Claude Code resolved the conflicts in {{count}} files"

@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  */
 /**
- * MergePRDialog: merges the task's PR into the chosen branch, shows the merge's steps while it
+ * MergePRDialog: merges the task's PR into the branch it targets, shows the merge's steps while it
  * runs and what Claude Code resolved when it's done.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -11,19 +11,6 @@ import '@testing-library/jest-dom';
 import '../../../../shared/i18n';
 import { MergePRDialog } from './MergePRDialog';
 import type { MergePRProgress, Task, WorktreeMergePRResult, WorktreeStatus } from '../../../../shared/types';
-
-vi.mock('../../../hooks/useProjectBranches', () => ({
-  useProjectBranches: () => ({
-    branches: [
-      { name: 'develop', type: 'local', displayName: 'develop' },
-      { name: 'origin/main', type: 'remote', displayName: 'origin/main' }
-    ],
-    detectedBranch: 'develop',
-    isLoading: false,
-    error: null,
-    refresh: vi.fn()
-  })
-}));
 
 let progressListener: ((taskId: string, progress: MergePRProgress) => void) | null = null;
 Object.defineProperty(window, 'electronAPI', {
@@ -70,15 +57,17 @@ describe('MergePRDialog', () => {
     vi.clearAllMocks();
   });
 
-  it("merges into the task's base branch and shows the steps and the resolved conflicts", async () => {
+  it("merges into the PR's own target branch and shows the steps and the resolved conflicts", async () => {
     let finish!: (result: WorktreeMergePRResult) => void;
     onMergePR.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     render(<MergePRDialog open task={task} worktreeStatus={worktreeStatus} onOpenChange={onOpenChange} onMergePR={onMergePR} />);
 
     expect(screen.getByText('auto-claude/001-auth')).toBeInTheDocument();
     expect(screen.getByText('example/repo/pull/7')).toBeInTheDocument();
+    // The PR already has a target: no branch to pick
+    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Merge pull request' }));
-    expect(onMergePR).toHaveBeenCalledWith({ targetBranch: 'develop' });
+    expect(onMergePR).toHaveBeenCalledWith({});
 
     act(() => progressListener?.('task-1', { step: 'pulling', params: { target: 'develop' } }));
     expect(screen.getByText('Pulling develop into the task branch')).toBeInTheDocument();
