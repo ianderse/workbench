@@ -26,7 +26,7 @@ function findWorktreeSpecDir(projectPath: string, specId: string, specsRelPath: 
  * the worktree's spec directory, not the main project's spec directory. This service
  * watches both locations and merges logs from both sources.
  */
-export class TaskLogService extends EventEmitter {
+class TaskLogService extends EventEmitter {
   private logCache: Map<string, TaskLogs> = new Map();
   private pollIntervals: Map<string, NodeJS.Timeout> = new Map();
   // Store paths being watched for each specId (main + worktree)
@@ -164,7 +164,7 @@ export class TaskLogService extends EventEmitter {
    *
    * @param specDir - Main project spec directory
    * @param projectPath - Optional: Project root path (needed to find worktree if not registered)
-   * @param specsRelPath - Optional: Relative path to specs (e.g., "auto-claude/specs")
+   * @param specsRelPath - Optional: Relative path to specs (e.g., ".auto-claude/tasks")
    * @param specId - Optional: Spec ID (needed to find worktree if not registered)
    */
   loadLogs(specDir: string, projectPath?: string, specsRelPath?: string, specId?: string): TaskLogs | null {
@@ -247,7 +247,7 @@ export class TaskLogService extends EventEmitter {
    * @param specId - The spec ID (e.g., "013-screenshots-on-tasks")
    * @param specDir - Main project spec directory
    * @param projectPath - Optional: Project root path (needed to find worktree)
-   * @param specsRelPath - Optional: Relative path to specs (e.g., "auto-claude/specs")
+   * @param specsRelPath - Optional: Relative path to specs (e.g., ".auto-claude/tasks")
    */
   startWatching(specId: string, specDir: string, projectPath?: string, specsRelPath?: string): void {
     debugLog('[TaskLogService.startWatching] Starting watch:', {
@@ -504,7 +504,7 @@ export class TaskLogService extends EventEmitter {
             phase,
             timestamp: currPhase.started_at || new Date().toISOString()
           } as TaskLogStreamChunk);
-        } else if (currPhase.status === 'completed' || currPhase.status === 'failed') {
+        } else if (currPhase.status === 'completed' || currPhase.status === 'failed' || currPhase.status === 'stopped') {
           this.emit('stream-chunk', specId, {
             type: 'phase_end',
             phase,

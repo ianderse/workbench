@@ -13,7 +13,6 @@
   "actions": {
     "start": "Start",
     "stop": "Stop",
-    "recover": "Recover",
     "resume": "Resume",
     "archive": "Archive",
     "delete": "Delete",
@@ -23,7 +22,9 @@
     "taskActions": "Task actions",
     "selectTask": "Select task: {{title}}",
     "unarchive": "Unarchive",
-    "unarchiveFailed": "Failed to unarchive the task: {{error}}"
+    "unarchiveFailed": "Failed to unarchive the task: {{error}}",
+    "retry": "Retry",
+    "edit": "Edit"
   },
   "labels": {
     "running": "Running",
@@ -32,7 +33,6 @@
     "pending": "Pending",
     "stuck": "Stuck",
     "incomplete": "Incomplete",
-    "recovering": "Recovering...",
     "needsRecovery": "Needs recovery",
     "needsResume": "Needs resume",
     "onHoldUntil": "On hold · resumes {{time}}"
@@ -41,7 +41,6 @@
     "completed": "Completed",
     "hasErrors": "Has errors",
     "qaIssues": "QA issues",
-    "approvePlan": "Approve plan",
     "stopped": "Stopped"
   },
   "tooltips": {
@@ -72,7 +71,7 @@
     "emptyBacklog": "No tasks planned",
     "emptyBacklogHint": "Add a task to get started",
     "emptyQueue": "Queue is empty",
-    "emptyQueueHint": "Tasks will wait here when parallel task limit is reached",
+    "emptyQueueHint": "Wait the parallel task limit to free up",
     "emptyInProgress": "Nothing running",
     "emptyInProgressHint": "Start a task from Planning",
     "emptyAiReview": "No tasks in review",
@@ -85,17 +84,15 @@
     "dropHere": "Drop here",
     "showArchived": "Show archived",
     "addTaskAriaLabel": "Add new task to backlog",
-    "queueAllAriaLabel": "Move all tasks to queue",
+    "queueSettingsAriaLabel": "Parallel task limit settings",
     "closeTaskDetailsAriaLabel": "Close task details",
     "editTask": "Edit task",
-    "cannotEditWhileRunning": "Cannot edit while task is running",
     "worktreeCleanupTitle": "Worktree Cleanup",
     "worktreeCleanupStaged": "This task has been staged and has a worktree. Would you like to clean up the worktree?",
     "worktreeCleanupNotStaged": "This task has a worktree with changes that have not been merged. Delete the worktree to mark as done, or cancel to review the changes first.",
     "keepWorktree": "Keep Worktree",
     "deleteWorktree": "Delete Worktree & Mark Done",
     "refreshTasks": "Refresh Tasks",
-    "orderSaveFailedTitle": "Reorder not saved",
     "orderSaveFailedDescription": "Your task order change was applied but couldn't be saved to storage. It will be lost on refresh.",
     "selectAll": "Select all",
     "deselectAll": "Deselect all",
@@ -116,11 +113,8 @@
   },
   "queue": {
     "limitReached": "Parallel task limit reached ({{current}}/{{max}}). Task moved to queue.",
-    "movedToQueue": "Task moved to queue.",
     "autoPromoted": "Task auto-promoted from queue to In Progress.",
-    "capacityAvailable": "{{count}} slot(s) available in In Progress.",
-    "queueAll": "Add All to Queue",
-    "queueAllSuccess": "Moved {{count}} tasks to queue."
+    "capacityAvailable": "{{count}} slot(s) available in In Progress."
   },
   "execution": {
     "phases": {
@@ -144,12 +138,22 @@
       "plan": "Plan",
       "code": "Code",
       "qa": "QA"
+    },
+    "steps": {
+      "idle": "Idle",
+      "assessing": "Assessing",
+      "planning": "Planning",
+      "implementing": "Implementing",
+      "revising": "Applying feedback",
+      "validating": "Validating",
+      "fixing": "Fixing issues",
+      "rate_limit_paused": "Rate limited",
+      "auth_failure_paused": "Auth required",
+      "complete": "Complete",
+      "failed": "Failed"
     }
   },
   "metadata": {
-    "fastMode": "Fast",
-    "severity": "severity",
-    "pullRequest": "Pull request",
     "showMore": "Show more",
     "showLess": "Show less",
     "created": "Created {{time}}",
@@ -159,11 +163,12 @@
     "targetAudience": "Target audience",
     "dependencies": "Dependencies",
     "acceptanceCriteria": "Acceptance criteria",
-    "affectedFiles": "Affected files"
+    "affectedFiles": "Affected files",
+    "byAgent": "By agent",
+    "byUser": "By user"
   },
   "images": {
-    "removeImageAriaLabel": "Remove image {{filename}}",
-    "pasteHint": "Tip: Paste screenshots directly with {{shortcut}} to add reference images."
+    "removeImageAriaLabel": "Remove image {{filename}}"
   },
   "imagePreview": {
     "close": "Close preview",
@@ -172,14 +177,10 @@
     "doubleClickHint": "Double-click to enlarge",
     "lowResolution": "Low resolution preview"
   },
-  "notifications": {
-    "backgroundTaskTitle": "Task continues in background",
-    "backgroundTaskDescription": "The task is still running. You can reopen this dialog to monitor progress."
-  },
   "wizard": {
     "createTitle": "Create new task",
-    "createDescription": "Describe what you want to build. The AI will analyze your request and create a detailed specification.",
-    "descriptionPlaceholder": "Describe the feature, bug fix, or improvement you want to implement. Be as specific as possible about requirements, constraints, and expected behavior. Type @ to reference files.",
+    "createDescription": "Claude Code plans and builds it in an isolated worktree",
+    "descriptionPlaceholder": "What should Claude Code do?",
     "draftRestored": "Draft restored",
     "startFresh": "Start fresh",
     "creating": "Creating...",
@@ -203,23 +204,21 @@
     }
   },
   "feedback": {
-    "dragDropHint": "Drag & drop images or paste screenshots",
-    "imageAdded": "Image added successfully",
     "maxImagesError": "Maximum of {{count}} images allowed",
     "invalidTypeError": "Invalid image type. Allowed: {{types}}",
     "removeImage": "Remove image",
     "processingError": "Failed to process image",
     "requestChanges": "Request changes",
-    "description": "Found issues? Describe what needs to be fixed and the AI will continue working on it.",
-    "placeholder": "Describe the issues or changes needed...",
-    "submitting": "Submitting..."
-  },
-  "review": {
-    "mergeTooltip": "Merges changes from the task's worktree branch back to your base branch. AI will resolve any conflicts. You can then choose whether to keep or remove the worktree."
+    "description": "Claude Code applies them in the same session, then validates again",
+    "placeholder": "Describe what to change",
+    "submitting": "Submitting...",
+    "addImages": "Add images",
+    "dropImages": "Drop images to attach",
+    "send": "Request changes"
   },
   "edit": {
     "title": "Edit task",
-    "description": "Update task details including title, description, classification, images, and settings. Changes will be saved to the spec files.",
+    "description": "Update the title, description, reference images and connectors. Changes are saved to the task files.",
     "saveChanges": "Save",
     "errors": {
       "updateFailed": "Failed to update task. Please try again."
@@ -227,78 +226,20 @@
   },
   "form": {
     "description": "Description",
-    "descriptionPlaceholder": "Describe the feature, bug fix, or improvement you want to implement. Be as specific as possible about requirements, constraints, and expected behavior.",
+    "descriptionPlaceholder": "What should Claude Code do?",
+    "attachFiles": "Attach files",
+    "dropToAttach": "Drop images to attach",
     "imageAddedSuccess": "Image added successfully!",
-    "taskTitle": "Title",
-    "titlePlaceholder": "Leave empty to auto-generate from description",
-    "titleHelpText": "A short, descriptive title will be generated automatically if left empty.",
     "sections": {
-      "task": "Task",
-      "agent": "Agent",
-      "classification": "Classification",
-      "options": "Options"
+      "connectors": "Connectors"
     },
-    "requireReviewLabel": "Require human review before coding",
-    "requireReviewDescription": "When enabled, you'll be prompted to review the spec and implementation plan before the coding phase begins. This allows you to approve, request changes, or provide feedback.",
-    "connectorsLabel": "Connectors",
-    "fastModeLabel": "Fast mode",
-    "fastModeDescription": "Same Opus 4.6 model with faster output. Higher cost per token.",
-    "fastModeNotice": "Requires \"extra usage\" enabled on your Claude subscription.",
     "errors": {
       "descriptionRequired": "Please provide a description",
       "maxImagesReached": "Maximum of 5 images allowed",
       "invalidImageType": "Invalid image type. Allowed: PNG, JPEG, GIF, WebP",
       "processPasteFailed": "Failed to process pasted image",
       "processDropFailed": "Failed to process dropped image"
-    },
-    "classification": {
-      "category": "Category",
-      "selectCategory": "Select category",
-      "priority": "Priority",
-      "selectPriority": "Select priority",
-      "complexity": "Complexity",
-      "selectComplexity": "Select complexity",
-      "impact": "Impact",
-      "selectImpact": "Select impact",
-      "helpText": "These labels help organize and prioritize tasks. They're optional but useful for filtering.",
-      "values": {
-        "category": {
-          "feature": "Feature",
-          "bug_fix": "Bug Fix",
-          "refactoring": "Refactoring",
-          "documentation": "Docs",
-          "security": "Security"
-        },
-        "priority": {
-          "low": "Low",
-          "medium": "Medium",
-          "high": "High",
-          "urgent": "Urgent"
-        },
-        "complexity": {
-          "trivial": "Trivial",
-          "small": "Small",
-          "medium": "Medium",
-          "large": "Large",
-          "complex": "Complex"
-        },
-        "impact": {
-          "low": "Low Impact",
-          "medium": "Medium Impact",
-          "high": "High Impact",
-          "critical": "Critical Impact"
-        }
-      }
     }
-  },
-  "subtasks": {
-    "untitled": "Subtask {{number}}",
-    "expandAll": "Expand all",
-    "collapseAll": "Collapse all",
-    "empty": "No subtasks defined",
-    "emptyHint": "Implementation subtasks will appear here after planning",
-    "completedOf": "{{completed}} of {{total}} completed",
-    "verification": "Verification"
   },
   "bulkPR": {
     "selectAllInColumn": "Select all tasks in column",
@@ -321,45 +262,25 @@
     "deleting": "Deleting...",
     "failed": "Failed to delete task"
   },
-  "fileAutocomplete": {
-    "noFiles": "No files found",
-    "keyboardHint": "↑↓ to navigate · Enter to select · Esc to close"
-  },
-  "referenceImages": {
-    "title": "Reference images (optional)",
-    "description": "Add visual references like screenshots or designs to help the AI understand your requirements.",
-    "dropZone": "Drop images here or click to browse",
+  "attachments": {
     "preview": "Preview {{filename}}"
   },
-  "detailTabs": {
-    "label": "Task sections",
-    "overview": "Overview",
-    "subtasks": "Subtasks ({{count}})",
-    "logs": "Logs"
-  },
   "detail": {
-    "resumeFailedTitle": "Cannot resume task",
-    "resumeFailedDescription": "Failed to load implementation plan. Please try again or check the task files."
+    "resumeFailedDescription": "Failed to load implementation plan. Please try again or check the task files.",
+    "attachments": "Attachments",
+    "attachmentCount_one": "{{count}} file",
+    "attachmentCount_other": "{{count}} files"
   },
   "warnings": {
-    "stuckTitle": "Task appears stuck",
-    "stuckDescription": "This task is marked as running but no active process was found. This can happen if the app crashed or the process was terminated unexpectedly.",
-    "recover": "Recover and restart",
-    "recovering": "Recovering...",
     "incompleteTitle": "Task incomplete",
-    "incompleteDescription": "This task has a spec and implementation plan but never completed any subtasks ({{completed}}/{{total}}). The process likely crashed during spec creation.",
+    "incompleteDescription": "This task stopped before Claude Code finished it ({{completed}}/{{total}} task list items done). The process likely exited early. Resume to continue the same session.",
     "resume": "Resume task"
   },
   "logs": {
-    "empty": "No logs yet",
-    "emptyHint": "Logs will appear here when the task runs",
+    "title": "Logs",
+    "stopped": "Stopped",
     "entries_one": "{{count}} entry",
     "entries_other": "{{count}} entries",
-    "phases": {
-      "planning": "Planning",
-      "coding": "Coding",
-      "validation": "Validation"
-    },
     "tools": {
       "reading": "Reading",
       "searchingFiles": "Searching files",
@@ -368,22 +289,34 @@
       "writing": "Writing",
       "running": "Running"
     },
-    "done": "Done",
-    "showOutput": "Show output",
-    "hideOutput": "Hide output",
     "more": "More",
     "less": "Less"
   },
   "detailHeader": {
     "stuck": "Stuck",
     "incomplete": "Incomplete",
-    "subtaskProgress": "{{completed}}/{{total}} subtasks",
-    "reviewReason": {
-      "completed": "Completed",
-      "errors": "Has errors",
-      "plan_review": "Approve plan",
-      "stopped": "Stopped",
-      "qa": "QA issues"
+    "failed": "Failed"
+  },
+  "claudeRun": {
+    "modelEffort": "{{model}} · {{effort}}",
+    "planned": "Planned",
+    "models": {
+      "haiku": "Haiku",
+      "sonnet": "Sonnet",
+      "opus": "Opus",
+      "fable": "Fable"
+    },
+    "efforts": {
+      "low": "low",
+      "medium": "medium",
+      "high": "high",
+      "xhigh": "extra high",
+      "max": "max"
+    },
+    "session": {
+      "openAgent": "Open agent",
+      "noProject": "The task's project is not open",
+      "noRoom": "All agent windows of this project are in use. Close one to open this session"
     }
   }
 }

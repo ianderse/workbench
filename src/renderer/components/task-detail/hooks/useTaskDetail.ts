@@ -1,8 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useProjectStore } from '../../../stores/project-store';
-import { useSettingsStore } from '../../../stores/settings-store';
-import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, loadTasks, hasRecentActivity } from '../../../stores/task-store';
-import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, WorktreeDiff, MergeConflict, MergeStats, GitConflictInfo, ImageAttachment } from '../../../../shared/types';
+import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, hasRecentActivity } from '../../../stores/task-store';
+import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, ImageAttachment } from '../../../../shared/types';
 
 /**
  * Validates task subtasks structure to prevent infinite loops during resume.
@@ -49,14 +48,18 @@ export interface UseTaskDetailOptions {
   task: Task;
 }
 
+const LOG_PHASES: TaskLogPhase[] = ['planning', 'coding', 'validation'];
+
+/** Steps whose log ended in failure */
+function failedPhases(logs: TaskLogs): Set<TaskLogPhase> {
+  return new Set(LOG_PHASES.filter((phase) => logs.phases[phase]?.status === 'failed'));
+}
+
 export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [feedback, setFeedback] = useState('');
   const [feedbackImages, setFeedbackImages] = useState<ImageAttachment[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [activeTab, setActiveTab] = useState('overview');
-  const [isUserScrolledUp, setIsUserScrolledUp] = useState(false);
   const [isStuck, setIsStuck] = useState(false);
-  const [isRecovering, setIsRecovering] = useState(false);
   const [hasCheckedRunning, setHasCheckedRunning] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -65,35 +68,16 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [isCheckingChanges, setIsCheckingChanges] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [worktreeStatus, setWorktreeStatus] = useState<WorktreeStatus | null>(null);
-  const [worktreeDiff, setWorktreeDiff] = useState<WorktreeDiff | null>(null);
-  const [isLoadingWorktree, setIsLoadingWorktree] = useState(false);
-  const [isMerging, setIsMerging] = useState(false);
-  const [isDiscarding, setIsDiscarding] = useState(false);
-  const [showDiscardDialog, setShowDiscardDialog] = useState(false);
-  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
-  const [showDiffDialog, setShowDiffDialog] = useState(false);
-  const [stageOnly, setStageOnly] = useState(false); // Default to full merge for proper cleanup (fixes #243)
-  const [stagedSuccess, setStagedSuccess] = useState<string | null>(null);
-  const [stagedProjectPath, setStagedProjectPath] = useState<string | undefined>(undefined);
-  const [suggestedCommitMessage, setSuggestedCommitMessage] = useState<string | undefined>(undefined);
   const [phaseLogs, setPhaseLogs] = useState<TaskLogs | null>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [expandedPhases, setExpandedPhases] = useState<Set<TaskLogPhase>>(new Set());
+  // The Logs section (all steps in one list) opens by itself when a step runs or fails
+  const [isLogsExpanded, setIsLogsExpanded] = useState(false);
+  const failedPhasesRef = useRef<Set<TaskLogPhase>>(new Set());
   const [isLoadingPlan, setIsLoadingPlan] = useState(false);
-  const logsEndRef = useRef<HTMLDivElement>(null);
-  const logsContainerRef = useRef<HTMLDivElement>(null);
 
-  // Merge preview state
-  const [mergePreview, setMergePreview] = useState<{
-    files: string[];
-    conflicts: MergeConflict[];
-    summary: MergeStats;
-    gitConflicts?: GitConflictInfo;
-  } | null>(null);
-  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
-  const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [isCreatingPR, setIsCreatingPR] = useState(false);
+  const [showMergePRDialog, setShowMergePRDialog] = useState(false);
 
   const currentProject = useProjectStore((state) => {
     const currentProjectId = state.activeProjectId || state.selectedProjectId;
@@ -101,11 +85,11 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
       ? state.projects.find((project) => project.id === currentProjectId)
       : undefined;
   });
-  const logOrder = useSettingsStore(s => s.settings.logOrder);
   const isRunning = task.status === 'in_progress';
   // isActiveTask includes ai_review for stuck detection (CHANGELOG documents this feature)
   const isActiveTask = task.status === 'in_progress' || task.status === 'ai_review';
-  const needsReview = task.status === 'human_review';
+  // A task whose PR isn't merged yet is still in review (Human Review column)
+  const needsReview = task.status === 'human_review' || task.status === 'pr_created';
   const executionPhase = task.executionProgress?.phase;
   const hasActiveExecution = executionPhase && executionPhase !== 'idle' && executionPhase !== 'complete' && executionPhase !== 'failed';
   const isIncomplete = isIncompleteHumanReview(task);
@@ -121,7 +105,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
       return;
     }
 
-    const intervalId = setInterval(() => {
+    const checkStuck = () => {
       if (hasRecentActivity(task.id)) {
         setIsStuck(false);
         return;
@@ -135,7 +119,10 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
         }
         setHasCheckedRunning(true);
       });
-    }, 60_000);
+    };
+    // Check right away (a run stopped by quitting the app is stuck as soon as the app starts)
+    checkStuck();
+    const intervalId = setInterval(checkStuck, 60_000);
 
     return () => clearInterval(intervalId);
   }, [task.id, isActiveTask]);
@@ -155,68 +142,23 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     }
   }, [showDeleteDialog, task]);
 
-  // Handle scroll events in logs to detect if user scrolled away from anchor
-  const handleLogsScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLDivElement;
-    const isReverseOrder = logOrder === 'reverse-chronological';
-
-    // Check distance from top for reverse order, bottom for chronological
-    const isAtAnchor = isReverseOrder
-      ? target.scrollTop < 100
-      : target.scrollHeight - target.scrollTop - target.clientHeight < 100;
-
-    setIsUserScrolledUp(!isAtAnchor);
-  };
-
-  // Auto-scroll logs to anchor (top for reverse, bottom for chronological) only if user hasn't scrolled away
-  useEffect(() => {
-    const isReverseOrder = logOrder === 'reverse-chronological';
-
-    if (activeTab === 'logs' && !isUserScrolledUp) {
-      if (isReverseOrder && logsContainerRef.current) {
-        logsContainerRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-      } else if (!isReverseOrder && logsEndRef.current) {
-        logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
-      }
-    }
-  }, [activeTab, isUserScrolledUp, logOrder, phaseLogs]);
-
-  // Reset scroll state when switching to logs tab
-  useEffect(() => {
-    if (activeTab === 'logs') {
-      setIsUserScrolledUp(false);
-    }
-  }, [activeTab]);
-
   // Reset feedback images when task changes to prevent image leakage between tasks
   useEffect(() => {
     setFeedbackImages([]);
   }, []);
 
-  // Load worktree status when task is in human_review
+  // Load worktree status when task is in review (change summary, Create PR and Merge PR)
   useEffect(() => {
     if (needsReview) {
-      setIsLoadingWorktree(true);
-      setWorkspaceError(null);
-
-      Promise.all([
-        window.electronAPI.getWorktreeStatus(task.id),
-        window.electronAPI.getWorktreeDiff(task.id)
-      ]).then(([statusResult, diffResult]) => {
+      window.electronAPI.getWorktreeStatus(task.id).then((statusResult) => {
         if (statusResult.success && statusResult.data) {
           setWorktreeStatus(statusResult.data);
         }
-        if (diffResult.success && diffResult.data) {
-          setWorktreeDiff(diffResult.data);
-        }
       }).catch((err) => {
         console.error('Failed to load worktree info:', err);
-      }).finally(() => {
-        setIsLoadingWorktree(false);
       });
     } else {
       setWorktreeStatus(null);
-      setWorktreeDiff(null);
     }
   }, [task.id, needsReview]);
 
@@ -230,12 +172,11 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
         const result = await window.electronAPI.getTaskLogs(currentProject.id, task.specId);
         if (result.success && result.data) {
           setPhaseLogs(result.data);
-          // Auto-expand active phase
-          const activePhase = (['planning', 'coding', 'validation'] as TaskLogPhase[]).find(
-            phase => result.data?.phases[phase]?.status === 'active'
-          );
-          if (activePhase) {
-            setExpandedPhases(new Set([activePhase]));
+          // Open the logs while a step runs or after one failed (so its error is visible)
+          const data = result.data;
+          failedPhasesRef.current = failedPhases(data);
+          if (failedPhasesRef.current.size > 0 || LOG_PHASES.some((phase) => data.phases[phase]?.status === 'active')) {
+            setIsLogsExpanded(true);
           }
         }
       } catch (err) {
@@ -254,17 +195,12 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     const unsubscribe = window.electronAPI.onTaskLogsChanged((specId, logs) => {
       if (specId === task.specId) {
         setPhaseLogs(logs);
-        // Auto-expand newly active phase
-        const activePhase = (['planning', 'coding', 'validation'] as TaskLogPhase[]).find(
-          phase => logs.phases[phase]?.status === 'active'
-        );
-        if (activePhase) {
-          setExpandedPhases(prev => {
-            const next = new Set(prev);
-            next.add(activePhase);
-            return next;
-          });
+        // Open the logs when a step newly fails (a collapsed list stays collapsed otherwise)
+        const failed = failedPhases(logs);
+        if ([...failed].some((phase) => !failedPhasesRef.current.has(phase))) {
+          setIsLogsExpanded(true);
         }
+        failedPhasesRef.current = failed;
       }
     });
 
@@ -274,18 +210,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     };
   }, [currentProject, task.specId]);
 
-  // Toggle phase expansion
-  const togglePhase = useCallback((phase: TaskLogPhase) => {
-    setExpandedPhases(prev => {
-      const next = new Set(prev);
-      if (next.has(phase)) {
-        next.delete(phase);
-      } else {
-        next.add(phase);
-      }
-      return next;
-    });
-  }, []);
+  const toggleLogs = useCallback(() => setIsLogsExpanded((open) => !open), []);
 
   // Add a feedback image
   const addFeedbackImage = useCallback((image: ImageAttachment) => {
@@ -306,119 +231,6 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const clearFeedbackImages = useCallback(() => {
     setFeedbackImages([]);
   }, []);
-
-  // Track if we've already loaded preview for this task to prevent infinite loops
-  const hasLoadedPreviewRef = useRef<string | null>(null);
-
-  // Clear merge preview state when switching to a different task
-  useEffect(() => {
-    if (hasLoadedPreviewRef.current !== task.id) {
-      setMergePreview(null);
-      hasLoadedPreviewRef.current = null;
-    }
-  }, [task.id]);
-
-  // Load merge preview (conflict detection) and refresh worktree status
-  const loadMergePreview = useCallback(async () => {
-    setIsLoadingPreview(true);
-    // Clear any previous workspace error before loading
-    setWorkspaceError(null);
-
-    try {
-      // Fetch both merge preview and updated worktree status in parallel
-      // This ensures the branch information (currentProjectBranch) is refreshed
-      // when the user clicks the refresh button after switching branches locally
-      // Use Promise.allSettled to handle partial failures - if one API call fails,
-      // the other's result is still processed rather than being discarded
-      const [previewResult, statusResult] = await Promise.allSettled([
-        window.electronAPI.mergeWorktreePreview(task.id),
-        window.electronAPI.getWorktreeStatus(task.id)
-      ]);
-
-      const errors: string[] = [];
-
-      // Process merge preview result if fulfilled
-      if (previewResult.status === 'fulfilled') {
-        const result = previewResult.value;
-        if (result.success && result.data?.preview) {
-          setMergePreview(result.data.preview);
-        } else if (!result.success && result.error) {
-          errors.push(`Merge preview: ${result.error}`);
-        }
-      } else {
-        console.error('[useTaskDetail] Failed to load merge preview:', previewResult.reason);
-        errors.push('Failed to load merge preview');
-      }
-
-      // Update worktree status with fresh branch information if fulfilled
-      if (statusResult.status === 'fulfilled') {
-        const result = statusResult.value;
-        if (result.success && result.data) {
-          setWorktreeStatus(result.data);
-        } else if (!result.success && result.error) {
-          errors.push(`Worktree status: ${result.error}`);
-        }
-      } else {
-        console.error('[useTaskDetail] Failed to load worktree status:', statusResult.reason);
-        errors.push('Failed to load worktree status');
-      }
-
-      // Set workspace error if any API calls failed
-      if (errors.length > 0) {
-        setWorkspaceError(errors.join('; '));
-      }
-    } catch (err) {
-      console.error('[useTaskDetail] Unexpected error in loadMergePreview:', err);
-      setWorkspaceError('An unexpected error occurred while loading workspace information');
-    } finally {
-      hasLoadedPreviewRef.current = task.id;
-      setIsLoadingPreview(false);
-    }
-  }, [task.id]);
-
-  // Handle "Review Again" - clears staged state and reloads worktree info
-  const handleReviewAgain = useCallback(async () => {
-    // Clear staged success state if it was set in this session
-    setStagedSuccess(null);
-    setStagedProjectPath(undefined);
-    setSuggestedCommitMessage(undefined);
-
-    // Reset merge preview to force re-check
-    setMergePreview(null);
-    hasLoadedPreviewRef.current = null;
-
-    // Reset workspace error state
-    setWorkspaceError(null);
-
-    // Reload worktree status
-    setIsLoadingWorktree(true);
-    try {
-      const [statusResult, diffResult] = await Promise.all([
-        window.electronAPI.getWorktreeStatus(task.id),
-        window.electronAPI.getWorktreeDiff(task.id)
-      ]);
-      if (statusResult.success && statusResult.data) {
-        setWorktreeStatus(statusResult.data);
-      }
-      if (diffResult.success && diffResult.data) {
-        setWorktreeDiff(diffResult.data);
-      }
-
-      // Reload task data from store to reflect cleared staged state
-      // (clearStagedState IPC already invalidated the cache)
-      if (currentProject) {
-        await loadTasks(currentProject.id);
-      }
-    } catch (err) {
-      console.error('Failed to reload worktree info:', err);
-    } finally {
-      setIsLoadingWorktree(false);
-    }
-  }, [task.id, currentProject]);
-
-  // NOTE: Merge preview is NO LONGER auto-loaded on modal open.
-  // User must click "Check for Conflicts" button to trigger the expensive preview operation.
-  // This improves modal open performance significantly (avoids 1-30+ second Python subprocess).
 
   /**
    * Reloads implementation plan for an incomplete task to ensure subtasks are properly loaded.
@@ -500,10 +312,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     feedback,
     feedbackImages,
     isSubmitting,
-    activeTab,
-    isUserScrolledUp,
     isStuck,
-    isRecovering,
     hasCheckedRunning,
     showDeleteDialog,
     isDeleting,
@@ -512,22 +321,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     isCheckingChanges,
     isEditDialogOpen,
     worktreeStatus,
-    worktreeDiff,
-    isLoadingWorktree,
-    isMerging,
-    isDiscarding,
-    showDiscardDialog,
-    workspaceError,
-    showDiffDialog,
-    stageOnly,
-    stagedSuccess,
-    stagedProjectPath,
-    suggestedCommitMessage,
     phaseLogs,
     isLoadingLogs,
-    expandedPhases,
-    logsEndRef,
-    logsContainerRef,
+    isLogsExpanded,
     selectedProject: currentProject,
     isRunning,
     needsReview,
@@ -535,21 +331,16 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     hasActiveExecution,
     isIncomplete,
     taskProgress,
-    mergePreview,
-    isLoadingPreview,
-    showConflictDialog,
     showPRDialog,
     isCreatingPR,
+    showMergePRDialog,
     isLoadingPlan,
 
     // Setters
     setFeedback,
     setFeedbackImages,
     setIsSubmitting,
-    setActiveTab,
-    setIsUserScrolledUp,
     setIsStuck,
-    setIsRecovering,
     setHasCheckedRunning,
     setShowDeleteDialog,
     setIsDeleting,
@@ -558,35 +349,18 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setIsCheckingChanges,
     setIsEditDialogOpen,
     setWorktreeStatus,
-    setWorktreeDiff,
-    setIsLoadingWorktree,
-    setIsMerging,
-    setIsDiscarding,
-    setShowDiscardDialog,
-    setWorkspaceError,
-    setShowDiffDialog,
-    setStageOnly,
-    setStagedSuccess,
-    setStagedProjectPath,
-    setSuggestedCommitMessage,
     setPhaseLogs,
     setIsLoadingLogs,
-    setExpandedPhases,
-    setMergePreview,
-    setIsLoadingPreview,
-    setShowConflictDialog,
     setShowPRDialog,
     setIsCreatingPR,
+    setShowMergePRDialog,
 
     // Handlers
-    handleLogsScroll,
-    togglePhase,
-    loadMergePreview,
+    toggleLogs,
     addFeedbackImage,
     addFeedbackImages,
     removeFeedbackImage,
     clearFeedbackImages,
-    handleReviewAgain,
     reloadPlanForIncompleteTask,
   };
 }

@@ -5,7 +5,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   loadProfilesFile,
-  saveProfilesFile,
   generateProfileId,
   validateFilePermissions
 } from './profile-manager';
@@ -129,39 +128,6 @@ describe('profile-manager', () => {
       const filePath = readFileCalls[0]?.[0];
       expect(filePath).toContain('auto-claude');
       expect(filePath).toContain('profiles.json');
-    });
-  });
-
-  describe('saveProfilesFile', () => {
-    it('should write profiles file to disk', async () => {
-      const mockData: ProfilesFile = {
-        profiles: [],
-        activeProfileId: null,
-        version: 1
-      };
-
-      await saveProfilesFile(mockData);
-
-      expect(fsMocks.writeFile).toHaveBeenCalled();
-      const writeFileCall = fsMocks.writeFile.mock.calls[0];
-      const filePath = writeFileCall?.[0];
-      const content = writeFileCall?.[1];
-
-      expect(filePath).toContain('auto-claude');
-      expect(filePath).toContain('profiles.json');
-      expect(content).toBe(JSON.stringify(mockData, null, 2));
-    });
-
-    it('should throw error when write fails', async () => {
-      const mockData: ProfilesFile = {
-        profiles: [],
-        activeProfileId: null,
-        version: 1
-      };
-
-      fsMocks.writeFile.mockRejectedValue(new Error('Write failed'));
-
-      await expect(saveProfilesFile(mockData)).rejects.toThrow('Write failed');
     });
   });
 

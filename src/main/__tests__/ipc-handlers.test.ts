@@ -167,7 +167,6 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
     startTaskExecution: ReturnType<typeof vi.fn>;
     startQAProcess: ReturnType<typeof vi.fn>;
     killTask: ReturnType<typeof vi.fn>;
-    configure: ReturnType<typeof vi.fn>;
   };
   let mockTerminalManager: {
     create: ReturnType<typeof vi.fn>;
@@ -201,7 +200,6 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       startTaskExecution: vi.fn(),
       startQAProcess: vi.fn(),
       killTask: vi.fn(),
-      configure: vi.fn(),
     });
 
     // Create mock terminal manager
@@ -420,14 +418,14 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       );
 
       // Create .auto-claude directory first (before adding project so it gets detected)
-      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "specs"), { recursive: true });
+      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks"), { recursive: true });
 
       // Add a project - it will detect .auto-claude
       const addResult = await ipcMain.invokeHandler("project:add", {}, TEST_PROJECT_PATH);
       const projectId = (addResult as { data: { id: string } }).data.id;
 
-      // Create a spec directory with implementation plan in .auto-claude/specs
-      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "specs", "001-test-feature");
+      // Create a spec directory with implementation plan in .auto-claude/tasks
+      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks", "001-test-feature");
       mkdirSync(specDir, { recursive: true });
       writeFileSync(
         path.join(specDir, "implementation_plan.json"),
@@ -490,7 +488,7 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       );
 
       // Create .auto-claude directory first (before adding project so it gets detected)
-      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "specs"), { recursive: true });
+      mkdirSync(path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks"), { recursive: true });
 
       // Add a project first
       const addResult = await ipcMain.invokeHandler("project:add", {}, TEST_PROJECT_PATH);
@@ -552,18 +550,6 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       expect(data.defaultModel).toBe("opus");
     });
 
-    it("should configure agent manager when paths change", async () => {
-      const { setupIpcHandlers } = await import("../ipc-handlers");
-      setupIpcHandlers(
-        mockAgentManager as never,
-        mockTerminalManager as never,
-        () => mockMainWindow as never
-      );
-
-      await ipcMain.invokeHandler("settings:save", {}, { pythonPath: "/usr/bin/python3" });
-
-      expect(mockAgentManager.configure).toHaveBeenCalledWith("/usr/bin/python3", undefined);
-    });
   });
 
   describe("app:version handler", () => {
@@ -630,7 +616,7 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       await ipcMain.invokeHandler("project:add", {}, TEST_PROJECT_PATH);
 
       // Create a spec/task directory with implementation_plan.json
-      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "specs", "task-1");
+      const specDir = path.join(TEST_PROJECT_PATH, ".auto-claude", "tasks", "task-1");
       mkdirSync(specDir, { recursive: true });
       writeFileSync(
         path.join(specDir, "implementation_plan.json"),

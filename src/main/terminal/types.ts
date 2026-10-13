@@ -19,7 +19,7 @@ export interface TerminalProcess {
   title: string;
   /** Associated worktree configuration (persisted across restarts) */
   worktreeConfig?: TerminalWorktreeConfig;
-  /** Whether this terminal has a pending Claude resume that should be triggered on activation */
+  /** Whether this terminal has a pending Claude resume that the renderer triggers once its window is shown */
   pendingCLIResume?: boolean;
   /** Whether Claude was invoked with --dangerously-skip-permissions (YOLO mode) */
   dangerouslySkipPermissions?: boolean;
@@ -29,6 +29,15 @@ export interface TerminalProcess {
   shellType?: WindowsShellType;
   /** Whether PTY has emitted exit; used to avoid writes/resizes on dead PTYs */
   hasExited?: boolean;
+  /**
+   * Set while the window follows a running task's session (read-only): the follower gets the
+   * keys and the shell's output is held back
+   */
+  follower?: { handleInput(data: string): void; stop(): void };
+  /** The app is restarting the window's CLI (account switch): its exit must not close the window */
+  cliRestarting?: boolean;
+  /** Last output characters, to find the CLI exit marker when it is split across chunks */
+  cliExitTail?: string;
 }
 
 /**
@@ -54,15 +63,6 @@ export interface OAuthTokenEvent {
   success: boolean;
   message?: string;
   detectedAt: string;
-}
-
-
-/**
- * Session capture result
- */
-export interface SessionCaptureResult {
-  sessionId: string | null;
-  captured: boolean;
 }
 
 /**

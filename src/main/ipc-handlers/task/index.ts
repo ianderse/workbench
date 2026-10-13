@@ -40,4 +40,4 @@ export function registerTaskHandlers(
 }
 
 // Export shared utilities for use by other modules if needed
-export { findTaskAndProject } from './shared';
+;

@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { ViewStateProvider, useViewState, useViewStateOptional } from '../ViewStateContext';
+import { ViewStateProvider, useViewState } from '../ViewStateContext';
 
 describe('ViewStateContext', () => {
   beforeEach(() => {
@@ -77,27 +77,6 @@ describe('ViewStateContext', () => {
 
       const { result } = renderHook(() => useViewState(), { wrapper });
 
-      expect(result.current).toHaveProperty('showArchived');
-      expect(result.current).toHaveProperty('setShowArchived');
-      expect(result.current).toHaveProperty('toggleShowArchived');
-    });
-  });
-
-  describe('useViewStateOptional Hook', () => {
-    it('should return null when used outside ViewStateProvider', () => {
-      const { result } = renderHook(() => useViewStateOptional());
-
-      expect(result.current).toBeNull();
-    });
-
-    it('should return context value when used inside ViewStateProvider', () => {
-      const wrapper = ({ children }: { children: ReactNode }) => (
-        <ViewStateProvider>{children}</ViewStateProvider>
-      );
-
-      const { result } = renderHook(() => useViewStateOptional(), { wrapper });
-
-      expect(result.current).not.toBeNull();
       expect(result.current).toHaveProperty('showArchived');
       expect(result.current).toHaveProperty('setShowArchived');
       expect(result.current).toHaveProperty('toggleShowArchived');

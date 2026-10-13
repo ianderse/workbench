@@ -54,6 +54,7 @@ vi.mock('../claude-profile-manager', () => ({
   getClaudeProfileManager: vi.fn(() => ({
     getProfile: vi.fn(),
     saveProfile: vi.fn(),
+    mergeSameAccountProfile: vi.fn(() => null),
     setProfileToken: vi.fn(),
   })),
 }));

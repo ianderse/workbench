@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow } from 'electron';
+import { handleIpc } from '../ipc-registry';
+import { BrowserWindow } from 'electron';
 import { IPC_CHANNELS, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, TaskLogs, TaskLogStreamChunk } from '../../../shared/types';
 import path from 'path';
@@ -16,7 +17,7 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
    * Get task logs from spec directory
    * Returns logs organized by phase (planning, coding, validation)
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LOGS_GET,
     async (_, projectId: string, specId: string): Promise<IPCResult<TaskLogs | null>> => {
       try {
@@ -72,7 +73,7 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
   /**
    * Start watching a spec for log changes
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LOGS_WATCH,
     async (_, projectId: string, specId: string): Promise<IPCResult> => {
       try {
@@ -115,7 +116,7 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
   /**
    * Stop watching a spec for log changes
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LOGS_UNWATCH,
     async (_, specId: string): Promise<IPCResult> => {
       try {

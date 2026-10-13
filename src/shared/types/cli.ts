@@ -87,15 +87,10 @@ export interface GraphifyVersionInfo {
   latest: string | null;
   /** Whether a newer version than the installed one is available */
   isOutdated: boolean;
-  /**
-   * Whether Claude Code offers the /graphify command: how many of its config directories (the
-   * default one and each Claude profile's) don't have it yet. Null when Graphify isn't installed.
-   */
-  claudeCommand: { configDirs: number; missing: number } | null;
 }
 
 /**
- * A project's memory graph, built by Graphify into .auto-claude/memory
+ * A project's memory graph, built by Graphify into .auto-claude/knowledge
  */
 export interface GraphifyIndexInfo {
   nodes: number;
@@ -118,11 +113,13 @@ export interface GraphifyGraphNode {
 }
 
 /** An edge of a project's memory graph */
-export interface GraphifyGraphLink {
+interface GraphifyGraphLink {
   source: string;
   target: string;
   /** e.g. calls, imports, contains */
   relation?: string;
+  /** EXTRACTED, INFERRED, ...; Graphify draws non-extracted links fainter */
+  confidence?: string;
 }
 
 export interface GraphifyGraph {

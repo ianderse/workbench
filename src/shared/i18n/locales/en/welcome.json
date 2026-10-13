@@ -6,10 +6,5 @@
   "actions": {
     "newProject": "New Project",
     "openProject": "Open Project"
-  },
-  "recentProjects": {
-    "title": "Recent Projects",
-    "openFolder": "Open Folder",
-    "openProjectAriaLabel": "Open project {{name}}"
   }
 }

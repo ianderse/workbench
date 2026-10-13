@@ -18,6 +18,9 @@ import * as SessionHandler from './session-handler';
 import * as TerminalLifecycle from './terminal-lifecycle';
 import * as TerminalEventHandler from './terminal-event-handler';
 import * as ClaudeIntegration from './cli-integration-handler';
+import { SessionFollower, type FollowedRun } from './session-follower';
+import { safeSendToRenderer } from '../ipc-handlers/utils';
+import { IPC_CHANNELS } from '../../shared/constants';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 
 export class TerminalManager {
@@ -92,6 +95,7 @@ export class TerminalManager {
    * Destroy a terminal process
    */
   async destroy(id: string): Promise<TerminalOperationResult> {
+    this.stopFollowing(id);
     return TerminalLifecycle.destroyTerminal(
       id,
       this.terminals,
@@ -105,6 +109,7 @@ export class TerminalManager {
    * Kill all terminal processes
    */
   async killAll(): Promise<void> {
+    for (const id of this.terminals.keys()) this.stopFollowing(id);
     this.saveTimer = await TerminalLifecycle.destroyAllTerminals(
       this.terminals,
       this.saveTimer
@@ -117,6 +122,11 @@ export class TerminalManager {
   write(id: string, data: string): void {
     debugLog('[TerminalManager:write] Writing to terminal:', id, 'data length:', data.length);
     const terminal = this.terminals.get(id);
+    if (terminal?.follower) {
+      // Following a running task's session: the follower handles the keys (Enter, Ctrl+C)
+      terminal.follower.handleInput(data);
+      return;
+    }
     if (terminal) {
       debugLog('[TerminalManager:write] Terminal found, calling writeToPty...');
       PtyManager.writeToPty(terminal, data);
@@ -154,6 +164,77 @@ export class TerminalManager {
       this.getWindow,
       dangerouslySkipPermissions
     );
+  }
+
+  /**
+   * Resume a task's Claude Code session in a terminal (`claude --resume <id>` in the task's
+   * worktree), on the profile and config dir the session ran on (async - non-blocking)
+   */
+  async resumeTaskSessionAsync(
+    id: string,
+    options: { sessionId: string; cwd: string; profileId?: string; configDir?: string },
+    dangerouslySkipPermissions?: boolean
+  ): Promise<void> {
+    const terminal = this.terminals.get(id);
+    if (!terminal) {
+      return;
+    }
+
+    await ClaudeIntegration.invokeCLIAsync(
+      terminal,
+      options.cwd,
+      options.profileId,
+      this.getWindow,
+      dangerouslySkipPermissions,
+      { resumeSessionId: options.sessionId, configDir: options.configDir }
+    );
+  }
+
+  /**
+   * Follow a running task's Claude Code session in a terminal (read-only). Once the task stops,
+   * Enter resumes the session there like resumeTaskSessionAsync.
+   */
+  followTaskSession(
+    id: string,
+    options: { sessionId: string; cwd: string; profileId?: string; configDir?: string },
+    run: FollowedRun,
+    dangerouslySkipPermissions?: boolean
+  ): void {
+    const terminal = this.terminals.get(id);
+    if (!terminal) return;
+    this.stopFollowing(id);
+    // Output goes to this terminal only while it is still the one with this id (a recreated
+    // window reuses the id)
+    const write = (data: string) => {
+      if (this.terminals.get(id) !== terminal) return;
+      terminal.outputBuffer = (terminal.outputBuffer + data).slice(-100000);
+      safeSendToRenderer(this.getWindow, IPC_CHANNELS.TERMINAL_OUTPUT, id, data);
+    };
+    const follower = new SessionFollower({
+      ...options,
+      run,
+      write,
+      onContinue: (session) => {
+        terminal.follower = undefined;
+        this.resumeTaskSessionAsync(id, { ...session, cwd: options.cwd }, dangerouslySkipPermissions).catch((error) => {
+          debugError('[TerminalManager] Failed to resume the followed session:', error);
+        });
+      },
+      onRelease: () => {
+        terminal.follower = undefined;
+        terminal.isCLIMode = false;
+        // A fresh prompt (the shell's output was held back while following)
+        PtyManager.writeToPty(terminal, '\r');
+      },
+    });
+    terminal.follower = follower;
+    follower.start();
+  }
+
+  private stopFollowing(id: string): void {
+    const terminal = this.terminals.get(id);
+    terminal?.follower?.stop();
+    if (terminal) terminal.follower = undefined;
   }
 
   /**
@@ -213,7 +294,7 @@ export class TerminalManager {
 
   /**
    * Activate deferred Claude resume for a terminal
-   * Called when a terminal with pendingCLIResume becomes active (user views it)
+   * Called by the renderer once a terminal with pendingCLIResume is shown
    */
   async activateDeferredResume(id: string): Promise<void> {
     const terminal = this.terminals.get(id);
@@ -392,5 +473,20 @@ export class TerminalManager {
    */
   private handleTerminalData(terminal: TerminalProcess, data: string): void {
     TerminalEventHandler.handleTerminalData(terminal, data, this.eventCallbacks);
+    this.closeOnCliExit(terminal, data);
+  }
+
+  /**
+   * A CLI the app launched in this window (Claude Code in an agent window) exited: end the
+   * shell so the window closes like after typing `exit`. Skipped when the app restarts the CLI.
+   */
+  private closeOnCliExit(terminal: TerminalProcess, data: string): void {
+    if (!ClaudeIntegration.shouldCloseOnCliExit(terminal, data)) return;
+    debugLog('[TerminalManager] CLI exited, closing the window:', terminal.id);
+    try {
+      terminal.pty.kill();
+    } catch (error) {
+      debugError('[TerminalManager] Failed to end the shell after the CLI exited:', error);
+    }
   }
 }

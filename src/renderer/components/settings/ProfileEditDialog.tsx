@@ -30,7 +30,6 @@ import { Label } from '../ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { useSettingsStore } from '../../stores/settings-store';
 import { ModelSearchableSelect } from './ModelSearchableSelect';
-import { useToast } from '../../hooks/use-toast';
 import { isValidUrl, isValidApiKey } from '../../lib/profile-utils';
 import type { APIProfile, ProfileFormData, } from '@shared/types/profile';
 import { maskApiKey } from '../../lib/profile-utils';
@@ -58,7 +57,6 @@ export function ProfileEditDialog({ open, onOpenChange, onSaved, profile }: Prof
     isTestingConnection,
     testConnectionResult
   } = useSettingsStore();
-  const { toast } = useToast();
 
   // Edit mode detection: profile prop determines mode
   const isEditMode = !!profile;
@@ -258,12 +256,6 @@ export function ProfileEditDialog({ open, onOpenChange, onSaved, profile }: Prof
       };
       const success = await updateProfile(updatedProfile);
       if (success) {
-        toast({
-          title: t('settings:apiProfiles.toast.update.title'),
-          description: t('settings:apiProfiles.toast.update.description', {
-            name: name.trim()
-          }),
-        });
         onOpenChange(false);
         onSaved?.();
       }
@@ -286,12 +278,6 @@ export function ProfileEditDialog({ open, onOpenChange, onSaved, profile }: Prof
 
       const success = await saveProfile(profileData);
       if (success) {
-        toast({
-          title: t('settings:apiProfiles.toast.create.title'),
-          description: t('settings:apiProfiles.toast.create.description', {
-            name: name.trim()
-          }),
-        });
         onOpenChange(false);
         onSaved?.();
       }

@@ -1,8 +1,7 @@
-import { X, GripVertical, Maximize2, Minimize2, RotateCcw } from 'lucide-react';
+import { X, GripVertical, Maximize2, Minimize2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { SyntheticListenerMap } from '@dnd-kit/core/dist/hooks/utilities';
 import type { Task, TerminalWorktreeConfig } from '../../../shared/types';
-import { useTerminalStore } from '../../stores/terminal-store';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
 import { AgentsIcon, TerminalPromptIcon } from '../icons/app-icons';
@@ -34,8 +33,6 @@ interface TerminalHeaderProps {
   isExpanded?: boolean;
   /** Callback to toggle expanded state */
   onToggleExpand?: () => void;
-  /** Whether this terminal has a pending Claude resume (deferred until tab activated) */
-  pendingCLIResume?: boolean;
 }
 
 export function TerminalHeader({
@@ -55,17 +52,13 @@ export function TerminalHeader({
   dragHandleListeners,
   isExpanded,
   onToggleExpand,
-  pendingCLIResume,
 }: TerminalHeaderProps) {
   const { t } = useTranslation(['terminal', 'common']);
-  const backlogTasks = tasks.filter((t) => t.status === 'backlog');
-
-  // Check if 2+ terminals have pending Claude resume
-  // Use a derived selector returning a primitive to avoid re-renders on unrelated terminal changes
-  const pendingResumeCount = useTerminalStore(
-    (state) => state.terminals.filter((t) => t.pendingCLIResume === true).length
+  // Tasks an agent window can pick: those with a Claude Code session to resume (not archived),
+  // and backlog tasks (their description is sent to the running session)
+  const selectableTasks = tasks.filter(
+    (task) => (!!task.claudeRun?.sessionId && !task.metadata?.archivedAt) || task.status === 'backlog'
   );
-  const showResumeAllButton = pendingResumeCount >= 2;
 
   return (
     <div className="electron-no-drag group/header flex h-11 items-center justify-between border-b border-border px-2">
@@ -94,15 +87,6 @@ export function TerminalHeader({
             <TerminalPromptIcon className="h-4 w-4 text-primary" />
           )}
         </span>
-        {pendingCLIResume && (
-          <span
-            className="flex items-center gap-1 text-[10px] font-medium text-cyan-500 bg-cyan-500/10 px-1.5 py-0.5 rounded animate-pulse"
-            title={t('terminal:resume.pendingTooltip')}
-          >
-            <RotateCcw className="h-2.5 w-2.5" />
-            {terminalCount < 4 && <span>{t('terminal:resume.pending')}</span>}
-          </span>
-        )}
         {/* Worktree selector - labelled with the active worktree, which can be switched */}
         {projectPath && onCreateWorktree && onSelectWorktree && (
           <WorktreeSelector
@@ -117,7 +101,7 @@ export function TerminalHeader({
         {isCLIMode && (
           <TaskSelector
             terminalId={terminalId}
-            backlogTasks={backlogTasks}
+            tasks={selectableTasks}
             associatedTask={associatedTask}
             onTaskSelect={onTaskSelect}
             onClearTask={onClearTask}
@@ -126,26 +110,6 @@ export function TerminalHeader({
         )}
       </div>
       <div className="flex items-center gap-1">
-        {/* Resume All button - shown when 2+ terminals have pending resume */}
-        {showResumeAllButton && (
-          <Button
-            variant="ghost"
-            size={terminalCount >= 4 ? 'icon' : 'sm'}
-            className={cn(
-              'h-8 hover:bg-cyan-500/10 hover:text-cyan-500 animate-pulse',
-              terminalCount >= 4 ? 'w-8' : 'px-2 text-sm gap-1.5',
-              'text-cyan-500 bg-cyan-500/10'
-            )}
-            onClick={(e) => {
-              e.stopPropagation();
-              useTerminalStore.getState().resumeAllPendingClaude();
-            }}
-            title={t('terminal:resume.resumeAllSessions')}
-          >
-            <RotateCcw className="h-4 w-4" />
-            {terminalCount < 4 && <span>{t('terminal:resume.resumeAllSessions')}</span>}
-          </Button>
-        )}
         {/* Expand/collapse button */}
         {onToggleExpand && (
           <Button

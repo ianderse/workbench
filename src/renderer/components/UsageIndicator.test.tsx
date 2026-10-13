@@ -10,7 +10,6 @@ import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { UsageIndicator } from './UsageIndicator';
 import { useSettingsStore } from '../stores/settings-store';
-import type { ProviderAccount } from '../../shared/types/provider-account';
 
 vi.mock('../stores/settings-store', () => ({
   useSettingsStore: vi.fn(),
@@ -59,81 +58,25 @@ vi.mock('react-i18next', () => ({
   })),
 }));
 
-const crossProviderAccounts: ProviderAccount[] = [
-  {
-    id: 'account-openai',
-    provider: 'openai',
-    name: 'OpenAI API',
-    authType: 'api-key',
-    billingModel: 'pay-per-use',
-    apiKey: 'openai-key',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  },
-  {
-    id: 'account-anthropic',
-    provider: 'anthropic',
-    name: 'Anthropic OAuth',
-    authType: 'oauth',
-    billingModel: 'subscription',
-    claudeProfileId: 'account-anthropic',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  },
-];
-
-const crossProviderMonitoredAccounts: ProviderAccount[] = [
-  {
-    id: 'account-anthropic-active',
-    provider: 'anthropic',
-    name: 'Anthropic OAuth',
-    authType: 'oauth',
-    billingModel: 'subscription',
-    claudeProfileId: 'account-anthropic-active',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  },
-  {
-    id: 'account-openai-other',
-    provider: 'openai',
-    name: 'OpenAI OAuth',
-    authType: 'oauth',
-    billingModel: 'pay-per-use',
-    claudeProfileId: 'account-openai-other',
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-  },
-];
-
-const commonStoreMock = {
-  setQueueOrder: vi.fn(),
-  setSettings: vi.fn(),
-  updateSettings: vi.fn(),
-  loadProfiles: vi.fn(),
-  loadProviderAccounts: vi.fn(),
+const apiProfile = {
+  id: 'api-1',
+  name: 'Gateway',
+  baseUrl: 'https://gateway.example.com/v1',
+  apiKey: 'sk-test-1234',
+  createdAt: Date.now(),
+  updatedAt: Date.now(),
 };
 
-function createStoreMock(overrides?: {
-  customMixedProfileActive?: boolean;
-  customMixedPhaseConfig?: Record<string, { provider: 'anthropic' | 'openai' }>;
-  globalPriorityOrder?: string[];
-  providerAccounts?: ProviderAccount[];
-}) {
-  return {
-    providerAccounts: overrides?.providerAccounts ?? crossProviderAccounts,
-    settings: {
-      globalPriorityOrder: overrides?.globalPriorityOrder ?? ['account-openai', 'account-anthropic'],
-      customMixedProfileActive: overrides?.customMixedProfileActive,
-      customMixedPhaseConfig: overrides?.customMixedPhaseConfig,
-    },
-    ...commonStoreMock,
-  } as any;
+/** Settings store state: an API profile is in use only when activeProfileId is set */
+function mockStore(activeProfileId: string | null) {
+  const state = { profiles: [apiProfile], activeProfileId, settings: {} };
+  vi.mocked(useSettingsStore).mockImplementation(((selector?: (s: typeof state) => unknown) =>
+    selector ? selector(state) : state) as any);
 }
 
 describe('UsageIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    commonStoreMock.setQueueOrder.mockResolvedValue({ success: true });
 
     (window as any).electronAPI = {
       onUsageUpdated: vi.fn(() => vi.fn()),
@@ -177,18 +120,13 @@ describe('UsageIndicator', () => {
         },
       }),
       onAllProfilesUsageUpdated: vi.fn(),
-      setQueueOrder: vi.fn(),
-      testProviderConnection: vi.fn().mockResolvedValue({ success: true, data: { status: 'valid' } }),
     };
   });
 
   describe('usage breakdown', () => {
     beforeEach(() => {
-      // Active account: Anthropic subscription (usage monitoring available); a second account is queued
-      vi.mocked(useSettingsStore).mockReturnValue(createStoreMock({
-        providerAccounts: crossProviderMonitoredAccounts,
-        globalPriorityOrder: ['account-anthropic-active', 'account-openai-other'],
-      }) as any);
+      // Claude account in use (usage monitoring available)
+      mockStore(null);
     });
 
     it('shows the session and weekly usage in the badge', async () => {
@@ -212,26 +150,24 @@ describe('UsageIndicator', () => {
     });
   });
 
-  describe('API key accounts', () => {
+  describe('API profiles', () => {
     beforeEach(() => {
-      // Active account: OpenAI API key (no usage monitoring)
-      vi.mocked(useSettingsStore).mockReturnValue(createStoreMock() as any);
+      // An API profile is in use (pay as you go, no usage monitoring)
+      mockStore('api-1');
     });
 
-    it('shows an API key badge, not "Unlimited", when the provider accepts the key', async () => {
+    it('shows an API key badge instead of usage', async () => {
       render(<UsageIndicator />);
       const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
       await waitFor(() => expect(usageTrigger).toHaveTextContent('API key'));
-      expect(window.electronAPI.testProviderConnection).toHaveBeenCalledWith('openai', { apiKey: 'openai-key', baseUrl: undefined });
+      expect(usageTrigger).not.toHaveTextContent('45');
     });
 
-    it('flags a key the provider rejects', async () => {
-      vi.mocked(window.electronAPI.testProviderConnection).mockResolvedValue({ success: true, data: { status: 'invalid' } });
+    it('names the profile and its endpoint in the breakdown', async () => {
       render(<UsageIndicator />);
       const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
-      await waitFor(() => expect(usageTrigger).toHaveTextContent('Invalid key'));
       fireEvent.click(usageTrigger);
-      expect(await screen.findByText('OpenAI rejected this API key')).toBeInTheDocument();
+      expect(await screen.findByText('Gateway · gateway.example.com')).toBeInTheDocument();
     });
   });
 });

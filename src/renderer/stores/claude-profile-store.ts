@@ -81,28 +81,3 @@ export async function loadClaudeProfiles(): Promise<void> {
     store.setLoading(false);
   }
 }
-
-/**
- * Switch to a different Claude profile in a terminal
- */
-export async function switchTerminalToProfile(
-  terminalId: string,
-  profileId: string
-): Promise<boolean> {
-  const store = useClaudeProfileStore.getState();
-  store.setSwitching(true);
-
-  try {
-    const result = await window.electronAPI.switchClaudeProfile(terminalId, profileId);
-    if (result.success) {
-      store.setActiveProfile(profileId);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    console.error('[ClaudeProfileStore] Error switching profile:', error);
-    return false;
-  } finally {
-    store.setSwitching(false);
-  }
-}

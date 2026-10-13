@@ -1,23 +1,4 @@
 /**
- * Version management utilities
- *
- * Simplified version that uses only the bundled app version.
- * The "source updater" system has been removed since the backend
- * is bundled with the app and updates via electron-updater.
- */
-
-import { app } from 'electron';
-
-/**
- * Get the current app/framework version from package.json
- *
- * Uses app.getVersion() (from package.json) as the version.
- */
-export function getBundledVersion(): string {
-  return app.getVersion();
-}
-
-/**
  * Parse a version string into its components
  * Handles versions like "2.7.2", "2.7.2-beta.6", "2.7.2-alpha.1"
  *

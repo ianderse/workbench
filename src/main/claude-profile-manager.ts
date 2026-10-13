@@ -14,6 +14,7 @@
 import { app } from 'electron';
 import { join, resolve } from 'path';
 import { mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 import { homedir } from 'os';
 import type {
   ClaudeProfile,
@@ -31,7 +32,9 @@ import { parseUsageOutput } from './claude-profile/usage-parser';
 import {
   recordRateLimitEvent as recordRateLimitEventImpl,
   isProfileRateLimited as isProfileRateLimitedImpl,
-  clearRateLimitEvents as clearRateLimitEventsImpl
+  clearRateLimitEvents as clearRateLimitEventsImpl,
+  pruneRateLimitEvents,
+  type RecordRateLimitOptions
 } from './claude-profile/rate-limit-manager';
 import {
   loadProfileStoreAsync,
@@ -45,7 +48,7 @@ import {
   getProfilesSortedByAvailability as getProfilesSortedByAvailabilityImpl,
   getBestAvailableUnifiedAccount
 } from './claude-profile/profile-scorer';
-import { getCredentialsFromKeychain, normalizeWindowsPath, updateProfileSubscriptionMetadata } from './claude-profile/credential-utils';
+import { getCredentialsFromKeychain, getKeychainServiceName, normalizeWindowsPath, updateProfileSubscriptionMetadata } from './claude-profile/credential-utils';
 import { loadProfilesFile } from './services/profile/profile-manager';
 import {
   CLAUDE_PROFILES_DIR,
@@ -54,11 +57,14 @@ import {
   isProfileAuthenticated as isProfileAuthenticatedImpl,
   hasValidToken,
   expandHomePath,
-  getEmailFromConfigDir
+  getEmailFromConfigDir,
+  getAccountIdentityFromConfigDir,
+  isSameClaudeAccount
 } from './claude-profile/profile-utils';
 import { debugLog } from '../shared/utils/debug-logger';
 import { isWindows } from './platform';
-import { readSettingsFile, writeSettingsFile } from './settings-utils';
+import { detectClaudeCodeSetups, detectedAccountName, type DetectedSetup } from './claude-profile/claude-code-detection';
+import { getDefaultClaudeConfigDir } from './claude-profile/config-dir-paths';
 
 /** Normalize a profile configDir for comparison (~ expansion, resolution, Windows case). */
 function normalizeConfigDir(configDir: string): string {
@@ -82,6 +88,11 @@ function mergeDuplicateProfile(kept: ClaudeProfile, duplicate: ClaudeProfile): C
     id: kept.id,
     isDefault: kept.isDefault || duplicate.isDefault,
   } as ClaudeProfile;
+}
+
+/** Display names compared the way a person would read them */
+function sameName(a: string | undefined, b: string | undefined): boolean {
+  return !!a && !!b && a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
 /**
@@ -127,6 +138,10 @@ export class ClaudeProfileManager {
       debugLog('[ClaudeProfileManager] No existing profile store found, using defaults');
     }
 
+    // Claude Code's own setups (~/.claude, CLAUDE_CONFIG_DIR, ~/.claude-*) are the accounts
+    this.syncDetectedAccounts();
+    this.keepOnlyDetectedAccounts();
+
     // Run one-time migration to fix corrupted emails
     // This repairs emails that were truncated due to ANSI escape codes in terminal output
     this.migrateCorruptedEmails();
@@ -135,12 +150,143 @@ export class ClaudeProfileManager {
     // Keeps the first (oldest/default) entry per configDir
     this.deduplicateProfiles();
 
+    // Remove leftovers of sign-ins that never finished and that duplicate another account
+    this.removeAbandonedDuplicates();
+
+    // Forget rate limits that were never real (quoted limit messages) or have reset
+    this.pruneStaleRateLimits();
+
+    // Never stay on an account that can't sign in when one that can exists
+    this.ensureUsableActiveProfile();
+
     // Populate missing subscription metadata for existing profiles
     // This reads subscriptionType and rateLimitTier from Keychain credentials
     this.populateSubscriptionMetadata();
 
     this.initialized = true;
     console.log('[ClaudeProfileManager] Initialization complete');
+  }
+
+  /**
+   * List the Claude Code setups found on this machine as accounts (on every start): new ones are
+   * added, known ones get their current values, and accounts whose setup is gone are dropped.
+   * An account the user added for the same config dir becomes the detected one.
+   */
+  private syncDetectedAccounts(): void {
+    let setups: DetectedSetup[];
+    try {
+      setups = detectClaudeCodeSetups({
+        excludeUnder: [CLAUDE_PROFILES_DIR],
+        hasSubscriptionCredentials: (dir) => !!getCredentialsFromKeychain(dir).token,
+        keychainEntry: (dir) => getKeychainServiceName(dir),
+      });
+    } catch (error) {
+      console.warn('[ClaudeProfileManager] Could not detect Claude Code accounts:', error);
+      return;
+    }
+
+    const pending = new Map(setups.map((setup) => [normalizeConfigDir(setup.configDir), setup]));
+    const toDetected = ({ configDir: _, ...detected }: DetectedSetup) => detected;
+    let changed = false;
+
+    this.data.profiles = this.data.profiles.filter((profile) => {
+      const key = profile.configDir ? normalizeConfigDir(profile.configDir) : undefined;
+      const setup = key ? pending.get(key) : undefined;
+      if (setup && key) {
+        pending.delete(key);
+        profile.detected = toDetected(setup);
+        if (setup.email) profile.email = setup.email;
+        changed = true;
+        return true;
+      }
+      if (profile.detected) {
+        // Its setup no longer reaches Claude
+        changed = true;
+        return false;
+      }
+      return true;
+    });
+
+    for (const setup of pending.values()) {
+      const taken = new Set(this.data.profiles.map((p) => p.name));
+      const base = detectedAccountName(setup);
+      let name = base;
+      for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+      this.data.profiles.push({
+        id: generateProfileIdImpl(name, this.data.profiles),
+        name,
+        configDir: setup.configDir,
+        isDefault: false,
+        createdAt: new Date(),
+        ...(setup.email ? { email: setup.email } : {}),
+        detected: toDetected(setup),
+      });
+      changed = true;
+    }
+
+    if (changed) this.save();
+  }
+
+  /**
+   * Only Claude Code's own setups are accounts. Accounts added the old way (each in its own
+   * folder under ~/.claude-profiles) leave the list once a setup is detected; their folders stay.
+   * References to a removed account move to the detected account of the same Claude account, or
+   * to the one on Claude Code's default ~/.claude.
+   */
+  private keepOnlyDetectedAccounts(): void {
+    const detected = this.data.profiles.filter((profile) => profile.detected);
+    if (this.data.profiles.length === 0) {
+      // Every setup is gone: the default account until a sign-in adds one
+      const { profiles, activeProfileId } = this.createDefaultData();
+      this.data.profiles = profiles;
+      this.data.activeProfileId = activeProfileId;
+      this.save();
+      return;
+    }
+    if (detected.length === 0 || detected.length === this.data.profiles.length) return;
+
+    const fallback = detected.find((profile) => profile.detected?.isDefaultDir) ?? detected[0];
+    const idRemap = new Map<string, string>();
+    for (const profile of this.data.profiles) {
+      if (profile.detected) continue;
+      const email = profile.email?.toLowerCase();
+      const same = email ? detected.find((candidate) => candidate.email?.toLowerCase() === email) : undefined;
+      idRemap.set(profile.id, (same ?? fallback).id);
+    }
+
+    this.data.profiles = detected;
+    if (!detected.some((profile) => profile.isDefault)) fallback.isDefault = true;
+    this.remapRemovedProfiles(idRemap);
+    this.save();
+  }
+
+  /**
+   * Config dir that Claude Code's own sign-in (`claude auth login`) writes an account to: the
+   * account's own (to sign it in again); for a new account Claude Code's default ~/.claude while
+   * no setup uses it, then ~/.claude-2, ~/.claude-3, ... (Claude Code's way of keeping several
+   * accounts). Detection lists it afterwards.
+   */
+  getLoginConfigDir(profileId?: string): string {
+    const profile = profileId ? this.getProfile(profileId) : undefined;
+    if (profile?.detected && profile.configDir) return expandHomePath(profile.configDir);
+
+    const used = new Set(
+      this.data.profiles.filter((p) => p.detected && p.configDir).map((p) => normalizeConfigDir(p.configDir!))
+    );
+    const defaultDir = getDefaultClaudeConfigDir();
+    if (!used.has(normalizeConfigDir(defaultDir))) return defaultDir;
+    for (let n = 2; ; n++) {
+      const dir = join(homedir(), `.claude-${n}`);
+      if (!used.has(normalizeConfigDir(dir)) && !existsSync(dir)) return dir;
+    }
+  }
+
+  /** Detect Claude Code's setups again (after a sign-in) and return the accounts */
+  redetectAccounts(): ClaudeProfileSettings {
+    this.syncDetectedAccounts();
+    this.keepOnlyDetectedAccounts();
+    this.ensureUsableActiveProfile();
+    return this.getSettings();
   }
 
   /**
@@ -180,9 +326,8 @@ export class ClaudeProfileManager {
   /**
    * Remove duplicate profiles that share the same configDir (compared after normalization).
    * The first entry per configDir is kept; data that only a duplicate has (default flag,
-   * OAuth token, email, subscription info, usage) is merged into it. The active profile,
-   * the account priority order and provider accounts that referenced a removed id are
-   * remapped to the kept profile.
+   * OAuth token, email, subscription info, usage) is merged into it. The active profile and
+   * provider accounts that referenced a removed id are remapped to the kept profile.
    */
   private deduplicateProfiles(): void {
     const keptIndexByDir = new Map<string, number>();
@@ -205,48 +350,153 @@ export class ClaudeProfileManager {
     if (idRemap.size === 0) return;
 
     this.data.profiles = kept;
-    const remapId = (id: string): string => idRemap.get(id) ?? id;
-
-    if (this.data.activeProfileId) {
-      this.data.activeProfileId = remapId(this.data.activeProfileId);
-    }
-
-    // Unified account priority order uses 'oauth-{profileId}'; keep the first occurrence
-    if (this.data.accountPriorityOrder) {
-      const seen = new Set<string>();
-      this.data.accountPriorityOrder = this.data.accountPriorityOrder
-        .map(id => (id.startsWith('oauth-') ? `oauth-${remapId(id.slice('oauth-'.length))}` : id))
-        .filter(id => (seen.has(id) ? false : (seen.add(id), true)));
-    }
-
-    this.remapProviderAccountProfiles(idRemap);
+    this.remapRemovedProfiles(idRemap);
 
     debugLog(`[ClaudeProfileManager] Deduplicated profiles: removed ${idRemap.size} duplicates, ${kept.length} remaining`);
     this.save();
   }
 
   /**
-   * Point provider accounts (settings.json) that referenced a removed duplicate profile
-   * at the profile that was kept.
+   * Point references to removed profiles (the active profile) at the
+   * profiles that replaced them. Callers remove the profiles themselves and save.
    */
-  private remapProviderAccountProfiles(idRemap: Map<string, string>): void {
-    try {
-      const settings = readSettingsFile();
-      const accounts = settings?.providerAccounts;
-      if (!settings || !Array.isArray(accounts)) return;
+  private remapRemovedProfiles(idRemap: Map<string, string>): void {
+    const remapId = (id: string): string => idRemap.get(id) ?? id;
 
-      let changed = false;
-      for (const account of accounts as Array<{ claudeProfileId?: string }>) {
-        const mapped = account.claudeProfileId ? idRemap.get(account.claudeProfileId) : undefined;
-        if (mapped) {
-          account.claudeProfileId = mapped;
-          changed = true;
-        }
-      }
-      if (changed) writeSettingsFile(settings);
-    } catch (error) {
-      console.warn('[ClaudeProfileManager] Failed to remap provider accounts after dedup:', error);
+    if (this.data.activeProfileId) {
+      this.data.activeProfileId = remapId(this.data.activeProfileId);
     }
+
+    if (this.data.migratedProfileIds) {
+      this.data.migratedProfileIds = this.data.migratedProfileIds.filter(id => !idRemap.has(id));
+      if (this.data.migratedProfileIds.length === 0) delete this.data.migratedProfileIds;
+    }
+  }
+
+  /**
+   * Whether a profile is the leftover of an "Add account" sign-in that never finished: not the
+   * default account, no email, not signed in (no credentials for its config dir).
+   */
+  private isAbandonedSignIn(profile: ClaudeProfile): boolean {
+    return !profile.isDefault
+      && !profile.detected
+      && !profile.email
+      && !hasValidToken(profile)
+      && !this.isProfileAuthenticated(profile)
+      && !getAccountIdentityFromConfigDir(profile.configDir);
+  }
+
+  /**
+   * Remove abandoned sign-ins (see isAbandonedSignIn) that carry the same name as another
+   * account that is signed in or has an email: they are duplicates of that account (for example
+   * "Primary" again, created as `primary-1` by a sign-in that was interrupted) and can never be
+   * used. References to them move to that account. Their config dirs are left on disk.
+   */
+  private removeAbandonedDuplicates(): void {
+    const idRemap = new Map<string, string>();
+    for (const profile of this.data.profiles) {
+      if (!this.isAbandonedSignIn(profile)) continue;
+      const original = this.data.profiles.find(other =>
+        other.id !== profile.id
+        && !idRemap.has(other.id)
+        && sameName(other.name, profile.name)
+        && (!!other.email || this.isProfileAuthenticated(other))
+      );
+      if (original) idRemap.set(profile.id, original.id);
+    }
+    if (idRemap.size === 0) return;
+
+    this.data.profiles = this.data.profiles.filter(p => !idRemap.has(p.id));
+    this.remapRemovedProfiles(idRemap);
+    console.warn('[ClaudeProfileManager] Removed duplicate accounts that were never signed in:', Object.fromEntries(idRemap));
+    this.save();
+  }
+
+  /** Drop rate limit events that were never real or whose reset time has passed */
+  private pruneStaleRateLimits(): void {
+    let changed = false;
+    for (const profile of this.data.profiles) {
+      if (pruneRateLimitEvents(profile)) changed = true;
+    }
+    if (changed) {
+      debugLog('[ClaudeProfileManager] Removed stale or implausible rate limit events');
+      this.save();
+    }
+  }
+
+  /**
+   * If the active profile can't sign in (no credentials) but another profile can, switch to
+   * that one (the default account first, then list order).
+   */
+  private ensureUsableActiveProfile(): void {
+    const active = this.data.profiles.find(p => p.id === this.data.activeProfileId);
+    if (active && this.hasValidAuth(active.id)) return;
+
+    const usable = this.data.profiles.filter(p => this.hasValidAuth(p.id));
+    const replacement = usable.find(p => p.isDefault) ?? usable[0];
+    if (!replacement || replacement.id === this.data.activeProfileId) return;
+
+    console.warn('[ClaudeProfileManager] Active account is not signed in, switching to a signed-in account:', {
+      from: this.data.activeProfileId,
+      to: replacement.id
+    });
+    this.data.activeProfileId = replacement.id;
+    this.save();
+  }
+
+  /**
+   * An unfinished sign-in profile with this name (see isAbandonedSignIn), to reuse when an
+   * account with the same name is added again instead of creating `<name>-1`.
+   */
+  findAbandonedProfileByName(name: string): ClaudeProfile | undefined {
+    return this.data.profiles.find(p => sameName(p.name, name) && this.isAbandonedSignIn(p));
+  }
+
+  /** A profile with this display name (case-insensitive) */
+  findProfileByName(name: string): ClaudeProfile | undefined {
+    return this.data.profiles.find(p => sameName(p.name, name));
+  }
+
+  /**
+   * After a profile signed in: if another profile is signed in to the same Claude account (same
+   * account and organization), keep a single entry. The older entry stays (its id, name,
+   * default flag and place in the list); it takes the newly signed-in config dir when its own
+   * has no credentials. Returns the profile that remains, or null when there was no duplicate.
+   */
+  mergeSameAccountProfile(profileId: string): ClaudeProfile | null {
+    const profile = this.getProfile(profileId);
+    if (!profile) return null;
+    const identity = getAccountIdentityFromConfigDir(profile.configDir);
+    if (!identity) return null;
+
+    const twin = this.data.profiles.find(other =>
+      other.id !== profile.id && isSameClaudeAccount(identity, getAccountIdentityFromConfigDir(other.configDir))
+    );
+    if (!twin) return null;
+
+    const profileIndex = this.data.profiles.indexOf(profile);
+    const twinIndex = this.data.profiles.indexOf(twin);
+    const [older, newer] = twinIndex < profileIndex ? [twin, profile] : [profile, twin];
+    const olderSignedIn = this.isProfileAuthenticated(older);
+
+    const merged = mergeDuplicateProfile(
+      {
+        ...older,
+        ...(olderSignedIn ? {} : {
+          configDir: newer.configDir,
+          email: newer.email ?? older.email,
+          subscriptionType: newer.subscriptionType ?? older.subscriptionType,
+          rateLimitTier: newer.rateLimitTier ?? older.rateLimitTier,
+        }),
+      },
+      newer
+    );
+    this.data.profiles[this.data.profiles.indexOf(older)] = merged;
+    this.data.profiles = this.data.profiles.filter(p => p.id !== newer.id);
+    this.remapRemovedProfiles(new Map([[newer.id, older.id]]));
+    console.warn('[ClaudeProfileManager] Account was already added, kept one entry:', { kept: older.id, removed: newer.id });
+    this.save();
+    return merged;
   }
 
   /**
@@ -390,24 +640,6 @@ export class ClaudeProfileManager {
   }
 
   /**
-   * Get unified account priority order
-   * Returns array of account IDs in priority order (first = highest priority)
-   * IDs are prefixed: 'oauth-{profileId}' for OAuth, 'api-{profileId}' for API profiles
-   */
-  getAccountPriorityOrder(): string[] {
-    return this.data.accountPriorityOrder || [];
-  }
-
-  /**
-   * Set unified account priority order
-   * @param order Array of account IDs in priority order
-   */
-  setAccountPriorityOrder(order: string[]): void {
-    this.data.accountPriorityOrder = order;
-    this.save();
-  }
-
-  /**
    * Get a specific profile by ID
    */
   getProfile(profileId: string): ClaudeProfile | undefined {
@@ -520,8 +752,8 @@ export class ClaudeProfileManager {
       return false;
     }
 
-    // Cannot delete default profile
-    if (profile.isDefault) {
+    // Cannot delete default profile, nor an account found in Claude Code's configuration
+    if (profile.isDefault || profile.detected) {
       return false;
     }
 
@@ -800,13 +1032,22 @@ export class ClaudeProfileManager {
   /**
    * Record a rate limit event for a profile
    */
-  recordRateLimitEvent(profileId: string, resetTimeStr: string): ClaudeRateLimitEvent {
+  recordRateLimitEvent(
+    profileId: string,
+    resetTimeStr: string,
+    options?: RecordRateLimitOptions
+  ): ClaudeRateLimitEvent | null {
     const profile = this.getProfile(profileId);
     if (!profile) {
       throw new Error('Profile not found');
     }
 
-    const event = recordRateLimitEventImpl(profile, resetTimeStr);
+    // Null when the reset string isn't a real Claude reset (e.g. quoted in terminal output)
+    const event = recordRateLimitEventImpl(profile, resetTimeStr, options);
+    if (!event) {
+      debugLog('[ClaudeProfileManager] Ignored implausible rate limit for profile:', profileId, JSON.stringify(resetTimeStr));
+      return null;
+    }
     this.save();
     return event;
   }
@@ -823,19 +1064,17 @@ export class ClaudeProfileManager {
   }
 
   /**
-   * Get the best profile to switch to based on priority order and availability
+   * Get the best profile to switch to based on availability and usage
    * Returns null if no good alternative is available
    *
    * Selection logic:
-   * 1. Respects user's configured account priority order
-   * 2. Filters by availability (authenticated, not rate-limited, below thresholds)
-   * 3. Returns first available profile in priority order
-   * 4. Falls back to "least bad" option if no profile meets all criteria
+   * 1. Filters by availability (authenticated, not rate-limited, below thresholds)
+   * 2. Returns the available profile with the most headroom (lowest usage)
+   * 3. Falls back to "least bad" option if no profile meets all criteria
    */
   getBestAvailableProfile(excludeProfileId?: string): ClaudeProfile | null {
     const settings = this.getAutoSwitchSettings();
-    const priorityOrder = this.getAccountPriorityOrder();
-    return getBestAvailableProfile(this.data.profiles, settings, excludeProfileId, priorityOrder);
+    return getBestAvailableProfile(this.data.profiles, settings, excludeProfileId);
   }
 
   /**
@@ -870,7 +1109,6 @@ export class ClaudeProfileManager {
    */
   async getBestAvailableUnifiedAccount(excludeAccountId?: string): Promise<UnifiedAccount | null> {
     const settings = this.getAutoSwitchSettings();
-    const priorityOrder = this.getAccountPriorityOrder();
     const activeOAuthId = this.data.activeProfileId;
 
     // Load API profiles and active API profile ID from profiles.json
@@ -882,7 +1120,6 @@ export class ClaudeProfileManager {
       settings,
       {
         excludeAccountId,
-        priorityOrder,
         activeOAuthId,
         activeAPIId
       }
@@ -899,8 +1136,7 @@ export class ClaudeProfileManager {
     }
 
     const settings = this.getAutoSwitchSettings();
-    const priorityOrder = this.getAccountPriorityOrder();
-    return shouldProactivelySwitchImpl(profile, this.data.profiles, settings, priorityOrder);
+    return shouldProactivelySwitchImpl(profile, this.data.profiles, settings);
   }
 
   /**

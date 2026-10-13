@@ -10,14 +10,6 @@ export const workspaceMock = {
     }
   }),
 
-  getWorktreeDiff: async () => ({
-    success: true,
-    data: {
-      files: [],
-      summary: 'No changes'
-    }
-  }),
-
   mergeWorktree: async () => ({
     success: true,
     data: {
@@ -62,6 +54,13 @@ export const workspaceMock = {
     }
   }),
 
+  mergeWorktreePR: async () => ({
+    success: true,
+    data: { success: true, targetBranch: 'main', conflictedFiles: [] }
+  }),
+
+  getWorktreePRState: async () => ({ success: true, data: 'open' as const }),
+
   discardWorktree: async (_taskId: string, _skipStatusChange?: boolean) => ({
     success: true,
     data: {
@@ -69,7 +68,6 @@ export const workspaceMock = {
       message: 'Worktree discarded successfully'
     }
   }),
-
 
   clearStagedState: async () => ({
     success: true,
@@ -80,28 +78,6 @@ export const workspaceMock = {
     success: true,
     data: {
       worktrees: []
-    }
-  }),
-
-  worktreeOpenInIDE: async () => ({
-    success: true,
-    data: { opened: true }
-  }),
-
-  worktreeOpenInTerminal: async () => ({
-    success: true,
-    data: { opened: true }
-  }),
-
-  worktreeDetectTools: async () => ({
-    success: true,
-    data: {
-      ides: [
-        { id: 'vscode', name: 'Visual Studio Code', path: '/Applications/Visual Studio Code.app', installed: true }
-      ],
-      terminals: [
-        { id: 'system', name: 'System Terminal', path: '', installed: true }
-      ]
     }
   })
 };

@@ -2,19 +2,13 @@
  * Merge Resolver Runner
  * =====================
  *
- * AI-powered merge conflict resolution using Vercel AI SDK.
- * See src/main/ai/runners/merge-resolver.ts for the TypeScript implementation.
- *
- * Simple single-turn text generation — takes a system prompt describing
- * the merge context and a user prompt with the conflict, returns the resolution.
- *
- * Uses `createSimpleClient()` with no tools.
+ * AI-powered merge conflict resolution through a one-shot Claude Code run.
+ * Takes a system prompt describing the merge context and a user prompt with
+ * the conflict, and returns the resolved content. No tools are enabled.
  */
 
-import { generateText } from 'ai';
-
-import { createSimpleClient } from '../client/factory';
-import type { ModelShorthand, ThinkingLevel } from '../config/types';
+import { runClaudeText } from '../../claude-code/run-text';
+import type { ClaudeEffort } from '../../../shared/types/claude-code';
 
 // =============================================================================
 // Types
@@ -26,10 +20,11 @@ export interface MergeResolverConfig {
   systemPrompt: string;
   /** User prompt with the conflict to resolve */
   userPrompt: string;
-  /** Model shorthand (defaults to 'haiku') */
-  modelShorthand?: ModelShorthand;
-  /** Thinking level (defaults to 'low') */
-  thinkingLevel?: ThinkingLevel;
+  /** Claude model alias (defaults to 'sonnet') */
+  model?: string;
+  /** Reasoning effort (defaults to 'low') */
+  effort?: ClaudeEffort;
+  abortSignal?: AbortSignal;
 }
 
 /** Result of a merge resolution */
@@ -42,47 +37,40 @@ export interface MergeResolverResult {
   error?: string;
 }
 
-/** Factory function type for creating a resolver call function */
+/** Function used by the merge orchestrator to resolve one conflict */
 export type MergeResolverCallFn = (system: string, user: string) => Promise<string>;
+
+/** How long a single conflict resolution may run */
+const RESOLVE_TIMEOUT_MS = 5 * 60 * 1000;
 
 // =============================================================================
 // Merge Resolver
 // =============================================================================
 
-/**
- * Resolve a merge conflict using AI.
- *
- * @param config - Merge resolver configuration
- * @returns Resolution result with the resolved text
- */
+/** Remove one Markdown code fence wrapping the whole answer */
+function stripCodeFence(text: string): string {
+  const match = /^```[^\n]*\n([\s\S]*?)\n?```$/.exec(text);
+  return match ? match[1] : text;
+}
+
+/** Resolve a merge conflict with Claude Code */
 export async function resolveMergeConflict(
   config: MergeResolverConfig,
 ): Promise<MergeResolverResult> {
-  const {
-    systemPrompt,
-    userPrompt,
-    modelShorthand = 'haiku',
-    thinkingLevel = 'low',
-  } = config;
+  const { systemPrompt, userPrompt, model = 'sonnet', effort = 'low', abortSignal } = config;
 
   try {
-    const client = await createSimpleClient({
-      systemPrompt,
-      modelShorthand,
-      thinkingLevel,
-    });
-
-    const result = await generateText({
-      model: client.model,
-      system: client.systemPrompt,
+    const result = await runClaudeText({
       prompt: userPrompt,
+      systemPrompt,
+      model,
+      effort,
+      timeoutMs: RESOLVE_TIMEOUT_MS,
+      abortSignal,
     });
-
-    if (result.text.trim()) {
-      return { success: true, text: result.text.trim() };
-    }
-
-    return { success: false, text: '', error: 'Empty response from AI' };
+    const text = stripCodeFence(result.text.trim());
+    if (text) return { success: true, text };
+    return { success: false, text: '', error: 'Empty response from Claude Code' };
   } catch (error) {
     return {
       success: false,
@@ -93,26 +81,15 @@ export async function resolveMergeConflict(
 }
 
 /**
- * Create a merge resolver call function.
- *
- * Returns a function matching the `(system, user) => string` signature
- * used by the AIResolver class. This mirrors Python's `create_claude_resolver()`.
- *
- * @param modelShorthand - Model to use (defaults to 'haiku')
- * @param thinkingLevel - Thinking level (defaults to 'low')
- * @returns Async function that resolves conflicts
+ * Create the `(system, user) => resolved text` function the merge orchestrator calls.
+ * Returns an empty string when resolution fails (the orchestrator treats that as unresolved).
  */
 export function createMergeResolverFn(
-  modelShorthand: ModelShorthand = 'haiku',
-  thinkingLevel: ThinkingLevel = 'low',
+  model = 'sonnet',
+  effort: ClaudeEffort = 'low',
 ): MergeResolverCallFn {
   return async (system: string, user: string): Promise<string> => {
-    const result = await resolveMergeConflict({
-      systemPrompt: system,
-      userPrompt: user,
-      modelShorthand,
-      thinkingLevel,
-    });
+    const result = await resolveMergeConflict({ systemPrompt: system, userPrompt: user, model, effort });
     return result.text;
   };
 }

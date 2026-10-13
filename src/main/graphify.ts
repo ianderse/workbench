@@ -2,8 +2,8 @@
  * Graphify (https://github.com/Graphify-Labs/graphify) builds a knowledge graph of a project's code.
  *
  * Auto Claude detects the `graphify` CLI (Settings > Updates), sets up its /graphify command in
- * Claude Code, builds each project's memory graph into .auto-claude/memory (Settings > Project >
- * Memory index), and gives agents a CodebaseGraph tool to search it when the project's "Use
+ * Claude Code, builds each project's memory graph into .auto-claude/knowledge (Settings > Project >
+ * Knowledge index), and gives agents a CodebaseGraph tool to search it when the project's "Use
  * Graphify" setting is on. Everything runs asynchronously so the main process never blocks on the
  * CLI.
  */
@@ -44,7 +44,7 @@ let detection: Promise<GraphifyInstallation | null> | null = null;
 let latestVersion: Promise<string | null> | null = null;
 const buildsInProgress = new Map<string, Promise<GraphifyIndexInfo>>();
 
-export { getGraphifyMemoryDir, getGraphifyGraphPath, hasGraphifyGraph };
+export {   hasGraphifyGraph };
 
 async function runGraphify(
   executable: string,
@@ -103,8 +103,7 @@ export async function checkGraphifyVersion(forceRefresh = false): Promise<Graphi
   const [installation, latest] = await Promise.all([detectGraphify(forceRefresh), latestVersion]);
   const installed = installation ? installation.version ?? 'unknown' : null;
   const isOutdated = !!(installed && latest && semver.valid(installed) && semver.valid(latest) && semver.lt(installed, latest));
-  const claudeCommand = installation ? await getGraphifyClaudeCommandStatus() : null;
-  return { installed, latest, isOutdated, claudeCommand };
+  return { installed, latest, isOutdated };
 }
 
 /**
@@ -137,17 +136,11 @@ async function getConfigDirsMissingCommand(): Promise<{ dirs: string[]; missing:
   return { dirs, missing: dirs.filter((_, i) => !present[i]) };
 }
 
-/** Whether Claude Code offers /graphify, counted over its config directories */
-export async function getGraphifyClaudeCommandStatus(): Promise<{ configDirs: number; missing: number }> {
-  const { dirs, missing } = await getConfigDirsMissingCommand();
-  return { configDirs: dirs.length, missing: missing.length };
-}
-
 /**
  * Make /graphify available in Claude Code: `graphify install` copies Graphify's skill into each
  * config directory that lacks it (and registers it in that directory's CLAUDE.md)
  */
-export async function installGraphifyClaudeCommand(): Promise<{ configDirs: number; missing: number }> {
+async function installGraphifyClaudeCommand(): Promise<{ configDirs: number; missing: number }> {
   const installation = await detectGraphify();
   if (!installation) throw new Error('Graphify is not installed');
   const defaultDir = path.join(os.homedir(), '.claude');
@@ -220,8 +213,8 @@ export async function readGraphifyGraph(projectPath: string): Promise<GraphifyGr
   }
   const data = JSON.parse(raw) as {
     nodes?: Array<{ id: string; label?: string; community?: number; source_file?: string; source_location?: string }>;
-    links?: Array<{ source: string; target: string; relation?: string }>;
-    edges?: Array<{ source: string; target: string; relation?: string }>;
+    links?: Array<{ source: string; target: string; relation?: string; confidence?: string }>;
+    edges?: Array<{ source: string; target: string; relation?: string; confidence?: string }>;
   };
   const nodes = (data.nodes ?? []).map((node) => ({
     id: String(node.id),
@@ -232,7 +225,7 @@ export async function readGraphifyGraph(projectPath: string): Promise<GraphifyGr
   }));
   const ids = new Set(nodes.map((node) => node.id));
   const links = (data.links ?? data.edges ?? [])
-    .map((link) => ({ source: String(link.source), target: String(link.target), relation: link.relation }))
+    .map((link) => ({ source: String(link.source), target: String(link.target), relation: link.relation, confidence: link.confidence }))
     .filter((link) => ids.has(link.source) && ids.has(link.target) && link.source !== link.target);
   return { nodes, links };
 }
@@ -255,10 +248,11 @@ async function build(projectPath: string): Promise<GraphifyIndexInfo> {
   const memoryDir = getGraphifyMemoryDir(projectPath);
   await fs.mkdir(memoryDir, { recursive: true });
 
-  // Code-only extraction parses the code locally (tree-sitter), so no API key is needed
+  // Code-only extraction parses the code locally (tree-sitter), so no API key is needed.
+  // The graph mirrors the current code, so a rebuild may shrink it (graphify refuses that by default)
   const { stdout, stderr } = await runGraphify(
     installation.path,
-    ['extract', projectPath, '--code-only', '--out', memoryDir],
+    ['extract', projectPath, '--code-only', '--allow-dedup-shrink', '--out', memoryDir],
     projectPath,
     BUILD_TIMEOUT_MS
   );

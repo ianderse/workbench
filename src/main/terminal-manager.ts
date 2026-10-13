@@ -11,4 +11,4 @@
  */
 
 export { TerminalManager } from './terminal/terminal-manager';
-export type { TerminalProcess } from './terminal/types';
+;

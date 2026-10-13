@@ -5,7 +5,7 @@
  * Supports both command-based (npx/npm) and HTTP-based servers.
  */
 
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -20,8 +20,7 @@ import { Label } from './ui/label';
 import { SegmentedControl, SettingsRow } from './settings/SettingsRow';
 import { useTranslation } from 'react-i18next';
 import type { CustomMcpServer } from '../../shared/types';
-import { X, Github, ChevronRight, Globe } from 'lucide-react';
-import { ExternalLink } from './ui/external-link';
+import { X, ChevronRight } from 'lucide-react';
 
 interface CustomMcpDialogProps {
   open: boolean;
@@ -58,48 +57,6 @@ export function CustomMcpDialog({
   const [bearerToken, setBearerToken] = useState('');
   const [showAdvancedHeaders, setShowAdvancedHeaders] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Known provider patterns for helpful hints
-  const urlHint = useMemo(() => {
-    const url = formData.url?.toLowerCase() || '';
-    if (url.includes('github')) {
-      return {
-        provider: 'GitHub',
-        icon: Github,
-        message: t('mcp.hints.github'),
-        link: 'https://github.com/settings/tokens',
-        linkText: t('mcp.hints.createGithubPat'),
-      };
-    }
-    if (url.includes('google') || url.includes('googleapis')) {
-      return {
-        provider: 'Google',
-        icon: Globe,
-        message: t('mcp.hints.google'),
-        link: 'https://console.cloud.google.com/apis/credentials',
-        linkText: t('mcp.hints.createGoogleToken'),
-      };
-    }
-    if (url.includes('anthropic')) {
-      return {
-        provider: 'Anthropic',
-        icon: Globe,
-        message: t('mcp.hints.anthropic'),
-        link: 'https://console.anthropic.com/settings/keys',
-        linkText: t('mcp.hints.createAnthropicKey'),
-      };
-    }
-    if (url.includes('openai')) {
-      return {
-        provider: 'OpenAI',
-        icon: Globe,
-        message: t('mcp.hints.openai'),
-        link: 'https://platform.openai.com/api-keys',
-        linkText: t('mcp.hints.createOpenaiKey'),
-      };
-    }
-    return null;
-  }, [formData.url, t]);
 
   // Reset form when dialog opens/closes or server changes
   useEffect(() => {
@@ -341,18 +298,6 @@ export function CustomMcpDialog({
                   placeholder="https://mcp.example.com/mcp"
                 />
               </div>
-
-              {/* URL-based hint for known providers */}
-              {urlHint && (
-                <div className="rounded-xl bg-segment-track px-4 py-3">
-                  <div className="min-w-0">
-                    <p className="text-sm text-muted-foreground">{urlHint.message}</p>
-                    <ExternalLink href={urlHint.link} className="mt-1">
-                      {urlHint.linkText}
-                    </ExternalLink>
-                  </div>
-                </div>
-              )}
 
               {/* Authentication Token (simplified) */}
               <div className="space-y-2">

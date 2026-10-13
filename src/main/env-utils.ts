@@ -112,7 +112,7 @@ function getNpmGlobalPrefix(): string | null {
  * Common binary directories that should be in PATH
  * These are locations where commonly used tools are installed
  */
-export const COMMON_BIN_PATHS: Record<string, string[]> = {
+const COMMON_BIN_PATHS: Record<string, string[]> = {
   darwin: [
     '/opt/homebrew/bin',      // Apple Silicon Homebrew
     '/usr/local/bin',         // Intel Homebrew / system
@@ -310,16 +310,6 @@ export function findExecutable(command: string): string | null {
   return null;
 }
 
-/**
- * Check if a command is available (in PATH or common locations)
- *
- * @param command - The command name to check
- * @returns true if the command is available
- */
-export function isCommandAvailable(command: string): boolean {
-  return findExecutable(command) !== null;
-}
-
 // ============================================================================
 // ASYNC VERSIONS - Non-blocking alternatives for Electron main process
 // ============================================================================
@@ -476,16 +466,6 @@ export async function findExecutableAsync(command: string): Promise<string | nul
   }
 
   return null;
-}
-
-/**
- * Clear the npm global prefix cache
- *
- * Call this if npm configuration changes and you need fresh detection.
- */
-export function clearNpmPrefixCache(): void {
-  npmGlobalPrefixCache = undefined;
-  npmGlobalPrefixCachePromise = null;
 }
 
 /**

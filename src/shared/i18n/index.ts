@@ -7,23 +7,21 @@ import enNavigation from './locales/en/navigation.json';
 import enSettings from './locales/en/settings.json';
 import enTasks from './locales/en/tasks.json';
 import enWelcome from './locales/en/welcome.json';
-import enOnboarding from './locales/en/onboarding.json';
 import enDialogs from './locales/en/dialogs.json';
 import enTaskReview from './locales/en/taskReview.json';
 import enTerminal from './locales/en/terminal.json';
 import enErrors from './locales/en/errors.json';
 
 
-export const defaultNS = 'common';
+const defaultNS = 'common';
 
-export const resources = {
+const resources = {
   en: {
     common: enCommon,
     navigation: enNavigation,
     settings: enSettings,
     tasks: enTasks,
     welcome: enWelcome,
-    onboarding: enOnboarding,
     dialogs: enDialogs,
     taskReview: enTaskReview,
     terminal: enTerminal,
@@ -38,7 +36,7 @@ i18n
     lng: 'en',
     fallbackLng: 'en',
     defaultNS,
-    ns: ['common', 'navigation', 'settings', 'tasks', 'welcome', 'onboarding', 'dialogs', 'taskReview', 'terminal', 'errors'],
+    ns: ['common', 'navigation', 'settings', 'tasks', 'welcome', 'dialogs', 'taskReview', 'terminal', 'errors'],
     interpolation: {
       escapeValue: false // React already escapes values
     },
@@ -47,4 +45,5 @@ i18n
     }
   });
 
+/** @internal The configured instance, for tests (the app loads this module for its side effects) */
 export default i18n;

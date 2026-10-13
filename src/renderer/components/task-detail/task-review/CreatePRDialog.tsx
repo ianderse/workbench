@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import { ExternalLink } from '../../ui/external-link';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,10 @@ import {
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { Switch } from '../../ui/switch';
+import { Combobox } from '../../ui/combobox';
+import { buildBranchOptions } from '../../../lib/branch-utils';
+import { useProjectBranches } from '../../../hooks/useProjectBranches';
+import { useProjectStore } from '../../../stores/project-store';
 import { SettingsRow, SettingsRows } from '../../settings/SettingsRow';
 import type { Task, WorktreeStatus, WorktreeCreatePRResult } from '../../../../shared/types';
 
@@ -35,7 +39,7 @@ export function CreatePRDialog({
   onOpenChange,
   onCreatePR
 }: CreatePRDialogProps) {
-  const { t } = useTranslation(['taskReview', 'common']);
+  const { t } = useTranslation(['taskReview', 'tasks', 'common']);
   const [targetBranch, setTargetBranch] = useState('');
   const [prTitle, setPrTitle] = useState('');
   const [isDraft, setIsDraft] = useState(false);
@@ -55,14 +59,15 @@ export function CreatePRDialog({
     }
   }, [open, worktreeStatus?.baseBranch, task.title]);
 
-  // Frontend validation functions
-  const validateBranchName = (branch: string): string | null => {
-    if (!branch.trim()) return null; // Empty is OK, will use default
-    // Basic git branch name rules: no spaces, .., @{, \, etc.
-    if (!/^[a-zA-Z0-9/_-]+$/.test(branch)) {
-      return t('taskReview:pr.errors.invalidBranchName');
-    }
-    return null;
+  // The project's branches, in the same picker as the task and worktree dialogs
+  const projectPath = useProjectStore((state) => state.projects.find((p) => p.id === task.projectId)?.path);
+  const { branches, isLoading: isLoadingBranches } = useProjectBranches(projectPath);
+  const branchOptions = useMemo(() => buildBranchOptions(branches, { t }), [branches, t]);
+
+  // A pull request targets a branch on the remote: `origin/main` is sent as `main`
+  const targetBranchName = (branch: string): string => {
+    const detail = branches.find((b) => b.name === branch);
+    return detail?.type === 'remote' ? branch.slice(branch.indexOf('/') + 1) : branch;
   };
 
   const validatePRTitle = (title: string): string | null => {
@@ -74,12 +79,6 @@ export function CreatePRDialog({
 
   const handleCreatePR = async () => {
     // Frontend validation before submitting
-    const branchError = validateBranchName(targetBranch);
-    if (branchError) {
-      setError(branchError);
-      return;
-    }
-
     const titleError = validatePRTitle(prTitle);
     if (titleError) {
       setError(titleError);
@@ -92,7 +91,7 @@ export function CreatePRDialog({
 
     try {
       const prResult = await onCreatePR({
-        targetBranch: targetBranch || undefined,
+        targetBranch: targetBranch ? targetBranchName(targetBranch) : undefined,
         title: prTitle || undefined,
         draft: isDraft
       });
@@ -185,8 +184,12 @@ export function CreatePRDialog({
               {/* Branch info */}
               <div data-testid="pr-stats-container">
                 <SettingsRows>
-                  <SettingsRow label={t('taskReview:pr.labels.sourceBranch')}>
-                    <span className="font-mono text-xs text-(--nav-label-color)">
+                  {/* A long branch name is cut short (full name on hover) so the label stays on one line */}
+                  <SettingsRow label={<span className="whitespace-nowrap">{t('taskReview:pr.labels.sourceBranch')}</span>}>
+                    <span
+                      className="block max-w-72 truncate font-mono text-xs text-(--nav-label-color)"
+                      title={worktreeStatus?.branch}
+                    >
                       {worktreeStatus?.branch || t('taskReview:pr.labels.unknown')}
                     </span>
                   </SettingsRow>
@@ -213,11 +216,15 @@ export function CreatePRDialog({
                 label={t('taskReview:pr.labels.targetBranch')}
                 description={t('taskReview:pr.hints.targetBranch')}
               >
-                <Input
+                <Combobox
                   id="targetBranch"
                   value={targetBranch}
-                  onChange={(e) => setTargetBranch(e.target.value)}
+                  onValueChange={setTargetBranch}
+                  options={branchOptions}
                   placeholder={worktreeStatus?.baseBranch || 'main'}
+                  searchPlaceholder={t('tasks:wizard.gitOptions.searchBranches')}
+                  emptyMessage={t('tasks:wizard.gitOptions.noBranchesFound')}
+                  disabled={isCreating || isLoadingBranches}
                 />
               </SettingsRow>
 

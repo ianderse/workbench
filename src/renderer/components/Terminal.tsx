@@ -1,7 +1,13 @@
 import { useEffect, useRef, useCallback, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import '@xterm/xterm/css/xterm.css';
-import { useTerminalStore } from '../stores/terminal-store';
+import {
+  buildTaskWorktreeConfig,
+  getTaskSessionRequest,
+  useTerminalStore,
+  type PendingTaskSession
+} from '../stores/terminal-store';
+import { getTaskSessionBlocker } from '../../shared/utils/claude-run';
 import type { TerminalProps } from './terminal/types';
 import type { TerminalWorktreeConfig } from '../../shared/types';
 import { TerminalHeader } from './terminal/TerminalHeader';
@@ -70,9 +76,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Track last sent PTY dimensions to prevent redundant resize calls
   // This ensures terminal.resize() stays in sync with PTY dimensions
   const lastPtyDimensionsRef = useRef<{ cols: number; rows: number } | null>(null);
-  // Track if auto-resume has been attempted to prevent duplicate resume calls
-  // This fixes the race condition where isActive and pendingCLIResume update timing can miss the effect trigger
-  const hasAttemptedAutoResumeRef = useRef(false);
   // Track when the last resize was sent to PTY for grace period logic
   // This prevents false positive mismatch warnings during async resize acknowledgment
   const lastResizeTimeRef = useRef<number>(0);
@@ -310,13 +313,36 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     isRecreatingRef,
     onCreated: () => {
       isCreatedRef.current = true;
-      // "New agent" terminals (and agents moved to another worktree) start Claude Code as soon as
-      // the shell is ready; the store holds the current cwd (the worktree path after a switch)
       const created = useTerminalStore.getState().getTerminal(id);
+      // If there's a pending worktree config from a recreation attempt,
+      // sync it to main process now that the terminal exists.
+      // This fixes the race condition where IPC calls happen before terminal creation.
+      // A window opened on a task's session (new window) syncs its worktree the same way.
+      const worktreeToSync =
+        pendingWorktreeConfigRef.current ?? (created?.pendingTaskSession ? created.worktreeConfig : undefined);
+      if (worktreeToSync) {
+        try {
+          window.electronAPI.setTerminalWorktreeConfig(id, worktreeToSync);
+          // The store title is the worktree name, or the task title for a task session
+          window.electronAPI.setTerminalTitle(id, created?.title || worktreeToSync.name);
+        } catch (error) {
+          console.error('Failed to sync worktree config after PTY creation:', error);
+        }
+        pendingWorktreeConfigRef.current = null;
+      }
+      // "New agent" terminals (and agents moved to another worktree) start Claude Code as soon as
+      // the shell is ready; the store holds the current cwd (the worktree path after a switch).
+      // A window opened on a task resumes the task's Claude Code session instead.
       if (created?.launchCLIOnCreate) {
-        useTerminalStore.getState().updateTerminal(id, { launchCLIOnCreate: false });
+        const launchCwd = created.cwd || effectiveCwd;
+        const taskSession = created.pendingTaskSession;
+        useTerminalStore.getState().updateTerminal(id, { launchCLIOnCreate: false, pendingTaskSession: undefined });
         setCLIMode(id, true);
-        window.electronAPI.invokeCLIInTerminal(id, created.cwd || effectiveCwd);
+        if (taskSession && launchCwd) {
+          window.electronAPI.resumeTaskSessionInTerminal(id, { ...taskSession, cwd: launchCwd });
+        } else {
+          window.electronAPI.invokeCLIInTerminal(id, launchCwd);
+        }
       }
       // ALWAYS force PTY resize on creation/remount
       // This ensures PTY matches xterm even if PTY existed before remount (expand/minimize)
@@ -345,19 +371,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         }, DIMENSION_MISMATCH_GRACE_PERIOD_MS + 100);
       } else {
         debugLog(`[Terminal ${id}] PTY created - no valid dimensions available for tracking (cols=${currentCols}, rows=${currentRows})`);
-      }
-      // If there's a pending worktree config from a recreation attempt,
-      // sync it to main process now that the terminal exists.
-      // This fixes the race condition where IPC calls happen before terminal creation.
-      if (pendingWorktreeConfigRef.current) {
-        const config = pendingWorktreeConfigRef.current;
-        try {
-          window.electronAPI.setTerminalWorktreeConfig(id, config);
-          window.electronAPI.setTerminalTitle(id, config.name);
-        } catch (error) {
-          console.error('Failed to sync worktree config after PTY creation:', error);
-        }
-        pendingWorktreeConfigRef.current = null;
       }
     },
     onError: (error) => {
@@ -534,49 +547,16 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     };
   }, [isExpanded, fit, id, resizePtyWithTracking]);
 
-  // Trigger deferred Claude resume when terminal becomes active
-  // This ensures Claude sessions are only resumed when the user actually views the terminal,
-  // preventing all terminals from resuming simultaneously on app startup (which can crash the app)
+  // Resume a restored agent window's Claude Code session as soon as the window is shown. The
+  // store queues the resumes, so the project's windows start one after another, not all at once
   useEffect(() => {
-    // Reset resume attempt tracking when terminal is no longer pending
-    if (!terminal?.pendingCLIResume) {
-      hasAttemptedAutoResumeRef.current = false;
-      return;
-    }
-
-    // Only attempt auto-resume once, even if the effect runs multiple times
-    if (hasAttemptedAutoResumeRef.current) {
-      return;
-    }
-
-    // Check if both conditions are met for auto-resume
-    if (isActive && terminal?.pendingCLIResume) {
-      // Defer the resume slightly to ensure all React state updates have propagated
-      // This fixes the race condition where isActive and pendingCLIResume might update
-      // at different times during the restoration flow
-      const timer = setTimeout(() => {
-        if (!isMountedRef.current) return;
-
-        // Mark that we've attempted resume INSIDE the callback to prevent duplicates
-        // This ensures we only mark as attempted if the timeout actually fires
-        // (prevents race condition where effect re-runs before timeout executes)
-        if (hasAttemptedAutoResumeRef.current) return;
-        hasAttemptedAutoResumeRef.current = true;
-
-        // Double-check conditions before resuming (state might have changed)
-        const currentTerminal = useTerminalStore.getState().terminals.find((t) => t.id === id);
-        if (currentTerminal?.pendingCLIResume) {
-          // Clear the pending flag and trigger the actual resume
-          useTerminalStore.getState().setPendingClaudeResume(id, false);
-          window.electronAPI.activateDeferredClaudeResume(id);
-          // The terminal now runs `claude --continue` in the project: show it in Claude mode
-          useTerminalStore.getState().setCLIMode(id, true);
-        }
-      }, 100); // Small delay to let React finish batched updates
-
-      return () => clearTimeout(timer);
-    }
-  }, [isActive, id, terminal?.pendingCLIResume]);
+    if (!terminal?.pendingCLIResume) return;
+    // Let the restore's batched state updates land first
+    const timer = setTimeout(() => {
+      if (isMountedRef.current) useTerminalStore.getState().queueClaudeResume(id);
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [id, terminal?.pendingCLIResume]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -605,25 +585,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     focus();
   }, [onActivate, focus]);
 
-  const handleTaskSelect = useCallback((taskId: string) => {
-    const selectedTask = tasks.find((t) => t.id === taskId);
-    if (!selectedTask) return;
-
-    setAssociatedTask(id, taskId);
-    updateTerminal(id, { title: selectedTask.title });
-    // Sync to main process so title persists across hot reloads
-    window.electronAPI.setTerminalTitle(id, selectedTask.title);
-
-    const contextMessage = `I'm working on: ${selectedTask.title}
-
-Description:
-${selectedTask.description}
-
-Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title} - Context is loaded.`;
-
-    window.electronAPI.sendTerminalInput(id, contextMessage + '\r');
-  }, [id, tasks, setAssociatedTask, updateTerminal]);
-
   const handleClearTask = useCallback(() => {
     setAssociatedTask(id, undefined);
     updateTerminal(id, { title: 'Claude' });
@@ -636,12 +597,19 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
     setShowWorktreeDialog(true);
   }, []);
 
-  const applyWorktreeConfig = useCallback(async (config: TerminalWorktreeConfig) => {
+  const applyWorktreeConfig = useCallback(async (
+    config: TerminalWorktreeConfig,
+    taskSession?: { session: PendingTaskSession; title: string }
+  ) => {
     // Recreating the PTY ends Claude Code, so an agent window relaunches it in the new worktree
-    // as soon as the new shell is ready (same flag as "New agent", handled in onCreated)
-    if (useTerminalStore.getState().getTerminal(id)?.isCLIMode) {
-      updateTerminal(id, { launchCLIOnCreate: true });
+    // as soon as the new shell is ready (same flag as "New agent", handled in onCreated).
+    // With a task session, Claude Code always starts and resumes that session.
+    if (taskSession) {
+      updateTerminal(id, { launchCLIOnCreate: true, pendingTaskSession: taskSession.session });
+    } else if (useTerminalStore.getState().getTerminal(id)?.isCLIMode) {
+      updateTerminal(id, { launchCLIOnCreate: true, pendingTaskSession: undefined });
     }
+    const title = taskSession?.title ?? config.name;
 
     // IMPORTANT: Set isRecreatingRef BEFORE destruction to signal deliberate recreation
     // This prevents exit handlers from triggering auto-removal during controlled recreation
@@ -662,9 +630,9 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
     window.electronAPI.setTerminalWorktreeConfig(id, config);
 
     // Update terminal title and cwd to worktree path
-    updateTerminal(id, { title: config.name, cwd: config.worktreePath });
+    updateTerminal(id, { title, cwd: config.worktreePath });
     // Try to sync to main process (may be ignored if terminal doesn't exist yet)
-    window.electronAPI.setTerminalTitle(id, config.name);
+    window.electronAPI.setTerminalTitle(id, title);
 
     // Destroy current PTY - a new one will be created in the worktree directory
     if (isCreatedRef.current) {
@@ -679,6 +647,42 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
     // Reset refs to allow recreation - effect will now trigger with new cwd
     resetForRecreate();
   }, [id, setWorktreeConfig, updateTerminal, prepareForRecreate, resetForRecreate]);
+
+  const handleTaskSelect = useCallback((taskId: string) => {
+    const selectedTask = tasks.find((t) => t.id === taskId);
+    if (!selectedTask) return;
+
+    // A task with a Claude Code session: move the window to the task's worktree and resume the
+    // session there (Claude Code restarts with --resume if it is already running)
+    const request = projectPath ? getTaskSessionRequest(selectedTask, projectPath) : null;
+    if (request && !getTaskSessionBlocker(selectedTask)) {
+      setAssociatedTask(id, taskId);
+      void applyWorktreeConfig(buildTaskWorktreeConfig(request, id), {
+        title: selectedTask.title,
+        session: {
+          taskId: request.taskId,
+          sessionId: request.sessionId,
+          profileId: request.profileId,
+          configDir: request.configDir
+        }
+      });
+      return;
+    }
+
+    setAssociatedTask(id, taskId);
+    updateTerminal(id, { title: selectedTask.title });
+    // Sync to main process so title persists across hot reloads
+    window.electronAPI.setTerminalTitle(id, selectedTask.title);
+
+    const contextMessage = `I'm working on: ${selectedTask.title}
+
+Description:
+${selectedTask.description}
+
+Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title} - Context is loaded.`;
+
+    window.electronAPI.sendTerminalInput(id, contextMessage + '\r');
+  }, [id, tasks, projectPath, setAssociatedTask, updateTerminal, applyWorktreeConfig]);
 
   const handleWorktreeCreated = useCallback(async (config: TerminalWorktreeConfig) => {
     await applyWorktreeConfig(config);
@@ -717,7 +721,6 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
         dragHandleListeners={dragHandleListeners}
         isExpanded={isExpanded}
         onToggleExpand={onToggleExpand}
-        pendingCLIResume={terminal?.pendingCLIResume}
       />
 
       {/* Padding lives on the wrapper: xterm's fit addon sizes rows from its container's height,

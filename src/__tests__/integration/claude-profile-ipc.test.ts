@@ -53,7 +53,9 @@ const mockProfileManager = {
   renameProfile: vi.fn(() => true),
   getAutoSwitchSettings: vi.fn(),
   updateAutoSwitchSettings: vi.fn(() => true),
-  isInitialized: vi.fn(() => true)
+  isInitialized: vi.fn(() => true),
+  findAbandonedProfileByName: vi.fn((_name: string): ClaudeProfile | undefined => undefined),
+  findProfileByName: vi.fn((_name: string): ClaudeProfile | undefined => undefined)
 };
 
 vi.mock('../../main/claude-profile-manager', () => ({
@@ -179,6 +181,34 @@ describe('Claude Profile IPC Integration', () => {
 
       const savedProfile = mockProfileManager.saveProfile.mock.calls[0][0];
       expect(savedProfile.id).toBe('profile-new-account');
+    });
+
+    it('refuses a new account named like an existing one instead of adding "<name>-1"', async () => {
+      const handleProfileSave = handlers.get('claude:profileSave');
+      const existing = createTestProfile({ id: 'primary', name: 'Primary', email: 'me@example.com', isDefault: true });
+      mockProfileManager.findProfileByName.mockImplementation((name: string) =>
+        name.toLowerCase() === 'primary' ? existing : undefined
+      );
+
+      const result = await handleProfileSave?.(null, createTestProfile({ id: '', name: 'Primary', configDir: '' })) as IPCResult<ClaudeProfile>;
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('Primary');
+      expect(mockProfileManager.generateProfileId).not.toHaveBeenCalled();
+      expect(mockProfileManager.saveProfile).not.toHaveBeenCalled();
+    });
+
+    it('reuses an unfinished sign-in with the same name', async () => {
+      const handleProfileSave = handlers.get('claude:profileSave');
+      const abandoned = createTestProfile({ id: 'work', name: 'Work' });
+      mockProfileManager.findAbandonedProfileByName.mockImplementation((name: string) =>
+        name === 'Work' ? abandoned : undefined
+      );
+
+      const result = await handleProfileSave?.(null, createTestProfile({ id: '', name: 'Work', configDir: '' })) as IPCResult<ClaudeProfile>;
+
+      expect(result).toEqual({ success: true, data: abandoned });
+      expect(mockProfileManager.saveProfile).not.toHaveBeenCalled();
     });
 
     it('should save profile with existing ID', async () => {

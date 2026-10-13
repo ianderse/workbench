@@ -195,6 +195,51 @@ export interface ClaudeProfile {
    * Indicates the user's rate limit tier level. Populated from Keychain credentials.
    */
   rateLimitTier?: string;
+  /**
+   * Set when the account was found in Claude Code's own configuration (detected on every app
+   * start): it can be used and renamed but not removed
+   */
+  detected?: DetectedClaudeCodeAccount;
+}
+
+/** How a Claude Code setup reaches Claude (Claude Code's authentication precedence) */
+export type ClaudeCodeProvider =
+  | 'bedrock'
+  | 'mantle'
+  | 'vertex'
+  | 'foundry'
+  | 'anthropic-aws'
+  | 'auth-token'
+  | 'api-key'
+  | 'api-key-helper'
+  | 'oauth-token'
+  | 'subscription';
+
+/** One value of a detected setup, with the file (or "environment") it comes from */
+export interface DetectedClaudeCodeValue {
+  key: string;
+  /** Secrets are masked */
+  value: string;
+  source: string;
+}
+
+/** A Claude Code setup found in its config files: a config dir and what it signs in with */
+export interface DetectedClaudeCodeAccount {
+  provider: ClaudeCodeProvider;
+  /** The config dir is Claude Code's default `~/.claude` (runs without CLAUDE_CONFIG_DIR) */
+  isDefaultDir: boolean;
+  /**
+   * Where its credentials are defined: the sign-in's `.credentials.json` (`~`-shortened), a
+   * "Keychain: <entry>" on macOS, the settings file that configures the provider, or
+   * "environment"
+   */
+  credentials?: string;
+  /** Claude account (subscription sign-ins) */
+  email?: string;
+  organization?: string;
+  plan?: string;
+  /** Settings and variables that configure it (effective first) */
+  values: DetectedClaudeCodeValue[];
 }
 
 /**
@@ -234,12 +279,6 @@ export interface ClaudeAutoSwitchSettings {
 
   /** Whether to automatically switch on authentication failure (vs. prompting user) */
   autoSwitchOnAuthFailure: boolean;
-}
-
-export interface ClaudeAuthResult {
-  success: boolean;
-  authenticated: boolean;
-  error?: string;
 }
 
 /**

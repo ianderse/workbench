@@ -4,9 +4,6 @@ import { Check, ChevronDown, ChevronUp } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
 const Select = SelectPrimitive.Root;
-
-const SelectGroup = SelectPrimitive.Group;
-
 const SelectValue = SelectPrimitive.Value;
 
 const SelectTrigger = React.forwardRef<
@@ -17,8 +14,8 @@ const SelectTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       'field-border flex h-10 w-full items-center justify-between rounded-lg',
-      'border border-border bg-field px-3 py-2 text-sm',
-      'text-foreground placeholder:text-muted-foreground',
+      'border border-border bg-transparent px-3 py-2 text-sm',
+      'text-foreground placeholder:text-(--field-placeholder) data-[placeholder]:text-(--field-placeholder)',
       'focus:outline-none focus:ring-2 focus:ring-ring focus:border-primary',
       'disabled:cursor-not-allowed disabled:opacity-50',
       'transition-colors duration-200',
@@ -104,18 +101,6 @@ const SelectContent = React.forwardRef<
 ));
 SelectContent.displayName = SelectPrimitive.Content.displayName;
 
-const SelectLabel = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Label>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Label>
->(({ className, ...props }, ref) => (
-  <SelectPrimitive.Label
-    ref={ref}
-    className={cn('px-3 py-1.5 text-xs text-(--nav-label-color)', className)}
-    {...props}
-  />
-));
-SelectLabel.displayName = SelectPrimitive.Label.displayName;
-
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
@@ -146,27 +131,10 @@ const SelectItem = React.forwardRef<
 ));
 SelectItem.displayName = SelectPrimitive.Item.displayName;
 
-const SelectSeparator = React.forwardRef<
-  React.ElementRef<typeof SelectPrimitive.Separator>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Separator>
->(({ className, ...props }, ref) => (
-  <SelectPrimitive.Separator
-    ref={ref}
-    className={cn('-mx-1 my-1 h-px bg-border', className)}
-    {...props}
-  />
-));
-SelectSeparator.displayName = SelectPrimitive.Separator.displayName;
-
 export {
   Select,
-  SelectGroup,
   SelectValue,
   SelectTrigger,
   SelectContent,
-  SelectLabel,
-  SelectItem,
-  SelectSeparator,
-  SelectScrollUpButton,
-  SelectScrollDownButton,
+  SelectItem
 };

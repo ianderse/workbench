@@ -8,7 +8,7 @@ import {
   Download,
   Blocks
 } from 'lucide-react';
-import { AgentOutlineIcon, GearIcon, MemoryChipIcon, ProjectOutlineIcon } from '../icons/app-icons';
+import { AgentOutlineIcon, GearIcon, ProjectOutlineIcon } from '../icons/app-icons';
 
 import {
   FullScreenDialog,
@@ -22,11 +22,10 @@ import { cn } from '../../lib/utils';
 import { useSettings } from './hooks/useSettings';
 import { ThemeSettings } from './ThemeSettings';
 import { GeneralSettings } from './GeneralSettings';
+import { ClaudeCodeTaskSettings } from './ClaudeCodeTaskSettings';
 import { AdvancedSettings } from './AdvancedSettings';
 import { ClaudeCodeSettings } from './ClaudeCodeSettings';
 import { GraphifySettings } from './GraphifySettings';
-import { DevToolsSettings } from './DevToolsSettings';
-import { DebugSettings } from './DebugSettings';
 import { AccountSettings } from './AccountSettings';
 import { ProjectSettingsContent, ProjectSettingsSection } from './ProjectSettingsContent';
 import { ConnectorsSettings } from './ConnectorsSettings';
@@ -50,13 +49,16 @@ interface AppSettingsDialogProps {
 }
 
 // App-level settings pages (claude.ai layout: related settings grouped on one page)
-type AppPage = 'general' | 'accounts' | 'agent' | 'connectors' | 'devtools' | 'updates';
+type AppPage = 'general' | 'accounts' | 'agents' | 'connectors' | 'devtools' | 'updates';
 
 // Section ids accepted from the rest of the app; older ids map onto the page that now holds them
-export type AppSection = AppPage | 'terminal-fonts' | 'appearance' | 'display' | 'notifications' | 'paths' | 'debug' | 'integrations' | 'api-profiles';
+export type AppSection = AppPage | 'agent' | 'claude-code' | 'terminal-fonts' | 'appearance' | 'display' | 'notifications' | 'paths' | 'debug' | 'integrations' | 'api-profiles';
 
 const LEGACY_SECTION_PAGE: Record<string, AppPage> = {
-  'terminal-fonts': 'agent',
+  // Older ids of the Agents page (limits live there)
+  agent: 'agents',
+  'claude-code': 'agents',
+  'terminal-fonts': 'agents',
   appearance: 'general',
   display: 'general',
   notifications: 'general',
@@ -77,7 +79,7 @@ interface NavItemConfig<T extends string> {
   iconStrokeWidth?: number;
 }
 
-// One list: app pages, then the selected project's pages (Project, Memory) above Updates
+// One list: app pages with the selected project's pages
 type TopNavItem =
   | ({ kind: 'app' } & NavItemConfig<AppPage>)
   | ({ kind: 'project' } & NavItemConfig<ProjectSettingsSection>);
@@ -86,11 +88,10 @@ const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'general', icon: GearIcon },
   { kind: 'app', id: 'accounts', icon: CircleUserRound },
   // The wide, short creature reads small at 18px: 20px, with the extra 2px taken out of the gap
-  { kind: 'app', id: 'agent', icon: AgentOutlineIcon, iconClassName: '-mx-px h-5 w-5', iconStrokeWidth: 1.35 },
+  { kind: 'app', id: 'agents', icon: AgentOutlineIcon, iconClassName: '-mx-px h-5 w-5', iconStrokeWidth: 1.35 },
+  { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
   { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'app', id: 'devtools', icon: CodeXml },
-  { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
-  { kind: 'project', id: 'memory', icon: MemoryChipIcon },
   { kind: 'app', id: 'updates', icon: Download }
 ];
 
@@ -223,23 +224,17 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
         );
       case 'accounts':
         return <AccountSettings settings={settings} onSettingsChange={setSettings} isOpen={open} />;
-      case 'agent':
-        return <GeneralSettings settings={settings} onSettingsChange={setSettings} section="agent" />;
+      case 'agents':
+        return <ClaudeCodeTaskSettings settings={settings} onSettingsChange={setSettings} />;
       case 'connectors':
         return <ConnectorsSettings settings={settings} onSettingsChange={setSettings} />;
       case 'devtools':
-        return (
-          <>
-            <DevToolsSettings settings={settings} onSettingsChange={setSettings} />
-            <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />
-            <DebugSettings />
-          </>
-        );
+        return <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />;
       case 'updates':
         return (
           <>
             <AdvancedSettings settings={settings} onSettingsChange={setSettings} section="updates" version={version} />
-            {/* Claude Code CLI (status, install/update, version and installation switching) */}
+            {/* Claude Code CLI (status, install/update, version switching) */}
             <ClaudeCodeSettings />
             {/* Graphify CLI (builds the projects' memory graphs) */}
             <GraphifySettings />
@@ -331,9 +326,7 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
                           >
                             {renderNavIcon(item.icon, item.iconClassName, item.iconStrokeWidth)}
                             <span className="min-w-0 flex-1 truncate">
-                              {isProject
-                                ? item.id === 'general' ? t('nav.project') : t(`projectSections.${item.id}.title`)
-                                : t(`sections.${item.id}.title`)}
+                              {isProject ? t('nav.project') : t(`sections.${item.id}.title`)}
                             </span>
                           </button>
                         </li>

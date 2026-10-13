@@ -1,10 +1,7 @@
 import { create } from 'zustand';
-import type { AppSettings, PerProviderAgentConfig } from '../../shared/types';
+import type { AppSettings } from '../../shared/types';
 import type { APIProfile, ProfileFormData, TestConnectionResult, ModelInfo } from '@shared/types/profile';
-import type { BuiltinProvider, ProviderAccount } from '@shared/types/provider-account';
-import type { IPCResult } from '@shared/types/common';
 import { DEFAULT_APP_SETTINGS } from '../../shared/constants';
-import { toast } from '../hooks/use-toast';
 
 interface SettingsState {
   settings: AppSettings;
@@ -26,10 +23,6 @@ interface SettingsState {
   modelsError: string | null;
   discoveredModels: Map<string, ModelInfo[]>; // Cache key -> models mapping
 
-  // Provider accounts state (unified multi-provider credentials)
-  providerAccounts: ProviderAccount[];
-  envCredentials: Record<string, boolean>;
-
   // Actions
   setSettings: (settings: AppSettings) => void;
   updateSettings: (updates: Partial<AppSettings>) => void;
@@ -46,17 +39,6 @@ interface SettingsState {
   setActiveProfile: (profileId: string | null) => Promise<boolean>;
   testConnection: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<TestConnectionResult | null>;
   discoverModels: (baseUrl: string, apiKey: string, signal?: AbortSignal) => Promise<ModelInfo[] | null>;
-
-  // Provider account actions
-  addProviderAccount: (account: Omit<ProviderAccount, 'id' | 'createdAt' | 'updatedAt'>) => Promise<IPCResult<ProviderAccount>>;
-  updateProviderAccount: (id: string, updates: Partial<ProviderAccount>) => Promise<IPCResult<ProviderAccount>>;
-  deleteProviderAccount: (id: string) => Promise<IPCResult>;
-  setQueueOrder: (order: string[]) => Promise<IPCResult>;
-  setCrossProviderQueueOrder: (order: string[]) => Promise<IPCResult>;
-  saveModelOverrides: (overrides: Record<string, unknown>) => Promise<IPCResult>;
-  getProviderAccounts: (provider?: BuiltinProvider) => ProviderAccount[];
-  checkEnvCredentials: () => Promise<IPCResult<Record<string, boolean>>>;
-  loadProviderAccounts: () => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set) => ({
@@ -73,10 +55,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
   // Test connection state
   isTestingConnection: false,
   testConnectionResult: null,
-
-  // Provider accounts state
-  providerAccounts: [],
-  envCredentials: {},
 
   // Model discovery state
   modelsLoading: false,
@@ -230,15 +208,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       if (result.success && result.data) {
         set({ testConnectionResult: result.data, isTestingConnection: false });
 
-        // Show toast on success
-        // TODO: Use i18n translation keys (settings:connection.successTitle, settings:connection.successDescription)
-        // Note: Zustand stores can't use useTranslation() hook - need to pass t() or use i18n.t()
-        if (result.data.success) {
-          toast({
-            title: 'Connection successful',
-            description: 'Your API credentials are valid.'
-          });
-        }
         return result.data;
       }
 
@@ -249,11 +218,6 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         message: result.error || 'Failed to test connection'
       };
       set({ testConnectionResult: errorResult, isTestingConnection: false });
-      toast({
-        variant: 'destructive',
-        title: 'Connection test failed',
-        description: result.error || 'Failed to test connection'
-      });
       return errorResult;
     } catch (error) {
       // Unexpected error - set testConnectionResult for inline display
@@ -263,17 +227,11 @@ export const useSettingsStore = create<SettingsState>((set) => ({
         message: error instanceof Error ? error.message : 'Failed to test connection'
       };
       set({ testConnectionResult: errorResult, isTestingConnection: false });
-      toast({
-        variant: 'destructive',
-        title: 'Connection test failed',
-        description: error instanceof Error ? error.message : 'Failed to test connection'
-      });
       return errorResult;
     }
   },
 
   discoverModels: async (baseUrl: string, apiKey: string, signal?: AbortSignal): Promise<ModelInfo[] | null> => {
-    console.log('[settings-store] discoverModels called with:', { baseUrl, apiKey: `${apiKey.slice(-4)}` });
     // Generate cache key from baseUrl and apiKey (last 4 chars)
     const cacheKey = `${baseUrl}::${apiKey.slice(-4)}`;
 
@@ -281,16 +239,13 @@ export const useSettingsStore = create<SettingsState>((set) => ({
     const state = useSettingsStore.getState();
     const cached = state.discoveredModels.get(cacheKey);
     if (cached) {
-      console.log('[settings-store] Returning cached models');
       return cached;
     }
 
     // Fetch from API
     set({ modelsLoading: true, modelsError: null });
     try {
-      console.log('[settings-store] Calling window.electronAPI.discoverModels...');
       const result = await window.electronAPI.discoverModels(baseUrl, apiKey, signal);
-      console.log('[settings-store] discoverModels result:', result);
 
       if (result.success && result.data) {
         const models = result.data.models;
@@ -313,150 +268,7 @@ export const useSettingsStore = create<SettingsState>((set) => ({
       return null;
     }
   },
-
-  // ============================================================
-  // Provider Account CRUD — unified multi-provider credentials
-  // ============================================================
-
-  loadProviderAccounts: async () => {
-    const result = await window.electronAPI.getProviderAccounts();
-    if (result.success && result.data) {
-      set({ providerAccounts: result.data.accounts });
-    }
-  },
-
-  getProviderAccounts: (provider?: BuiltinProvider): ProviderAccount[] => {
-    const accounts = useSettingsStore.getState().providerAccounts;
-    if (!provider) return accounts;
-    return accounts.filter(a => a.provider === provider);
-  },
-
-  addProviderAccount: async (account: Omit<ProviderAccount, 'id' | 'createdAt' | 'updatedAt'>): Promise<IPCResult<ProviderAccount>> => {
-    const result = await window.electronAPI.saveProviderAccount(account);
-    if (result.success && result.data) {
-      const newAccount = result.data!;
-      set(state => ({
-        providerAccounts: [...state.providerAccounts, newAccount],
-        settings: {
-          ...state.settings,
-          globalPriorityOrder: [newAccount.id, ...(state.settings.globalPriorityOrder ?? [])],
-          // Also prepend to cross-provider order if it's been initialized
-          crossProviderPriorityOrder: state.settings.crossProviderPriorityOrder
-            ? [newAccount.id, ...state.settings.crossProviderPriorityOrder]
-            : undefined,
-        },
-      }));
-    }
-    return result;
-  },
-
-  updateProviderAccount: async (id: string, updates: Partial<ProviderAccount>): Promise<IPCResult<ProviderAccount>> => {
-    const result = await window.electronAPI.updateProviderAccount(id, updates);
-    if (result.success && result.data) {
-      set(state => ({
-        providerAccounts: state.providerAccounts.map(a => a.id === id ? result.data! : a)
-      }));
-    }
-    return result;
-  },
-
-  deleteProviderAccount: async (id: string): Promise<IPCResult> => {
-    const result = await window.electronAPI.deleteProviderAccount(id);
-    if (result.success) {
-      set(state => ({
-        providerAccounts: state.providerAccounts.filter(a => a.id !== id),
-        settings: {
-          ...state.settings,
-          globalPriorityOrder: (state.settings.globalPriorityOrder ?? []).filter(qid => qid !== id),
-          crossProviderPriorityOrder: state.settings.crossProviderPriorityOrder?.filter(qid => qid !== id),
-        },
-      }));
-    }
-    return result;
-  },
-
-  setQueueOrder: async (order: string[]): Promise<IPCResult> => {
-    const result = await window.electronAPI.setProviderAccountQueueOrder(order);
-    if (result.success) {
-      set(state => ({
-        settings: { ...state.settings, globalPriorityOrder: order }
-      }));
-    }
-    return result;
-  },
-
-  setCrossProviderQueueOrder: async (order: string[]): Promise<IPCResult> => {
-    const result = await window.electronAPI.setCrossProviderQueueOrder(order);
-    if (result.success) {
-      set(state => ({
-        settings: { ...state.settings, crossProviderPriorityOrder: order }
-      }));
-    }
-    return result;
-  },
-
-  saveModelOverrides: async (overrides: Record<string, unknown>): Promise<IPCResult> => {
-    const result = await window.electronAPI.saveModelOverrides(overrides);
-    if (result.success) {
-      set(state => ({
-        settings: { ...state.settings, modelOverrides: overrides as any }
-      }));
-    }
-    return result;
-  },
-
-  checkEnvCredentials: async (): Promise<IPCResult<Record<string, boolean>>> => {
-    const result = await window.electronAPI.checkEnvCredentials();
-    if (result.success && result.data) {
-      set({ envCredentials: result.data });
-    }
-    return result;
-  },
 }));
-
-/**
- * Check if settings need migration for onboardingCompleted flag.
- * Existing users (with tokens or projects configured) should have
- * onboardingCompleted set to true to skip the onboarding wizard.
- *
- * This function now also checks Claude Code's ~/.claude.json for
- * hasCompletedOnboarding to respect Claude Code's onboarding status.
- */
-async function migrateOnboardingCompleted(settings: AppSettings): Promise<AppSettings> {
-  // Only migrate if onboardingCompleted is undefined (not explicitly set)
-  if (settings.onboardingCompleted !== undefined) {
-    return settings;
-  }
-
-  // NEW: Check ~/.claude.json for hasCompletedOnboarding
-  // This allows Auto-Claude to respect Claude Code's onboarding status
-  try {
-    const claudeCodeResult = await window.electronAPI.getClaudeCodeOnboardingStatus();
-    if (claudeCodeResult.success && claudeCodeResult.data?.hasCompletedOnboarding) {
-      // Claude Code says onboarding is complete, respect that
-      return { ...settings, onboardingCompleted: true };
-    }
-  } catch (error) {
-    // If checking Claude Code onboarding fails, log and continue with existing logic
-    console.warn('[settings-store] Failed to check Claude Code onboarding status:', error);
-  }
-
-  // Check for signs of an existing user:
-  // - Has provider accounts configured (Vercel AI SDK migration)
-  // - Has the auto-build source path configured
-  const hasProviderAccounts = useSettingsStore.getState().providerAccounts.length > 0;
-  const hasAutoBuildPath = Boolean(settings.autoBuildPath);
-
-  const isExistingUser = hasProviderAccounts || hasAutoBuildPath;
-
-  if (isExistingUser) {
-    // Mark onboarding as completed for existing users
-    return { ...settings, onboardingCompleted: true };
-  }
-
-  // New user - set to false to trigger onboarding wizard
-  return { ...settings, onboardingCompleted: false };
-}
 
 /**
  * Load settings from main process
@@ -468,20 +280,7 @@ export async function loadSettings(): Promise<void> {
   try {
     const result = await window.electronAPI.getSettings();
     if (result.success && result.data) {
-      // Apply migration for onboardingCompleted flag
-      // This is now async since it needs to read ~/.claude.json
-      const migratedSettings = await migrateOnboardingCompleted(result.data);
-      store.setSettings(migratedSettings);
-
-      // If migration changed the settings, persist them
-      if (migratedSettings.onboardingCompleted !== result.data.onboardingCompleted) {
-        await window.electronAPI.saveSettings({
-          onboardingCompleted: migratedSettings.onboardingCompleted
-        });
-      }
-
-      // Load provider accounts from the dedicated IPC handler
-      await store.loadProviderAccounts();
+      store.setSettings(result.data);
     }
   } catch (error) {
     store.setError(error instanceof Error ? error.message : 'Failed to load settings');
@@ -506,23 +305,6 @@ export async function saveSettings(updates: Partial<AppSettings>): Promise<boole
   } catch {
     return false;
   }
-}
-
-/**
- * Save per-provider agent configuration.
- * Merges the updates into the existing provider config for the given provider.
- */
-export async function saveProviderAgentConfig(
-  provider: BuiltinProvider,
-  updates: Partial<PerProviderAgentConfig>
-): Promise<boolean> {
-  const { settings } = useSettingsStore.getState();
-  return saveSettings({
-    providerAgentConfig: {
-      ...settings.providerAgentConfig,
-      [provider]: { ...settings.providerAgentConfig?.[provider], ...updates },
-    },
-  });
 }
 
 /**

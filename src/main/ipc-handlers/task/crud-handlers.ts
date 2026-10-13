@@ -1,8 +1,10 @@
-import { ipcMain, nativeImage } from 'electron';
-import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir, VALID_THINKING_LEVELS, sanitizeThinkingLevel } from '../../../shared/constants';
+import { handleIpc } from '../ipc-registry';
+import { nativeImage } from 'electron';
+import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, Task, TaskMetadata } from '../../../shared/types';
 import path from 'path';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, Dirent } from 'fs';
 import { projectStore } from '../../project-store';
 import { titleGenerator } from '../../title-generator';
@@ -14,30 +16,10 @@ import { cleanupWorktree } from '../../utils/worktree-cleanup';
 import { getToolPath } from '../../cli-tool-manager';
 import { getIsolatedGitEnv } from '../../utils/git-isolation';
 import { taskStateManager } from '../../task-state-manager';
+import { buildInitialPlan } from './plan-file-utils';
+import { taskQueue } from '../../services/task-queue';
 
-/**
- * Sanitize thinking levels in task metadata in-place.
- * Maps legacy values (e.g. 'ultrathink' → 'high') and defaults unknown values to 'medium'.
- */
-function sanitizeThinkingLevels(metadata: TaskMetadata): void {
-  const isValid = (val: string): boolean => VALID_THINKING_LEVELS.includes(val as typeof VALID_THINKING_LEVELS[number]);
-
-  if (metadata.thinkingLevel && !isValid(metadata.thinkingLevel)) {
-    const mapped = sanitizeThinkingLevel(metadata.thinkingLevel);
-    console.warn(`[TASK_CRUD] Sanitized invalid thinkingLevel "${metadata.thinkingLevel}" to "${mapped}"`);
-    metadata.thinkingLevel = mapped as TaskMetadata['thinkingLevel'];
-  }
-
-  if (metadata.phaseThinking) {
-    for (const phase of Object.keys(metadata.phaseThinking) as Array<keyof typeof metadata.phaseThinking>) {
-      if (!isValid(metadata.phaseThinking[phase])) {
-        const mapped = sanitizeThinkingLevel(metadata.phaseThinking[phase]);
-        console.warn(`[TASK_CRUD] Sanitized invalid phaseThinking.${phase} "${metadata.phaseThinking[phase]}" to "${mapped}"`);
-        metadata.phaseThinking[phase] = mapped as typeof metadata.phaseThinking[typeof phase];
-      }
-    }
-  }
-}
+const execFileAsync = promisify(execFile);
 
 /**
  * Generate a title from a description using AI, with a fallback.
@@ -84,7 +66,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * @param options - Optional parameters
    * @param options.forceRefresh - If true, invalidates cache before fetching (for refresh button)
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LIST,
     async (_, projectId: string, options?: { forceRefresh?: boolean }): Promise<IPCResult<Task[]>> => {
       console.warn('[IPC] TASK_LIST called with projectId:', projectId, 'options:', options);
@@ -107,7 +89,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
   /**
    * Create a new task
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_CREATE,
     async (
       _,
@@ -171,25 +153,16 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
         userDescription: description
       };
 
-      // Process and save attached images
+      // Save the files attached to the description (any type) in the task's attachments folder
       if (taskMetadata.attachedImages && taskMetadata.attachedImages.length > 0) {
         const attachmentsDir = path.join(specDir, 'attachments');
         mkdirSync(attachmentsDir, { recursive: true });
         const resolvedAttachmentsDir = path.resolve(attachmentsDir);
 
-        // MIME type allowlist (defense in depth - frontend also validates)
-        const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
-
         const savedImages: typeof taskMetadata.attachedImages = [];
 
         for (const image of taskMetadata.attachedImages) {
           if (image.data) {
-            // Validate MIME type
-            if (!image.mimeType || !ALLOWED_MIME_TYPES.includes(image.mimeType)) {
-              console.warn(`[TASK_CREATE] Skipping image with missing or disallowed MIME type: ${image.mimeType}`);
-              continue;
-            }
-
             // Sanitize filename to prevent path traversal attacks
             const sanitizedFilename = path.basename(image.filename);
             if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
@@ -214,7 +187,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
               savedImages.push({
                 id: image.id,
                 filename: sanitizedFilename,
-                mimeType: image.mimeType,
+                mimeType: image.mimeType || 'application/octet-stream',
                 size: image.size,
                 path: `attachments/${sanitizedFilename}`
                 // Don't include data or thumbnail to save space
@@ -230,44 +203,14 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       }
 
       // Create initial implementation_plan.json (task is created but not started)
-      const now = new Date().toISOString();
-      const implementationPlan = {
-        feature: finalTitle,
-        description: description,
-        created_at: now,
-        updated_at: now,
-        status: 'pending',
-        phases: []
-      };
+      const implementationPlan = buildInitialPlan(finalTitle, description);
 
       const planPath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
       writeFileSync(planPath, JSON.stringify(implementationPlan, null, 2), 'utf-8');
 
-      // Save task metadata if provided (sanitize thinking levels before writing)
-      if (taskMetadata) {
-        sanitizeThinkingLevels(taskMetadata);
-        const metadataPath = path.join(specDir, 'task_metadata.json');
-        writeFileSync(metadataPath, JSON.stringify(taskMetadata, null, 2), 'utf-8');
-        console.warn(`[TASK_CREATE] [Fast Mode] ${taskMetadata.fastMode ? 'ENABLED' : 'disabled'} — written to task_metadata.json for spec ${specId}`);
-      }
-
-      // Create requirements.json with attached images
-      const requirements: Record<string, unknown> = {
-        task_description: description,
-        workflow_type: taskMetadata.category || 'feature'
-      };
-
-      // Add attached images to requirements if present
-      if (taskMetadata.attachedImages && taskMetadata.attachedImages.length > 0) {
-        requirements.attached_images = taskMetadata.attachedImages.map(img => ({
-          filename: img.filename,
-          path: img.path,
-          description: '' // User can add descriptions later
-        }));
-      }
-
-      const requirementsPath = path.join(specDir, AUTO_BUILD_PATHS.REQUIREMENTS);
-      writeFileSync(requirementsPath, JSON.stringify(requirements, null, 2), 'utf-8');
+      // Save task metadata (user description, attachments, connectors, workspace options)
+      const metadataPath = path.join(specDir, 'task_metadata.json');
+      writeFileSync(metadataPath, JSON.stringify(taskMetadata, null, 2), 'utf-8');
 
       // Create the task object
       const task: Task = {
@@ -304,7 +247,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * because the latter fails on Windows when the directory contains untracked files
    * (node_modules, build artifacts, etc.).
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_DELETE,
     async (_, taskId: string): Promise<IPCResult> => {
       const { rm } = await import('fs/promises');
@@ -356,6 +299,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       if (specPaths.length === 0 && !hasErrors) {
         console.warn(`[TASK_DELETE] No spec directories found for task ${taskId} - already removed`);
         projectStore.invalidateTasksCache(project.id);
+        taskQueue.request(project.id);
         return { success: true };
       }
 
@@ -383,6 +327,8 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
 
       // Invalidate cache since a task was deleted
       projectStore.invalidateTasksCache(project.id);
+      // Deleting a task may free a slot or empty a Queue position
+      taskQueue.request(project.id);
 
       if (hasErrors) {
         return {
@@ -398,7 +344,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
   /**
    * Update a task
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_UPDATE,
     async (
       _,
@@ -414,7 +360,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
         }
 
         const autoBuildDir = project.autoBuildPath || '.auto-claude';
-        const specDir = path.join(project.path, autoBuildDir, 'specs', task.specId);
+        const specDir = path.join(project.path, autoBuildDir, DATA_DIR_NAMES.tasks, task.specId);
 
         if (!existsSync(specDir)) {
           return { success: false, error: 'Spec directory not found' };
@@ -450,36 +396,6 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
           }
         }
 
-        // Update spec.md if it exists
-        const specPath = path.join(specDir, AUTO_BUILD_PATHS.SPEC_FILE);
-        try {
-          let specContent = readFileSync(specPath, 'utf-8');
-
-          // Update title (first # heading)
-          if (finalTitle !== undefined) {
-            specContent = specContent.replace(
-              /^#\s+.*$/m,
-              `# ${finalTitle}`
-            );
-          }
-
-          // Update description (## Overview section content)
-          if (updates.description !== undefined) {
-            // Replace content between ## Overview and the next ## section
-            specContent = specContent.replace(
-              /(## Overview\n)([\s\S]*?)((?=\n## )|$)/,
-              `$1${updates.description}\n\n$3`
-            );
-          }
-
-          writeFileSync(specPath, specContent, 'utf-8');
-        } catch (specErr: unknown) {
-          // File missing or update failed - continue anyway
-          if ((specErr as NodeJS.ErrnoException).code !== 'ENOENT') {
-            console.error('[TASK_UPDATE] Error updating spec.md:', specErr);
-          }
-        }
-
         // Update metadata if provided
         let updatedMetadata = task.metadata;
         if (updates.metadata) {
@@ -489,26 +405,17 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
             updatedMetadata.userDescription = updates.description;
           }
 
-          // Process and save attached images if provided
+          // Save newly attached files (any type) in the task's attachments folder
           if (updates.metadata.attachedImages && updates.metadata.attachedImages.length > 0) {
             const attachmentsDir = path.join(specDir, 'attachments');
             mkdirSync(attachmentsDir, { recursive: true });
             const resolvedAttachmentsDir = path.resolve(attachmentsDir);
-
-            // MIME type allowlist (defense in depth - frontend also validates)
-            const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp', 'image/svg+xml'];
 
             const savedImages: typeof updates.metadata.attachedImages = [];
 
             for (const image of updates.metadata.attachedImages) {
               // If image has data (new image), save it
               if (image.data) {
-                // Validate MIME type
-                if (!image.mimeType || !ALLOWED_MIME_TYPES.includes(image.mimeType)) {
-                  console.warn(`[TASK_UPDATE] Skipping image with missing or disallowed MIME type: ${image.mimeType}`);
-                  continue;
-                }
-
                 // Sanitize filename to prevent path traversal attacks
                 const sanitizedFilename = path.basename(image.filename);
                 if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
@@ -531,7 +438,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
                   savedImages.push({
                     id: image.id,
                     filename: sanitizedFilename,
-                    mimeType: image.mimeType,
+                    mimeType: image.mimeType || 'application/octet-stream',
                     size: image.size,
                     path: `attachments/${sanitizedFilename}`
                   });
@@ -547,33 +454,11 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
             updatedMetadata.attachedImages = savedImages;
           }
 
-          // Sanitize thinking levels and update task_metadata.json
-          sanitizeThinkingLevels(updatedMetadata);
           const metadataPath = path.join(specDir, 'task_metadata.json');
           try {
             writeFileSync(metadataPath, JSON.stringify(updatedMetadata, null, 2), 'utf-8');
           } catch (err) {
             console.error('Failed to update task_metadata.json:', err);
-          }
-
-          // Update requirements.json if it exists
-          const requirementsPath = path.join(specDir, 'requirements.json');
-          try {
-            const requirementsContent = readFileSync(requirementsPath, 'utf-8');
-            const requirements = JSON.parse(requirementsContent);
-
-            if (updates.description !== undefined) {
-              requirements.task_description = updates.description;
-            }
-            if (updates.metadata.category) {
-              requirements.workflow_type = updates.metadata.category;
-            }
-
-            writeFileSync(requirementsPath, JSON.stringify(requirements, null, 2), 'utf-8');
-          } catch (err) {
-            if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-              console.error('Failed to update requirements.json:', err);
-            }
           }
         }
 
@@ -625,7 +510,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * @param imagePath - Relative path to the image (e.g., 'attachments/image.png')
    * @returns Base64 data URL thumbnail
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_LOAD_IMAGE_THUMBNAIL,
     async (
       _,
@@ -712,7 +597,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    * Check if a task's worktree has uncommitted changes
    * Used by the UI before showing the delete confirmation dialog
    */
-  ipcMain.handle(
+  handleIpc(
     IPC_CHANNELS.TASK_CHECK_WORKTREE_CHANGES,
     async (_, taskId: string): Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>> => {
       const { task, project } = findTaskAndProject(taskId);
@@ -726,12 +611,12 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       }
 
       try {
-        const status = execFileSync(getToolPath('git'), ['status', '--porcelain'], {
+        const { stdout } = await execFileAsync(getToolPath('git'), ['status', '--porcelain'], {
           cwd: worktreePath,
-          encoding: 'utf-8',
           env: getIsolatedGitEnv(),
           timeout: 5000
-        }).trim();
+        });
+        const status = stdout.trim();
 
         const changedFiles = status ? status.split('\n').length : 0;
         return {

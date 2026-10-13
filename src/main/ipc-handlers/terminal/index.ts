@@ -14,4 +14,4 @@ export function registerTerminalWorktreeIpcHandlers(): void {
   registerTerminalWorktreeHandlers();
 }
 
-export { registerTerminalWorktreeHandlers } from './worktree-handlers';
+;

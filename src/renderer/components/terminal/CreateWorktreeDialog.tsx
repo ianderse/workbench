@@ -23,7 +23,6 @@ import {
   SelectValue,
 } from '../ui/select';
 import { Combobox } from '../ui/combobox';
-import { useToast } from '../../hooks/use-toast';
 import { buildBranchOptions } from '../../lib/branch-utils';
 import type { Task, TerminalWorktreeConfig } from '../../../shared/types';
 import { useProjectStore } from '../../stores/project-store';
@@ -87,12 +86,13 @@ export function CreateWorktreeDialog({
   onWorktreeCreated,
 }: CreateWorktreeDialogProps) {
   const { t } = useTranslation(['terminal', 'common']);
-  const { toast } = useToast();
   const [name, setName] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
   const [createGitBranch, setCreateGitBranch] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Created, but its branch could not be pushed: the dialog stays open to say so
+  const [pushWarning, setPushWarning] = useState<string | null>(null);
 
   // Get project settings for default branch
   const project = useProjectStore((state) =>
@@ -181,19 +181,16 @@ export function CreateWorktreeDialog({
 
       if (result.success && result.config) {
         onWorktreeCreated(result.config);
+        if (result.warning) {
+          // Remote tracking could not be set up: say so here before closing
+          setPushWarning(`${t('terminal:worktree.remotePushFailed')}: ${result.warning}`);
+          return;
+        }
         onOpenChange(false);
         // Reset form
         setName('');
         setSelectedTaskId(undefined);
         setCreateGitBranch(true);
-        // Notify user if remote tracking could not be set up
-        if (result.warning) {
-          toast({
-            title: t('terminal:worktree.remotePushFailed'),
-            description: result.warning || t('terminal:worktree.remotePushFailedDescription'),
-            variant: 'destructive',
-          });
-        }
       } else {
         setError(result.error || t('common:errors.generic'));
       }
@@ -212,6 +209,7 @@ export function CreateWorktreeDialog({
       setCreateGitBranch(true);
       setBaseBranch(PROJECT_DEFAULT_BRANCH);
       setError(null);
+      setPushWarning(null);
     }
     onOpenChange(newOpen);
   };
@@ -316,9 +314,19 @@ export function CreateWorktreeDialog({
           {error && (
             <p className="text-sm text-destructive">{error}</p>
           )}
+          {pushWarning && (
+            <p role="alert" className="text-sm text-destructive">{pushWarning}</p>
+          )}
         </div>
 
         <DialogFooter>
+          {pushWarning ? (
+            // The worktree exists already: only closing is left
+            <Button size="sm" onClick={() => handleOpenChange(false)}>
+              {t('common:buttons.close')}
+            </Button>
+          ) : (
+          <>
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isCreating}>
             {t('common:buttons.cancel')}
           </Button>
@@ -332,6 +340,8 @@ export function CreateWorktreeDialog({
               t('common:buttons.create')
             )}
           </Button>
+          </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>

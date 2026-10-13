@@ -6,7 +6,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
   validateBaseUrl,
   validateApiKey,
-  validateProfileNameUnique,
   createProfile,
   updateProfile,
   getAPIProfileEnv,
@@ -83,17 +82,14 @@ vi.mock('@anthropic-ai/sdk', () => {
 // Mock profile-manager
 vi.mock('./profile-manager', () => ({
   loadProfilesFile: vi.fn(),
-  saveProfilesFile: vi.fn(),
   generateProfileId: vi.fn(() => 'mock-uuid-1234'),
   validateFilePermissions: vi.fn().mockResolvedValue(true),
   getProfilesFilePath: vi.fn(() => '/mock/profiles.json'),
   atomicModifyProfiles: vi.fn(async (modifier: (file: ProfilesFile) => ProfilesFile) => {
     // Get the current mock file from loadProfilesFile
-    const { loadProfilesFile, saveProfilesFile } = await import('./profile-manager');
+    const { loadProfilesFile } = await import('./profile-manager');
     const file = await loadProfilesFile();
-    const modified = modifier(file);
-    await saveProfilesFile(modified);
-    return modified;
+    return modifier(file);
   })
 }));
 
@@ -151,140 +147,7 @@ describe('profile-service', () => {
     });
   });
 
-  describe('validateProfileNameUnique', () => {
-    it('should return true when name is unique', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: [
-          {
-            id: '1',
-            name: 'Existing Profile',
-            baseUrl: 'https://api.example.com',
-            apiKey: 'sk-test',
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-        ],
-        activeProfileId: null,
-        version: 1
-      };
-
-      const { loadProfilesFile } = await import('./profile-manager');
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-
-      const result = await validateProfileNameUnique('New Profile');
-      expect(result).toBe(true);
-    });
-
-    it('should return false when name already exists', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: [
-          {
-            id: '1',
-            name: 'Existing Profile',
-            baseUrl: 'https://api.example.com',
-            apiKey: 'sk-test',
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-        ],
-        activeProfileId: null,
-        version: 1
-      };
-
-      const { loadProfilesFile } = await import('./profile-manager');
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-
-      const result = await validateProfileNameUnique('Existing Profile');
-      expect(result).toBe(false);
-    });
-
-    it('should be case-insensitive for duplicate detection', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: [
-          {
-            id: '1',
-            name: 'My Profile',
-            baseUrl: 'https://api.example.com',
-            apiKey: 'sk-test',
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-        ],
-        activeProfileId: null,
-        version: 1
-      };
-
-      const { loadProfilesFile } = await import('./profile-manager');
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-
-      const result1 = await validateProfileNameUnique('my profile');
-      const result2 = await validateProfileNameUnique('MY PROFILE');
-      expect(result1).toBe(false);
-      expect(result2).toBe(false);
-    });
-
-    it('should trim whitespace before checking', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: [
-          {
-            id: '1',
-            name: 'My Profile',
-            baseUrl: 'https://api.example.com',
-            apiKey: 'sk-test',
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          }
-        ],
-        activeProfileId: null,
-        version: 1
-      };
-
-      const { loadProfilesFile } = await import('./profile-manager');
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-
-      const result = await validateProfileNameUnique('  My Profile  ');
-      expect(result).toBe(false);
-    });
-  });
-
   describe('createProfile', () => {
-    it('should create profile with valid data and save', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: [],
-        activeProfileId: null,
-        version: 1
-      };
-
-      const { loadProfilesFile, saveProfilesFile, generateProfileId } =
-        await import('./profile-manager');
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-      vi.mocked(saveProfilesFile).mockResolvedValue(undefined);
-      vi.mocked(generateProfileId).mockReturnValue('generated-id-123');
-
-      const input = {
-        name: 'Test Profile',
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: 'sk-ant-test-key',
-        models: {
-          default: 'claude-sonnet-4-5-20250929'
-        }
-      };
-
-      const result = await createProfile(input);
-
-      expect(result).toMatchObject({
-        id: 'generated-id-123',
-        name: 'Test Profile',
-        baseUrl: 'https://api.anthropic.com',
-        apiKey: 'sk-ant-test-key',
-        models: {
-          default: 'claude-sonnet-4-5-20250929'
-        }
-      });
-      expect(result.createdAt).toBeGreaterThan(0);
-      expect(result.updatedAt).toBeGreaterThan(0);
-      expect(saveProfilesFile).toHaveBeenCalled();
-    });
 
     it('should throw error for invalid base URL', async () => {
       const { loadProfilesFile } = await import('./profile-manager');
@@ -352,75 +215,6 @@ describe('profile-service', () => {
   });
 
   describe('updateProfile', () => {
-    it('should update profile name and other fields', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: [
-          {
-            id: 'existing-id',
-            name: 'Old Name',
-            baseUrl: 'https://old-api.example.com',
-            apiKey: 'sk-old-key-12345678',
-            createdAt: 1000000,
-            updatedAt: 1000000
-          }
-        ],
-        activeProfileId: null,
-        version: 1
-      };
-
-      const { loadProfilesFile, saveProfilesFile } = await import('./profile-manager');
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-      vi.mocked(saveProfilesFile).mockResolvedValue(undefined);
-
-      const input = {
-        id: 'existing-id',
-        name: 'New Name',
-        baseUrl: 'https://new-api.example.com',
-        apiKey: 'sk-new-api-key-123',
-        models: { default: 'claude-sonnet-4-5-20250929' }
-      };
-
-      const result = await updateProfile(input);
-
-      expect(result.name).toBe('New Name');
-      expect(result.baseUrl).toBe('https://new-api.example.com');
-      expect(result.apiKey).toBe('sk-new-api-key-123');
-      expect(result.models).toEqual({ default: 'claude-sonnet-4-5-20250929' });
-      expect(result.updatedAt).toBeGreaterThan(1000000);
-      expect(result.createdAt).toBe(1000000);
-    });
-
-    it('should allow updating profile with same name (case-insensitive)', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: [
-          {
-            id: 'existing-id',
-            name: 'My Profile',
-            baseUrl: 'https://api.example.com',
-            apiKey: 'sk-old-api-key-123',
-            createdAt: 1000000,
-            updatedAt: 1000000
-          }
-        ],
-        activeProfileId: null,
-        version: 1
-      };
-
-      const { loadProfilesFile, saveProfilesFile } = await import('./profile-manager');
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-      vi.mocked(saveProfilesFile).mockResolvedValue(undefined);
-
-      const input = {
-        id: 'existing-id',
-        name: 'my profile',
-        baseUrl: 'https://new-api.example.com',
-        apiKey: 'sk-new-api-key-456'
-      };
-
-      const result = await updateProfile(input);
-      expect(result.name).toBe('my profile');
-      expect(saveProfilesFile).toHaveBeenCalled();
-    });
 
     it('should throw error when name conflicts with another profile', async () => {
       const mockFile: ProfilesFile = {

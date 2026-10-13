@@ -9,7 +9,7 @@ import { SectionRouter } from './sections/SectionRouter';
 import { createHookProxy } from './utils/hookProxyFactory';
 import type { Project } from '../../../shared/types';
 
-export type ProjectSettingsSection = 'general' | 'memory';
+export type ProjectSettingsSection = 'general';
 
 
 interface ProjectSettingsContentProps {
@@ -84,8 +84,6 @@ function ProjectSettingsContentInner({
     isLoadingEnv,
     envError,
     updateEnvConfig,
-    showOpenAIKey,
-    setShowOpenAIKey,
     expandedSections: _expandedSections,
     toggleSection: _toggleSection,
     handleInitialize,
@@ -130,8 +128,6 @@ function ProjectSettingsContentInner({
         isLoadingEnv={isLoadingEnv}
         envError={envError}
         updateEnvConfig={updateEnvConfig}
-        showOpenAIKey={showOpenAIKey}
-        setShowOpenAIKey={setShowOpenAIKey}
         handleInitialize={handleInitialize}
       />
 

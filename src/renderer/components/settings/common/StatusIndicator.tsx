@@ -1,7 +1,7 @@
 import { Loader2 } from 'lucide-react';
 import { cn } from '../../../lib/utils';
 
-export type StatusIndicatorState = 'loading' | 'success' | 'error' | 'neutral';
+type StatusIndicatorState = 'loading' | 'success' | 'error' | 'neutral';
 
 interface StatusIndicatorProps {
   state: StatusIndicatorState;

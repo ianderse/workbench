@@ -1,7 +1,5 @@
 import { EventEmitter } from 'events';
-import { generateText } from 'ai';
-import { createSimpleClient } from './ai/client/factory';
-import { getActiveProviderFeatureSettings } from './ipc-handlers/feature-settings-helper';
+import { runClaudeText } from './claude-code/run-text';
 
 /**
  * Debug logging - only logs when DEBUG=true or in development mode
@@ -18,12 +16,11 @@ const SYSTEM_PROMPT =
   'You generate very short, concise terminal names (2-3 words MAX). Output ONLY the name, nothing else. No quotes, no explanation, no preamble. Keep it as short as possible while being descriptive.';
 
 /**
- * Service for generating terminal names from commands using the Vercel AI SDK.
+ * Service for generating terminal names from commands using a one-shot Claude Code run (haiku).
  *
- * Replaces the previous Python subprocess implementation.
  * Emits "sdk-rate-limit" events on 429 errors (same interface as before).
  */
-export class TerminalNameGenerator extends EventEmitter {
+class TerminalNameGenerator extends EventEmitter {
   constructor() {
     super();
     debug('TerminalNameGenerator initialized');
@@ -49,19 +46,11 @@ export class TerminalNameGenerator extends EventEmitter {
     debug('Generating terminal name for command:', command.substring(0, 100) + '...');
 
     try {
-      // Read the user's configured naming model for their active provider
-      const namingSettings = getActiveProviderFeatureSettings('naming');
-
-      const client = await createSimpleClient({
-        systemPrompt: SYSTEM_PROMPT,
-        modelShorthand: namingSettings.model,
-        thinkingLevel: namingSettings.thinkingLevel as 'low' | 'medium' | 'high' | 'xhigh',
-      });
-
-      const result = await generateText({
-        model: client.model,
-        system: client.systemPrompt,
+      const result = await runClaudeText({
         prompt,
+        systemPrompt: SYSTEM_PROMPT,
+        model: 'haiku',
+        timeoutMs: 60_000,
       });
 
       const raw = result.text.trim();

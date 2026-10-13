@@ -142,13 +142,7 @@ export function isAdditiveChange(change: SemanticChange): boolean {
   return additiveTypes.has(change.changeType);
 }
 
-export function overlapsWithChange(a: SemanticChange, b: SemanticChange): boolean {
-  if (a.location === b.location) return true;
-  if (a.lineEnd >= b.lineStart && b.lineEnd >= a.lineStart) return true;
-  return false;
-}
-
-export function semanticChangeToDict(change: SemanticChange): Record<string, unknown> {
+function semanticChangeToDict(change: SemanticChange): Record<string, unknown> {
   return {
     change_type: change.changeType,
     target: change.target,
@@ -161,7 +155,7 @@ export function semanticChangeToDict(change: SemanticChange): Record<string, unk
   };
 }
 
-export function semanticChangeFromDict(data: Record<string, unknown>): SemanticChange {
+function semanticChangeFromDict(data: Record<string, unknown>): SemanticChange {
   return {
     changeType: data['change_type'] as ChangeType,
     target: data['target'] as string,
@@ -199,18 +193,6 @@ export function createFileAnalysis(filePath: string): FileAnalysis {
   };
 }
 
-export function isAdditiveOnly(analysis: FileAnalysis): boolean {
-  return analysis.changes.every(isAdditiveChange);
-}
-
-export function locationsChanged(analysis: FileAnalysis): Set<string> {
-  return new Set(analysis.changes.map((c) => c.location));
-}
-
-export function getChangesAtLocation(analysis: FileAnalysis, location: string): SemanticChange[] {
-  return analysis.changes.filter((c) => c.location === location);
-}
-
 /** A detected conflict between multiple task changes. */
 export interface ConflictRegion {
   filePath: string;
@@ -221,19 +203,6 @@ export interface ConflictRegion {
   canAutoMerge: boolean;
   mergeStrategy?: MergeStrategy;
   reason: string;
-}
-
-export function conflictRegionToDict(conflict: ConflictRegion): Record<string, unknown> {
-  return {
-    file_path: conflict.filePath,
-    location: conflict.location,
-    tasks_involved: conflict.tasksInvolved,
-    change_types: conflict.changeTypes,
-    severity: conflict.severity,
-    can_auto_merge: conflict.canAutoMerge,
-    merge_strategy: conflict.mergeStrategy ?? null,
-    reason: conflict.reason,
-  };
 }
 
 /** A snapshot of a task's changes to a file. */
@@ -257,7 +226,7 @@ export function taskSnapshotHasModifications(snapshot: TaskSnapshot): boolean {
   return false;
 }
 
-export function taskSnapshotToDict(snapshot: TaskSnapshot): Record<string, unknown> {
+function taskSnapshotToDict(snapshot: TaskSnapshot): Record<string, unknown> {
   return {
     task_id: snapshot.taskId,
     task_intent: snapshot.taskIntent,
@@ -270,7 +239,7 @@ export function taskSnapshotToDict(snapshot: TaskSnapshot): Record<string, unkno
   };
 }
 
-export function taskSnapshotFromDict(data: Record<string, unknown>): TaskSnapshot {
+function taskSnapshotFromDict(data: Record<string, unknown>): TaskSnapshot {
   return {
     taskId: data['task_id'] as string,
     taskIntent: data['task_intent'] as string,
@@ -329,10 +298,6 @@ export function addTaskSnapshot(evolution: FileEvolution, snapshot: TaskSnapshot
   evolution.taskSnapshots.sort((a, b) => a.startedAt.getTime() - b.startedAt.getTime());
 }
 
-export function getTasksInvolved(evolution: FileEvolution): string[] {
-  return evolution.taskSnapshots.map((ts) => ts.taskId);
-}
-
 /** Result of a merge operation. */
 export interface MergeResult {
   decision: MergeDecision;
@@ -344,16 +309,6 @@ export interface MergeResult {
   tokensUsed: number;
   explanation: string;
   error?: string;
-}
-
-export function mergeResultSuccess(result: MergeResult): boolean {
-  return [MergeDecision.AUTO_MERGED, MergeDecision.AI_MERGED, MergeDecision.DIRECT_COPY].includes(
-    result.decision,
-  );
-}
-
-export function mergeResultNeedsHumanReview(result: MergeResult): boolean {
-  return result.conflictsRemaining.length > 0 || result.decision === MergeDecision.NEEDS_HUMAN_REVIEW;
 }
 
 // =============================================================================

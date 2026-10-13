@@ -426,10 +426,6 @@ describe('OAuthStep Profile Management Logic', () => {
     });
 
     it('should show "Active" badge for active profile', () => {
-      const _profiles: ClaudeProfile[] = [
-        createTestProfile({ id: 'p1' }),
-        createTestProfile({ id: 'p2' })
-      ];
       const activeProfileId = 'p1';
 
       const isActive = (profileId: string) => profileId === activeProfileId;

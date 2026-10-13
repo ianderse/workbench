@@ -14,7 +14,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { execSync, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 
 import { SemanticAnalyzer } from './semantic-analyzer';
 import {
@@ -33,7 +33,7 @@ import {
 // Default file extensions to track
 // =============================================================================
 
-export const DEFAULT_EXTENSIONS = new Set([
+const DEFAULT_EXTENSIONS = new Set([
   '.py', '.js', '.ts', '.tsx', '.jsx',
   '.json', '.yaml', '.yml', '.toml',
   '.md', '.txt', '.html', '.css', '.scss',

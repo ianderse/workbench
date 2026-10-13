@@ -6,12 +6,6 @@
 import type { McpConnectorSettings } from '../types/settings';
 import type { CustomMcpServer } from '../types/project';
 
-/** Built-in connectors that can be switched on or off (Auto Claude's own server is always on) */
-export const BUILTIN_MCP_CONNECTORS = ['context7', 'electron', 'puppeteer'] as const;
-
-/** Browser automation connectors, offered to the QA agents only */
-export const BROWSER_MCP_CONNECTORS: readonly string[] = ['electron', 'puppeteer'];
-
 /** Custom servers that can be used: only ones that passed a connection test */
 export function getUsableCustomServers(settings: McpConnectorSettings | undefined): CustomMcpServer[] {
   return (settings?.customServers ?? []).filter((server) => server.verified);

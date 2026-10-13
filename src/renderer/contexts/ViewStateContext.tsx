@@ -78,10 +78,3 @@ export function useViewState(): ViewStateContextValue {
   return context;
 }
 
-/**
- * Optional hook that returns null if used outside provider.
- * Useful for components that may or may not be within the provider tree.
- */
-export function useViewStateOptional(): ViewStateContextValue | null {
-  return useContext(ViewStateContext);
-}

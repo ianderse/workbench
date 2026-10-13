@@ -1,6 +1,10 @@
 @import "tailwindcss";
 @plugin "@tailwindcss/typography";
 
+/* dark: follows the app's theme (the .dark class on <html>, set from Settings > Appearance), not the
+   OS color scheme: otherwise light mode on a dark OS got dark-mode text, e.g. white code in Markdown */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Bundled UI font (shipped with the build, no network needed). Only the Regular cut is bundled,
    so it is declared as weight 400 and the browser synthesizes bold for semibold/bold text.
    Dank Mono, the terminal font, is registered from main.tsx before terminals open. */
@@ -94,7 +98,6 @@
   --color-info-foreground: var(--info-foreground);
 
   /* Theme-overridable surface tokens (see "Shared design tokens" below) */
-  --color-field: var(--field);
   --color-segment: var(--segment);
   --color-segment-active: var(--segment-active);
   --color-nav-hover: var(--nav-hover);
@@ -246,7 +249,8 @@
   /* Dialog fields (claude.ai composer): hairline border, stronger on focus */
   --field-border-color: rgb(31 30 29 / 0.15);
   --field-border-focus: rgb(31 30 29 / 0.3);
-  --field-placeholder: #73726C;
+  /* Placeholders: clearly lighter than typed text (and secondary text) */
+  --field-placeholder: #A09E98;
 
   --popover: #FFFFFF;
   --popover-foreground: #0B0B0B;
@@ -255,7 +259,7 @@
   --success: #5A7F4A;
   --success-foreground: #FFFFFF;
   --success-light: #EAF0E4;
-  --warning: #A8741F;
+  --warning: #FCA935;
   --warning-foreground: #FFFFFF;
   --warning-light: #F5EDDC;
   --info: #3F6E9C;
@@ -292,7 +296,6 @@
 
   /* Surfaces */
   --card-border: rgba(11, 11, 11, 0.1);
-  --field: #FFFFFF;
   --field-border: rgba(11, 11, 11, 0.2);
   --radius-composer: 14px;
   --segment: #F0EFEC;
@@ -329,7 +332,7 @@
 
   /* Kanban columns */
   --column-bg: none;
-  --column-top-width: 1px;
+  --column-top-width: 2px;
 
   /* Glows, gradients and decorative shadows - flattened */
   --accent-glow-rgb: 198, 97, 63;
@@ -393,7 +396,7 @@
   --sidebar-foreground: #F0EFEC;
   --field-border-color: rgb(222 220 209 / 0.15);
   --field-border-focus: rgb(222 220 209 / 0.3);
-  --field-placeholder: #85847F;
+  --field-placeholder: #6A6964;
 
   --popover: #20201F;
   --popover-foreground: #F0EFEC;
@@ -402,7 +405,7 @@
   --success: #8DB07A;
   --success-foreground: #141413;
   --success-light: #1E2620;
-  --warning: #D4A657;
+  --warning: #FCA935;
   --warning-foreground: #141413;
   --warning-light: #2A241A;
   --info: #7FA6CF;
@@ -439,7 +442,6 @@
 
   /* Surfaces */
   --card-border: rgba(255, 255, 255, 0.1);
-  --field: #1A1A19;
   --field-border: rgba(255, 255, 255, 0.2);
   --radius-composer: 14px;
   --segment: #1A1A19;
@@ -476,7 +478,7 @@
 
   /* Kanban columns */
   --column-bg: none;
-  --column-top-width: 1px;
+  --column-top-width: 2px;
 
   /* Glows, gradients and decorative shadows - flattened */
   --accent-glow-rgb: 217, 119, 87;
@@ -515,6 +517,11 @@
   * {
     border-color: var(--border);
   }
+  /* Every field's placeholder, so it doesn't read as typed text */
+  ::placeholder {
+    color: var(--field-placeholder);
+    opacity: 1;
+  }
 }
 
 body {
@@ -531,9 +538,11 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Card styles - following design system card-based modularity */
+/* Cards on a page (Kanban tasks) take the page's own shade and stand out by their border: a
+   lighter fill would add a third shade next to the sidebar and the page. Opaque, so a dragged
+   card still covers what is under it. */
 .card-surface {
-  background-color: var(--card);
+  background-color: var(--background);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-xl);
   box-shadow: var(--card-surface-shadow);
@@ -653,29 +662,38 @@ body {
   outline-offset: 2px;
 }
 
-/* Column status colors for Kanban */
+/* Column status colors for Kanban (also used by the task dialog's status label) */
+:root {
+  --column-backlog: var(--foreground);
+  --column-queue: #FF4081;
+  --column-in-progress: #0088FF;
+  --column-ai-review: #FCA935;
+  --column-human-review: #A855F7;
+  --column-done: #3FB950;
+}
+
 .column-backlog {
-  border-top-color: var(--muted-foreground);
+  border-top-color: var(--column-backlog);
 }
 
 .column-queue {
-  border-top-color: #22d3ee;
+  border-top-color: var(--column-queue);
 }
 
 .column-in-progress {
-  border-top-color: var(--info);
+  border-top-color: var(--column-in-progress);
 }
 
 .column-ai-review {
-  border-top-color: var(--warning);
+  border-top-color: var(--column-ai-review);
 }
 
 .column-human-review {
-  border-top-color: #A855F7;
+  border-top-color: var(--column-human-review);
 }
 
 .column-done {
-  border-top-color: var(--success);
+  border-top-color: var(--column-done);
 }
 
 /* Progress bar working animation - subtle glow sweep */
@@ -1198,12 +1216,12 @@ body {
    Scoped to dialogs (DIALOG_SURFACE_CLASS adds `claude-dialog`) so pages keep their own controls.
    ============================================ */
 
-/* Fields (claude.ai composer): translucent fill, hairline border that strengthens on focus
-   (no focus ring), muted placeholder; 32px tall */
+/* Fields: no fill of their own (they take the dialog's color, so there is no third shade),
+   hairline border that strengthens on focus (no focus ring), muted placeholder; 32px tall */
 .claude-dialog .field-border {
   height: 2rem;
   border-color: var(--field-border-color);
-  background-color: var(--segment-track);
+  background-color: transparent;
   box-shadow: none;
   border-radius: 8px;
 }

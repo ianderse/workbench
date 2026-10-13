@@ -1,24 +1,17 @@
 /**
- * Agent module - modular agent management system
+ * Agent module: runs tasks through the Claude Code CLI
  *
- * This module provides a clean separation of concerns for agent process management:
- * - AgentManager: Main facade for orchestrating agent lifecycle
- * - AgentState: Process tracking and state management
- * - AgentEvents: Event handling and progress parsing
- * - AgentProcessManager: Process spawning and lifecycle
+ * - AgentManager: starts, stops and restarts task runs (ClaudeTaskRun) and emits their events
+ * - AgentState: running tasks and their Claude profile assignments
  */
 
 export { AgentManager } from './agent-manager';
-export { AgentState } from './agent-state';
-export { AgentEvents } from './agent-events';
-export { AgentProcessManager } from './agent-process';
+;
 
 export type {
-  AgentProcess,
+  AgentAuthFailure,
+  
   ExecutionProgressData,
   ProcessType,
-  AgentManagerEvents,
-  TaskExecutionOptions,
-  SpecCreationMetadata
+  
 } from './types';
-

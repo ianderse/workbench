@@ -46,7 +46,6 @@ vi.mock('../../lib/terminal-font-constants', () => ({
 describe('terminal-font-settings-store', () => {
   let useTerminalFontSettingsStore: typeof import('../terminal-font-settings-store').useTerminalFontSettingsStore;
   let TERMINAL_PRESETS: typeof import('../terminal-font-settings-store').TERMINAL_PRESETS;
-  let _getOS: typeof import('../../lib/os-detection').getOS;
 
   beforeEach(async () => {
     vi.clearAllMocks();
@@ -90,7 +89,6 @@ describe('terminal-font-settings-store', () => {
     const storeModule = await import('../terminal-font-settings-store');
     useTerminalFontSettingsStore = storeModule.useTerminalFontSettingsStore;
     TERMINAL_PRESETS = storeModule.TERMINAL_PRESETS;
-    _getOS = (await import('../../lib/os-detection')).getOS;
   });
 
   afterEach(() => {
@@ -333,131 +331,6 @@ describe('terminal-font-settings-store', () => {
       expect(state.fontSize).toBe(13); // Linux default
       expect(state.fontWeight).toBe(400);
       expect(state.cursorStyle).toBe('block');
-    });
-  });
-
-  describe('exportSettings', () => {
-    it('should export settings as JSON string', () => {
-      const store = useTerminalFontSettingsStore.getState();
-      store.applySettings({ fontSize: 18 });
-
-      const exported = store.exportSettings();
-
-      expect(typeof exported).toBe('string');
-      const parsed = JSON.parse(exported);
-      expect(parsed.fontSize).toBe(18);
-    });
-
-    it('should export all settings', () => {
-      const exported = useTerminalFontSettingsStore.getState().exportSettings();
-      const parsed = JSON.parse(exported);
-
-      expect(parsed.fontFamily).toBeDefined();
-      expect(parsed.fontSize).toBeDefined();
-      expect(parsed.fontWeight).toBeDefined();
-      expect(parsed.lineHeight).toBeDefined();
-      expect(parsed.letterSpacing).toBeDefined();
-      expect(parsed.cursorStyle).toBeDefined();
-      expect(parsed.cursorBlink).toBeDefined();
-      expect(parsed.cursorAccentColor).toBeDefined();
-      expect(parsed.scrollback).toBeDefined();
-    });
-  });
-
-  describe('importSettings', () => {
-    it('should import valid settings', () => {
-      const store = useTerminalFontSettingsStore.getState();
-      const json = JSON.stringify({
-        fontFamily: ['Fira Code', 'monospace'],
-        fontSize: 16,
-        fontWeight: 500,
-        lineHeight: 1.5,
-        letterSpacing: 0.5,
-        cursorStyle: 'underline',
-        cursorBlink: false,
-        cursorAccentColor: '#ff0000',
-        scrollback: 50000,
-      });
-
-      const success = store.importSettings(json);
-
-      expect(success).toBe(true);
-      const state = useTerminalFontSettingsStore.getState();
-      expect(state.fontSize).toBe(16);
-      expect(state.fontFamily).toEqual(['Fira Code', 'monospace']);
-    });
-
-    it('should reject invalid JSON', () => {
-      const store = useTerminalFontSettingsStore.getState();
-
-      const success = store.importSettings('not valid json');
-
-      expect(success).toBe(false);
-    });
-
-    it('should reject settings with out-of-range values', () => {
-      const store = useTerminalFontSettingsStore.getState();
-      const json = JSON.stringify({
-        fontFamily: ['monospace'],
-        fontSize: 999, // Invalid: > 24
-        fontWeight: 400,
-        lineHeight: 1.2,
-        letterSpacing: 0,
-        cursorStyle: 'block',
-        cursorBlink: true,
-        cursorAccentColor: '#000000',
-        scrollback: 10000,
-      });
-
-      const success = store.importSettings(json);
-
-      expect(success).toBe(false);
-    });
-
-    it('should reject settings with invalid font family', () => {
-      const store = useTerminalFontSettingsStore.getState();
-      const json = JSON.stringify({
-        fontFamily: [], // Invalid: empty array
-        fontSize: 14,
-        fontWeight: 400,
-        lineHeight: 1.2,
-        letterSpacing: 0,
-        cursorStyle: 'block',
-        cursorBlink: true,
-        cursorAccentColor: '#000000',
-        scrollback: 10000,
-      });
-
-      const success = store.importSettings(json);
-
-      expect(success).toBe(false);
-    });
-
-    it('should reject settings with invalid cursor style', () => {
-      const store = useTerminalFontSettingsStore.getState();
-      const json = JSON.stringify({
-        fontFamily: ['monospace'],
-        fontSize: 14,
-        fontWeight: 400,
-        lineHeight: 1.2,
-        letterSpacing: 0,
-        cursorStyle: 'invalid', // Invalid cursor style
-        cursorBlink: true,
-        cursorAccentColor: '#000000',
-        scrollback: 10000,
-      });
-
-      const success = store.importSettings(json);
-
-      expect(success).toBe(false);
-    });
-
-    it('should reject non-object input', () => {
-      const store = useTerminalFontSettingsStore.getState();
-
-      const success = store.importSettings('null');
-
-      expect(success).toBe(false);
     });
   });
 

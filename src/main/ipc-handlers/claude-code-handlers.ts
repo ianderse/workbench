@@ -8,7 +8,7 @@
  */
 
 import { ipcMain } from 'electron';
-import { execFileSync, spawn, execFile } from 'child_process';
+import { execFileSync, spawn, execFile, type ChildProcess } from 'child_process';
 import { existsSync, readFileSync, promises as fsPromises } from 'fs';
 import { mkdir, rename, unlink } from 'fs/promises';
 import path from 'path';
@@ -20,12 +20,16 @@ import type { ClaudeCodeVersionInfo, ClaudeInstallationList, ClaudeInstallationI
 import { getToolInfo, configureTools, sortNvmVersionDirs, getClaudeDetectionPaths, type ExecFileAsyncOptionsWithVerbatim } from '../cli-tool-manager';
 import { readSettingsFile, writeSettingsFile } from '../settings-utils';
 import { isSecurePath, getWhereExePath, getTaskkillExePath } from '../utils/windows-paths';
-import { isWindows, isMacOS, isLinux } from '../platform';
+import { isWindows, isMacOS, isLinux, killProcessGracefully } from '../platform';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { isValidConfigDir } from '../utils/config-path-validator';
 import { clearKeychainCache, getCredentialsFromKeychain, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import semver from 'semver';
+import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
+
+/** Running `claude auth login` processes by profile id, so a sign-in can be cancelled */
+const authLogins = new Map<string, { child: ChildProcess; cancelled: boolean }>();
 
 const execFileAsync = promisify(execFile);
 
@@ -378,7 +382,7 @@ function getInstallCommand(isUpdate: boolean): string {
  * - Double quotes must be escaped: " → \"
  * - Single quotes do NOT need escaping inside double-quoted strings
  */
-export function escapeAppleScriptString(str: string): string {
+function escapeAppleScriptString(str: string): string {
   return str
     .replace(/\\/g, '\\\\')  // Escape backslashes first
     .replace(/"/g, '\\"');   // Escape double quotes
@@ -389,7 +393,7 @@ export function escapeAppleScriptString(str: string): string {
  * PowerShell requires escaping backticks, double quotes, dollar signs,
  * parentheses, semicolons, and ampersands.
  */
-export function escapePowerShellCommand(str: string): string {
+function escapePowerShellCommand(str: string): string {
   return str
     .replace(/`/g, '``')      // Escape backticks (PowerShell escape char)
     .replace(/"/g, '`"')      // Escape double quotes
@@ -406,7 +410,7 @@ export function escapePowerShellCommand(str: string): string {
  * Escape a string for safe use in Git Bash -c context.
  * Bash requires escaping single quotes, double quotes, backslashes, and other metacharacters.
  */
-export function escapeGitBashCommand(str: string): string {
+function escapeGitBashCommand(str: string): string {
   // For bash -c with double quotes, escape: backslash, double quote, dollar, backtick,
   // semicolon, pipe, and exclamation mark (all bash metacharacters that could allow command injection)
   return str
@@ -420,23 +424,14 @@ export function escapeGitBashCommand(str: string): string {
 }
 
 /**
- * Escape a string for safe use in bash -c context (Linux terminals).
- * Uses the same escaping rules as escapeGitBashCommand for consistency.
- * Defense-in-depth: Currently all commands come from trusted sources (getInstallCommand,
- * getInstallVersionCommand), but this prevents potential command injection if future
- * code adds new call sites with less controlled input.
- */
-export function escapeBashCommand(str: string): string {
-  // Reuse the same escaping logic as Git Bash
-  return escapeGitBashCommand(str);
-}
-
-/**
  * Open a terminal with the given command
  * Uses the user's preferred terminal from settings
  * Supports macOS, Windows, and Linux terminals
+ *
+ * @param env Environment for the terminal on Windows (on macOS and Linux the terminal starts its
+ *   own shell environment, so variables go in the command)
  */
-export async function openTerminalWithCommand(command: string): Promise<void> {
+export async function openTerminalWithCommand(command: string, env?: NodeJS.ProcessEnv): Promise<void> {
   const settings = readSettingsFile();
   const preferredTerminal = settings?.preferredTerminal as string | undefined;
 
@@ -579,6 +574,7 @@ export async function openTerminalWithCommand(command: string): Promise<void> {
           detached: true,
           stdio: 'ignore',
           windowsHide: false,
+          env: env ?? process.env,
         });
 
         // Detach from the child process so it runs independently
@@ -875,7 +871,7 @@ function checkProfileAuthentication(configDir: string): AuthCheckResult {
     ? path.join(os.homedir(), configDir.slice(1))
     : configDir;
 
-  const claudeJsonPath = path.join(expandedConfigDir, '.claude.json');
+  const claudeJsonPath = getClaudeGlobalConfigPath(expandedConfigDir);
   const credentialsJsonPath = path.join(expandedConfigDir, '.credentials.json');
 
   try {
@@ -1394,6 +1390,8 @@ export function registerClaudeCodeHandlers(): void {
 
           // Save profile metadata (email, isAuthenticated, subscriptionType, rateLimitTier) but NOT the OAuth token
           profileManager.saveProfile(profile);
+          // Signing in to an account that is already in the list keeps one entry
+          profileManager.mergeSameAccountProfile(profileId);
 
           // CRITICAL: Clear keychain cache for this profile's configDir
           // This ensures the new token is read from keychain instead of using a stale cached token
@@ -1434,6 +1432,20 @@ export function registerClaudeCodeHandlers(): void {
           error: `Failed to verify authentication: ${errorMsg}`
         };
       }
+    }
+  );
+
+  // Stop a running `claude auth login` (the user cancelled or closed the sign-in dialog). A
+  // sign-in that fails in the browser never ends on its own, so this is the way out of it.
+  ipcMain.handle(
+    IPC_CHANNELS.CLAUDE_AUTH_LOGIN_CANCEL,
+    async (_event, profileId: string): Promise<IPCResult> => {
+      const login = authLogins.get(profileId);
+      if (login) {
+        login.cancelled = true;
+        killProcessGracefully(login.child, { debugPrefix: '[Claude Code] auth login' });
+      }
+      return { success: true };
     }
   );
 
@@ -1507,12 +1519,23 @@ export function registerClaudeCodeHandlers(): void {
           delete env.ELECTRON_RUN_AS_NODE;
 
           const args = ['auth', 'login'];
+          // A sign-in still running for this account (e.g. Try again) is replaced
+          const previous = authLogins.get(profileId);
+          if (previous) {
+            previous.cancelled = true;
+            killProcessGracefully(previous.child, { debugPrefix: '[Claude Code] auth login' });
+          }
           const child = spawn(claudePath, args, {
             env,
             stdio: ['ignore', 'pipe', 'pipe'],
             // On Windows, .cmd files need shell: true
             shell: isWindows() && claudePath.endsWith('.cmd'),
           });
+          const login = { child, cancelled: false };
+          authLogins.set(profileId, login);
+          const forget = () => {
+            if (authLogins.get(profileId) === login) authLogins.delete(profileId);
+          };
 
           let stdout = '';
           let stderr = '';
@@ -1552,6 +1575,7 @@ export function registerClaudeCodeHandlers(): void {
 
           child.on('close', async (code) => {
             clearTimeout(timeout);
+            forget();
 
             if (code === 0) {
               // Verify authentication
@@ -1566,6 +1590,8 @@ export function registerClaudeCodeHandlers(): void {
                 }
                 updateProfileSubscriptionMetadata(profile, expandedConfigDir);
                 profileManager.saveProfile(profile);
+                // Signing in to an account that is already in the list keeps one entry
+                profileManager.mergeSameAccountProfile(profileId);
                 clearKeychainCache(expandedConfigDir);
                 const usageMonitor = getUsageMonitor();
                 usageMonitor.clearProfileUsageCache(profileId);
@@ -1606,6 +1632,10 @@ export function registerClaudeCodeHandlers(): void {
                 } catch { /* non-fatal */ }
               }
 
+              if (login.cancelled) {
+                resolve({ success: false, error: 'Sign-in cancelled' });
+                return;
+              }
               const errorMsg = stderr.trim() || `Process exited with code ${code}`;
               sender.send(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_PROGRESS, {
                 status: 'error',
@@ -1620,6 +1650,7 @@ export function registerClaudeCodeHandlers(): void {
 
           child.on('error', (err) => {
             clearTimeout(timeout);
+            forget();
             sender.send(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_PROGRESS, {
               status: 'error',
               message: err.message

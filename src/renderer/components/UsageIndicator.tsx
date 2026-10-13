@@ -5,16 +5,12 @@
  * - Hover to show breakdown popup (auto-closes on mouse leave)
  * - Click to pin popup open (stays until clicking outside)
  *
- * Supports all providers from the global priority queue:
- * - Anthropic OAuth (subscription): shows session/weekly usage bars
- * - Non-Anthropic subscription accounts (e.g. OpenAI Codex OAuth): shows "Subscription" badge
- *   with a note that rate limits apply but monitoring is not yet available
- * - API key providers: checks the key with the provider and shows "API key" (pay as you go)
- *   or "Invalid key"; local providers (Ollama) show "Local"
+ * - Claude accounts (subscription): shows session/weekly usage bars
+ * - An active API profile (Anthropic-compatible endpoint): shows "API key" (pay as you go)
  */
 
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef } from 'react';
-import { Activity, TrendingUp, AlertCircle, Clock, Info, LogIn } from 'lucide-react';
+import { Activity, TrendingUp, AlertCircle } from 'lucide-react';
 import {
   Popover,
   PopoverContent,
@@ -24,9 +20,7 @@ import { useTranslation } from 'react-i18next';
 import { formatTimeRemaining, localizeUsageWindowLabel, hasHardcodedText } from '../../shared/utils/format-time';
 import type { ClaudeUsageSnapshot } from '../../shared/types/agent';
 import type { AppSection } from './settings/AppSettings';
-import { useActiveProvider } from '../hooks/useActiveProvider';
-import { PROVIDER_REGISTRY } from '../../shared/constants/providers';
-import type { ProviderKeyCheckResult } from '../../shared/types/provider-account';
+import { useSettingsStore } from '../stores/settings-store';
 
 /**
  * Usage threshold constants for color coding
@@ -35,21 +29,6 @@ const THRESHOLD_CRITICAL = 95;  // Red: At or near limit
 const THRESHOLD_WARNING = 91;   // Orange: Very high usage
 const THRESHOLD_ELEVATED = 71;  // Yellow: Moderate usage
 // Below 71 is considered normal (green)
-
-const PROVIDER_BADGE_COLORS: Record<string, string> = {
-  'anthropic': 'bg-orange-500/10 text-orange-500 border-orange-500/20',
-  'openai': 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20',
-  'google': 'bg-blue-500/10 text-blue-500 border-blue-500/20',
-  'mistral': 'bg-amber-500/10 text-amber-500 border-amber-500/20',
-  'groq': 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20',
-  'xai': 'bg-slate-500/10 text-slate-500 border-slate-500/20',
-  'amazon-bedrock': 'bg-orange-600/10 text-orange-600 border-orange-600/20',
-  'azure': 'bg-sky-500/10 text-sky-500 border-sky-500/20',
-  'ollama': 'bg-purple-500/10 text-purple-500 border-purple-500/20',
-  'openai-compatible': 'bg-gray-500/10 text-gray-500 border-gray-500/20',
-  'zai': 'bg-indigo-500/10 text-indigo-500 border-indigo-500/20',
-  'openrouter': 'bg-violet-500/10 text-violet-500 border-violet-500/20',
-};
 
 /**
  * Get color class based on usage percentage
@@ -81,16 +60,6 @@ const getGradientClass = (percent: number): string => {
   return 'bg-gradient-to-r from-green-600 to-green-500';
 };
 
-/**
- * Check whether a provider account supports real-time usage monitoring.
- * Currently: Anthropic OAuth, OpenAI OAuth, and Z.AI API key accounts.
- */
-const accountHasUsageMonitoring = (account: { provider: string; authType?: string; apiKey?: string }): boolean => {
-  if ((account.provider === 'anthropic' || account.provider === 'openai') && account.authType === 'oauth') return true;
-  if (account.provider === 'zai' && account.apiKey) return true;
-  return false;
-};
-
 export function UsageIndicator() {
   const { t, i18n } = useTranslation(['common']);
   const [usage, setUsage] = useState<ClaudeUsageSnapshot | null>(null);
@@ -113,12 +82,10 @@ export function UsageIndicator() {
     setPopoverOffset(Math.round(trigger.getBoundingClientRect().top - footerTop + gap));
   }, [isOpen]);
 
-  const { account: activeAccount } = useActiveProvider();
-
-  // Usage monitoring is available for Anthropic/OpenAI OAuth accounts and Z.AI API key accounts
-  const hasUsageMonitoring = activeAccount ? accountHasUsageMonitoring(activeAccount) : false;
-  // Subscription accounts (any provider) have rate limits even though we can't monitor them
-  const hasSubscriptionLimits = activeAccount?.billingModel === 'subscription';
+  // An active API profile (Anthropic-compatible endpoint) bills per token: no usage limits to show
+  const activeApiProfile = useSettingsStore((state) => state.profiles.find((p) => p.id === state.activeProfileId) ?? null);
+  // Claude subscription accounts report session and weekly usage
+  const hasUsageMonitoring = !activeApiProfile;
 
   /**
    * Helper function to format large numbers with locale-aware compact notation
@@ -285,31 +252,6 @@ export function UsageIndicator() {
     };
   }, []);
 
-  // API key accounts have no usage data: check the key with its provider instead (on account
-  // change, and again when the breakdown opens if the last check is over a minute old)
-  const isApiKeyAccount = !!activeAccount && !hasUsageMonitoring && !hasSubscriptionLimits && activeAccount.provider !== 'ollama';
-  const [keyCheck, setKeyCheck] = useState<{ key: string; result: ProviderKeyCheckResult | null; at: number } | null>(null);
-  const keyCheckId = isApiKeyAccount ? `${activeAccount.id}:${activeAccount.apiKey ?? ''}:${activeAccount.baseUrl ?? ''}` : null;
-  const runKeyCheck = useCallback(() => {
-    if (!keyCheckId || !activeAccount) return;
-    setKeyCheck({ key: keyCheckId, result: null, at: Date.now() });
-    window.electronAPI.testProviderConnection(activeAccount.provider, {
-      apiKey: activeAccount.apiKey,
-      baseUrl: activeAccount.baseUrl,
-    }).then((res) => {
-      const result: ProviderKeyCheckResult = res.success && res.data ? res.data : { status: 'unreachable', error: res.error };
-      setKeyCheck((prev) => (prev?.key === keyCheckId ? { ...prev, result } : prev));
-    }).catch(() => {
-      setKeyCheck((prev) => (prev?.key === keyCheckId ? { ...prev, result: { status: 'unreachable' } } : prev));
-    });
-  }, [keyCheckId]);
-  useEffect(() => {
-    runKeyCheck();
-  }, [runKeyCheck]);
-  useEffect(() => {
-    if (isOpen && keyCheck?.result && Date.now() - keyCheck.at > 60_000) runKeyCheck();
-  }, [isOpen]);
-
   // Show loading state - only for Anthropic OAuth accounts awaiting usage data
   if (isLoading && hasUsageMonitoring) {
     return (
@@ -320,73 +262,17 @@ export function UsageIndicator() {
     );
   }
 
-  // For subscription accounts without monitoring (e.g. OpenAI Codex OAuth), show "Subscription" badge
-  if (!hasUsageMonitoring && hasSubscriptionLimits) {
-    const providerBadgeColor = PROVIDER_BADGE_COLORS[activeAccount?.provider ?? ''] ?? PROVIDER_BADGE_COLORS['openai-compatible'];
-    return (
-      <Popover open={isOpen} onOpenChange={handleOpenChange}>
-        <PopoverTrigger asChild>
-          <button
-            ref={triggerRef}
-            className={`flex items-center gap-1 px-2 py-1.5 rounded-md border transition-all hover:opacity-80 ${providerBadgeColor}`}
-            aria-label={t('common:usage.usageStatusAriaLabel')}
-            onMouseEnter={handleMouseEnter}
-            onMouseLeave={handleMouseLeave}
-            onClick={handleTriggerClick}
-          >
-            <Activity className="h-3.5 w-3.5" />
-            <span className="text-xs font-semibold">{t('common:usage.subscriptionBadge')}</span>
-          </button>
-        </PopoverTrigger>
-        <PopoverContent
-          side="top"
-          align="end"
-          sideOffset={popoverOffset}
-          className="text-xs w-[17rem] p-0 max-h-[80vh] overflow-y-auto"
-          onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
-        >
-            <div className="p-3 space-y-3">
-              <div className="flex items-center gap-1.5 pb-2 border-b">
-                <Activity className="h-3.5 w-3.5" />
-                <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
-              </div>
-            <div className="flex items-start gap-2.5 py-3">
-              <Info className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
-              <div className="space-y-1">
-                <p className="text-xs font-medium">{t('common:usage.subscriptionLimitsApply')}</p>
-                <p className="text-[10px] text-muted-foreground leading-relaxed">
-                  {t('common:usage.subscriptionMonitoringComingSoon')}
-                </p>
-              </div>
-            </div>
-          </div>
-        </PopoverContent>
-      </Popover>
-    );
-  }
-
-  // API key (pay-as-you-go) and local providers: no usage limits to track
-  if (!hasUsageMonitoring && !hasSubscriptionLimits) {
-    const providerName = PROVIDER_REGISTRY.find((p) => p.id === activeAccount?.provider)?.name ?? activeAccount?.provider ?? '';
-    const status = isApiKeyAccount ? (keyCheck?.key === keyCheckId ? keyCheck?.result?.status ?? 'checking' : 'checking') : 'local';
-    const isInvalid = status === 'invalid';
-    const badgeLabel = status === 'local'
-      ? t('common:usage.localBadge')
-      : isInvalid
-        ? t('common:usage.invalidKeyBadge')
-        : t('common:usage.apiKeyBadge');
-    const badgeColor = isInvalid
-      ? 'text-red-500 bg-red-500/10 border-red-500/20'
-      : 'text-muted-foreground bg-muted/50 border-border';
-    const message = {
-      checking: t('common:usage.apiKeyChecking', { provider: providerName }),
-      valid: t('common:usage.apiKeyValid', { provider: providerName }),
-      invalid: t('common:usage.apiKeyInvalid', { provider: providerName }),
-      unreachable: t('common:usage.apiKeyUnreachable', { provider: providerName }),
-      unknown: t('common:usage.apiKeyUnknown', { provider: providerName }),
-      local: t('common:usage.localNoLimits'),
-    }[status];
+  // API profiles (pay as you go): no usage limits to track
+  if (activeApiProfile) {
+    let providerName = activeApiProfile.baseUrl;
+    try {
+      providerName = new URL(activeApiProfile.baseUrl).host;
+    } catch {
+      // Not a URL: show it as entered
+    }
+    const badgeLabel = t('common:usage.apiKeyBadge');
+    const badgeColor = 'text-muted-foreground bg-muted/50 border-border';
+    const message = t('common:usage.apiKeyUnknown', { provider: providerName });
 
     return (
       <Popover open={isOpen} onOpenChange={handleOpenChange}>
@@ -399,7 +285,7 @@ export function UsageIndicator() {
             onMouseLeave={handleMouseLeave}
             onClick={handleTriggerClick}
           >
-            {isInvalid ? <AlertCircle className="h-3.5 w-3.5" /> : <Activity className="h-3.5 w-3.5" />}
+            <Activity className="h-3.5 w-3.5" />
             <span className="text-xs font-semibold">{badgeLabel}</span>
           </button>
         </PopoverTrigger>
@@ -413,27 +299,21 @@ export function UsageIndicator() {
         >
           <div className="p-3 space-y-3">
             <div className="flex items-center gap-1.5 pb-2 border-b">
-              <Activity className="h-3.5 w-3.5" />
               <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
             </div>
             <div className="flex items-start gap-2.5 py-1">
-              {isInvalid
-                ? <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-                : <Info className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />}
               <div className="min-w-0 space-y-1">
-                <p className="truncate text-xs font-medium">{activeAccount?.name} · {providerName}</p>
+                <p className="truncate text-xs font-medium">{activeApiProfile.name} · {providerName}</p>
                 <p className="text-xs text-muted-foreground leading-relaxed">{message}</p>
               </div>
             </div>
-            {isInvalid && (
-              <button
-                type="button"
-                onClick={handleOpenAccounts}
-                className="w-full rounded-md bg-muted/60 px-2 py-1.5 text-xs font-medium hover:bg-muted"
-              >
-                {t('common:usage.manageAccounts')}
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={handleOpenAccounts}
+              className="w-full rounded-md bg-muted/60 px-2 py-1.5 text-xs font-medium hover:bg-muted"
+            >
+              {t('common:usage.manageAccounts')}
+            </button>
           </div>
         </PopoverContent>
       </Popover>
@@ -482,7 +362,6 @@ export function UsageIndicator() {
         >
           <div className="p-3 space-y-3">
             <div className="flex items-center gap-1.5 pb-2 border-b">
-              <Activity className="h-3.5 w-3.5" />
               <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
             </div>
 
@@ -500,7 +379,6 @@ export function UsageIndicator() {
                 </>
               ) : (
                 <>
-                  <Info className="h-4 w-4 text-muted-foreground flex-shrink-0 mt-0.5" />
                   <div className="space-y-1">
                     <p className="text-xs font-medium">{t('common:usage.dataUnavailable')}</p>
                     <p className="text-[10px] text-muted-foreground leading-relaxed">
@@ -591,7 +469,6 @@ export function UsageIndicator() {
         <div className="p-3 space-y-3">
           {/* Header with overall status */}
           <div className="flex items-center gap-1.5 pb-2 border-b">
-            <Icon className="h-3.5 w-3.5" />
             <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
           </div>
 
@@ -614,7 +491,6 @@ export function UsageIndicator() {
                 onClick={handleOpenAccounts}
                 className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-xs font-medium"
               >
-                <LogIn className="h-3.5 w-3.5" />
                 {t('common:usage.reauthButton')}
               </button>
             </div>
@@ -624,7 +500,6 @@ export function UsageIndicator() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground font-medium text-[11px] flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
                     {sessionLabel}
                   </span>
                   <span className={`font-semibold tabular-nums text-xs ${getColorClass(usage.sessionPercent).replace('500', '600')}`}>
@@ -632,8 +507,7 @@ export function UsageIndicator() {
                   </span>
                 </div>
                 {sessionResetTime && (
-                  <div className="text-[10px] text-muted-foreground pl-4 flex items-center gap-1">
-                    <Info className="h-2.5 w-2.5" />
+                  <div className="text-[10px] text-muted-foreground">
                     {sessionResetTime}
                   </div>
                 )}
@@ -659,7 +533,6 @@ export function UsageIndicator() {
               <div className="space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground font-medium text-[11px] flex items-center gap-1">
-                    <TrendingUp className="h-3 w-3" />
                     {weeklyLabel}
                   </span>
                   <span className={`font-semibold tabular-nums text-xs ${getColorClass(usage.weeklyPercent).replace('500', '600')}`}>
@@ -667,8 +540,7 @@ export function UsageIndicator() {
                   </span>
                 </div>
                 {weeklyResetTime && (
-                  <div className="text-[10px] text-muted-foreground pl-4 flex items-center gap-1">
-                    <Info className="h-2.5 w-2.5" />
+                  <div className="text-[10px] text-muted-foreground">
                     {weeklyResetTime}
                   </div>
                 )}

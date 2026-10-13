@@ -16,6 +16,7 @@ interface TaskConnectorRowsProps {
 /**
  * The task's MCP connectors, like the Connectors settings page: a switch per built-in server and
  * per tested custom server. Starts from the Connectors defaults; changes stay with this task.
+ * Every enabled connector is available to the whole Claude Code session.
  */
 export function TaskConnectorRows({ value, onChange, disabled, idPrefix = '' }: TaskConnectorRowsProps) {
   const { t } = useTranslation(['settings', 'tasks']);
@@ -26,41 +27,38 @@ export function TaskConnectorRows({ value, onChange, disabled, idPrefix = '' }: 
   };
 
   return (
-    <div className="pt-3">
-      <div className="text-sm text-(--nav-label-color)">{t('tasks:form.connectorsLabel')}</div>
-      <SettingsRows>
-        {BUILTIN_CONNECTOR_META.map(({ id, icon, qaOnly }) => {
-          const name = t(`settings:mcp.servers.${id}.name`);
-          const description = t(`settings:mcp.servers.${id}.description`);
-          return (
-            <ConnectorRow
-              key={id}
-              icon={icon}
-              name={name}
-              description={qaOnly ? `${description} (${t('settings:mcp.qaAgentsOnly')})` : description}
-            >
-              <Switch
-                id={`${idPrefix}connector-${id}`}
-                checked={value.includes(id)}
-                onCheckedChange={(checked) => toggle(id, checked)}
-                disabled={disabled}
-                aria-label={name}
-              />
-            </ConnectorRow>
-          );
-        })}
-        {getUsableCustomServers(connectors).map((server) => (
-          <ConnectorRow key={server.id} icon={customServerIcon(server)} name={server.name} description={customServerSummary(server)}>
+    <SettingsRows>
+      {BUILTIN_CONNECTOR_META.map(({ id, icon }) => {
+        const name = t(`settings:mcp.servers.${id}.name`);
+        const description = t(`settings:mcp.servers.${id}.description`);
+        return (
+          <ConnectorRow
+            key={id}
+            icon={icon}
+            name={name}
+            description={description}
+          >
             <Switch
-              id={`${idPrefix}connector-${server.id}`}
-              checked={value.includes(server.id)}
-              onCheckedChange={(checked) => toggle(server.id, checked)}
+              id={`${idPrefix}connector-${id}`}
+              checked={value.includes(id)}
+              onCheckedChange={(checked) => toggle(id, checked)}
               disabled={disabled}
-              aria-label={server.name}
+              aria-label={name}
             />
           </ConnectorRow>
-        ))}
-      </SettingsRows>
-    </div>
+        );
+      })}
+      {getUsableCustomServers(connectors).map((server) => (
+        <ConnectorRow key={server.id} icon={customServerIcon(server)} name={server.name} description={customServerSummary(server)}>
+          <Switch
+            id={`${idPrefix}connector-${server.id}`}
+            checked={value.includes(server.id)}
+            onCheckedChange={(checked) => toggle(server.id, checked)}
+            disabled={disabled}
+            aria-label={server.name}
+          />
+        </ConnectorRow>
+      ))}
+    </SettingsRows>
   );
 }

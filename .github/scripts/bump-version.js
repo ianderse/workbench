@@ -45,20 +45,20 @@ function log(message, color = colors.reset) {
 }
 
 function error(message) {
-  log(`❌ Error: ${message}`, colors.red);
+  log(`Error: ${message}`, colors.red);
   process.exit(1);
 }
 
 function success(message) {
-  log(`✅ ${message}`, colors.green);
+  log(message, colors.green);
 }
 
 function info(message) {
-  log(`ℹ️  ${message}`, colors.cyan);
+  log(message, colors.cyan);
 }
 
 function warning(message) {
-  log(`⚠️  ${message}`, colors.yellow);
+  log(`Warning: ${message}`, colors.yellow);
 }
 
 // Parse semver version (supports optional pre-release suffix like -beta.1)
@@ -168,7 +168,7 @@ function main() {
           'Usage: node .github/scripts/bump-version.js <major|minor|patch|x.y.z>');
   }
 
-  log('\n🚀 Auto Claude Version Bump\n', colors.cyan);
+  log('\nAuto Claude Version Bump\n', colors.cyan);
 
   // 1. Check git status
   info('Checking git status...');
@@ -215,10 +215,10 @@ function main() {
     warning('');
     log(`    ## ${newVersion} - Your Release Title`, colors.cyan);
     log('', colors.cyan);
-    log('    ### ✨ New Features', colors.cyan);
+    log('    ### New Features', colors.cyan);
     log('    - Feature description', colors.cyan);
     log('', colors.cyan);
-    log('    ### 🐛 Bug Fixes', colors.cyan);
+    log('    ### Bug Fixes', colors.cyan);
     log('    - Fix description', colors.cyan);
     warning('');
     warning('═══════════════════════════════════════════════════════════════════════');
@@ -236,7 +236,7 @@ function main() {
   // successful builds.
 
   // 8. Instructions
-  log('\n📋 Next steps:', colors.yellow);
+  log('\nNext steps:', colors.yellow);
   if (!hasChangelogEntry) {
     log(`   1. UPDATE CHANGELOG.md with release notes for ${newVersion}`, colors.red);
     log(`   2. Commit the changelog: git add CHANGELOG.md && git commit --amend --no-edit`, colors.yellow);
@@ -259,7 +259,7 @@ function main() {
   }
   info('Tags are created automatically by GitHub Actions when merged to main.');
 
-  log('\n✨ Version bump complete!\n', colors.green);
+  log('\nVersion bump complete!\n', colors.green);
 }
 
 // Run

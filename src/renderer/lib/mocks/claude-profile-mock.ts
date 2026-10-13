@@ -24,6 +24,8 @@ export const claudeProfileMock = {
   }),
 
   deleteClaudeProfile: async () => ({ success: true }),
+  loginClaudeAccount: async () => ({ success: true }),
+  redetectClaudeAccounts: async () => ({ success: true, data: { profiles: [], activeProfileId: '' } }),
 
   renameClaudeProfile: async () => ({ success: true }),
 
@@ -49,13 +51,6 @@ export const claudeProfileMock = {
   }),
 
   updateAutoSwitchSettings: async () => ({ success: true }),
-
-  getAccountPriorityOrder: async () => ({
-    success: true,
-    data: [] as string[]
-  }),
-
-  setAccountPriorityOrder: async () => ({ success: true }),
 
   fetchClaudeUsage: async () => ({ success: true }),
 
@@ -98,5 +93,6 @@ export const claudeProfileMock = {
   }),
 
   claudeAuthLoginSubprocess: async () => ({ success: true, data: { authenticated: false } }),
+  cancelClaudeAuthLogin: async () => ({ success: true }),
   onClaudeAuthLoginProgress: () => () => {},
 };

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
-import { useTaskStore } from '../stores/task-store';
+import { useTaskStore, loadTasks } from '../stores/task-store';
 import { useAuthFailureStore } from '../stores/auth-failure-store';
 import { useProjectStore } from '../stores/project-store';
 import { setupInsightsListeners } from '../stores/insights-store';
@@ -222,12 +222,26 @@ export function useIpcListeners(): void {
     );
 
     // Rate-limit hold changes are applied immediately (not batched) so the hold is
-    // already on the task when the accompanying status change (-> queue) triggers
-    // queue auto-promotion; otherwise the held task would be restarted right away.
+    // already on the task when the accompanying status change (-> queue) arrives.
+    // Queue auto-promotion (which skips held tasks) runs in the main process.
     const cleanupRateLimitHold = window.electronAPI.onTaskRateLimitHoldChange(
       (taskId: string, hold: import('../../shared/types').RateLimitHold | null, projectId?: string) => {
         if (!isTaskForCurrentProject(projectId)) return;
         useTaskStore.getState().updateTask(taskId, { rateLimitHold: hold ?? undefined });
+      }
+    );
+
+    // Tasks created, edited or moved outside the board (the Claude chat's task tools)
+    const cleanupTaskList = window.electronAPI.onTaskListChanged((projectId: string) => {
+      if (!isTaskForCurrentProject(projectId)) return;
+      void loadTasks(projectId);
+    });
+
+    // Claude Code run state (triage, plan, steps, validation) replaces the task's claudeRun
+    const cleanupClaudeRun = window.electronAPI.onTaskClaudeRunUpdate(
+      (taskId: string, run: import('../../shared/types').ClaudeRunInfo, projectId?: string) => {
+        if (!isTaskForCurrentProject(projectId)) return;
+        useTaskStore.getState().updateTask(taskId, { claudeRun: run });
       }
     );
 
@@ -271,40 +285,11 @@ export function useIpcListeners(): void {
       cleanupLog();
       cleanupStatus();
       cleanupRateLimitHold();
+      cleanupClaudeRun();
+      cleanupTaskList();
       cleanupExecutionProgress();
       cleanupAuthFailure();
       cleanupInsights();
     };
   }, [appendLog, setError]);
-}
-
-/**
- * Hook to manage app settings
- */
-export function useAppSettings() {
-  const getSettings = async () => {
-    const result = await window.electronAPI.getSettings();
-    if (result.success && result.data) {
-      return result.data;
-    }
-    return null;
-  };
-
-  const saveSettings = async (settings: Parameters<typeof window.electronAPI.saveSettings>[0]) => {
-    const result = await window.electronAPI.saveSettings(settings);
-    return result.success;
-  };
-
-  return { getSettings, saveSettings };
-}
-
-/**
- * Hook to get the app version
- */
-export function useAppVersion() {
-  const getVersion = async () => {
-    return window.electronAPI.getAppVersion();
-  };
-
-  return { getVersion };
 }

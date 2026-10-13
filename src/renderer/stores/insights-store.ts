@@ -328,15 +328,6 @@ export function sendMessage(projectId: string, message: string, modelConfig?: In
   window.electronAPI.sendInsightsMessage(projectId, message, configToUse, images);
 }
 
-export async function clearSession(projectId: string, includeArchived?: boolean): Promise<void> {
-  const result = await window.electronAPI.clearInsightsSession(projectId);
-  if (result.success) {
-    useInsightsStore.getState().clearSession();
-    // Reload sessions list and current session
-    await loadInsightsSession(projectId, includeArchived);
-  }
-}
-
 export async function newSession(projectId: string): Promise<void> {
   const result = await window.electronAPI.newInsightsSession(projectId);
   if (result.success && result.data) {
@@ -381,27 +372,6 @@ export async function renameSession(projectId: string, sessionId: string, newTit
     return true;
   }
   return false;
-}
-
-export async function deleteSessions(projectId: string, sessionIds: string[]): Promise<{ success: boolean; failedIds?: string[] }> {
-  const result = await window.electronAPI.deleteInsightsSessions(projectId, sessionIds);
-  if (result.success) {
-    return { success: true, failedIds: result.data?.failedIds };
-  }
-  return { success: false, failedIds: result.data?.failedIds };
-}
-
-export async function archiveSession(projectId: string, sessionId: string): Promise<boolean> {
-  const result = await window.electronAPI.archiveInsightsSession(projectId, sessionId);
-  return result.success;
-}
-
-export async function archiveSessions(projectId: string, sessionIds: string[]): Promise<{ success: boolean; failedIds?: string[] }> {
-  const result = await window.electronAPI.archiveInsightsSessions(projectId, sessionIds);
-  if (result.success) {
-    return { success: true, failedIds: result.data?.failedIds };
-  }
-  return { success: false, failedIds: result.data?.failedIds };
 }
 
 export async function unarchiveSession(projectId: string, sessionId: string): Promise<boolean> {

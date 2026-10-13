@@ -3,7 +3,7 @@
  * Only logs when DEBUG=true in environment
  */
 
-export const isDebugEnabled = (): boolean => {
+const isDebugEnabled = (): boolean => {
   if (typeof process !== 'undefined' && process.env) {
     return process.env.DEBUG === 'true';
   }

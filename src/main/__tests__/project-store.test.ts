@@ -12,6 +12,8 @@ let TEST_DIR: string;
 let USER_DATA_PATH: string;
 let TEST_PROJECT_PATH: string;
 
+vi.mock('../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn() } }));
+
 // Mock Electron before importing the store
 vi.mock('electron', () => ({
   app: {
@@ -263,6 +265,58 @@ describe('ProjectStore', () => {
     });
   });
 
+  describe("settings kept in the project's .auto-claude/settings.json", () => {
+    const initializeProject = () => mkdirSync(path.join(TEST_PROJECT_PATH, '.auto-claude'), { recursive: true });
+    const projectFile = () => path.join(TEST_PROJECT_PATH, '.auto-claude', 'settings.json');
+    const storeFile = () => path.join(USER_DATA_PATH, 'store', 'projects.json');
+
+    it('writes Graphify, CLAUDE.md, budget and account to the project and keeps them out of the app list', async () => {
+      initializeProject();
+      const { ProjectStore } = await import('../project-store');
+      const store = new ProjectStore();
+      const project = store.addProject(TEST_PROJECT_PATH);
+
+      store.updateProjectSettings(project.id, { useGraphify: true, useClaudeMd: false, maxBudgetUsd: 2.5, claudeProfileId: 'work', model: 'sonnet' });
+
+      expect(JSON.parse(readFileSync(projectFile(), 'utf-8'))).toEqual({ useGraphify: true, useClaudeMd: false, maxBudgetUsd: 2.5, claudeProfileId: 'work' });
+      const listed = JSON.parse(readFileSync(storeFile(), 'utf-8')).projects[0].settings;
+      expect(listed.model).toBe('sonnet');
+      for (const key of ['useGraphify', 'useClaudeMd', 'maxBudgetUsd', 'claudeProfileId']) expect(listed).not.toHaveProperty(key);
+    });
+
+    it('loads them back from the project, and clearing one removes it from the file', async () => {
+      initializeProject();
+      const { ProjectStore } = await import('../project-store');
+      const store = new ProjectStore();
+      const project = store.addProject(TEST_PROJECT_PATH);
+      store.updateProjectSettings(project.id, { maxBudgetUsd: 3, claudeProfileId: 'work' });
+      store.updateProjectSettings(project.id, { maxBudgetUsd: undefined });
+
+      vi.resetModules();
+      const { ProjectStore: ReloadedStore } = await import('../project-store');
+      const reloaded = new ReloadedStore().getProject(project.id);
+      expect(reloaded?.settings.claudeProfileId).toBe('work');
+      expect(reloaded?.settings.maxBudgetUsd).toBeUndefined();
+      const saved = JSON.parse(readFileSync(projectFile(), 'utf-8'));
+      expect(saved.claudeProfileId).toBe('work');
+      expect(saved).not.toHaveProperty('maxBudgetUsd');
+    });
+
+    it('keeps older values from the app list until the project has its own file', async () => {
+      initializeProject();
+      writeFileSync(storeFile(), JSON.stringify({
+        projects: [{ id: 'p1', name: 'test-project', path: TEST_PROJECT_PATH, autoBuildPath: '.auto-claude', settings: { model: 'opus', useGraphify: true }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+        settings: {}
+      }));
+      const { ProjectStore } = await import('../project-store');
+      const store = new ProjectStore();
+      expect(store.getProject('p1')?.settings.useGraphify).toBe(true);
+
+      store.updateProjectSettings('p1', { model: 'sonnet' });
+      expect(JSON.parse(readFileSync(projectFile(), 'utf-8')).useGraphify).toBe(true);
+    });
+  });
+
   describe('getTasks', () => {
     it('should return empty array for non-existent project', async () => {
       const { ProjectStore } = await import('../project-store');
@@ -285,7 +339,7 @@ describe('ProjectStore', () => {
 
     it('should read tasks from filesystem correctly', async () => {
       // Create spec directory structure in .auto-claude (the data directory)
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '001-test-feature');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '001-test-feature');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -332,7 +386,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine status as backlog when no subtasks completed', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '002-pending');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '002-pending');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -372,7 +426,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine status as ai_review when all subtasks completed', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '003-complete');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '003-complete');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -412,7 +466,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine status as human_review when plan status is human_review', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '004-rejected');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '004-rejected');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -452,7 +506,7 @@ describe('ProjectStore', () => {
     });
 
     it('should determine reviewReason from plan when status is human_review', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '005-approved');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '005-approved');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -494,7 +548,7 @@ describe('ProjectStore', () => {
 
     it('should determine status as done when plan status is explicitly done', async () => {
       // User explicitly marking task as done via drag-and-drop sets status to done
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '006-done');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '006-done');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -532,38 +586,17 @@ describe('ProjectStore', () => {
       expect(tasks[0].status).toBe('done');
     });
 
-    it('should prefer original task description from requirements.json over plan description', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '007-description-priority');
+    it('should load the Claude Code run state and fall back to the plan description', async () => {
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '007-claude-run');
       mkdirSync(specsDir, { recursive: true });
-
-      const aiDescription = 'AI-generated implementation plan description';
-      const userDescription = 'User entered: preserve this exact original task description';
-
-      const plan = {
-        feature: 'Description Priority Feature',
-        description: aiDescription,
-        workflow_type: 'feature',
-        services_involved: [],
-        status: 'pending',
-        phases: [],
-        final_acceptance: [],
-        created_at: '2024-01-01T00:00:00Z',
-        updated_at: '2024-01-01T00:00:00Z',
-        spec_file: 'spec.md'
-      };
 
       writeFileSync(
         path.join(specsDir, 'implementation_plan.json'),
-        JSON.stringify(plan)
+        JSON.stringify({ feature: 'Claude Run Feature', description: 'Plan description', status: 'pending', phases: [] })
       );
-
-      const requirements = {
-        task_description: userDescription,
-        workflow_type: 'feature'
-      };
       writeFileSync(
-        path.join(specsDir, 'requirements.json'),
-        JSON.stringify(requirements)
+        path.join(specsDir, 'claude_run.json'),
+        JSON.stringify({ version: 1, phases: [{ name: 'triage', startedAt: '2026-01-01T00:00:00Z' }], subagents: [], totalCostUsd: 0.5, updatedAt: '2026-01-01T00:00:00Z' })
       );
 
       const { ProjectStore } = await import('../project-store');
@@ -573,10 +606,12 @@ describe('ProjectStore', () => {
       const tasks = store.getTasks(project.id);
 
       expect(tasks).toHaveLength(1);
-      expect(tasks[0].description).toBe(userDescription);
+      expect(tasks[0].description).toBe('Plan description');
+      expect(tasks[0].claudeRun?.totalCostUsd).toBe(0.5);
+      expect(tasks[0].claudeRun?.phases[0].name).toBe('triage');
     });
     it('should prefer the user-entered description from task_metadata.json over a rewritten requirements.json', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '008-user-description');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '008-user-description');
       mkdirSync(specsDir, { recursive: true });
 
       const userDescription = 'Exactly what the user typed';
@@ -613,7 +648,6 @@ describe('ProjectStore', () => {
             autoBuildPath: '',
             settings: {
               model: 'sonnet',
-              memoryBackend: 'memory',
               notifications: {
                 onTaskComplete: true,
                 onTaskFailed: true,
@@ -655,7 +689,7 @@ describe('ProjectStore', () => {
   describe('archiveTasks - multi-location handling', () => {
     it('should archive task from main specs directory only', async () => {
       // Create spec directory in main location only
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '001-test-task');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '001-test-task');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -688,11 +722,11 @@ describe('ProjectStore', () => {
 
     it('should archive task from BOTH main and worktree locations', async () => {
       // Create spec directory in main location
-      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '002-multi-location');
+      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '002-multi-location');
       mkdirSync(mainSpecsDir, { recursive: true });
 
       // Create spec directory in worktree location
-      // Worktree path: .auto-claude/worktrees/tasks/<worktreeName>/.auto-claude/specs/<taskId>
+      // Worktree path: .auto-claude/worktrees/tasks/<worktreeName>/.auto-claude/tasks/<taskId>
       const worktreeDir = path.join(
         TEST_PROJECT_PATH,
         '.auto-claude',
@@ -700,7 +734,7 @@ describe('ProjectStore', () => {
         'tasks',
         'my-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '002-multi-location'
       );
       mkdirSync(worktreeDir, { recursive: true });
@@ -751,7 +785,7 @@ describe('ProjectStore', () => {
         'tasks',
         'only-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '003-worktree-only'
       );
       mkdirSync(worktreeDir, { recursive: true });
@@ -800,7 +834,7 @@ describe('ProjectStore', () => {
 
     it('should reject path traversal attempts in taskId', async () => {
       // Create a valid spec dir
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', 'valid-task');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', 'valid-task');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = { feature: 'Test', phases: [] };
@@ -842,7 +876,7 @@ describe('ProjectStore', () => {
   describe('unarchiveTasks - multi-location handling', () => {
     it('should unarchive task from BOTH main and worktree locations', async () => {
       // Create archived task in both locations
-      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '004-unarchive-test');
+      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '004-unarchive-test');
       mkdirSync(mainSpecsDir, { recursive: true });
 
       const worktreeDir = path.join(
@@ -852,7 +886,7 @@ describe('ProjectStore', () => {
         'tasks',
         'unarchive-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '004-unarchive-test'
       );
       mkdirSync(worktreeDir, { recursive: true });
@@ -896,7 +930,7 @@ describe('ProjectStore', () => {
 
   describe('cache invalidation', () => {
     it('should invalidate cache after archiveTasks', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '005-cache-test');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '005-cache-test');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -937,7 +971,7 @@ describe('ProjectStore', () => {
     });
 
     it('should return fresh data after invalidateTasksCache is called', async () => {
-      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '006-invalidate-test');
+      const specsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '006-invalidate-test');
       mkdirSync(specsDir, { recursive: true });
 
       const plan = {
@@ -981,7 +1015,7 @@ describe('ProjectStore', () => {
   describe('getTasks - worktree deduplication', () => {
     it('should not duplicate tasks that exist in both main and worktree', async () => {
       // Create same task in both main and worktree
-      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'specs', '007-dedupe-test');
+      const mainSpecsDir = path.join(TEST_PROJECT_PATH, '.auto-claude', 'tasks', '007-dedupe-test');
       mkdirSync(mainSpecsDir, { recursive: true });
 
       const worktreeDir = path.join(
@@ -991,7 +1025,7 @@ describe('ProjectStore', () => {
         'tasks',
         'dedupe-worktree',
         '.auto-claude',
-        'specs',
+        'tasks',
         '007-dedupe-test'
       );
       mkdirSync(worktreeDir, { recursive: true });

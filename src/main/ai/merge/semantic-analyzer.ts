@@ -207,7 +207,7 @@ function classifyFunctionModification(before: string, after: string, ext: string
  * @param after - Content after changes
  * @returns FileAnalysis with changes detected via regex patterns
  */
-export function analyzeWithRegex(
+function analyzeWithRegex(
   filePath: string,
   before: string,
   after: string,

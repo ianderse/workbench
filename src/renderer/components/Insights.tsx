@@ -1,15 +1,16 @@
-import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Loader2,
   Plus,
+  Check,
   CheckCircle2,
-  AlertCircle,
+  Copy,
   Search,
   FileText,
   FolderSearch,
-  Network,
-  SquareTerminal,
+  Terminal,
+  Wrench,
   PanelLeft,
   SquarePen,
   ArrowUp,
@@ -18,13 +19,12 @@ import {
   Paperclip,
   X
 } from 'lucide-react';
-import ReactMarkdown, { type Components } from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { MarkdownContent } from './ui/markdown-content';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { Badge } from './ui/badge';
 import { cn } from '../lib/utils';
+import { GraphIcon, KanbanIcon } from './icons/app-icons';
 import {
   useInsightsStore,
   loadInsightsSession,
@@ -32,9 +32,7 @@ import {
   newSession,
   switchSession,
   deleteSession,
-  deleteSessions,
   renameSession,
-  archiveSessions,
   unarchiveSession,
   updateModelConfig,
   createTaskFromSuggestion,
@@ -47,49 +45,10 @@ import { InsightsModelSelector } from './InsightsModelSelector';
 import { AttachmentPreviewDialog } from './AttachmentPreviewDialog';
 import type { InsightsChatMessage, InsightsModelConfig, TaskMetadata, ImageAttachment } from '../../shared/types';
 import {
-  TASK_CATEGORY_LABELS,
-  TASK_CATEGORY_COLORS,
-  TASK_COMPLEXITY_LABELS,
-  TASK_COMPLEXITY_COLORS,
   MAX_IMAGE_SIZE,
-  parseInsightsError
+  parseInsightsError,
+  DEFAULT_AGENT_PROFILES
 } from '../../shared/constants';
-
-// createSafeLink - factory function that creates a SafeLink component with i18n support
-const createSafeLink = (opensInNewWindowText: string) => {
-  return function SafeLink({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) {
-    // Validate URL - only allow http, https, and relative links
-    const isValidUrl = href && (
-      href.startsWith('http://') ||
-      href.startsWith('https://') ||
-      href.startsWith('/') ||
-      href.startsWith('#')
-    );
-
-    if (!isValidUrl) {
-      // For invalid or potentially malicious URLs, render as plain text
-      return <span className="text-muted-foreground">{children}</span>;
-    }
-
-    // External links get security attributes and accessibility indicator
-    const isExternal = href?.startsWith('http://') || href?.startsWith('https://');
-
-    return (
-      <a
-        href={href}
-        {...props}
-        {...(isExternal && {
-          target: '_blank',
-          rel: 'noopener noreferrer',
-        })}
-        className="text-primary hover:underline"
-      >
-        {children}
-        {isExternal && <span className="sr-only"> {opensInNewWindowText}</span>}
-      </a>
-    );
-  };
-};
 
 interface InsightsProps {
   projectId: string;
@@ -103,11 +62,6 @@ export function Insights({ projectId }: InsightsProps) {
   const streamingContent = useInsightsStore((state) => state.streamingContent);
   const currentTool = useInsightsStore((state) => state.currentTool);
   const isLoadingSessions = useInsightsStore((state) => state.isLoadingSessions);
-
-  // Create markdown components with translated accessibility text
-  const markdownComponents = useMemo(() => ({
-    a: createSafeLink(t('accessibility.opensInNewWindow')),
-  }), [t]);
 
   const [inputValue, setInputValue] = useState('');
   const [creatingTask, setCreatingTask] = useState<Set<string>>(new Set());
@@ -267,38 +221,6 @@ export function Insights({ projectId }: InsightsProps) {
     }
   };
 
-  const handleDeleteSessions = async (sessionIds: string[]) => {
-    try {
-      const result = await deleteSessions(projectId, sessionIds);
-      await loadInsightsSessions(projectId, showArchived);
-      // Reload current session in case backend switched to a different one
-      await loadInsightsSession(projectId, showArchived);
-
-      // Log partial failures for debugging
-      if (result.failedIds && result.failedIds.length > 0) {
-        console.warn(`Failed to delete ${result.failedIds.length} session(s):`, result.failedIds);
-      }
-    } catch (error) {
-      console.error(`Failed to delete sessions ${sessionIds.join(', ')}:`, error);
-    }
-  };
-
-  const handleArchiveSessions = async (sessionIds: string[]) => {
-    try {
-      const result = await archiveSessions(projectId, sessionIds);
-      await loadInsightsSessions(projectId, showArchived);
-      // Reload current session in case backend switched to a different one
-      await loadInsightsSession(projectId, showArchived);
-
-      // Log partial failures for debugging
-      if (result.failedIds && result.failedIds.length > 0) {
-        console.warn(`Failed to archive ${result.failedIds.length} session(s):`, result.failedIds);
-      }
-    } catch (error) {
-      console.error(`Failed to archive sessions ${sessionIds.join(', ')}:`, error);
-    }
-  };
-
   const handleToggleShowArchived = () => {
     useInsightsStore.getState().setShowArchived(!showArchived);
   };
@@ -373,8 +295,7 @@ export function Insights({ projectId }: InsightsProps) {
 
   const parsedError = status.phase === 'error' && status.error ? parseInsightsError(status.error) : null;
   const errorBanner = parsedError ? (
-    <div className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+    <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
       {parsedError.code ? (
         <div className="min-w-0 space-y-1">
           <p>{t(`insights.errors.${parsedError.code}`)}</p>
@@ -385,6 +306,41 @@ export function Insights({ projectId }: InsightsProps) {
       )}
     </div>
   ) : null;
+
+  // Kanban button: gives Claude the project's task tools in this conversation (kept with the
+  // conversation's model settings)
+  const kanbanTools = effectiveModelConfig?.kanbanTools === true;
+  const toggleKanbanTools = () => {
+    const balanced = DEFAULT_AGENT_PROFILES.find((profile) => profile.id === 'balanced');
+    const base: InsightsModelConfig = effectiveModelConfig ?? {
+      profileId: 'balanced',
+      model: balanced?.model ?? 'sonnet',
+      thinkingLevel: balanced?.thinkingLevel ?? 'medium',
+    };
+    void handleModelConfigChange({ ...base, kanbanTools: !kanbanTools });
+  };
+  const kanbanButton = (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={toggleKanbanTools}
+          disabled={isLoading}
+          aria-pressed={kanbanTools}
+          className={cn(
+            'flex h-8 items-center gap-1.5 rounded-lg px-2 text-sm transition-colors disabled:pointer-events-none disabled:opacity-40',
+            kanbanTools
+              ? 'bg-primary/15 text-primary hover:bg-primary/20'
+              : 'text-muted-foreground hover:bg-nav-hover hover:text-foreground'
+          )}
+        >
+          <KanbanIcon className="h-4 w-4 shrink-0" />
+          {t('insights.kanbanTools.label')}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>{t(kanbanTools ? 'insights.kanbanTools.on' : 'insights.kanbanTools.off')}</TooltipContent>
+    </Tooltip>
+  );
 
   const modelSelector = (
     <InsightsModelSelector
@@ -419,7 +375,7 @@ export function Insights({ projectId }: InsightsProps) {
             disabled={isLoading || !canAddMore}
             aria-label={t('insights.attachments.add')}
           >
-            <Plus className="h-4 w-4" />
+            <Paperclip className="h-4 w-4" />
           </button>
         </TooltipTrigger>
         <TooltipContent>{t('insights.attachments.add')}</TooltipContent>
@@ -431,7 +387,7 @@ export function Insights({ projectId }: InsightsProps) {
     <div className="space-y-2">
       <div
         className={cn(
-          'relative rounded-(--radius-composer) bg-card',
+          'relative rounded-(--radius-composer) bg-background',
           'shadow-[0_4px_20px_rgba(0,0,0,0.075),0_0_0_1px_var(--input)]',
           'transition-shadow duration-150 focus-within:shadow-[0_4px_20px_rgba(0,0,0,0.1),0_0_0_1px_var(--input)]'
         )}
@@ -488,28 +444,31 @@ export function Insights({ projectId }: InsightsProps) {
           className={cn(
             'block max-h-96 w-full resize-none overflow-y-auto border-0 bg-transparent',
             isEmpty ? 'min-h-[3rem] px-4 pt-4 pb-1' : 'min-h-[3rem] py-3 pl-4 pr-12',
-            'text-[0.9375rem] leading-relaxed text-foreground placeholder:text-muted-foreground',
+            'text-[0.9375rem] leading-relaxed text-foreground placeholder:text-(--field-placeholder)',
             'focus:outline-none focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60'
           )}
           disabled={isLoading}
         />
 
         {isEmpty ? (
-          /* Toolbar (new chat): attach on the left, send on the right */
+          /* Toolbar (new chat): attach on the left; the model and send on the right */
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
-            <div className="flex items-center gap-0.5">{attachButton}</div>
-            {/* Send button only appears once there is something to send */}
-            {canSend && (
-              <button
-                type="button"
-                onClick={handleSend}
-                className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90"
-                aria-label={t('insights.send')}
-                title={t('insights.send')}
-              >
-                <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
-              </button>
-            )}
+            <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              {modelSelector}
+              {/* Send button only appears once there is something to send */}
+              {canSend && (
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90"
+                  aria-label={t('insights.send')}
+                  title={t('insights.send')}
+                >
+                  <ArrowUp className="h-4 w-4" strokeWidth={2.25} />
+                </button>
+              )}
+            </div>
           </div>
         ) : (
           /* Reply: send sits inside the single-line field, always visible (disabled until there is something to send) */
@@ -555,8 +514,6 @@ export function Insights({ projectId }: InsightsProps) {
           onDeleteSession={handleDeleteSession}
           onRenameSession={handleRenameSession}
           onUnarchiveSession={handleUnarchiveSession}
-          onDeleteSessions={handleDeleteSessions}
-          onArchiveSessions={handleArchiveSessions}
           showArchived={showArchived}
           onToggleShowArchived={handleToggleShowArchived}
         />
@@ -614,11 +571,6 @@ export function Insights({ projectId }: InsightsProps) {
 
               {composer}
 
-              {/* Meta row */}
-              <div className="mt-2 flex items-center justify-end text-sm">
-                {modelSelector}
-              </div>
-
               {errorBanner && <div className="mt-6">{errorBanner}</div>}
             </div>
           </div>
@@ -631,7 +583,6 @@ export function Insights({ projectId }: InsightsProps) {
                   <MessageBubble
                     key={message.id}
                     message={message}
-                    markdownComponents={markdownComponents}
                     onCreateTask={handleCreateTask}
                     creatingTask={creatingTask}
                     taskCreated={taskCreated}
@@ -643,11 +594,7 @@ export function Insights({ projectId }: InsightsProps) {
                 {(streamingContent || currentTool) && (
                   <div className="space-y-2">
                     {streamingContent && (
-                      <div className="prose prose-sm dark:prose-invert max-w-none text-[0.9375rem] leading-relaxed text-foreground">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                          {streamingContent}
-                        </ReactMarkdown>
-                      </div>
+                      <MarkdownContent>{streamingContent}</MarkdownContent>
                     )}
                     {/* Tool usage indicator */}
                     {currentTool && (
@@ -676,7 +623,7 @@ export function Insights({ projectId }: InsightsProps) {
                 {composer}
                 {/* Under the field: attach, disclaimer, model */}
                 <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                  <div className="flex items-center gap-0.5">{attachButton}</div>
+                  <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
                   <span className="truncate text-xs text-muted-foreground">{t('insights.disclaimer')}</span>
                   <div className="flex justify-end">{modelSelector}</div>
                 </div>
@@ -719,7 +666,6 @@ function SparkMark({ className, animate }: SparkMarkProps) {
 
 interface MessageBubbleProps {
   message: InsightsChatMessage;
-  markdownComponents: Components;
   onCreateTask: (messageId: string, taskIndex: number, taskData: { title: string; description: string; metadata?: TaskMetadata }) => void;
   creatingTask: Set<string>;
   taskCreated: Set<string>;
@@ -728,7 +674,6 @@ interface MessageBubbleProps {
 
 function MessageBubble({
   message,
-  markdownComponents,
   onPreviewImage,
   onCreateTask,
   creatingTask,
@@ -783,17 +728,15 @@ function MessageBubble({
   return (
     <div className="space-y-3">
       {message.content && (
-        <div className="prose prose-sm dark:prose-invert max-w-none text-[0.9375rem] leading-relaxed text-foreground">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-            {message.content}
-          </ReactMarkdown>
-        </div>
+        <MarkdownContent>{message.content}</MarkdownContent>
       )}
 
-      {/* Tool usage history for assistant messages */}
-      {message.toolsUsed && message.toolsUsed.length > 0 && (
-        <ToolUsageHistory tools={message.toolsUsed} />
-      )}
+      {/* A button that copies the reply's markdown, then the tools used */}
+      {message.toolsUsed && message.toolsUsed.length > 0 ? (
+        <ToolUsageHistory tools={message.toolsUsed} actions={message.content ? <CopyMessageButton text={message.content} /> : undefined} />
+      ) : message.content ? (
+        <CopyMessageButton text={message.content} />
+      ) : null}
 
       {/* Task suggestion cards */}
       {message.suggestedTasks && message.suggestedTasks.length > 0 && (
@@ -804,7 +747,7 @@ function MessageBubble({
             const isCreated = taskCreated.has(taskKey);
 
             return (
-              <div key={taskKey} className="rounded-xl border border-border bg-card p-4">
+              <div key={taskKey} className="rounded-xl border border-border bg-background p-4">
                 <div className="mb-1.5 text-xs font-medium text-muted-foreground">
                   {t('insights.suggestedTask')}
                 </div>
@@ -814,34 +757,6 @@ function MessageBubble({
                 <p className="mb-3 text-sm text-muted-foreground">
                   {task.description}
                 </p>
-                {task.metadata && (task.metadata.category || task.metadata.complexity) && (
-                  <div className="mb-3 flex flex-wrap gap-2">
-                    {task.metadata.category && (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'text-xs',
-                          TASK_CATEGORY_COLORS[task.metadata.category]
-                        )}
-                      >
-                        {TASK_CATEGORY_LABELS[task.metadata.category] ||
-                          task.metadata.category}
-                      </Badge>
-                    )}
-                    {task.metadata.complexity && (
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          'text-xs',
-                          TASK_COMPLEXITY_COLORS[task.metadata.complexity]
-                        )}
-                      >
-                        {TASK_COMPLEXITY_LABELS[task.metadata.complexity] ||
-                          task.metadata.complexity}
-                      </Badge>
-                    )}
-                  </div>
-                )}
                 <Button
                   size="sm"
                   variant={isCreated ? 'outline' : 'default'}
@@ -874,7 +789,15 @@ function MessageBubble({
   );
 }
 
+/** Auto Claude's task tools (MCP server "auto-claude") as Claude Code names them */
+const TASK_TOOL_PREFIX = 'mcp__auto-claude__';
+
+/** The task tool's own name (create_task, move_task, ...), or null for other tools */
+const taskToolName = (toolName: string): string | null =>
+  toolName.startsWith(TASK_TOOL_PREFIX) ? toolName.slice(TASK_TOOL_PREFIX.length) : null;
+
 const getToolIcon = (toolName: string) => {
+  if (taskToolName(toolName)) return KanbanIcon;
   switch (toolName) {
     case 'Read':
       return FileText;
@@ -883,11 +806,11 @@ const getToolIcon = (toolName: string) => {
     case 'Grep':
       return Search;
     case 'CodebaseGraph':
-      return Network;
+      return GraphIcon;
     case 'Bash':
-      return SquareTerminal;
+      return Terminal;
     default:
-      return FileText;
+      return Wrench;
   }
 };
 
@@ -898,42 +821,62 @@ interface ToolUsageHistoryProps {
     input?: string;
     timestamp: Date;
   }>;
+  /** Shown before the toggle (e.g., the copy button) */
+  actions?: React.ReactNode;
 }
 
-function ToolUsageHistory({ tools }: ToolUsageHistoryProps) {
+// How long the copy button shows that the reply was copied
+const COPIED_RESET_MS = 1500;
+
+/** Copies an assistant reply's original markdown */
+function CopyMessageButton({ text }: { text: string }) {
+  const { t } = useTranslation('common');
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), COPIED_RESET_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  const label = copied ? t('insights.copied') : t('insights.copyResponse');
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => setCopied(true), (err) => {
+          console.error('Failed to copy the reply:', err);
+        });
+      }}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
+      aria-label={label}
+      title={label}
+    >
+      {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
   const { t } = useTranslation('common');
   const [expanded, setExpanded] = useState(false);
 
   if (tools.length === 0) return null;
 
-  // Group tools by name for summary
-  const toolCounts = tools.reduce((acc, tool) => {
-    acc[tool.name] = (acc[tool.name] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
   return (
     <div>
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        aria-expanded={expanded}
-        className="inline-flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <span className="flex items-center gap-1.5">
-          {Object.entries(toolCounts).map(([name, count]) => {
-            const Icon = getToolIcon(name);
-            return (
-              <span key={name} className="flex items-center gap-0.5">
-                <Icon className="h-3 w-3" />
-                <span>{count}</span>
-              </span>
-            );
-          })}
-        </span>
-        <span>{t('insights.tools.toolsUsed', { count: tools.length })}</span>
-        <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
-      </button>
+      <div className="flex items-center gap-2">
+        {actions}
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          aria-expanded={expanded}
+          className="inline-flex items-center gap-2 rounded-md text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span>{t('insights.tools.toolsUsed', { count: tools.length })}</span>
+          <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
+        </button>
+      </div>
 
       {expanded && (
         <div className="mt-2 space-y-1 rounded-xl border border-border p-3">
@@ -945,7 +888,11 @@ function ToolUsageHistory({ tools }: ToolUsageHistoryProps) {
                 className="flex items-center gap-2 text-xs"
               >
                 <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="font-medium text-foreground">{tool.name}</span>
+                <span className="font-medium text-foreground">
+                  {taskToolName(tool.name)
+                    ? t(`insights.taskTools.${taskToolName(tool.name)}`, { defaultValue: taskToolName(tool.name) })
+                    : tool.name}
+                </span>
                 {tool.input && (
                   <span className="max-w-[250px] truncate text-muted-foreground">
                     {tool.input}
@@ -971,6 +918,8 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
 
   // Get friendly name and icon for each tool
   const getToolInfo = (toolName: string) => {
+    const taskTool = taskToolName(toolName);
+    if (taskTool) return { icon: KanbanIcon, label: t(`insights.taskTools.${taskTool}`, { defaultValue: taskTool }) };
     switch (toolName) {
       case 'Read':
         return { icon: FileText, label: t('insights.tools.readingFile') };
@@ -979,11 +928,11 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
       case 'Grep':
         return { icon: Search, label: t('insights.tools.searchingCode') };
       case 'CodebaseGraph':
-        return { icon: Network, label: t('insights.tools.searchingGraph') };
+        return { icon: GraphIcon, label: t('insights.tools.searchingGraph') };
       case 'Bash':
-        return { icon: SquareTerminal, label: t('insights.tools.runningCommand') };
+        return { icon: Terminal, label: t('insights.tools.runningCommand') };
       default:
-        return { icon: Loader2, label: toolName };
+        return { icon: Wrench, label: toolName };
     }
   };
 

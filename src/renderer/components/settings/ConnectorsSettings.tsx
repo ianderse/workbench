@@ -4,7 +4,7 @@
  * Tasks copy these defaults when created and can change them per task.
  */
 
-import { ListChecks, Loader2, Lock, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { Loader2, Lock, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Switch } from '../ui/switch';
@@ -211,17 +211,17 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
           {t('settings:mcp.serversEnabled', { count: enabledCount })} · {t('settings:mcp.defaultsHint')}
         </p>
         <SettingsRows>
-          {BUILTIN_CONNECTOR_META.map(({ id, icon, qaOnly }) => {
+          {BUILTIN_CONNECTOR_META.map(({ id, icon, defaultOff }) => {
             const key = BUILTIN_SETTING_KEY[id];
             // Context7 and Memory default on; browser automation defaults off
-            const checked = qaOnly ? connectors[key] === true : connectors[key] !== false;
+            const checked = defaultOff ? connectors[key] === true : connectors[key] !== false;
             const description = t(`settings:mcp.servers.${id}.description`);
             return (
               <ConnectorRow
                 key={id}
                 icon={icon}
                 name={t(`settings:mcp.servers.${id}.name`)}
-                description={qaOnly ? `${description} (${t('settings:mcp.qaAgentsOnly')})` : description}
+                description={description}
               >
                 <Switch
                   checked={checked}
@@ -231,13 +231,6 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
               </ConnectorRow>
             );
           })}
-          <ConnectorRow
-            icon={ListChecks}
-            name={t('settings:mcp.servers.autoClaude.name')}
-            description={`${t('settings:mcp.servers.autoClaude.description')} (${t('settings:mcp.alwaysEnabled')})`}
-          >
-            <Switch checked={true} disabled aria-label={t('settings:mcp.servers.autoClaude.name')} />
-          </ConnectorRow>
         </SettingsRows>
       </SettingsSection>
 

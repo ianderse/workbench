@@ -15,8 +15,6 @@ declare global {
   }
 }
 
-export type Platform = 'windows' | 'macos' | 'linux' | 'unknown';
-
 /**
  * Get the current platform string at runtime.
  * Uses navigator.userAgentData.platform if available (modern, non-deprecated),
@@ -24,7 +22,7 @@ export type Platform = 'windows' | 'macos' | 'linux' | 'unknown';
  *
  * @returns Platform string in lowercase
  */
-export function getPlatform(): string {
+function getPlatform(): string {
   // Prefer navigator.userAgentData.platform (modern, non-deprecated)
   if (navigator.userAgentData?.platform) {
     return navigator.userAgentData.platform.toLowerCase();
@@ -64,14 +62,3 @@ export function isLinux(): boolean {
   return platform.includes('linux');
 }
 
-/**
- * Get the current OS as a Platform enum.
- *
- * @returns Platform enum value
- */
-export function getOS(): Platform {
-  if (isWindows()) return 'windows';
-  if (isMacOS()) return 'macos';
-  if (isLinux()) return 'linux';
-  return 'unknown';
-}

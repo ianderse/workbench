@@ -4,8 +4,7 @@ import {
   RefreshCw,
   Download,
   ArrowDownToLine,
-  X,
-  AlertCircle
+  X
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -358,8 +357,7 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
 
                   {/* Update Error */}
                   {appUpdateError && (
-                    <p className="flex items-center gap-1.5 text-sm text-destructive">
-                      <AlertCircle className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                    <p className="text-sm text-destructive">
                       {appUpdateError}
                     </p>
                   )}

@@ -28,8 +28,6 @@ export function createHookProxy(
     get updateEnvConfig() { return hookRef.current.updateEnvConfig; },
     get showClaudeToken() { return hookRef.current.showClaudeToken; },
     get setShowClaudeToken() { return hookRef.current.setShowClaudeToken; },
-    get showOpenAIKey() { return hookRef.current.showOpenAIKey; },
-    get setShowOpenAIKey() { return hookRef.current.setShowOpenAIKey; },
     get expandedSections() { return hookRef.current.expandedSections; },
     get toggleSection() { return hookRef.current.toggleSection; },
     get handleInitialize() { return hookRef.current.handleInitialize; },

@@ -8,6 +8,7 @@ import { IPC_CHANNELS } from '../shared/constants';
 import { safeSendToRenderer } from './ipc-handlers/utils';
 import { getPlanPath, persistPlanStatusAndReasonSync } from './ipc-handlers/task/plan-file-utils';
 import { findTaskWorktree } from './worktree-paths';
+import { taskHooks } from './task-hooks';
 import { getSpecsDir, AUTO_BUILD_PATHS } from '../shared/constants';
 import { existsSync } from 'fs';
 import path from 'path';
@@ -21,7 +22,7 @@ interface TaskContextEntry {
 
 const TERMINAL_EVENTS = new Set<string>([
   'QA_PASSED',
-  'PLANNING_COMPLETE',
+  'QA_FAILED',
   'PLANNING_FAILED',
   'CODING_FAILED',
   'QA_MAX_ITERATIONS',
@@ -38,6 +39,7 @@ export class TaskStateManager {
   private terminalEventSeen = new Set<string>();
   private getMainWindow: (() => BrowserWindow | null) | null = null;
   private onTaskCompleted: ((taskId: string, project: Project) => void) | null = null;
+  private onStatusChange: ((taskId: string, status: TaskStatus, projectId?: string) => void) | null = null;
 
   configure(getMainWindow: () => BrowserWindow | null): void {
     this.getMainWindow = getMainWindow;
@@ -49,6 +51,14 @@ export class TaskStateManager {
    */
   setTaskCompletedListener(listener: (taskId: string, project: Project) => void): void {
     this.onTaskCompleted = listener;
+  }
+
+  /**
+   * Called after every status the machine emits (persisted first), e.g. so the task
+   * queue can fill a slot freed by a task leaving In Progress
+   */
+  setStatusChangeListener(listener: ((taskId: string, status: TaskStatus, projectId?: string) => void) | null): void {
+    this.onStatusChange = listener;
   }
 
   handleTaskEvent(taskId: string, event: TaskEventPayload, task: Task, project: Project): boolean {
@@ -88,9 +98,7 @@ export class TaskStateManager {
       return;
     }
     const actor = this.getOrCreateActor(taskId);
-    // Only mark as unexpected if the process exited with a non-zero code.
-    // A code-0 exit is normal (e.g., spec creation finished, plan created, waiting for review).
-    // Sending unexpected:true for code-0 exits incorrectly transitions plan_review → error.
+    // Only mark as unexpected if the run ended with a non-zero code
     const isUnexpected = exitCode !== 0;
     actor.send({
       type: 'PROCESS_EXITED',
@@ -126,17 +134,12 @@ export class TaskStateManager {
       case 'in_progress': {
         // Use XState as source of truth for determining correct event
         const currentState = this.getCurrentState(taskId);
-        if (currentState === 'plan_review') {
-          this.handleUiEvent(taskId, { type: 'PLAN_APPROVED' }, task, project);
-        } else if (currentState === 'queued' || (!currentState && task.status === 'queue' && task.rateLimitHold)) {
-          // Rate-limit hold released: restart via planning; the build orchestrator
-          // skips straight to coding/QA when a plan already exists.
+        if (currentState === 'queued' || (!currentState && task.status === 'queue' && task.rateLimitHold)) {
+          // Rate-limit hold released: restart via planning; the Claude Code run continues
+          // from its saved state (triage/plan/implementation aren't repeated)
           this.handleUiEvent(taskId, { type: 'PLANNING_STARTED' }, task, project);
         } else if (currentState === 'human_review' || currentState === 'error') {
           this.handleUiEvent(taskId, { type: 'USER_RESUMED' }, task, project);
-        } else if (!currentState && task.reviewReason === 'plan_review') {
-          // Fallback: No actor exists (e.g., after app restart), use task data
-          this.handleUiEvent(taskId, { type: 'PLAN_APPROVED' }, task, project);
         } else if (
           currentState === 'backlog' ||
           (!currentState && (task.status === 'backlog' || (task.status === 'queue' && !task.rateLimitHold)))
@@ -149,12 +152,14 @@ export class TaskStateManager {
         return true;
       }
       case 'backlog':
-        this.handleUiEvent(taskId, { type: 'USER_STOPPED', hasPlan: false }, task, project);
+        // Back to Planning from any column it may be moved from (Queue, AI Review, Human Review)
+        this.handleUiEvent(taskId, { type: 'MOVED_TO_BACKLOG' }, task, project);
         return true;
       case 'human_review':
         // Already in human_review (e.g., stage-only merge keeps task in review).
         // Emit status directly since there's no XState transition needed.
         this.emitStatus(taskId, 'human_review', task.reviewReason ?? 'completed', project.id);
+        taskHooks.emit('state', { project, task, status: 'human_review', state: 'human_review' });
         return true;
       default:
         return false;
@@ -179,14 +184,6 @@ export class TaskStateManager {
       return undefined;
     }
     return String(actor.getSnapshot().value);
-  }
-
-  /**
-   * Check if the task is currently in plan_review state.
-   * Used by TASK_START to determine correct event to send.
-   */
-  isInPlanReview(taskId: string): boolean {
-    return this.getCurrentState(taskId) === 'plan_review';
   }
 
   /**
@@ -304,6 +301,7 @@ export class TaskStateManager {
 
       this.persistStatus(task, project, status, reviewReason, stateValue, executionPhase);
       this.emitStatus(taskId, status, reviewReason, project.id);
+      taskHooks.emit('state', { project, task, status, state: stateValue });
 
       // Only transitions seen while the app runs (not tasks restored in that state)
       const completed = (stateValue === 'human_review' && reviewReason === 'completed') || stateValue === 'done';
@@ -354,6 +352,11 @@ export class TaskStateManager {
     reviewReason: ReviewReason | undefined,
     projectId?: string
   ): void {
+    try {
+      this.onStatusChange?.(taskId, status, projectId);
+    } catch (error) {
+      console.warn(`[TaskStateManager] Status change listener failed for ${taskId}:`, error);
+    }
     if (!this.getMainWindow) {
       console.warn(`[TaskStateManager] emitStatus: No main window, cannot emit status ${status} for ${taskId}`);
       return;
@@ -403,7 +406,7 @@ export class TaskStateManager {
         stateValue = 'qa_review';
         break;
       case 'human_review':
-        stateValue = reviewReason === 'plan_review' ? 'plan_review' : 'human_review';
+        stateValue = 'human_review';
         contextReviewReason = reviewReason;
         break;
       case 'pr_created':

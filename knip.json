@@ -1,0 +1,46 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/renderer/components/memory/graph-layout.worker.ts!",
+    ".github/scripts/*.{js,cjs,mjs}"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx}!",
+    ".github/scripts/**/*.{js,cjs,mjs}"
+  ],
+  "ignore": [
+    "src/__tests__/setup.ts"
+  ],
+  "ignoreDependencies": [
+    "@tailwindcss/typography",
+    "tailwindcss"
+  ],
+  "ignoreBinaries": [
+    "electron",
+    "icacls",
+    "osascript",
+    "kitty",
+    "wezterm",
+    "gnome-terminal",
+    "konsole",
+    "xfce4-terminal",
+    "lxterminal",
+    "mate-terminal",
+    "tilix",
+    "terminator",
+    "guake",
+    "yakuake",
+    "alacritty",
+    "hyper",
+    "tabby",
+    "xterm",
+    "urxvt",
+    "st",
+    "foot",
+    "start"
+  ],
+  "ignoreExportsUsedInFile": true,
+  "tags": [
+    "-internal"
+  ]
+}

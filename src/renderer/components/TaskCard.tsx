@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical } from 'lucide-react';
+import { AlertCircle, Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import {
@@ -12,25 +12,18 @@ import {
   DropdownMenuTrigger,
 } from './ui/dropdown-menu';
 import { cn, formatRelativeTime, sanitizeMarkdownForDisplay } from '../lib/utils';
-import { PhaseProgressIndicator } from './PhaseProgressIndicator';
-import { StatusIndicator } from './settings/common/StatusIndicator';
 import {
-  EXECUTION_PHASE_LABELS,
-  TASK_STATUS_COLUMNS,
   TASK_STATUS_LABELS,
+  getAllowedTaskMoves,
   JSON_ERROR_PREFIX,
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
-import { stopTask, checkTaskRunning, recoverStuckTask, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue } from '../stores/task-store';
-import { useToast } from '../hooks/use-toast';
-import type { Task, ReviewReason, TaskStatus } from '../../shared/types';
-import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
-import { formatTime } from '../../shared/utils/format-date-time';
+import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask } from '../stores/task-store';
+import type { Task, TaskStatus } from '../../shared/types';
 
-// Catastrophic stuck detection interval (ms).
-// XState handles all normal process-exit transitions via PROCESS_EXITED events.
-// This is a last-resort safety net: if XState somehow fails to transition the task
-// out of in_progress after the process dies, flag it as stuck after 60 seconds.
+// Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
+// catches a task left In Progress or AI Review without a run (e.g. the app quit mid-run),
+// checked when the card mounts and then every 60 seconds.
 const STUCK_CHECK_INTERVAL_MS = 60_000;
 
 // Icon-only buttons, like the settings dialog's (muted icon, nav hover background)
@@ -65,16 +58,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.updatedAt === nextTask.updatedAt &&
     prevTask.reviewReason === nextTask.reviewReason &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
-    prevTask.executionProgress?.phaseProgress === nextTask.executionProgress?.phaseProgress &&
-    prevTask.subtasks.length === nextTask.subtasks.length &&
-    prevTask.metadata?.fastMode === nextTask.metadata?.fastMode &&
-    prevTask.metadata?.category === nextTask.metadata?.category &&
-    prevTask.metadata?.complexity === nextTask.metadata?.complexity &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
-    prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
-    prevTask.rateLimitHold?.resetAt === nextTask.rateLimitHold?.resetAt &&
-    // Check if any subtask statuses changed (compare all subtasks)
-    prevTask.subtasks.every((s, i) => s.status === nextTask.subtasks[i]?.status)
+    prevTask.metadata?.prUrl === nextTask.metadata?.prUrl
   );
 
   // Only log when actually re-rendering (reduces noise significantly)
@@ -98,31 +83,19 @@ export const TaskCard = memo(function TaskCard({
   onClick,
   onStatusChange
 }: TaskCardProps) {
-  const { t, i18n } = useTranslation(['tasks', 'errors']);
-  const { toast } = useToast();
+  const { t } = useTranslation(['tasks', 'errors']);
   const [isStuck, setIsStuck] = useState(false);
-  const [isRecovering, setIsRecovering] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
+  // Why starting or retrying from the card failed, shown under the description
+  const [actionError, setActionError] = useState<string | null>(null);
   const stuckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const isRunning = task.status === 'in_progress';
-  const executionPhase = task.executionProgress?.phase;
-  const hasActiveExecution = executionPhase && executionPhase !== 'idle' && executionPhase !== 'complete' && executionPhase !== 'failed';
+  // Validation (AI Review) also runs Claude Code, so it can be left stuck too (e.g. by an app quit)
+  const isActive = isRunning || task.status === 'ai_review';
 
   // Check if task is in human_review but has no completed subtasks (crashed/incomplete)
   const isIncomplete = isIncompleteHumanReview(task);
-
-  // Rate-limit hold: queued until the provider limit resets, then resumed automatically
-  const isOnHold = isTaskOnRateLimitHold(task);
-  const holdResumeLabel = useMemo(() => {
-    const resetAt = task.rateLimitHold?.resetAt;
-    if (!resetAt) return null;
-    const resetDate = new Date(resetAt);
-    if (Number.isNaN(resetDate.getTime())) return null;
-    const isToday = resetDate.toDateString() === new Date().toDateString();
-    return isToday
-      ? formatTime(resetDate)
-      : `${resetDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${formatTime(resetDate)}`;
-  }, [task.rateLimitHold?.resetAt]);
 
   // Memoize expensive computations to avoid running on every render
   // Truncate description for card display - full description shown in modal
@@ -153,10 +126,13 @@ export const TaskCard = memo(function TaskCard({
     [task.updatedAt]
   );
 
-  // Memoize status menu items to avoid recreating on every render
+  // Memoize status menu items to avoid recreating on every render.
+  // Lists only the columns the task may move to (same rule as drag and drop).
   const statusMenuItems = useMemo(() => {
     if (!onStatusChange) return null;
-    return TASK_STATUS_COLUMNS.filter(status => status !== task.status).map((status) => (
+    const allowedMoves = getAllowedTaskMoves(task.status);
+    if (allowedMoves.length === 0) return null;
+    return allowedMoves.map((status) => (
       <DropdownMenuItem
         key={status}
         onClick={() => onStatusChange(status)}
@@ -170,7 +146,7 @@ export const TaskCard = memo(function TaskCard({
   // XState handles all normal transitions via PROCESS_EXITED events.
   // This only fires if XState somehow fails to transition after 60s with no activity.
   useEffect(() => {
-    if (!isRunning) {
+    if (!isActive) {
       setIsStuck(false);
       if (stuckIntervalRef.current) {
         clearInterval(stuckIntervalRef.current);
@@ -179,14 +155,14 @@ export const TaskCard = memo(function TaskCard({
       return;
     }
 
-    stuckIntervalRef.current = setInterval(() => {
+    const checkStuck = () => {
       // If any activity (status, progress, logs) was recorded recently, task is alive
       if (hasRecentActivity(task.id)) {
         setIsStuck(false);
         return;
       }
 
-      // No activity for 60s — verify process is actually gone
+      // No recent activity: verify the process is actually gone
       checkTaskRunning(task.id).then((actuallyRunning) => {
         // Re-check activity in case something arrived while the IPC was in flight
         if (hasRecentActivity(task.id)) {
@@ -195,14 +171,17 @@ export const TaskCard = memo(function TaskCard({
           setIsStuck(!actuallyRunning);
         }
       });
-    }, STUCK_CHECK_INTERVAL_MS);
+    };
+    // Check right away (a run stopped by quitting the app is stuck as soon as the app starts)
+    checkStuck();
+    stuckIntervalRef.current = setInterval(checkStuck, STUCK_CHECK_INTERVAL_MS);
 
     return () => {
       if (stuckIntervalRef.current) {
         clearInterval(stuckIntervalRef.current);
       }
     };
-  }, [task.id, isRunning]);
+  }, [task.id, isActive]);
 
   const handleStartStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -211,28 +190,25 @@ export const TaskCard = memo(function TaskCard({
       // User should be able to force-stop a stuck task
       stopTask(task.id);
     } else {
+      // A queued task moves to the Queue column, so only a failure needs telling
       const result = await startTaskOrQueue(task.id);
-      if (!result.success) {
-        toast({
-          title: t('tasks:wizard.errors.startFailed'),
-          description: result.error,
-          variant: 'destructive',
-        });
-      } else if (result.action === 'queued') {
-        toast({ title: t('tasks:queue.movedToQueue') });
-      }
+      setActionError(result.success ? null : result.error || t('tasks:wizard.errors.startFailed'));
     }
   };
 
-  const handleRecover = async (e: React.MouseEvent) => {
+  // A stuck task (marked running without a run) starts over like Retry on a failed task:
+  // continuing its broken session could pick up where it went wrong
+  const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    setIsRecovering(true);
-    // Auto-restart the task after recovery (no need to click Start again)
-    const result = await recoverStuckTask(task.id, { autoRestart: true });
+    setIsRetrying(true);
+    const result = await retryTask(task.id);
+    setIsRetrying(false);
     if (result.success) {
       setIsStuck(false);
+      setActionError(null);
+    } else {
+      setActionError(result.error || t('wizard.errors.startFailed'));
     }
-    setIsRecovering(false);
   };
 
   const handleArchive = async (e: React.MouseEvent) => {
@@ -250,70 +226,11 @@ export const TaskCard = memo(function TaskCard({
     }
   };
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'in_progress':
-        return t('labels.running');
-      case 'ai_review':
-        return t('labels.aiReview');
-      case 'human_review':
-        return t('labels.needsReview');
-      case 'done':
-        return t('status.complete');
-      default:
-        return t('labels.pending');
-    }
-  };
-
-  const getReviewReasonLabel = (reason?: ReviewReason): { label: string; variant: 'success' | 'destructive' | 'warning' } | null => {
-    if (!reason) return null;
-    switch (reason) {
-      case 'completed':
-        return { label: t('reviewReason.completed'), variant: 'success' };
-      case 'errors':
-        return { label: t('reviewReason.hasErrors'), variant: 'destructive' };
-      case 'qa_rejected':
-        return { label: t('reviewReason.qaIssues'), variant: 'warning' };
-      case 'plan_review':
-        return { label: t('reviewReason.approvePlan'), variant: 'warning' };
-      case 'stopped':
-        return { label: t('reviewReason.stopped'), variant: 'warning' };
-      default:
-        return null;
-    }
-  };
-
-  // When executionPhase is 'complete', always show 'completed' badge regardless of reviewReason
-  // This ensures the user sees "Complete" when the task finished successfully
-  const effectiveReviewReason: ReviewReason | undefined =
-    executionPhase === 'complete' ? 'completed' : task.reviewReason;
-  const reviewReasonInfo = task.status === 'human_review' ? getReviewReasonLabel(effectiveReviewReason) : null;
-
   const isArchived = !!task.metadata?.archivedAt;
-
-  // The card's status line, most important first
-  const statusParts: { key: string; label: string; loading?: boolean; attention?: boolean; title?: string }[] = [];
-  if (isStuck) {
-    statusParts.push({ key: 'stuck', label: t('labels.needsRecovery'), attention: true });
-  } else if (isIncomplete) {
-    statusParts.push({ key: 'incomplete', label: t('labels.needsResume'), attention: true });
-  } else if (hasActiveExecution && executionPhase) {
-    statusParts.push({ key: 'phase', label: EXECUTION_PHASE_LABELS[executionPhase], loading: isRunning });
-  } else if (task.status !== 'done') {
-    statusParts.push({ key: 'status', label: getStatusLabel(task.status) });
-  }
-  if (reviewReasonInfo && !isStuck && !isIncomplete) {
-    statusParts.push({ key: 'review', label: reviewReasonInfo.label, attention: reviewReasonInfo.variant === 'destructive' });
-  }
-  if (isOnHold && holdResumeLabel) {
-    statusParts.push({
-      key: 'hold',
-      label: t('labels.onHoldUntil', { time: holdResumeLabel }),
-      title: task.rateLimitHold?.message || undefined,
-    });
-  }
-  if (isArchived) statusParts.push({ key: 'archived', label: t('status.archived') });
-  if (task.metadata?.fastMode) statusParts.push({ key: 'fast', label: t('metadata.fastMode') });
+  // Failed tasks show the usage badge's "sign in again" alert icon next to the title; stuck
+  // tasks show it in the color of their "Stuck" label
+  const hasErrors = taskHasErrors(task);
+  const alertClass = hasErrors ? 'text-red-500' : isStuck ? 'text-warning' : null;
 
   return (
     <Card
@@ -326,48 +243,33 @@ export const TaskCard = memo(function TaskCard({
       <CardContent className="p-4">
         <div>
           <div>
-            {/* Title - full width, no wrapper */}
-            <h3
-              className="font-medium text-sm text-foreground line-clamp-2 leading-snug"
-              title={displayTitle}
-            >
-              {displayTitle}
-            </h3>
+            {/* Title, with an alert icon at the right when the task failed */}
+            <div className="flex items-start gap-2">
+              <h3
+                className="min-w-0 flex-1 font-bold text-sm text-foreground line-clamp-2 leading-snug wrap-anywhere"
+                title={displayTitle}
+              >
+                {displayTitle}
+              </h3>
+              {alertClass && (
+                <AlertCircle
+                  className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', alertClass)}
+                  aria-label={hasErrors ? t('reviewReason.hasErrors') : t('detailHeader.stuck')}
+                />
+              )}
+            </div>
 
-        {/* Description - sanitized to handle markdown content (memoized) */}
+        {/* Description - sanitized to handle markdown content (memoized); long paths and URLs
+            wrap instead of widening the card past its column */}
         {sanitizedDescription && (
-          <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2">
+          <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2 wrap-anywhere">
             {sanitizedDescription}
           </p>
         )}
-
-        {/* Status line: muted text like the settings dialog, with a spinner while an agent runs */}
-        {statusParts.length > 0 && (
-          <div className="mt-3 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-(--nav-label-color)">
-            {statusParts.map((part, index) => (
-              <span key={part.key} className="inline-flex min-w-0 items-center gap-1.5" title={part.title}>
-                {index > 0 && <span aria-hidden="true">·</span>}
-                <StatusIndicator
-                  state={part.loading ? 'loading' : 'neutral'}
-                  tone={part.attention ? 'foreground' : 'muted'}
-                >
-                  {part.label}
-                </StatusIndicator>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Progress section - Phase-aware with animations */}
-        {(task.subtasks.length > 0 || hasActiveExecution || isRunning || isStuck) && (
-          <div className="mt-3">
-            <PhaseProgressIndicator
-              phase={executionPhase}
-              subtasks={task.subtasks}
-              isStuck={isStuck}
-              isRunning={isRunning}
-            />
-          </div>
+        {actionError && (
+          <p role="alert" className="mt-1.5 text-xs text-destructive line-clamp-2 wrap-anywhere">
+            {actionError}
+          </p>
         )}
 
         {/* Footer */}
@@ -381,12 +283,12 @@ export const TaskCard = memo(function TaskCard({
                 variant="ghost"
                 size="sm"
                 className={ICON_BUTTON_CLASS}
-                onClick={handleRecover}
-                disabled={isRecovering}
-                title={isRecovering ? t('labels.recovering') : t('actions.recover')}
-                aria-label={isRecovering ? t('labels.recovering') : t('actions.recover')}
+                onClick={handleRetry}
+                disabled={isRetrying}
+                title={t('actions.retry')}
+                aria-label={t('actions.retry')}
               >
-                {isRecovering
+                {isRetrying
                   ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
                   : <RotateCcw className="h-4 w-4" strokeWidth={1.75} />}
               </Button>
@@ -428,18 +330,17 @@ export const TaskCard = memo(function TaskCard({
                   </Button>
                 )}
               </div>
-            ) : (task.status === 'backlog' || task.status === 'in_progress') && (
+            ) : isRunning && (
+              /* Tasks start from the task dialog; a running task can be stopped from its card */
               <Button
                 variant="ghost"
                 size="sm"
                 className={ICON_BUTTON_CLASS}
                 onClick={handleStartStop}
-                title={isRunning ? t('actions.stop') : t('actions.start')}
-                aria-label={isRunning ? t('actions.stop') : t('actions.start')}
+                title={t('actions.stop')}
+                aria-label={t('actions.stop')}
               >
-                {isRunning
-                  ? <Square className="h-4 w-4" strokeWidth={1.75} />
-                  : <Play className="h-4 w-4" strokeWidth={1.75} />}
+                <Square className="h-4 w-4" strokeWidth={1.75} />
               </Button>
             )}
 

@@ -3,7 +3,7 @@
  * Tests Zustand store for task state management
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { useTaskStore, hasRecentActivity, clearTaskActivity } from '../stores/task-store';
+import { useTaskStore } from '../stores/task-store';
 import type { Task, TaskStatus, ImplementationPlan } from '../../shared/types';
 
 // Helper to create test tasks
@@ -198,16 +198,16 @@ describe('Task Store', () => {
         tasks: [createTestTask({ id: 'task-1', status: 'in_progress' })]
       });
 
-      useTaskStore.getState().updateTaskStatus('task-1', 'human_review', 'plan_review');
+      useTaskStore.getState().updateTaskStatus('task-1', 'human_review', 'qa_rejected');
 
       const task = useTaskStore.getState().tasks[0];
       expect(task.status).toBe('human_review');
-      expect(task.reviewReason).toBe('plan_review');
+      expect(task.reviewReason).toBe('qa_rejected');
     });
 
     it('should clear reviewReason when not provided', () => {
       useTaskStore.setState({
-        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'plan_review' })]
+        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'stopped' })]
       });
 
       useTaskStore.getState().updateTaskStatus('task-1', 'in_progress');
@@ -219,7 +219,7 @@ describe('Task Store', () => {
 
     it('should update when only reviewReason changes', () => {
       useTaskStore.setState({
-        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'plan_review' })]
+        tasks: [createTestTask({ id: 'task-1', status: 'human_review', reviewReason: 'stopped' })]
       });
 
       useTaskStore.getState().updateTaskStatus('task-1', 'human_review', 'completed');
@@ -486,67 +486,6 @@ describe('Task Store', () => {
       const selected = useTaskStore.getState().getSelectedTask();
 
       expect(selected).toBeUndefined();
-    });
-  });
-
-  describe('activity recording for stuck detection', () => {
-    afterEach(() => {
-      // Clean up activity tracking between tests
-      clearTaskActivity('task-1');
-    });
-
-    it('should record activity when updateTaskStatus is called', () => {
-      useTaskStore.setState({
-        tasks: [createTestTask({ id: 'task-1', status: 'backlog' })]
-      });
-
-      // Clear any prior activity
-      clearTaskActivity('task-1');
-      expect(hasRecentActivity('task-1')).toBe(false);
-
-      // Status change should record activity
-      useTaskStore.getState().updateTaskStatus('task-1', 'in_progress');
-
-      expect(hasRecentActivity('task-1')).toBe(true);
-    });
-
-    it('should record activity when batchAppendLogs is called', () => {
-      useTaskStore.setState({
-        tasks: [createTestTask({ id: 'task-1', status: 'in_progress' })]
-      });
-
-      clearTaskActivity('task-1');
-      expect(hasRecentActivity('task-1')).toBe(false);
-
-      // Log append should record activity
-      useTaskStore.getState().batchAppendLogs('task-1', ['line 1', 'line 2']);
-
-      expect(hasRecentActivity('task-1')).toBe(true);
-    });
-
-    it('should record activity when updateExecutionProgress is called', () => {
-      useTaskStore.setState({
-        tasks: [createTestTask({ id: 'task-1', status: 'in_progress' })]
-      });
-
-      clearTaskActivity('task-1');
-      expect(hasRecentActivity('task-1')).toBe(false);
-
-      // Execution progress should record activity
-      useTaskStore.getState().updateExecutionProgress('task-1', { phase: 'coding', phaseProgress: 50 });
-
-      expect(hasRecentActivity('task-1')).toBe(true);
-    });
-
-    it('should not record activity for non-existent tasks in updateTaskStatus', () => {
-      useTaskStore.setState({ tasks: [] });
-
-      // Status change for missing task should still record activity
-      // (recordTaskActivity fires before the index check)
-      useTaskStore.getState().updateTaskStatus('nonexistent', 'in_progress');
-
-      expect(hasRecentActivity('nonexistent')).toBe(true);
-      clearTaskActivity('nonexistent');
     });
   });
 

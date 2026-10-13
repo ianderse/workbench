@@ -3,8 +3,6 @@ import { useEffect, useState } from 'react';
 import { Input } from '../ui/input';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
-import { ProviderAgentTabs } from './ProviderAgentTabs';
-import { DEFAULT_MAX_TERMINALS, MIN_TERMINALS, MAX_TERMINALS_LIMIT, DEFAULT_MAX_PARALLEL_TASKS, MIN_PARALLEL_TASKS, MAX_PARALLEL_TASKS_LIMIT } from '../../../shared/constants';
 import type {
   AppSettings,
   ToolDetectionResult
@@ -13,7 +11,8 @@ import type {
 interface GeneralSettingsProps {
   settings: AppSettings;
   onSettingsChange: (settings: AppSettings) => void;
-  section: 'agent' | 'paths';
+  /** Only the paths section is left on this component */
+  section: 'paths';
 }
 
 /**
@@ -60,9 +59,9 @@ function ToolDetectionDisplay({ info, isLoading, t }: ToolDetectionDisplayProps)
 }
 
 /**
- * General settings component for agent configuration and paths
+ * Paths settings (Developer page): CLI tool and framework paths
  */
-export function GeneralSettings({ settings, onSettingsChange, section }: GeneralSettingsProps) {
+export function GeneralSettings({ settings, onSettingsChange }: GeneralSettingsProps) {
   const { t } = useTranslation('settings');
   const [toolsInfo, setToolsInfo] = useState<{
     python: ToolDetectionResult;
@@ -73,84 +72,24 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
   } | null>(null);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
 
-  // Fetch CLI tools detection info when component mounts (paths section only)
+  // Detect the CLI tools once when the page opens
   useEffect(() => {
-    if (section === 'paths') {
-      setIsLoadingTools(true);
-      window.electronAPI
-        .getCliToolsInfo()
-        .then((result: { success: boolean; data?: { python: ToolDetectionResult; git: ToolDetectionResult; gh: ToolDetectionResult; glab: ToolDetectionResult; claude: ToolDetectionResult } }) => {
-          if (result.success && result.data) {
-            setToolsInfo(result.data);
-          }
-        })
-        .catch((error: unknown) => {
-          console.error('Failed to fetch CLI tools info:', error);
-        })
-        .finally(() => {
-          setIsLoadingTools(false);
-        });
-    }
-  }, [section]);
+    setIsLoadingTools(true);
+    window.electronAPI
+      .getCliToolsInfo()
+      .then((result: { success: boolean; data?: { python: ToolDetectionResult; git: ToolDetectionResult; gh: ToolDetectionResult; glab: ToolDetectionResult; claude: ToolDetectionResult } }) => {
+        if (result.success && result.data) {
+          setToolsInfo(result.data);
+        }
+      })
+      .catch((error: unknown) => {
+        console.error('Failed to fetch CLI tools info:', error);
+      })
+      .finally(() => {
+        setIsLoadingTools(false);
+      });
+  }, []);
 
-  if (section === 'agent') {
-    return (
-      <>
-        {/* Provider-tabbed agent settings (profiles, features, model overrides) */}
-        <ProviderAgentTabs />
-        {/* How many agent windows and parallel tasks a project can run */}
-        <SettingsSection title={t('general.limits')}>
-          <SettingsRows>
-            <SettingsRow
-              label={t('general.maxTerminals')}
-              description={t('general.maxTerminalsDescription', { min: MIN_TERMINALS, max: MAX_TERMINALS_LIMIT })}
-              htmlFor="maxTerminals"
-            >
-              <Input
-                id="maxTerminals"
-                type="number"
-                min={MIN_TERMINALS}
-                max={MAX_TERMINALS_LIMIT}
-                className="w-20"
-                value={settings.maxTerminals ?? DEFAULT_MAX_TERMINALS}
-                onChange={(e) => {
-                  const value = Number(e.target.value);
-                  if (e.target.value === '' || !Number.isFinite(value)) return;
-                  const clamped = Math.min(MAX_TERMINALS_LIMIT, Math.max(MIN_TERMINALS, Math.round(value)));
-                  onSettingsChange({ ...settings, maxTerminals: clamped });
-                }}
-              />
-            </SettingsRow>
-            <SettingsRow
-              label={t('settings:projectSections.queue.maxParallelTasks')}
-              description={t('settings:projectSections.queue.maxParallelTasksDescription', {
-                min: MIN_PARALLEL_TASKS,
-                max: MAX_PARALLEL_TASKS_LIMIT
-              })}
-              htmlFor="maxParallelTasks"
-            >
-              <Input
-                id="maxParallelTasks"
-                type="number"
-                min={MIN_PARALLEL_TASKS}
-                max={MAX_PARALLEL_TASKS_LIMIT}
-                className="w-20"
-                value={settings.maxParallelTasks ?? DEFAULT_MAX_PARALLEL_TASKS}
-                onChange={(e) => {
-                  const value = Number(e.target.value);
-                  if (e.target.value === '' || !Number.isFinite(value)) return;
-                  const clamped = Math.min(MAX_PARALLEL_TASKS_LIMIT, Math.max(MIN_PARALLEL_TASKS, Math.round(value)));
-                  onSettingsChange({ ...settings, maxParallelTasks: clamped });
-                }}
-              />
-            </SettingsRow>
-          </SettingsRows>
-        </SettingsSection>
-      </>
-    );
-  }
-
-  // paths section
   return (
     <SettingsSection
       title={t('general.paths')}
@@ -260,20 +199,6 @@ export function GeneralSettings({ settings, onSettingsChange, section }: General
             className="w-full"
             value={settings.claudePath || ''}
             onChange={(e) => onSettingsChange({ ...settings, claudePath: e.target.value })}
-          />
-        </SettingsRow>
-        <SettingsRow
-          label={t('general.autoClaudePath')}
-          description={t('general.autoClaudePathDescription')}
-          htmlFor="autoBuildPath"
-          stacked
-        >
-          <Input
-            id="autoBuildPath"
-            placeholder={t('general.autoClaudePathPlaceholder')}
-            className="w-full"
-            value={settings.autoBuildPath || ''}
-            onChange={(e) => onSettingsChange({ ...settings, autoBuildPath: e.target.value })}
           />
         </SettingsRow>
       </SettingsRows>

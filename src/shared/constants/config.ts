@@ -39,7 +39,6 @@ export const MAX_TERMINALS_LIMIT = 24;
 export const DEFAULT_APP_SETTINGS = {
   theme: 'dark' as const,
   colorTheme: 'default' as const,
-  defaultModel: 'opus',
   pythonPath: undefined as string | undefined,
   gitPath: undefined as string | undefined,
   githubCLIPath: undefined as string | undefined,
@@ -47,19 +46,18 @@ export const DEFAULT_APP_SETTINGS = {
   autoBuildPath: undefined as string | undefined,
   autoUpdateAutoBuild: true,
   maxTerminals: DEFAULT_MAX_TERMINALS,
-  onboardingCompleted: false,
   notifications: {
     onTaskComplete: true,
     onTaskFailed: true,
     onReviewNeeded: true,
     sound: false
   },
-  // Global API keys (used as defaults for all projects)
+  // API key for OpenAI memory embeddings (used as the default for all projects)
   globalOpenAIApiKey: undefined as string | undefined,
-  // Selected agent profile - defaults to 'auto' for per-phase optimized model selection
-  selectedAgentProfile: 'auto',
   // Interface font (bundled Anthropic Sans)
   interfaceFont: 'anthropic-sans' as const,
+  // Graph page colors: one muted color (Graphify's community colors with 'colorful')
+  graphStyle: 'plain' as const,
   // Log order setting for task detail view (default chronological - oldest first)
   logOrder: 'chronological' as const,
   // Beta updates opt-in (receive pre-release versions)
@@ -77,7 +75,6 @@ export const DEFAULT_APP_SETTINGS = {
 
 export const DEFAULT_PROJECT_SETTINGS = {
   model: 'opus',
-  memoryBackend: 'file' as const,
   notifications: {
     onTaskComplete: true,
     onTaskFailed: true,
@@ -92,25 +89,44 @@ export const DEFAULT_PROJECT_SETTINGS = {
 // Auto Build File Paths
 // ============================================
 
+/**
+ * Folders inside a project's .auto-claude data directory. Older versions used other names
+ * (LEGACY_DATA_DIR_NAMES); projects are migrated when the app starts or a project is added.
+ */
+export const DATA_DIR_NAMES = {
+  /** One folder per task (task_metadata.json, implementation_plan.json, claude_run.json, logs) */
+  tasks: 'tasks',
+  /** The project's Graphify knowledge graph */
+  knowledge: 'knowledge',
+  /** Claude page (Insights) chat sessions and attachments */
+  chats: 'chats',
+} as const;
+
+/** Names the data folders had before (tasks were "specs", knowledge "memory", chats "insights") */
+export const LEGACY_DATA_DIR_NAMES: Record<keyof typeof DATA_DIR_NAMES, string> = {
+  tasks: 'specs',
+  knowledge: 'memory',
+  chats: 'insights',
+};
+
 // File paths relative to project
 // IMPORTANT: All paths use .auto-claude/ (the installed instance), NOT auto-claude/ (source code)
 export const AUTO_BUILD_PATHS = {
-  SPECS_DIR: '.auto-claude/specs',
+  SPECS_DIR: `.auto-claude/${DATA_DIR_NAMES.tasks}`,
   IMPLEMENTATION_PLAN: 'implementation_plan.json',
   SPEC_FILE: 'spec.md',
   QA_REPORT: 'qa_report.md',
   BUILD_PROGRESS: 'build-progress.txt',
   CONTEXT: 'context.json',
   REQUIREMENTS: 'requirements.json',
-  PROJECT_INDEX: '.auto-claude/project_index.json',
-  MEMORY_STATE: '.memory_state.json'
+  PROJECT_INDEX: '.auto-claude/project_index.json'
 } as const;
 
 /**
- * Get the specs directory path.
- * All specs go to .auto-claude/specs/ (the project's data directory).
+ * Get the tasks directory path (relative to the project): one folder per task in
+ * .auto-claude/tasks/ (the project's data directory).
  */
 export function getSpecsDir(autoBuildPath: string | undefined): string {
   const basePath = autoBuildPath || '.auto-claude';
-  return `${basePath}/specs`;
+  return `${basePath}/${DATA_DIR_NAMES.tasks}`;
 }

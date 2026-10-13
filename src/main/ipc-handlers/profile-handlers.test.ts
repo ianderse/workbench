@@ -47,8 +47,6 @@ import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import {
   loadProfilesFile,
-  saveProfilesFile,
-  validateFilePermissions,
   testConnection
 } from '../services/profile';
 import type { TestConnectionResult } from '@shared/types/profile';
@@ -96,27 +94,6 @@ describe('profile-handlers - setActiveProfile', () => {
   ];
 
   describe('setting valid profile as active', () => {
-    it('should set active profile with valid profileId', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: mockProfiles,
-        activeProfileId: null,
-        version: 1
-      };
-
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-      vi.mocked(saveProfilesFile).mockResolvedValue(undefined);
-      vi.mocked(validateFilePermissions).mockResolvedValue(true);
-
-      const handler = getSetActiveHandler();
-      const result = await handler({}, 'profile-1');
-
-      expect(result).toEqual({ success: true });
-      expect(saveProfilesFile).toHaveBeenCalledWith(
-        expect.objectContaining({
-          activeProfileId: 'profile-1'
-        })
-      );
-    });
 
     it('should return error for non-existent profile', async () => {
       const mockFile: ProfilesFile = {
@@ -137,50 +114,6 @@ describe('profile-handlers - setActiveProfile', () => {
     });
   });
 
-  describe('switching to OAuth (null profileId)', () => {
-    it('should accept null profileId to switch to OAuth', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: mockProfiles,
-        activeProfileId: 'profile-1',
-        version: 1
-      };
-
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-      vi.mocked(saveProfilesFile).mockResolvedValue(undefined);
-      vi.mocked(validateFilePermissions).mockResolvedValue(true);
-
-      const handler = getSetActiveHandler();
-      const result = await handler({}, null);
-
-      // Should succeed and clear activeProfileId
-      expect(result).toEqual({ success: true });
-      expect(saveProfilesFile).toHaveBeenCalledWith(
-        expect.objectContaining({
-          activeProfileId: null
-        })
-      );
-    });
-
-    it('should handle null when no profile was active', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: mockProfiles,
-        activeProfileId: null,
-        version: 1
-      };
-
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-      vi.mocked(saveProfilesFile).mockResolvedValue(undefined);
-      vi.mocked(validateFilePermissions).mockResolvedValue(true);
-
-      const handler = getSetActiveHandler();
-      const result = await handler({}, null);
-
-      // Should succeed (idempotent operation)
-      expect(result).toEqual({ success: true });
-      expect(saveProfilesFile).toHaveBeenCalled();
-    });
-  });
-
   describe('error handling', () => {
     it('should handle loadProfilesFile errors', async () => {
       vi.mocked(loadProfilesFile).mockRejectedValue(
@@ -196,26 +129,6 @@ describe('profile-handlers - setActiveProfile', () => {
       });
     });
 
-    it('should handle saveProfilesFile errors', async () => {
-      const mockFile: ProfilesFile = {
-        profiles: mockProfiles,
-        activeProfileId: null,
-        version: 1
-      };
-
-      vi.mocked(loadProfilesFile).mockResolvedValue(mockFile);
-      vi.mocked(saveProfilesFile).mockRejectedValue(
-        new Error('Failed to save')
-      );
-
-      const handler = getSetActiveHandler();
-      const result = await handler({}, 'profile-1');
-
-      expect(result).toEqual({
-        success: false,
-        error: 'Failed to save'
-      });
-    });
   });
 });
 

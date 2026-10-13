@@ -1,4 +1,4 @@
-import { ipcMain, app } from "electron";
+import { ipcMain } from "electron";
 import type { BrowserWindow } from "electron";
 import path from "path";
 import { existsSync, readdirSync, mkdirSync, writeFileSync } from "fs";
@@ -19,19 +19,11 @@ import type {
 import { projectStore } from "../project-store";
 import { insightsService } from "../insights-service";
 import { safeSendToRenderer } from "./utils";
-import { getActiveProviderFeatureSettings } from "./feature-settings-helper";
 import type { ThinkingLevel } from "../../shared/types/settings";
 
-/**
- * Read insights feature settings using per-provider resolution
- */
+/** Default model for Insights turns (Claude Code model alias) */
 function getInsightsFeatureSettings(): InsightsModelConfig {
-  const { model, thinkingLevel } = getActiveProviderFeatureSettings('insights');
-  return {
-    profileId: "balanced",
-    model,
-    thinkingLevel: thinkingLevel as ThinkingLevel,
-  };
+  return { profileId: "balanced", model: "sonnet", thinkingLevel: "medium" as ThinkingLevel };
 }
 
 /**
@@ -424,6 +416,11 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
   // ============================================
 
   // Forward streaming chunks to renderer
+  // The chat's task tools changed tasks: the board reloads them
+  insightsService.on("tasks-changed", (projectId: string) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LIST_CHANGED, projectId);
+  });
+
   insightsService.on("stream-chunk", (projectId: string, chunk: unknown) => {
     safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_STREAM_CHUNK, projectId, chunk);
   });

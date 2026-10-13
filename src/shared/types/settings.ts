@@ -2,9 +2,8 @@
  * Application settings types
  */
 
-import type { NotificationSettings, MemoryEmbeddingProvider, CustomMcpServer } from './project';
-import type { ProviderAccount, BuiltinProvider } from './provider-account';
-import type { ProviderModelSpec } from '../constants/models';
+import type { NotificationSettings, CustomMcpServer } from './project';
+import type { ClaudeCodeTaskSettings } from './claude-code';
 
 // Color theme types for multi-theme support
 export type ColorTheme = 'default';
@@ -16,9 +15,9 @@ export type ColorTheme = 'default';
 export interface McpConnectorSettings {
   /** Context7 documentation lookup (default on) */
   context7Enabled?: boolean;
-  /** Electron automation, QA agents only (default off) */
+  /** Electron automation (default off) */
   electronEnabled?: boolean;
-  /** Puppeteer browser automation, QA agents only (default off) */
+  /** Puppeteer browser automation (default off) */
   puppeteerEnabled?: boolean;
   /** User-added servers; only ones that passed a connection test can be used */
   customServers?: CustomMcpServer[];
@@ -27,9 +26,12 @@ export interface McpConnectorSettings {
 /** Interface font choice (Appearance settings) */
 export type InterfaceFont = 'anthropic-sans' | 'system' | 'sans-serif' | 'inter';
 
+/** How the Graph page draws the memory graph: one muted color, or Graphify's community colors */
+export type GraphStyle = 'plain' | 'colorful';
+
 // Developer tools preferences - IDE and terminal selection
 // Comprehensive list based on Stack Overflow Developer Survey 2024, JetBrains Survey, and market research
-export type SupportedIDE =
+type SupportedIDE =
   // Microsoft/VS Code Ecosystem
   | 'vscode'           // Visual Studio Code (~73% market share)
   | 'visualstudio'     // Visual Studio (full IDE)
@@ -170,7 +172,7 @@ export type SupportedCLI =
   | 'codex'         // Codex CLI
   | 'custom';
 
-export interface ThemePreviewColors {
+interface ThemePreviewColors {
   bg: string;
   accent: string;
   darkBg: string;
@@ -184,26 +186,18 @@ export interface ColorThemeDefinition {
   previewColors: ThemePreviewColors;
 }
 
-// Thinking level for model (budget token allocation or reasoning effort)
+/** @deprecated removed with the Claude Code refactor (Claude Code takes an effort level instead) */
 export type ThinkingLevel = 'low' | 'medium' | 'high' | 'xhigh';
 
-// Model type shorthand
-export type ModelTypeShort = 'haiku' | 'sonnet' | 'opus' | 'opus-1m' | 'opus-4.5';
-
-/** Widened model type: Claude shorthands + any arbitrary model ID */
-export type ModelSelection = ModelTypeShort | (string & {});
-
-// Phase-based model configuration for Auto profile
-// Each phase can use a different model optimized for that task type
-// Values can be Claude shorthands ('opus', 'sonnet') or concrete model IDs ('gpt-5.3-codex', 'gemini-2.5-pro')
+/** @deprecated removed with the Claude Code refactor (tasks no longer have per-phase models) */
 export interface PhaseModelConfig {
-  spec: string;       // Spec creation (discovery, requirements, context)
-  planning: string;   // Implementation planning
-  coding: string;     // Actual coding implementation
-  qa: string;         // QA review and fixing
+  spec: string;
+  planning: string;
+  coding: string;
+  qa: string;
 }
 
-// Thinking level configuration per phase
+/** @deprecated removed with the Claude Code refactor (tasks no longer have per-phase thinking) */
 export interface PhaseThinkingConfig {
   spec: ThinkingLevel;
   planning: ThinkingLevel;
@@ -211,66 +205,21 @@ export interface PhaseThinkingConfig {
   qa: ThinkingLevel;
 }
 
-// Feature-specific model configuration (for non-pipeline features)
-// Values can be Claude shorthands or concrete model IDs
-export interface FeatureModelConfig {
-  insights: string;    // Insights chat feature
-  utility: string;      // Utility agents (commit message, merge resolver)
-  naming: string;       // AI naming (task titles, terminal names)
-}
-
-// Feature-specific thinking level configuration
-export interface FeatureThinkingConfig {
-  insights: ThinkingLevel;
-  utility: ThinkingLevel;
-  naming: ThinkingLevel;
-}
-
-// Agent profile for preset model/thinking configurations
-// All profiles have per-phase configuration (phaseModels/phaseThinking)
+/** @deprecated removed with the Claude Code refactor (agent profiles are gone; triage picks the model) */
 export interface AgentProfile {
   id: string;
   name: string;
   description: string;
-  model: string;                   // Primary model (shown in profile card) — shorthand or concrete ID
-  thinkingLevel: ThinkingLevel;    // Primary thinking level (shown in profile card)
-  icon?: string;                   // Lucide icon name
-  // Per-phase configuration - all profiles now have this
+  model: string;
+  thinkingLevel: ThinkingLevel;
+  icon?: string;
   phaseModels?: PhaseModelConfig;
   phaseThinking?: PhaseThinkingConfig;
-  /** @deprecated Use phaseModels and phaseThinking for per-phase configuration. Will be removed in v3.0. */
-  isAutoProfile?: boolean;
 }
-
-// Per-provider agent configuration
-export interface PerProviderAgentConfig {
-  selectedAgentProfile?: string;         // 'auto' | 'complex' | 'balanced' | 'quick'
-  customPhaseModels?: PhaseModelConfig;
-  customPhaseThinking?: PhaseThinkingConfig;
-  featureModels?: FeatureModelConfig;
-  featureThinking?: FeatureThinkingConfig;
-}
-
-// Cross-provider phase entry for Custom profile
-export interface MixedPhaseEntry {
-  provider: BuiltinProvider;
-  modelId: string;           // Model value from ALL_AVAILABLE_MODELS
-  thinkingLevel: ThinkingLevel;
-}
-
-// Pipeline phase key type (distinct from task.ts Phase interface which is for plan phases)
-export type PipelinePhase = 'spec' | 'planning' | 'coding' | 'qa';
-
-// Cross-provider phase config
-export type MixedPhaseConfig = Record<PipelinePhase, MixedPhaseEntry>;
-
-// Cross-provider feature config
-export type MixedFeatureConfig = Record<keyof FeatureModelConfig, MixedPhaseEntry>;
 
 export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   colorTheme?: ColorTheme;
-  defaultModel: string;
   pythonPath?: string;
   gitPath?: string;
   githubCLIPath?: string;
@@ -281,70 +230,20 @@ export interface AppSettings {
   // Maximum agent terminals per project (MIN_TERMINALS..MAX_TERMINALS_LIMIT)
   maxTerminals?: number;
   notifications: NotificationSettings;
-  // Global API keys (used as defaults for all projects)
-  globalOpenAIApiKey?: string;
-  globalAnthropicApiKey?: string;
-  globalGoogleApiKey?: string;
-  globalGroqApiKey?: string;
-  globalOpenRouterApiKey?: string;
-  globalMistralApiKey?: string;
-  globalXAIApiKey?: string;
-  globalAzureApiKey?: string;
-  globalAzureBaseUrl?: string;
-  globalBedrockRegion?: string;
-  // Unified provider accounts (multi-provider)
-  providerAccounts?: ProviderAccount[];
-  /** Global priority order — array of ProviderAccount IDs. First = highest priority. */
-  globalPriorityOrder?: string[];
-  /** Cross-provider priority order — array of ProviderAccount IDs for cross-provider mode. */
-  crossProviderPriorityOrder?: string[];
-  /** User overrides for model equivalence mapping per provider */
-  modelOverrides?: Record<string, Partial<Record<BuiltinProvider, ProviderModelSpec>>>;
-  _migratedProviderAccounts?: boolean;
-  ollamaBaseUrl?: string;
-  // Memory configuration (app-wide, set during onboarding)
-  memoryEnabled?: boolean;
-  memoryEmbeddingProvider?: MemoryEmbeddingProvider;
-  memoryOllamaEmbeddingModel?: string;
-  memoryOllamaEmbeddingDim?: number;
-  memoryVoyageApiKey?: string;
-  memoryVoyageEmbeddingModel?: string;
-  memoryAzureApiKey?: string;
-  memoryAzureBaseUrl?: string;
-  memoryAzureEmbeddingDeployment?: string;
-  memoryGoogleApiKey?: string;
-  memoryOpenaiEmbeddingModel?: string;
-  memoryGoogleEmbeddingModel?: string;
-  // Onboarding wizard completion state
-  onboardingCompleted?: boolean;
-  // Selected agent profile for preset model/thinking configurations
-  selectedAgentProfile?: string;
-  // Custom phase configuration for Auto profile (overrides defaults)
-  customPhaseModels?: PhaseModelConfig;
-  customPhaseThinking?: PhaseThinkingConfig;
-  // Feature-specific configuration (insights, PR/MR review, utility, naming)
-  featureModels?: FeatureModelConfig;
-  featureThinking?: FeatureThinkingConfig;
   // Interface font (default Anthropic Sans)
   interfaceFont?: InterfaceFont;
-  // Maximum tasks in progress at once per project; others wait in the Queue (Settings > Terminal)
+  // Graph page colors (Settings > General > Appearance; default plain)
+  graphStyle?: GraphStyle;
+  // Maximum tasks in progress at once per project; others wait in the Queue (Settings > Claude Code)
   maxParallelTasks?: number;
   // MCP connector defaults for new tasks (Settings > Connectors)
   mcpConnectors?: McpConnectorSettings;
+  // How tasks run in Claude Code: triage, planning, validation, budget (Settings > Claude Code)
+  claudeCodeTasks?: Partial<ClaudeCodeTaskSettings>;
   // Log order setting for task detail view
   logOrder?: 'chronological' | 'reverse-chronological';
   // Beta updates opt-in (receive pre-release updates)
   betaUpdates?: boolean;
-  // Per-provider agent configuration
-  providerAgentConfig?: Partial<Record<BuiltinProvider, PerProviderAgentConfig>>;
-  customMixedProfileActive?: boolean;
-  customMixedPhaseConfig?: MixedPhaseConfig;
-  customMixedFeatureConfig?: MixedFeatureConfig;
-  // Migration flags (internal use)
-  _migratedAgentProfileToAuto?: boolean;
-  _migratedDefaultModelSync?: boolean;
-  _migratedUltrathinkToHigh?: boolean;
-  _migratedToPerProviderConfig?: boolean;
   // Developer tools preferences
   preferredIDE?: SupportedIDE;
   customIDEPath?: string;      // For 'custom' IDE

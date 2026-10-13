@@ -67,13 +67,6 @@ export function handleTerminalData(
 }
 
 /**
- * Clear busy state tracking for a terminal (call on terminal destruction)
- */
-export function clearBusyState(terminalId: string): void {
-  lastBusyState.delete(terminalId);
-}
-
-/**
  * Create event handler callbacks from TerminalManager context
  */
 export function createEventCallbacks(
