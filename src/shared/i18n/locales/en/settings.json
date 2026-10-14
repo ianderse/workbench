@@ -546,7 +546,12 @@
     },
     "agentWindows": {
       "skipPermissions": "Skip permission prompts",
-      "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions, so it runs commands and edits files without asking"
+      "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions, so it runs commands and edits files without asking",
+      "liveAgent": "Live agent",
+      "liveAgentDescription": "Agent windows of {{project}} show a live graph of the Claude Code session next to the terminal",
+      "liveAgentNoProject": "Select a project to show a live graph of its Claude Code sessions in its agent windows",
+      "liveAgentFailed": "Live agent could not be changed: {{error}}",
+      "liveAgentHooksFailed": "The graph works from the session transcripts only. {{error}}"
     }
   },
   "claudeAccounts": {

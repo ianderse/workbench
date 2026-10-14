@@ -22,8 +22,9 @@ import { SortableTerminalWrapper } from './SortableTerminalWrapper';
 import { Button } from './ui/button';
 import { useTerminalStore } from '../stores/terminal-store';
 import { useTaskStore } from '../stores/task-store';
+import { useLiveAgentStore } from '../stores/live-agent-store';
 import { TERMINAL_DOM_UPDATE_DELAY_MS, PANEL_CLEANUP_GRACE_PERIOD_MS } from '../../shared/constants';
-import { computeTerminalGridLayout } from '../lib/terminal-grid-layout';
+import { computeTerminalGridLayout, computeWeightedTerminalLayout } from '../lib/terminal-grid-layout';
 
 interface TerminalGridProps {
   projectPath?: string;
@@ -236,6 +237,20 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
   // Near-square grid without empty cells: the newest row or column is shared by its windows
   const gridLayout = useMemo(() => computeTerminalGridLayout(terminals.length), [terminals.length]);
 
+  // Live agent (the project's setting): agent windows show their graph next to the terminal and take
+  // twice the width. Without any, the plain grid above is used as it is
+  const liveAgent = useLiveAgentStore((state) => (projectPath ? state.enabled[projectPath] === true : false));
+  useEffect(() => {
+    if (projectPath) void useLiveAgentStore.getState().load(projectPath);
+  }, [projectPath]);
+  const weightKey = terminals
+    .map((terminal) => (liveAgent && terminal.isCLIMode && (terminal.cwd || projectPath) ? 2 : 1))
+    .join(',');
+  const weightedBoxes = useMemo(
+    () => (weightKey.includes('2') ? computeWeightedTerminalLayout(weightKey.split(',').map(Number)) : null),
+    [weightKey]
+  );
+
   // Terminal IDs for SortableContext
   const terminalIds = useMemo(() => terminals.map(t => t.id), [terminals]);
 
@@ -353,9 +368,11 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
               // causing React to unmount → dispose xterm → blank screen.
               // With a flat grid, React just reorders siblings (no unmount needed).
               <SortableContext items={terminalIds} strategy={rectSortingStrategy}>
+                {/* With Live agent the same windows are placed as boxes (same elements, so switching
+                    never remounts a terminal) */}
                 <div
-                  className="h-full grid"
-                  style={{
+                  className="relative h-full grid"
+                  style={weightedBoxes ? undefined : {
                     gridTemplateColumns: `repeat(${gridLayout.columns}, 1fr)`,
                     gridTemplateRows: `repeat(${gridLayout.rows}, 1fr)`,
                   }}
@@ -364,7 +381,13 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
                     <div
                       key={terminal.id}
                       className="p-1 min-h-0 min-w-0"
-                      style={{
+                      style={weightedBoxes ? {
+                        position: 'absolute',
+                        left: `${weightedBoxes[index].x * 100}%`,
+                        top: `${weightedBoxes[index].y * 100}%`,
+                        width: `${weightedBoxes[index].width * 100}%`,
+                        height: `${weightedBoxes[index].height * 100}%`,
+                      } : {
                         gridRow: `${gridLayout.cells[index].row} / span ${gridLayout.cells[index].rowSpan}`,
                         gridColumn: `${gridLayout.cells[index].column} / span ${gridLayout.cells[index].columnSpan}`,
                       }}

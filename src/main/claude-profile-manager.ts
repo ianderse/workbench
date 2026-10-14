@@ -640,6 +640,13 @@ export class ClaudeProfileManager {
   }
 
   /**
+   * The profiles' Claude Code config dirs (as stored), without checking their credentials
+   */
+  getProfileConfigDirs(): string[] {
+    return this.data.profiles.flatMap(profile => (profile.configDir ? [profile.configDir] : []));
+  }
+
+  /**
    * Get a specific profile by ID
    */
   getProfile(profileId: string): ClaudeProfile | undefined {

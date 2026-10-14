@@ -48,7 +48,9 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     strategy:
-      fail-fast: false
+      # The first platform to fail cancels the others (its steps already stop at the first
+      # failing one), so a broken change doesn't keep the remaining runners busy
+      fail-fast: true
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
 

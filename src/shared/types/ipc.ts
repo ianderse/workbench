@@ -480,6 +480,15 @@ export interface ElectronAPI {
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyGraph | null>>;
   onGraphifyIndexUpdated: (callback: (projectId: string, info: import('./cli').GraphifyIndexInfo) => void) => () => void;
 
+  // Live agent (agent windows' agent-flow graph)
+  getLiveAgentStatus: () => Promise<IPCResult<import('./live-agent').LiveAgentStatus>>;
+  getLiveAgentProject: (projectPath: string) => Promise<IPCResult<boolean>>;
+  setLiveAgentProject: (projectPath: string, enabled: boolean) => Promise<IPCResult<{ hooksError?: string }>>;
+  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string) => Promise<IPCResult>;
+  unsubscribeLiveAgent: (clientId: string) => Promise<IPCResult>;
+  onLiveAgentStatus: (callback: (status: import('./live-agent').LiveAgentStatus) => void) => () => void;
+  onLiveAgentMessage: (callback: (clientId: string, data: string) => void) => () => void;
+
   // MCP Server health check operations
   checkMcpHealth: (server: CustomMcpServer) => Promise<IPCResult<McpHealthCheckResult>>;
   testMcpConnection: (server: CustomMcpServer) => Promise<IPCResult<McpTestConnectionResult>>;

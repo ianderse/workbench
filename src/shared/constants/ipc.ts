@@ -255,6 +255,15 @@ export const IPC_CHANNELS = {
   GRAPHIFY_GET_GRAPH: 'graphify:getGraph',
   GRAPHIFY_INDEX_UPDATED: 'graphify:indexUpdated', // main -> renderer: a project's graph was rebuilt
 
+  // Live agent (agent windows' agent-flow graph)
+  LIVE_AGENT_GET_STATUS: 'liveAgent:getStatus',
+  LIVE_AGENT_GET_PROJECT: 'liveAgent:getProject',
+  LIVE_AGENT_SET_PROJECT: 'liveAgent:setProject',
+  LIVE_AGENT_SUBSCRIBE: 'liveAgent:subscribe',
+  LIVE_AGENT_UNSUBSCRIBE: 'liveAgent:unsubscribe',
+  LIVE_AGENT_STATUS: 'liveAgent:status',   // main -> renderer: the relay started, stopped or failed
+  LIVE_AGENT_MESSAGE: 'liveAgent:message', // main -> renderer: a relay message for one graph
+
   // MCP Server health checks
   MCP_CHECK_HEALTH: 'mcp:checkHealth',           // Quick connectivity check
   MCP_TEST_CONNECTION: 'mcp:testConnection',     // Full MCP protocol test

@@ -16,6 +16,7 @@ import { resolveClaudeCodeTaskSettings } from '../claude-code/settings';
 import { isClaudeRunFinished, loadClaudeRunInfo, resetClaudeRunInfo } from '../claude-code/task-runner';
 import { detectClaudeLimitMessage } from '../claude-code/limit';
 import { createOrGetWorktree } from '../worktree';
+import { addToWorktree } from '../live-agent/project-setup';
 import { readSettingsFile } from '../settings-utils';
 import { getGraphifyPromptContext } from '../graphify';
 import { getAugmentedEnvAsync } from '../env-utils';
@@ -333,6 +334,12 @@ export class AgentManager extends EventEmitter {
       );
       worktreePath = worktree.worktreePath;
       branch = worktree.branch;
+      // Live agent: the project's Claude Code hooks (settings.local.json isn't checked out)
+      try {
+        addToWorktree(project.path, worktreePath);
+      } catch (error) {
+        appLog.warn('[AgentManager] Could not copy the Live agent hooks to the worktree:', error);
+      }
     }
 
     const settings = (readSettingsFile() ?? {}) as Partial<AppSettings>;

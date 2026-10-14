@@ -135,6 +135,15 @@ const browserMockAPI: ElectronAPI = {
   getGraphifyGraph: async () => ({ success: true, data: null }),
   onGraphifyIndexUpdated: () => () => {},
 
+  // Live agent (agent windows' agent-flow graph)
+  getLiveAgentStatus: async () => ({ success: true, data: { state: 'stopped' as const } }),
+  getLiveAgentProject: async () => ({ success: true, data: false }),
+  setLiveAgentProject: async () => ({ success: false, error: 'Not available in browser mode' }),
+  subscribeLiveAgent: async () => ({ success: true }),
+  unsubscribeLiveAgent: async () => ({ success: true }),
+  onLiveAgentStatus: () => () => {},
+  onLiveAgentMessage: () => () => {},
+
   checkClaudeCodeVersion: async () => ({
     success: true,
     data: {
