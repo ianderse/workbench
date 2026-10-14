@@ -16,6 +16,7 @@ describe('relay', () => {
   let workspace: string;
   let otherDir: string;
   let flowDir: string;
+  let transcript: string;
   let relay: Relay;
   const sent: Array<{ clientIds: string[]; message: { type: string; [key: string]: unknown } }> = [];
   /** Discovery files this relay wrote in the project's flow directory */
@@ -34,7 +35,8 @@ describe('relay', () => {
     const projectDir = path.join(claudeDir, 'projects', workspace.replace(/[^a-zA-Z0-9]/g, '-'));
     fs.mkdirSync(projectDir, { recursive: true });
     const line = { type: 'user', uuid: 'u1', cwd: workspace, message: { role: 'user', content: 'Hello' } };
-    fs.writeFileSync(path.join(projectDir, `${SESSION_ID}.jsonl`), JSON.stringify(line) + '\n');
+    transcript = path.join(projectDir, `${SESSION_ID}.jsonl`);
+    fs.writeFileSync(transcript, JSON.stringify(line) + '\n');
 
     relay = await createRelay({
       claudeDirs: [claudeDir],
@@ -97,6 +99,68 @@ describe('relay', () => {
     relay.subscribe('window-c', workspace, flowDir);
     const list = sent.find((entry) => entry.message.type === 'session-list');
     expect(list?.message.sessions).toEqual([expect.objectContaining({ id: SESSION_ID, owner: 'terminal-1' })]);
+  });
+
+  it('gives no node to a sub-agent handing its report back (SubagentHandback)', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    sent.length = 0;
+    const { port } = JSON.parse(fs.readFileSync(path.join(flowDir, discoveryFiles()[0]), 'utf-8'));
+    const preToolUse = (tool: string, id: string) => fetch(`http://127.0.0.1:${port}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: SESSION_ID, hook_event_name: 'PreToolUse', cwd: workspace, tool_name: tool, tool_use_id: id }),
+    });
+    await preToolUse('SubagentHandback', 'toolu_handback');
+    await preToolUse('Read', 'toolu_read');
+
+    const started = sent
+      .filter((entry) => entry.message.type === 'agent-event')
+      .map((entry) => entry.message.event as { type: string; payload: { tool?: string } })
+      .filter((event) => event.type === 'tool_call_start')
+      .map((event) => event.payload.tool);
+    expect(started).toEqual(['Read']);
+  });
+
+  /** Append transcript lines, have a hook read them, and return the agent events sent meanwhile */
+  async function appendAndRead(lines: object[]): Promise<string[]> {
+    fs.appendFileSync(transcript, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
+    sent.length = 0;
+    // A hook reads the transcript's new lines first
+    const { port } = JSON.parse(fs.readFileSync(path.join(flowDir, discoveryFiles()[0]), 'utf-8'));
+    await fetch(`http://127.0.0.1:${port}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: SESSION_ID, hook_event_name: 'Notification', notification_type: 'idle_prompt', cwd: workspace }),
+    });
+    return sent
+      .filter((entry) => entry.message.type === 'agent-event')
+      .map((entry) => (entry.message.event as { type: string }).type);
+  }
+
+  const reply = { type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'The sleeper finished.' }] } };
+  const turnEnd = { type: 'system', subtype: 'turn_duration' };
+  const notification = {
+    type: 'user', uuid: 'n1',
+    message: { role: 'user', content: '<task-notification>\n<task-id>task-1</task-id>\n<tool-use-id>toolu_x</tool-use-id>\n</task-notification>' },
+  };
+
+  it('keeps the main agent done when a handed-back sub-agent\'s notification arrives after its turn (2.1.300+)', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    // The sub-agent's report (SubagentHandback) starts a turn, which ends; the
+    // <task-notification> is written afterwards, and nothing answers it
+    const handback = {
+      type: 'user', uuid: 'p1', isMeta: true,
+      origin: { kind: 'peer', from: 'task-1', senderTaskId: 'task-1', handback: true },
+      message: { role: 'user', content: 'Another Claude session sent a message: slept 1s' },
+    };
+    expect(await appendAndRead([handback, reply, turnEnd, notification])).toEqual(['message', 'agent_complete']);
+  });
+
+  it('wakes the main agent for a task notification it answers (before 2.1.300)', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    await appendAndRead([reply, turnEnd]);
+    // The notification itself starts the turn in which the agent replies
+    expect(await appendAndRead([notification])).toEqual(['message']);
   });
 
   it('writes no discovery file for a project with Live agent off', () => {

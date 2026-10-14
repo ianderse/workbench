@@ -169,6 +169,10 @@ export interface WatchedSession {
   /** When a sub-agent file started since we attached was first seen before its
    *  launch line was read (Claude Code writes that late) */
   subagentFilesAwaitingLaunch: Map<string, number>
+  /** Background sub-agent tasks (by task id) whose report already reached their
+   *  caller through SubagentHandback (Claude Code 2.1.300+): their later
+   *  <task-notification> starts no turn (see TranscriptParser) */
+  handedBackTasks: Set<string>
   /** The sub-agent files present at attach have been scanned: any found later are live */
   attachScanDone: boolean
   /** Launch IDs that must not get a node (again): ones already given one, and

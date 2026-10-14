@@ -10,7 +10,7 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import { AgentEvent, SubagentLaunch, SubagentState, WatchedSession, spawnSubagentNode, subagentDedupFor } from './protocol'
-import { SESSION_ID_DISPLAY, SUBAGENT_META_WAIT_MS, SUBAGENT_LAUNCH_WAIT_MS, INACTIVITY_TIMEOUT_MS } from './constants'
+import { SESSION_ID_DISPLAY, SUBAGENT_META_WAIT_MS, SUBAGENT_LAUNCH_WAIT_MS, INACTIVITY_TIMEOUT_MS, HIDDEN_TOOLS } from './constants'
 import { readCompleteLines, readNewFileLines } from './fs-utils'
 import { TranscriptParser, isAsyncLaunch, taskNotificationLaunchId } from './transcript-parser'
 import { createLogger } from './logger'
@@ -205,7 +205,7 @@ function startWatchingSubagentFile(
   if (running) {
     spawnSubagentNode(delegate, session, agentName)
     for (const [id, call] of pending) {
-      if (call.name === 'Agent' || call.name === 'Task' || shown.has(id)) continue
+      if (call.name === 'Agent' || call.name === 'Task' || HIDDEN_TOOLS.has(call.name) || shown.has(id)) continue
       delegate.emit({
         time: delegate.elapsed(sessionId),
         type: 'tool_call_start',

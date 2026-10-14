@@ -62,3 +62,8 @@ export const HOOK_SERVER_HOST = '127.0.0.1'
 
 /** Default agent name for the main orchestrator */
 export const ORCHESTRATOR_NAME = 'orchestrator'
+
+/** Tool calls that get no node: a sub-agent's SubagentHandback (Claude Code
+ *  2.1.300+) only hands its report back to its caller as its last step, which
+ *  the graph already shows as the sub-agent completing */
+export const HIDDEN_TOOLS: ReadonlySet<string> = new Set(['SubagentHandback'])

@@ -16,7 +16,7 @@ import { createLogger } from './lib/logger'
 import { scanSubagentsDir, readSubagentNewLines, stopTailing } from './lib/subagent-watcher'
 import {
   INACTIVITY_TIMEOUT_MS, BUSY_INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
-  SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, WORKSPACE_HASH_LENGTH, MAX_EVENT_BUFFER,
+  SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, WORKSPACE_HASH_LENGTH, MAX_EVENT_BUFFER, HIDDEN_TOOLS,
 } from './lib/constants'
 
 const log = createLogger('Relay')
@@ -314,6 +314,7 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
     ignoredSubagentFiles: new Set(),
     subagentFilesAwaitingMeta: new Map(),
     subagentFilesAwaitingLaunch: new Map(),
+    handedBackTasks: new Set(),
     attachScanDone: false,
     spawnedSubagents: new Set(),
     subagentsDirWatcher: null,
@@ -331,7 +332,7 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
   // Tool calls already running when we attached get a node too (sub-agent
   // launches get theirs from the subagent watcher)
   for (const [id, call] of session.pendingToolCalls) {
-    if (session.launches.has(id)) continue
+    if (session.launches.has(id) || HIDDEN_TOOLS.has(call.name)) continue
     broadcastEvent({
       time: 0, type: 'tool_call_start',
       payload: { agent: ORCHESTRATOR_NAME, tool: call.name, id },

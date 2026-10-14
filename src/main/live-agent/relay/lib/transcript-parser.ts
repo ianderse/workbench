@@ -10,6 +10,7 @@ import {
 } from './protocol'
 import {
   HASH_PREFIX_MAX,
+  HIDDEN_TOOLS,
   ORCHESTRATOR_NAME,
 } from './constants'
 import { createLogger } from './logger'
@@ -135,6 +136,25 @@ function turnEffect(entry: Record<string, unknown>): 'end' | 'local' | 'activity
   return 'activity'
 }
 
+/**
+ * turnEffect, for an entry of this session. Claude Code 2.1.300+ delivers a
+ * background sub-agent's report as a peer message (its SubagentHandback call),
+ * which starts a turn, and writes the task's `<task-notification>` only after
+ * that turn has ended; nothing answers it, so it doesn't start one. Every other
+ * notification (all of them before 2.1.300) does, as the agent replies to it.
+ */
+function sessionTurnEffect(entry: Record<string, unknown>, session: WatchedSession): ReturnType<typeof turnEffect> {
+  if (entry.type === 'user' && isRecord(entry.origin) && entry.origin.handback === true
+      && typeof entry.origin.senderTaskId === 'string') {
+    session.handedBackTasks.add(entry.origin.senderTaskId)
+  }
+  const turn = turnEffect(entry)
+  if (turn !== 'activity' || entry.type !== 'user' || !isRecord(entry.message)) return turn
+  const text = userContentText(entry.message.content as TranscriptEntry['message']['content'])
+  const taskId = text.startsWith(TASK_NOTIFICATION_PREFIX) ? xmlTag(text, 'task-id') : undefined
+  return taskId && session.handedBackTasks.has(taskId) ? 'local' : turn
+}
+
 /** Whether a transcript line is the agent working (a message, a tool call or
  *  result), as opposed to bookkeeping such as titles, queue entries or local commands */
 export function isActivityLine(line: string): boolean {
@@ -184,7 +204,7 @@ export class TranscriptParser {
     const finishedLaunchId = taskNotificationLaunchId(parsed)
     if (finishedLaunchId) this.handleTaskNotification(finishedLaunchId, session)
 
-    const turn = turnEffect(parsed)
+    const turn = sessionTurnEffect(parsed, session)
     if (turn === 'end') {
       if (agentName === ORCHESTRATOR_NAME) this.endTurn(session)
       return
@@ -267,6 +287,7 @@ export class TranscriptParser {
   ): void {
     const sessionId = session.sessionId
     const toolName = block.name
+    if (HIDDEN_TOOLS.has(toolName)) return
 
     ctxPending.set(block.id, { name: toolName })
 
@@ -304,6 +325,7 @@ export class TranscriptParser {
     const toolName = pending.name
 
     ctxPending.delete(block.tool_use_id)
+    if (HIDDEN_TOOLS.has(toolName)) return
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const launch = session.launches.get(block.tool_use_id)
@@ -431,7 +453,7 @@ export class TranscriptParser {
       try {
         const raw = JSON.parse(line.trim()) as Record<string, unknown>
         // A turn is over at its end marker, until the next message starts another
-        const turn = turnEffect(raw)
+        const turn = sessionTurnEffect(raw, session)
         if (turn === 'end') { turnEnded = true; dropAbandonedCalls(session) }
         else if (turn === 'activity') turnEnded = false
         const entry = raw as unknown as TranscriptEntry & { toolUseResult?: unknown }
