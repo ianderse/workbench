@@ -104,6 +104,14 @@ export class LiveAgentRelay {
     this.removeSubscription(`${webContents.id}:${clientId}`);
   }
 
+  /** A project switched Live agent off: its graphs no longer get anything (and the relay stops
+   *  watching their directories) even before their windows unmount them */
+  dropProject(flowDir: string): void {
+    for (const [key, subscription] of this.subscriptions) {
+      if (subscription.flowDir === flowDir) this.removeSubscription(key);
+    }
+  }
+
   /** Stop the relay for good (the app is quitting); resolves once the worker is gone */
   async shutdown(): Promise<void> {
     this.shutDown = true;

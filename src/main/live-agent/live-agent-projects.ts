@@ -8,7 +8,7 @@ import { promises as fsPromises } from 'fs';
 import { appLog } from '../app-logger';
 import { projectStore } from '../project-store';
 import { liveAgentRelay } from './live-agent-relay';
-import { getFlowDir, removeFromProject, setUpProject } from './project-setup';
+import { addToWorktree, getFlowDir, listWorktrees, removeFromProject, removeFromWorktree, setUpProject } from './project-setup';
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -32,18 +32,39 @@ async function anyProjectEnabled(): Promise<boolean> {
   return states.some(Boolean);
 }
 
+/** Give each of the project's worktrees its hooks (a copy of the project's settings.local.json) */
+async function addToWorktrees(projectPath: string): Promise<void> {
+  for (const worktree of await listWorktrees(projectPath)) {
+    try {
+      addToWorktree(projectPath, worktree);
+    } catch (error) {
+      appLog.warn(`[LiveAgent] Could not set up the worktree ${worktree}: ${errorMessage(error)}`);
+    }
+  }
+}
+
 /**
  * Switch Live agent on or off for a project. On: the flow directory is created and the setup runs
- * (hook script, Claude Code hooks in .claude/settings.local.json), and the relay starts. Off: the
- * hooks and the directory go, and the relay stops once no project has Live agent on.
- * Returns why the hooks couldn't be configured, when only they failed.
+ * (hook script, Claude Code hooks in .claude/settings.local.json of the project and its worktrees),
+ * and the relay starts. Off: the hooks leave the project's and its worktrees' settings, the flow
+ * directory goes (hook script and discovery files with it), and the relay stops once no project
+ * has Live agent on. Returns why the hooks couldn't be configured, when only they failed.
  */
 export async function setLiveAgentEnabled(projectPath: string, enabled: boolean): Promise<{ hooksError?: string }> {
   if (enabled) {
     const result = setUpProject(projectPath);
+    await addToWorktrees(projectPath);
     liveAgentRelay.setEnabled(true);
     return result;
   }
+  for (const worktree of await listWorktrees(projectPath)) {
+    try {
+      removeFromWorktree(projectPath, worktree);
+    } catch (error) {
+      appLog.warn(`[LiveAgent] Could not remove the hooks from the worktree ${worktree}: ${errorMessage(error)}`);
+    }
+  }
+  liveAgentRelay.dropProject(getFlowDir(projectPath));
   removeFromProject(projectPath);
   if (!(await anyProjectEnabled())) liveAgentRelay.setEnabled(false);
   return {};
@@ -60,6 +81,7 @@ export async function syncLiveAgentAtStartup(): Promise<void> {
     anyEnabled = true;
     try {
       setUpProject(project.path);
+      await addToWorktrees(project.path);
     } catch (error) {
       appLog.warn(`[LiveAgent] Could not refresh the setup of ${project.path}: ${errorMessage(error)}`);
     }

@@ -1,15 +1,23 @@
 /**
  * Live agent setup for one project, from agent-flow's setup script (relay/setup.js):
  *   1. Installs the hook forwarding script at <project>/.auto-claude/flow/hook.cjs
- *   2. Configures Claude Code hooks in <project>/.claude/settings.local.json
+ *   2. Configures Claude Code hooks in <project>/.claude/settings.local.json, and in the
+ *      settings.local.json of the project's worktrees (Claude Code reads it from a worktree's own
+ *      .claude, which git doesn't check out: it is copied there)
  *
  * The project's .auto-claude/flow directory is also where the relay advertises itself (its
  * discovery files), and whether it exists is the project's "Live agent" setting.
  */
 import * as fs from 'fs'
 import * as path from 'path'
+import { execFile } from 'child_process'
+import { promisify } from 'util'
 import { isWindows } from '../platform'
 import { appLog } from '../app-logger'
+import { getToolPath } from '../cli-tool-manager'
+import { getIsolatedGitEnv } from '../utils/git-isolation'
+
+const execFileAsync = promisify(execFile)
 
 /** A project's Live agent directory: the hook script and the relay's discovery files */
 export function getFlowDir(projectPath: string): string {
@@ -271,9 +279,9 @@ function readHookSettings(file: string): { settings?: Settings; error?: string }
   return hooksError ? { error: hooksError } : { settings }
 }
 
-/** Returns an error message if the settings file was left alone */
-function configureHooks(projectPath: string): string | undefined {
-  const file = settingsPath(projectPath)
+/** Add our hooks (running the project's hook script) to a settings file (the project's, or a
+ *  worktree's); returns an error message if the file was left alone */
+function configureHooks(projectPath: string, file = settingsPath(projectPath)): string | undefined {
   const { settings, error } = readHookSettings(file)
   if (error || !settings) return `Can't update ${file} (${error}). It was left untouched.`
 
@@ -337,22 +345,84 @@ export function setUpProject(projectPath: string): { hooksError?: string } {
   return hooksError ? { hooksError } : {}
 }
 
-/** Undo setUpProject: our hooks leave the project's settings, and its flow directory goes
- *  (which switches the setting off) */
-export function removeFromProject(projectPath: string): void {
-  const file = settingsPath(projectPath)
+/** Take our hooks out of a settings file, keeping everything else; a file left
+ *  empty ({}) is deleted (it only held our hooks) */
+function removeOurHooks(file: string): void {
   const { settings, error } = readHookSettings(file)
   if (settings?.hooks && Object.values(settings.hooks).some(entries => entries.some(isAgentFlowHook))) {
     const hooks = withoutOurHooks(settings.hooks)
     if (Object.keys(hooks).length > 0) settings.hooks = hooks
     else delete settings.hooks
     try {
-      writeJsonAtomic(file, settings)
+      if (Object.keys(settings).length === 0) fs.unlinkSync(resolveLink(file))
+      else writeJsonAtomic(file, settings)
+      appLog.info('[LiveAgent] Removed Claude Code hooks from:', file)
     } catch (err) {
       appLog.warn(`[LiveAgent] Can't remove the hooks from ${file}:`, err)
     }
   } else if (error && fs.existsSync(file)) {
     appLog.warn(`[LiveAgent] Can't remove the hooks from ${file} (${error})`)
   }
+}
+
+/** Undo setUpProject: our hooks leave the project's settings, and its flow directory goes
+ *  (which switches the setting off, and takes the hook script and the relay's discovery files) */
+export function removeFromProject(projectPath: string): void {
+  removeOurHooks(settingsPath(projectPath))
   fs.rmSync(getFlowDir(projectPath), { recursive: true, force: true })
+}
+
+/** The same file (e.g. a worktree whose .claude is a symlink to the project's) */
+function isSameFile(a: string, b: string): boolean {
+  try { return fs.realpathSync(a) === fs.realpathSync(b) } catch { return false }
+}
+
+/**
+ * Give a worktree of a project with Live agent on the project's hooks: the
+ * project's settings.local.json is copied into the worktree's .claude (git
+ * doesn't check it out), or, when the worktree has its own, our hooks are
+ * added to it. Nothing for a project with Live agent off.
+ */
+export function addToWorktree(projectPath: string, worktreePath: string): void {
+  if (!fs.existsSync(getFlowDir(projectPath))) return
+  const source = settingsPath(projectPath)
+  const target = settingsPath(worktreePath)
+  if (isSameFile(source, target)) return // shared through a .claude symlink
+  try {
+    if (!fs.existsSync(target) && fs.existsSync(source)) {
+      fs.mkdirSync(path.dirname(target), { recursive: true })
+      fs.copyFileSync(source, target)
+    }
+  } catch (err) {
+    appLog.warn(`[LiveAgent] Can't copy ${source} to ${target}:`, err)
+  }
+  // Also brings a copy up to date (e.g. Auto Claude's executable moved)
+  const hooksError = configureHooks(projectPath, target)
+  if (hooksError) appLog.warn('[LiveAgent]', hooksError)
+}
+
+/** Take our hooks out of a worktree's settings.local.json (its own copy, not the project's) */
+export function removeFromWorktree(projectPath: string, worktreePath: string): void {
+  const target = settingsPath(worktreePath)
+  if (!fs.existsSync(target) || isSameFile(settingsPath(projectPath), target)) return
+  removeOurHooks(target)
+}
+
+/** The project's git worktrees besides the project itself (none outside a git repository) */
+export async function listWorktrees(projectPath: string): Promise<string[]> {
+  let stdout: string
+  try {
+    ({ stdout } = await execFileAsync(getToolPath('git'), ['worktree', 'list', '--porcelain'], {
+      cwd: projectPath,
+      encoding: 'utf-8',
+      timeout: 10000,
+      env: getIsolatedGitEnv(),
+    }))
+  } catch {
+    return []
+  }
+  const worktrees = stdout.split(/\r?\n/)
+    .filter(line => line.startsWith('worktree '))
+    .map(line => line.slice('worktree '.length).trim())
+  return worktrees.filter(worktree => !isSameFile(worktree, projectPath) && fs.existsSync(worktree))
 }

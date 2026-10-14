@@ -3,20 +3,21 @@
  * Switching it on creates that directory and runs the setup (hook script, Claude Code hooks in
  * .claude/settings.local.json); switching it off undoes both. The relay runs while any project has it on.
  */
-import { spawn } from 'child_process';
+import { execFileSync, spawn } from 'child_process';
 import fs from 'fs';
 import http from 'http';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { projects, setEnabled } = vi.hoisted(() => ({
+const { projects, setEnabled, dropProject } = vi.hoisted(() => ({
   projects: [] as Array<{ id: string; path: string }>,
   setEnabled: vi.fn(),
+  dropProject: vi.fn(),
 }));
 
 vi.mock('../../project-store', () => ({ projectStore: { getProjects: () => projects } }));
-vi.mock('../live-agent-relay', () => ({ liveAgentRelay: { setEnabled } }));
+vi.mock('../live-agent-relay', () => ({ liveAgentRelay: { setEnabled, dropProject } }));
 vi.mock('../../app-logger', () => ({
   appLog: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(), log: vi.fn() },
 }));
@@ -27,6 +28,7 @@ import {
   setLiveAgentEnabled,
   syncLiveAgentAtStartup,
 } from '../live-agent-projects';
+import { addToWorktree } from '../project-setup';
 
 const HOOK_EVENTS = ['PreToolUse', 'Notification', 'Stop', 'SessionEnd', 'SubagentStop'];
 
@@ -40,6 +42,7 @@ describe('Live agent per project', () => {
 
   beforeEach(() => {
     setEnabled.mockClear();
+    dropProject.mockClear();
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'live-agent-projects-')));
     projectA = path.join(root, 'a');
     projectB = path.join(root, 'b');
@@ -86,6 +89,14 @@ describe('Live agent per project', () => {
     await setLiveAgentEnabled(projectA, true);
     await setLiveAgentEnabled(projectA, true);
     for (const event of HOOK_EVENTS) expect(readSettings(projectA).hooks[event]).toHaveLength(1);
+  });
+
+  it('switching off deletes a settings file that only held our hooks, and drops the project graphs', async () => {
+    await setLiveAgentEnabled(projectA, true);
+    await setLiveAgentEnabled(projectA, false);
+    expect(fs.existsSync(settingsFile(projectA))).toBe(false);
+    expect(fs.existsSync(flowDir(projectA))).toBe(false);
+    expect(dropProject).toHaveBeenCalledWith(flowDir(projectA));
   });
 
   it('switching off removes the hooks and the flow directory, keeping the user hooks', async () => {
@@ -150,5 +161,54 @@ describe('Live agent per project', () => {
       });
     });
     expect(JSON.parse(await received)).toMatchObject({ session_id: 's1', hook_event_name: 'Stop' });
+  });
+
+  describe('worktrees', () => {
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd, stdio: 'ignore' });
+    const worktree = (name: string) => path.join(projectA, '.auto-claude', 'worktrees', name);
+
+    beforeEach(() => {
+      git(projectA, 'init', '-q');
+      git(projectA, 'commit', '-q', '--allow-empty', '-m', 'init');
+      git(projectA, 'worktree', 'add', '-q', '--detach', worktree('existing'));
+      fs.mkdirSync(path.dirname(settingsFile(projectA)));
+      fs.writeFileSync(settingsFile(projectA), JSON.stringify({ model: 'opus' }));
+    });
+
+    it('switching on copies the project settings, hooks included, into existing worktrees', async () => {
+      await setLiveAgentEnabled(projectA, true);
+      const copy = readSettings(worktree('existing'));
+      expect(copy.model).toBe('opus');
+      expect(copy.hooks).toEqual(readSettings(projectA).hooks);
+    });
+
+    it('a worktree created later gets the copy, and nothing while Live agent is off', async () => {
+      git(projectA, 'worktree', 'add', '-q', '--detach', worktree('off'));
+      addToWorktree(projectA, worktree('off'));
+      expect(fs.existsSync(settingsFile(worktree('off')))).toBe(false);
+
+      await setLiveAgentEnabled(projectA, true);
+      git(projectA, 'worktree', 'add', '-q', '--detach', worktree('later'));
+      addToWorktree(projectA, worktree('later'));
+      expect(readSettings(worktree('later')).hooks).toEqual(readSettings(projectA).hooks);
+    });
+
+    it('adds the hooks to a worktree that has its own settings, keeping them', async () => {
+      fs.mkdirSync(path.join(worktree('existing'), '.claude'));
+      fs.writeFileSync(settingsFile(worktree('existing')), JSON.stringify({ env: { A: '1' } }));
+      await setLiveAgentEnabled(projectA, true);
+      const settings = readSettings(worktree('existing'));
+      expect(settings.env).toEqual({ A: '1' });
+      expect(Object.keys(settings.hooks).sort()).toEqual([...HOOK_EVENTS].sort());
+    });
+
+    it('switching off removes the hooks from the worktrees too', async () => {
+      await setLiveAgentEnabled(projectA, true);
+      await setLiveAgentEnabled(projectA, false);
+      expect(readSettings(worktree('existing'))).toEqual({ model: 'opus' });
+      expect(readSettings(projectA)).toEqual({ model: 'opus' });
+      expect(fs.existsSync(flowDir(projectA))).toBe(false);
+    });
   });
 });

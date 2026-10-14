@@ -25,6 +25,7 @@ import {
 import { getIsolatedGitEnv } from '../../utils/git-isolation';
 import { getToolPath } from '../../cli-tool-manager';
 import { cleanupWorktree } from '../../utils/worktree-cleanup';
+import { addToWorktree } from '../../live-agent/project-setup';
 
 // Promisify execFile for async operations
 const execFileAsync = promisify(execFile);
@@ -914,6 +915,14 @@ async function createTerminalWorktree(
     const symlinkedClaude = symlinkClaudeConfigToWorktree(projectPath, worktreePath);
     if (symlinkedClaude.length > 0) {
       debugLog('[TerminalWorktree] Symlinked Claude config:', symlinkedClaude.join(', '));
+    }
+
+    // Live agent: the project's Claude Code hooks (a copy of its settings.local.json, unless
+    // .claude was just symlinked)
+    try {
+      addToWorktree(projectPath, worktreePath);
+    } catch (error) {
+      debugError('[TerminalWorktree] Could not copy the Live agent hooks:', error);
     }
 
     const config: TerminalWorktreeConfig = {

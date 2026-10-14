@@ -22,6 +22,7 @@ import { join, resolve } from 'path';
 import { promisify } from 'util';
 
 import { getSpecsDir } from '../../shared/constants';
+import { addToWorktree } from '../live-agent/project-setup';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -266,6 +267,14 @@ export async function createOrGetWorktree(
         `[WorktreeManager] Warning: Could not copy spec directory to worktree: ${message}`,
       );
     }
+  }
+
+  // Live agent: the project's Claude Code hooks (settings.local.json isn't checked out)
+  try {
+    addToWorktree(projectPath, worktreePath);
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`[WorktreeManager] Warning: Could not copy the Live agent hooks: ${message}`);
   }
 
   return { worktreePath: resolve(worktreePath), branch: branchName };
