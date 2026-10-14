@@ -713,7 +713,22 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     },
 
     unsubscribe(clientId: string) {
+      const client = clients.get(clientId)
       clients.delete(clientId)
+      // A directory no window shows any more is no longer scanned or advertised
+      // to the hook script (its sessions already watched idle out as usual)
+      if (!client || [...clients.values()].some(other => other.dirKey === client.dirKey)) return
+      const workspace = workspaces.get(client.dirKey)
+      if (!workspace) return
+      workspaces.delete(client.dirKey)
+      removeDiscoveryFile(workspace.discoveryFile)
+      for (const claudeDir of claudeProjectDirs) {
+        for (const encoded of workspace.encodedNames) {
+          const projectDir = path.join(claudeDir, encoded)
+          projectDirWatchers.get(projectDir)?.close()
+          projectDirWatchers.delete(projectDir)
+        }
+      }
     },
 
     addClaudeDirs(dirs: string[]) {

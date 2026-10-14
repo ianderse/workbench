@@ -240,7 +240,9 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
   // Live agent: agent windows show their graph next to the terminal and take twice the width.
   // Without any, the plain grid above is used as it is
   const liveAgent = useSettingsStore((state) => state.settings.liveAgent === true);
-  const weightKey = terminals.map((terminal) => (liveAgent && terminal.isCLIMode ? 2 : 1)).join(',');
+  const weightKey = terminals
+    .map((terminal) => (liveAgent && terminal.isCLIMode && (terminal.cwd || projectPath) ? 2 : 1))
+    .join(',');
   const weightedBoxes = useMemo(
     () => (weightKey.includes('2') ? computeWeightedTerminalLayout(weightKey.split(',').map(Number)) : null),
     [weightKey]

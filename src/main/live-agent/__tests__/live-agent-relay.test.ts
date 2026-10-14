@@ -44,7 +44,7 @@ vi.mock('../../app-logger', () => ({
 }));
 
 vi.mock('../../claude-profile-manager', () => ({
-  getClaudeProfileManager: () => ({ getSettings: () => ({ profiles: [{ configDir: '/tmp/claude-work' }] }) }),
+  getClaudeProfileManager: () => ({ getProfileConfigDirs: () => ['/tmp/claude-work'] }),
 }));
 
 import { LiveAgentRelay } from '../live-agent-relay';
@@ -171,7 +171,10 @@ describe('LiveAgentRelay', () => {
     expect(relay.getStatus()).toEqual({ state: 'error', error: 'listen EACCES' });
     expect(workers[0].terminated).toBe(true);
 
-    // Switching it on again tries again with a new worker
+    // Saving the setting again changes nothing; switching it off and on tries again with a new worker
+    relay.setEnabled(true);
+    expect(workers).toHaveLength(1);
+    relay.setEnabled(false);
     relay.setEnabled(true);
     expect(workers).toHaveLength(2);
   });

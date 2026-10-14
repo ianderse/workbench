@@ -87,9 +87,19 @@ describe('relay', () => {
     expect(forC).toEqual(['session-list', 'agent-event-batch']);
   });
 
-  it('stops sending once the client unsubscribes, and dispose removes the discovery file', () => {
+  it('stops advertising a directory once no client shows it', () => {
     relay.subscribe('window-a', workspace);
+    relay.subscribe('window-c', workspace);
+    const discoveryDir = path.join(tmpHome, '.claude', 'agent-flow');
+    const ours = () => fs.readdirSync(discoveryDir).filter((file) => file.endsWith(`-${process.pid}.json`));
     relay.unsubscribe('window-a');
+    expect(ours()).toHaveLength(1);
+    relay.unsubscribe('window-c');
+    expect(ours()).toEqual([]);
+  });
+
+  it('dispose removes the discovery file', () => {
+    relay.subscribe('window-a', workspace);
     relay.dispose();
     const discoveryDir = path.join(tmpHome, '.claude', 'agent-flow');
     const left = fs.existsSync(discoveryDir) ? fs.readdirSync(discoveryDir) : [];

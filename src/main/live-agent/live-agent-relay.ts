@@ -37,8 +37,9 @@ interface Subscription {
 function getClaudeConfigDirs(): string[] {
   const dirs = [path.join(os.homedir(), '.claude')];
   try {
-    for (const profile of getClaudeProfileManager().getSettings().profiles) {
-      if (profile.configDir) dirs.push(path.resolve(expandHomePath(profile.configDir)));
+    // Only the stored dirs: getSettings() checks each profile's credentials (keychain), which can block
+    for (const configDir of getClaudeProfileManager().getProfileConfigDirs()) {
+      dirs.push(path.resolve(expandHomePath(configDir)));
     }
   } catch (error) {
     appLog.warn('[LiveAgent] Could not read the Claude profiles:', error);
@@ -68,7 +69,9 @@ export class LiveAgentRelay {
 
   /** Follow the "Live agent" setting: start the relay (once) or stop it */
   setEnabled(enabled: boolean): void {
-    if (this.shutDown) return;
+    // The settings dialog saves every setting on each change: only a real switch counts (a relay that
+    // failed is retried by switching the setting off and on)
+    if (this.shutDown || enabled === this.enabled) return;
     this.enabled = enabled;
     if (enabled) this.start();
     else void this.stopWorker();
