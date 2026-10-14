@@ -16,7 +16,8 @@ const log = createLogger('HookServer')
  * Code writes it to the transcript up to seconds later, often after a short
  * tool has finished), a real permission prompt (Notification), the main agent
  * finishing its turn (Stop), the session ending (SessionEnd), and a backstop
- * completion for sub-agents (SubagentStop).
+ * completion for sub-agents (SubagentStop). Every hook also says which agent
+ * window its session runs in (SessionStart and UserPromptSubmit only say that).
  *
  * It listens on an OS-assigned port, advertised to the hook script through the
  * discovery file. Events are emitted without a timestamp; the relay stamps them
@@ -36,15 +37,26 @@ interface HookPayload {
   tool_use_id?: string
   // Notification
   notification_type?: string
+  // The agent window the session runs in (added by the hook script)
+  auto_claude_terminal_id?: string
   [key: string]: unknown
+}
+
+/** A session runs in this agent window (its terminal id) */
+export interface SessionOwner {
+  sessionId: string
+  terminalId: string
 }
 
 export class HookServer implements TypedDisposable {
   private server: http.Server | null = null
 
   private readonly _onEvent = new TypedEventEmitter<AgentEvent>()
+  private readonly _onOwner = new TypedEventEmitter<SessionOwner>()
 
   readonly onEvent = this._onEvent.event
+  /** A hook said which agent window its session runs in (every hook says it) */
+  readonly onOwner = this._onOwner.event
 
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
@@ -105,6 +117,10 @@ export class HookServer implements TypedDisposable {
   }
 
   private handleHook(payload: HookPayload): void {
+    const terminalId = payload.auto_claude_terminal_id
+    if (typeof terminalId === 'string' && terminalId) {
+      this._onOwner.fire({ sessionId: payload.session_id, terminalId })
+    }
     switch (payload.hook_event_name) {
       case 'PreToolUse':
         this.handlePreToolUse(payload)
@@ -180,5 +196,6 @@ export class HookServer implements TypedDisposable {
       this.server = null
     }
     this._onEvent.dispose()
+    this._onOwner.dispose()
   }
 }

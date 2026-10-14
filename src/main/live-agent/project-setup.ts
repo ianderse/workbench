@@ -19,6 +19,11 @@ import { getIsolatedGitEnv } from '../utils/git-isolation'
 
 const execFileAsync = promisify(execFile)
 
+/** Set in each agent window's shell to its terminal id. Claude Code passes it on to its hooks,
+ *  and the hook script adds it to what it forwards, so the relay knows which window each session
+ *  runs in (each window's graph shows only its own sessions) */
+export const LIVE_AGENT_TERMINAL_ENV = 'AUTO_CLAUDE_TERMINAL_ID'
+
 /** A project's Live agent directory: the hook script and the relay's discovery files */
 export function getFlowDir(projectPath: string): string {
   return path.join(projectPath, '.auto-claude', 'flow')
@@ -41,7 +46,8 @@ function getHookScriptContent() {
 // Agent Flow hook forwarder — installed by Auto Claude (Live agent).
 // Claude Code invokes this as a command hook. It reads the discovery files next
 // to it to find live relay instances, checks their PIDs, and forwards the event
-// via HTTP POST. Dead instances are cleaned up automatically.
+// via HTTP POST, with the agent window it runs in (${LIVE_AGENT_TERMINAL_ENV}).
+// Dead instances are cleaned up automatically.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -68,9 +74,13 @@ let input = '';
 process.stdin.setEncoding('utf8');
 process.stdin.on('data', c => { input += c; });
 process.stdin.on('end', () => {
-  let cwd;
-  try { cwd = JSON.parse(input).cwd; } catch { process.exit(0); }
+  let payload;
+  try { payload = JSON.parse(input); } catch { process.exit(0); }
+  const cwd = payload && payload.cwd;
   if (!cwd) process.exit(0);
+  const terminalId = process.env.${LIVE_AGENT_TERMINAL_ENV};
+  if (terminalId) payload.auto_claude_terminal_id = terminalId;
+  const body = JSON.stringify(payload);
 
   const resolvedCwd = normPath(cwd);
 
@@ -114,7 +124,7 @@ process.stdin.on('end', () => {
     }, res => { res.resume(); res.on('end', finish); });
     req.on('error', finish);
     req.on('timeout', () => { req.destroy(); });
-    req.write(input);
+    req.write(body);
     req.end();
   }
 
@@ -143,11 +153,13 @@ function ensureHookScript(projectPath: string) {
 // The relay reads sessions from their transcripts; hooks add what those can't
 // tell promptly (see relay/lib/hook-server.ts): tool calls and sub-agents as
 // they start, permission prompts, and turns, sub-agents and sessions ending.
-const HOOK_EVENTS = ['PreToolUse', 'Notification', 'Stop', 'SessionEnd', 'SubagentStop']
+// SessionStart and UserPromptSubmit tell which agent window a session runs in
+// before it does anything.
+const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Notification', 'Stop', 'SessionEnd', 'SubagentStop']
 // Run in the background, so Claude Code doesn't wait for them. Stop runs in
 // step, so the relay has it before the next turn can start (a late one would end
 // that turn); SessionEnd too, as Claude Code exits, which could cut it short.
-const ASYNC_HOOK_EVENTS = ['PreToolUse', 'Notification', 'SubagentStop']
+const ASYNC_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Notification', 'SubagentStop']
 
 interface CommandHook { type?: string; command?: string; url?: string; timeout?: number; async?: boolean }
 interface HookEntry { matcher?: string; hooks?: CommandHook[] }

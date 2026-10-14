@@ -8,7 +8,7 @@ import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 
-import { HookServer } from './lib/hook-server'
+import { HookServer, type SessionOwner } from './lib/hook-server'
 import { AgentEvent, SessionInfo, WatchedSession } from './lib/protocol'
 import { TranscriptParser, isActivityLine } from './lib/transcript-parser'
 import { readCompleteLines, readNewFileLines, foldPathCase } from './lib/fs-utils'
@@ -149,8 +149,22 @@ function historyBatch(sessionId: string) {
 function broadcastSessionStarted(sessionId: string) {
   broadcast(sessionId, JSON.stringify({
     type: 'session-started',
-    session: { id: sessionId, status: 'active', lastActivityTime: Date.now() } as SessionInfo,
+    session: { id: sessionId, status: 'active', lastActivityTime: Date.now(), owner: sessionOwners.get(sessionId) } as SessionInfo,
   }))
+}
+
+// ─── Session owners ─────────────────────────────────────────────────────────
+
+/** The agent window (terminal id) each session runs in, as its hooks report it.
+ *  Kept after a session is disposed: it's still that window's if it comes back. */
+const sessionOwners = new Map<string, string>()
+
+/** A hook said which window a session runs in: clients showing it learn the
+ *  change (each window's graph shows only its own sessions, see use-relay.ts) */
+function handleSessionOwner({ sessionId, terminalId }: SessionOwner) {
+  if (sessionOwners.get(sessionId) === terminalId) return
+  sessionOwners.set(sessionId, terminalId)
+  broadcast(sessionId, JSON.stringify({ type: 'session-owner', sessionId, owner: terminalId }))
 }
 
 // ─── Session watcher ────────────────────────────────────────────────────────
@@ -666,6 +680,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   const hookPort = await hookServer.start()
 
   hookServer.onEvent(handleHookEvent)
+  hookServer.onOwner(handleSessionOwner)
 
   const workspaces = new Map<string, Workspace>()
 
@@ -708,6 +723,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
         id: session.sessionId,
         status: session.sessionCompleted ? 'completed' : 'active',
         lastActivityTime: session.lastActivityTime,
+        owner: sessionOwners.get(session.sessionId),
       }))
       if (sessionList.length > 0) {
         sendSSE(clientId, { type: 'session-list', sessions: sessionList })
@@ -748,6 +764,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       for (const watcher of projectDirWatchers.values()) watcher.close()
       projectDirWatchers.clear()
       for (const id of [...sessions.keys()]) disposeSession(id)
+      sessionOwners.clear()
       clients.clear()
       sendToClients = () => {}
     },

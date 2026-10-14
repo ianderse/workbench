@@ -749,7 +749,7 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
           <div className="min-w-0 flex-1">
             <Suspense fallback={null}>
               {/* A new directory (worktree switch) starts a fresh graph */}
-              <LiveAgentGraph key={effectiveCwd} cwd={effectiveCwd} projectPath={graphProjectPath} />
+              <LiveAgentGraph key={effectiveCwd} cwd={effectiveCwd} projectPath={graphProjectPath} terminalId={id} />
             </Suspense>
           </div>
         )}

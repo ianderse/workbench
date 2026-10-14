@@ -85,7 +85,7 @@ interface RelayHookResult {
   consumeEvents: () => void
   /** Whether to play the mock scenario (demo mode) instead of relay events */
   useMockData: boolean
-  /** Session currently shown, picked automatically: the newest to start (on
+  /** Session currently shown (null: none of this window's), picked automatically: the newest to start (on
    *  connect, the one already shown if the relay still has it, else the active
    *  one with the latest activity) */
   shownSessionId: string | null
@@ -115,6 +115,10 @@ const toGraphEvent = (event: AgentEvent): GraphEvent => ({
  * for the Claude Code sessions run in `cwd` (the agent window's directory, in
  * the project at `projectPath`).
  *
+ * Shows only the window's own sessions: those whose hooks report its terminal
+ * (`terminalId`), and those run outside Auto Claude's agent windows (no window
+ * reported). Another window in the same directory has its own.
+ *
  * Shows one session at a time: on connect the one already shown if the relay
  * still has it, else the active one with the latest activity; then whichever
  * session starts next. Events are buffered per session so switching
@@ -122,7 +126,7 @@ const toGraphEvent = (event: AgentEvent): GraphEvent => ({
  * authoritative: one that differs from what we have replaces that session's
  * buffer, so a reconnect or a resend never duplicates events.
  */
-export function useRelay(cwd: string, projectPath: string): RelayHookResult {
+export function useRelay(cwd: string, projectPath: string, terminalId: string): RelayHookResult {
   // Agent windows only show live sessions (agent-flow's demo scenario is off)
   const useMockData = false
   const pendingEventsRef = useRef<GraphEvent[]>([])
@@ -146,9 +150,9 @@ export function useRelay(cwd: string, projectPath: string): RelayHookResult {
    *  event. The applied count only moves once the graph has applied them. */
   const pendingStartRef = useRef<number | null>(null)
 
-  /** Show another session. Does NOT flush events — the consumer calls
-   *  flushSessionEvents from the useLayoutEffect that swaps the graph state. */
-  const switchTo = useCallback((sessionId: string) => {
+  /** Show another session, or none (null). Does NOT flush events — the consumer
+   *  calls flushSessionEvents from the useLayoutEffect that swaps the graph state. */
+  const switchTo = useCallback((sessionId: string | null) => {
     sessionSwitchPendingRef.current = true
     pendingEventsRef.current.length = 0
     pendingPreludeRef.current = 0
@@ -242,23 +246,50 @@ export function useRelay(cwd: string, projectPath: string): RelayHookResult {
       if (sessionId === shownSessionIdRef.current) rebuildShown()
     }
 
-    // On connect, keep the shown session if the relay still has it; otherwise
-    // show the active session with the latest activity
-    const handleSessionList = (sessionList: SessionInfo[]) => {
-      if (sessionList.length === 0) return
-      if (sessionList.some(s => s.id === shownSessionIdRef.current)) return
-      const sorted = [...sessionList].sort((a, b) => {
+    // The sessions the relay told us about, and whether each is this window's
+    const sessionInfos = new Map<string, SessionInfo>()
+    const isOwn = (session: SessionInfo) => !session.owner || session.owner === terminalId
+
+    // The window's active session with the latest activity, or none
+    const bestOwnSession = (): string | null => {
+      const own = [...sessionInfos.values()].filter(isOwn).sort((a, b) => {
         const aActive = a.status === 'active' ? 1 : 0
         const bActive = b.status === 'active' ? 1 : 0
         if (aActive !== bActive) return bActive - aActive
         return b.lastActivityTime - a.lastActivityTime
       })
-      switchTo(sorted[0].id)
+      return own[0]?.id ?? null
     }
 
-    // Follow whichever session starts (or resumes after inactivity)
+    // On connect, keep the shown session if the relay still has it; otherwise
+    // show the window's active session with the latest activity
+    const handleSessionList = (sessionList: SessionInfo[]) => {
+      for (const session of sessionList) sessionInfos.set(session.id, session)
+      const shown = shownSessionIdRef.current
+      if (shown && sessionList.some(s => s.id === shown && isOwn(s))) return
+      const best = bestOwnSession()
+      if (best !== shown) switchTo(best)
+    }
+
+    // Follow whichever of the window's sessions starts (or resumes after inactivity)
     const handleSessionStarted = (session: SessionInfo) => {
-      if (session.id !== shownSessionIdRef.current) switchTo(session.id)
+      sessionInfos.set(session.id, { ...sessionInfos.get(session.id), ...session })
+      if (isOwn(session) && session.id !== shownSessionIdRef.current) switchTo(session.id)
+    }
+
+    // A session's window became known (or changed, e.g. resumed in another
+    // window): one shown here that runs elsewhere gives way to the window's
+    // own, and one that turns out to be ours is shown
+    const handleSessionOwner = (sessionId: string, owner: string) => {
+      const known = sessionInfos.get(sessionId)
+      const session: SessionInfo = { ...(known ?? { id: sessionId, status: 'active', lastActivityTime: Date.now() }), owner }
+      sessionInfos.set(sessionId, session)
+      const shown = shownSessionIdRef.current
+      if (!isOwn(session)) {
+        if (shown === sessionId) switchTo(bestOwnSession())
+      } else if (shown !== sessionId) {
+        switchTo(sessionId)
+      }
     }
 
     const clientId = crypto.randomUUID()
@@ -285,6 +316,11 @@ export function useRelay(cwd: string, projectPath: string): RelayHookResult {
         case 'session-started':
           handleSessionStarted(data.session)
           break
+        case 'session-owner':
+          if (typeof data.sessionId === 'string' && typeof data.owner === 'string') {
+            handleSessionOwner(data.sessionId, data.owner)
+          }
+          break
       }
     })
     void window.electronAPI.subscribeLiveAgent(clientId, cwd, projectPath)
@@ -293,7 +329,7 @@ export function useRelay(cwd: string, projectPath: string): RelayHookResult {
       removeListener()
       void window.electronAPI.unsubscribeLiveAgent(clientId)
     }
-  }, [useMockData, switchTo, cwd, projectPath])
+  }, [useMockData, switchTo, cwd, projectPath, terminalId])
 
   const consumeEvents = useCallback(() => {
     const shown = shownSessionIdRef.current

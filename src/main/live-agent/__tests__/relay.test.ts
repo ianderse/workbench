@@ -77,6 +77,28 @@ describe('relay', () => {
     expect(forC).toEqual(['session-list', 'agent-event-batch']);
   });
 
+  it('tells clients which agent window a session runs in, as its hooks report it', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    sent.length = 0;
+    const { port } = JSON.parse(fs.readFileSync(path.join(flowDir, discoveryFiles()[0]), 'utf-8'));
+    await fetch(`http://127.0.0.1:${port}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: SESSION_ID, hook_event_name: 'UserPromptSubmit', cwd: workspace, auto_claude_terminal_id: 'terminal-1',
+      }),
+    });
+
+    const owners = sent.filter((entry) => entry.message.type === 'session-owner');
+    expect(owners).toEqual([{ clientIds: ['window-a'], message: { type: 'session-owner', sessionId: SESSION_ID, owner: 'terminal-1' } }]);
+
+    // A client that subscribes later learns it from the session list
+    sent.length = 0;
+    relay.subscribe('window-c', workspace, flowDir);
+    const list = sent.find((entry) => entry.message.type === 'session-list');
+    expect(list?.message.sessions).toEqual([expect.objectContaining({ id: SESSION_ID, owner: 'terminal-1' })]);
+  });
+
   it('writes no discovery file for a project with Live agent off', () => {
     fs.rmSync(flowDir, { recursive: true });
     relay.subscribe('window-a', workspace, flowDir);

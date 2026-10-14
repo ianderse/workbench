@@ -20,6 +20,7 @@ import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeCodeEnv } from '../claude-code-settings';
 import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
+import { LIVE_AGENT_TERMINAL_ENV } from '../live-agent/project-setup';
 
 /**
  * Options for terminal restoration
@@ -80,6 +81,10 @@ export async function createTerminal(
     // instead of graphify-out in the working directory
     const graphifyOut = projectPath && (await hasGraphifyGraph(projectPath)) ? getGraphifyOutDir(projectPath) : undefined;
     if (graphifyOut) mergedEnv.GRAPHIFY_OUT = graphifyOut;
+
+    // Live agent: the hooks of a Claude Code session run here report this window, so its graph
+    // shows only its own sessions
+    mergedEnv[LIVE_AGENT_TERMINAL_ENV] = id;
 
     if (mergedEnv.CLAUDE_CODE_OAUTH_TOKEN) {
       debugLog('[TerminalLifecycle] Injecting OAuth token from active profile');

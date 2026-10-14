@@ -14,6 +14,8 @@ interface LiveAgentGraphProps {
   cwd: string
   /** The window's project (its .auto-claude/flow directory is where the relay advertises itself) */
   projectPath: string
+  /** The window's terminal: of the sessions in `cwd`, the graph shows the ones run in it */
+  terminalId: string
 }
 
 /**
@@ -21,10 +23,10 @@ interface LiveAgentGraphProps {
  * next to an agent window's terminal (Settings > Claude Code > Live agent).
  * From agent-flow (web/components/agent-visualizer/index.tsx).
  */
-export default function LiveAgentGraph({ cwd, projectPath }: LiveAgentGraphProps) {
+export default function LiveAgentGraph({ cwd, projectPath, terminalId }: LiveAgentGraphProps) {
   const { t } = useTranslation('terminal')
   const status = useLiveAgentStatus()
-  const relay = useRelay(cwd, projectPath)
+  const relay = useRelay(cwd, projectPath, terminalId)
   // Set while events queued at a session swap or rebuild wait to be applied
   // (the canvas holds its effects back until then)
   const historyQueuedRef = useRef(false)
@@ -62,9 +64,20 @@ export default function LiveAgentGraph({ cwd, projectPath }: LiveAgentGraphProps
   const prevShownRef = useRef<string | null>(null)
   const { shownSessionId, viewVersion, pendingEvents, takeHistoryReplaced, flushSessionEvents, getSessionEventCount } = relay
   useLayoutEffect(() => {
-    if (!shownSessionId) return
     const cache = sessionCacheRef.current
     const prev = prevShownRef.current
+    if (!shownSessionId) {
+      // None of the window's sessions to show (the one shown runs in another
+      // window): keep the outgoing one's graph and start empty
+      if (prev !== null) {
+        cache.delete(prev)
+        cache.set(prev, { snapshot: saveSnapshot(), eventCount: getSessionEventCount(prev) })
+        while (cache.size > MAX_CACHED_SESSIONS) cache.delete(cache.keys().next().value!)
+        restart()
+        prevShownRef.current = null
+      }
+      return
+    }
     const replaced = takeHistoryReplaced(shownSessionId)
 
     if (shownSessionId === prev) {

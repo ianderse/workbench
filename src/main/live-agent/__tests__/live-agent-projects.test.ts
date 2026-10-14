@@ -30,7 +30,7 @@ import {
 } from '../live-agent-projects';
 import { addToWorktree } from '../project-setup';
 
-const HOOK_EVENTS = ['PreToolUse', 'Notification', 'Stop', 'SessionEnd', 'SubagentStop'];
+const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Notification', 'Stop', 'SessionEnd', 'SubagentStop'];
 
 describe('Live agent per project', () => {
   let root: string;
