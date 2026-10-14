@@ -257,6 +257,8 @@ export const IPC_CHANNELS = {
 
   // Live agent (agent windows' agent-flow graph)
   LIVE_AGENT_GET_STATUS: 'liveAgent:getStatus',
+  LIVE_AGENT_GET_PROJECT: 'liveAgent:getProject',
+  LIVE_AGENT_SET_PROJECT: 'liveAgent:setProject',
   LIVE_AGENT_SUBSCRIBE: 'liveAgent:subscribe',
   LIVE_AGENT_UNSUBSCRIBE: 'liveAgent:unsubscribe',
   LIVE_AGENT_STATUS: 'liveAgent:status',   // main -> renderer: the relay started, stopped or failed

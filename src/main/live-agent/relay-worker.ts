@@ -24,7 +24,7 @@ if (port) {
     switch (request.type) {
       case 'subscribe':
         relay.addClaudeDirs(request.claudeDirs);
-        relay.subscribe(request.clientId, request.cwd);
+        relay.subscribe(request.clientId, request.cwd, request.flowDir);
         break;
       case 'unsubscribe':
         relay.unsubscribe(request.clientId);

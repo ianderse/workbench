@@ -2,8 +2,9 @@
  * @vitest-environment jsdom
  */
 /**
- * Live agent in an agent window: the graph shows next to the terminal only while the setting is
- * on, and switching it never remounts the terminal (its session and scrollback stay)
+ * Live agent in an agent window: the graph shows next to the terminal only while the window's
+ * project has the setting on, and switching it never remounts the terminal (its session and
+ * scrollback stay)
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
@@ -11,7 +12,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { useRef } from 'react';
 import { Terminal } from '../Terminal';
 import { useTerminalStore, type Terminal as TerminalState } from '../../stores/terminal-store';
-import { useSettingsStore } from '../../stores/settings-store';
+import { useLiveAgentStore } from '../../stores/live-agent-store';
 
 const fit = vi.fn(() => true);
 
@@ -39,7 +40,9 @@ vi.mock('../terminal/useTerminalEvents', () => ({ useTerminalEvents: () => {} })
 vi.mock('../terminal/TerminalHeader', () => ({ TerminalHeader: () => null }));
 vi.mock('../terminal/CreateWorktreeDialog', () => ({ CreateWorktreeDialog: () => null }));
 vi.mock('../live-agent/LiveAgentGraph', () => ({
-  default: ({ cwd }: { cwd: string }) => <div data-testid="live-agent-graph">{cwd}</div>
+  default: ({ cwd, projectPath }: { cwd: string; projectPath: string }) => (
+    <div data-testid="live-agent-graph">{`${cwd} in ${projectPath}`}</div>
+  )
 }));
 
 function terminal(isCLIMode: boolean): TerminalState {
@@ -54,9 +57,9 @@ function terminal(isCLIMode: boolean): TerminalState {
   };
 }
 
-function setLiveAgent(liveAgent: boolean) {
+function setLiveAgent(liveAgent: boolean, projectPath = '/work/app') {
   act(() => {
-    useSettingsStore.setState((state) => ({ settings: { ...state.settings, liveAgent } }));
+    useLiveAgentStore.setState({ enabled: { [projectPath]: liveAgent } });
   });
 }
 
@@ -90,7 +93,7 @@ describe('Terminal with Live agent', () => {
     expect(host).not.toBeNull();
 
     setLiveAgent(true);
-    expect(await screen.findByTestId('live-agent-graph')).toHaveTextContent('/work/app');
+    expect(await screen.findByTestId('live-agent-graph')).toHaveTextContent('/work/app in /work/app');
     expect(xtermHost(container)).toBe(host);
     // The terminal is refit to its new width
     await waitFor(() => expect(fit).toHaveBeenCalled());
@@ -100,6 +103,12 @@ describe('Terminal with Live agent', () => {
     expect(screen.queryByTestId('live-agent-graph')).not.toBeInTheDocument();
     expect(xtermHost(container)).toBe(host);
     await waitFor(() => expect(fit).toHaveBeenCalled());
+  });
+
+  it('shows no graph when another project has Live agent on', () => {
+    setLiveAgent(true, '/work/other');
+    renderTerminal();
+    expect(screen.queryByTestId('live-agent-graph')).not.toBeInTheDocument();
   });
 
   it('shows no graph in a plain terminal window', () => {

@@ -4,7 +4,7 @@
 
 export type RelayWorkerRequest =
   | { type: 'start'; claudeDirs: string[] }
-  | { type: 'subscribe'; clientId: string; cwd: string; claudeDirs: string[] }
+  | { type: 'subscribe'; clientId: string; cwd: string; flowDir: string; claudeDirs: string[] }
   | { type: 'unsubscribe'; clientId: string }
   | { type: 'stop' };
 

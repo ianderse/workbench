@@ -7,7 +7,7 @@ import {
   useTerminalStore,
   type PendingTaskSession
 } from '../stores/terminal-store';
-import { useSettingsStore } from '../stores/settings-store';
+import { useLiveAgentStore } from '../stores/live-agent-store';
 import { getTaskSessionBlocker } from '../../shared/utils/claude-run';
 import type { TerminalProps } from './terminal/types';
 import type { TerminalWorktreeConfig } from '../../shared/types';
@@ -113,8 +113,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Use cwd from store if available (for worktree), otherwise use prop
   const effectiveCwd = terminal?.cwd || cwd;
 
-  // Live agent: an agent window shows a graph of its Claude Code session next to the terminal
-  const liveAgent = useSettingsStore((state) => state.settings.liveAgent === true);
+  // Live agent (the project's setting): an agent window shows a graph of its Claude Code session next
+  // to the terminal
+  const graphProjectPath = terminal?.projectPath || projectPath;
+  const liveAgent = useLiveAgentStore((state) => (graphProjectPath ? state.enabled[graphProjectPath] === true : false));
   const showGraph = liveAgent && terminal?.isCLIMode === true && !!effectiveCwd;
 
   const associatedTask = terminal?.associatedTaskId
@@ -743,11 +745,11 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
         <div className="min-w-0 flex-1 px-2 py-1.5">
           <div ref={terminalRef} className="h-full w-full" />
         </div>
-        {showGraph && effectiveCwd && (
+        {showGraph && effectiveCwd && graphProjectPath && (
           <div className="min-w-0 flex-1">
             <Suspense fallback={null}>
               {/* A new directory (worktree switch) starts a fresh graph */}
-              <LiveAgentGraph key={effectiveCwd} cwd={effectiveCwd} />
+              <LiveAgentGraph key={effectiveCwd} cwd={effectiveCwd} projectPath={graphProjectPath} />
             </Suspense>
           </div>
         )}

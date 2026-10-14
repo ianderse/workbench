@@ -7,7 +7,6 @@
 import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
-import * as os from 'os'
 
 import { HookServer } from './lib/hook-server'
 import { AgentEvent, SessionInfo, WatchedSession } from './lib/protocol'
@@ -19,8 +18,6 @@ import {
   INACTIVITY_TIMEOUT_MS, BUSY_INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, WORKSPACE_HASH_LENGTH, MAX_EVENT_BUFFER,
 } from './lib/constants'
-
-const DISCOVERY_DIR = path.join(os.homedir(), '.claude', 'agent-flow')
 
 const log = createLogger('Relay')
 
@@ -512,6 +509,8 @@ interface Workspace {
   key: string
   /** Its names as Claude Code project dirs (every non-alphanumeric character is encoded as `-`) */
   encodedNames: string[]
+  /** Its project's .auto-claude/flow dir, where the hook script looks for relays */
+  flowDir: string
   discoveryFile: string | null
 }
 
@@ -611,12 +610,14 @@ function hashWorkspace(workspace: string): string {
   return crypto.createHash('sha256').update(normalizePath(workspace)).digest('hex').slice(0, WORKSPACE_HASH_LENGTH)
 }
 
-/** Advertise the hook server to the agent-flow hook script (installed by
- *  agent-flow's setup) for one workspace; returns the file written */
-function writeDiscoveryFile(port: number, workspace: string): string {
-  if (!fs.existsSync(DISCOVERY_DIR)) fs.mkdirSync(DISCOVERY_DIR, { recursive: true })
+/** Advertise the hook server to the hook script (installed in the project's
+ *  flow dir by the Live agent setup, see ../project-setup.ts) for one
+ *  workspace; returns the file written. A project without a flow dir has Live
+ *  agent off: nothing is written. */
+function writeDiscoveryFile(port: number, workspace: string, flowDir: string): string | null {
+  if (!fs.existsSync(flowDir)) return null
   const hash = hashWorkspace(workspace)
-  const discoveryFilePath = path.join(DISCOVERY_DIR, `${hash}-${process.pid}.json`)
+  const discoveryFilePath = path.join(flowDir, `${hash}-${process.pid}.json`)
   fs.writeFileSync(discoveryFilePath, JSON.stringify({ port, pid: process.pid, workspace: normalizePath(workspace) }, null, 2) + '\n')
   return discoveryFilePath
 }
@@ -631,8 +632,9 @@ function removeDiscoveryFile(discoveryFilePath: string | null) {
 
 export interface Relay {
   /** Send a client the sessions run in `cwd` (its list and history now, then
-   *  live events), watching that directory from now on */
-  subscribe: (clientId: string, cwd: string) => void
+   *  live events), watching that directory from now on; `flowDir` is its
+   *  project's .auto-claude/flow dir */
+  subscribe: (clientId: string, cwd: string, flowDir: string) => void
   unsubscribe: (clientId: string) => void
   /** Watch the sessions of these Claude Code config dirs too */
   addClaudeDirs: (dirs: string[]) => void
@@ -668,7 +670,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   const workspaces = new Map<string, Workspace>()
 
   /** Watch a directory's sessions (once) */
-  const addWorkspace = (dir: string) => {
+  const addWorkspace = (dir: string, flowDir: string) => {
     const key = dirKey(dir)
     if (workspaces.has(key)) return
     const given = path.resolve(dir)
@@ -676,11 +678,12 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     const workspace: Workspace = {
       path: given, resolved, key,
       encodedNames: [...new Set([resolved, given].map(encodeProjectDir))],
+      flowDir,
       discoveryFile: null,
     }
     workspaces.set(key, workspace)
     try {
-      workspace.discoveryFile = writeDiscoveryFile(hookPort, resolved)
+      workspace.discoveryFile = writeDiscoveryFile(hookPort, resolved, flowDir)
     } catch (e) { log.warn('Could not write the discovery file:', e) }
     scanForActiveSessions(workspace)
   }
@@ -692,13 +695,13 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
   let relayDisposed = false
 
   return {
-    subscribe(clientId: string, cwd: string) {
+    subscribe(clientId: string, cwd: string, flowDir: string) {
       if (relayDisposed) return
       const key = dirKey(cwd)
       clients.set(clientId, { dirKey: key })
       // A directory watched for the first time announces its sessions as it
       // finds them (to this client too)
-      addWorkspace(cwd)
+      addWorkspace(cwd, flowDir)
 
       // Send the session list, then each session's history
       const sessionList: SessionInfo[] = [...sessions.values()].filter(session => session.dirKey === key).map(session => ({

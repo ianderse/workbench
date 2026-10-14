@@ -26,6 +26,8 @@ function useGraphTheme() {
 interface LiveAgentGraphProps {
   /** The agent window's working directory: the graph shows the Claude Code sessions run in it */
   cwd: string
+  /** The window's project (its .auto-claude/flow directory is where the relay advertises itself) */
+  projectPath: string
 }
 
 /**
@@ -33,11 +35,11 @@ interface LiveAgentGraphProps {
  * next to an agent window's terminal (Settings > Claude Code > Live agent).
  * From agent-flow (web/components/agent-visualizer/index.tsx).
  */
-export default function LiveAgentGraph({ cwd }: LiveAgentGraphProps) {
+export default function LiveAgentGraph({ cwd, projectPath }: LiveAgentGraphProps) {
   const { t } = useTranslation('terminal')
   useGraphTheme()
   const status = useLiveAgentStatus()
-  const relay = useRelay(cwd)
+  const relay = useRelay(cwd, projectPath)
   // Set while events queued at a session swap or rebuild wait to be applied
   // (the canvas holds its effects back until then)
   const historyQueuedRef = useRef(false)

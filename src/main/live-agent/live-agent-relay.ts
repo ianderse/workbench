@@ -1,9 +1,9 @@
 /**
- * Live agent relay: runs agent-flow's relay (./relay) in a worker thread while the "Live agent"
- * setting is on, and passes its messages to the agent windows' graphs.
+ * Live agent relay: runs agent-flow's relay (./relay) in a worker thread while any project has
+ * "Live agent" on (see live-agent-projects.ts), and passes its messages to the agent windows' graphs.
  *
- * The worker starts when the setting is switched on (or at startup when it is saved on) and keeps
- * running until the setting is switched off or the app quits. Agent windows only subscribe and
+ * The worker starts when a project switches it on (or at startup when one has it on) and keeps
+ * running until the last project switches it off or the app quits. Agent windows only subscribe and
  * unsubscribe: opening or closing them never starts, stops or restarts it.
  */
 
@@ -22,12 +22,13 @@ import type { RelayWorkerMessage, RelayWorkerRequest } from './relay-worker-prot
 /** How long the worker gets to clean up (discovery files, hook server, watchers) before it is terminated */
 const STOP_TIMEOUT_MS = 2000;
 
-/** A graph in an agent window, shown sessions run in `cwd` */
+/** A graph in an agent window, shown sessions run in `cwd` (`flowDir`: its project's .auto-claude/flow) */
 interface Subscription {
   webContents: WebContents;
   contentsId: number;
   clientId: string;
   cwd: string;
+  flowDir: string;
 }
 
 /**
@@ -77,11 +78,11 @@ export class LiveAgentRelay {
     else void this.stopWorker();
   }
 
-  /** A graph in an agent window wants the sessions run in `cwd` */
-  subscribe(webContents: WebContents, clientId: string, cwd: string): void {
+  /** A graph in an agent window wants the sessions run in `cwd`, in the project whose flow dir is `flowDir` */
+  subscribe(webContents: WebContents, clientId: string, cwd: string, flowDir: string): void {
     const contentsId = webContents.id;
     const key = `${contentsId}:${clientId}`;
-    this.subscriptions.set(key, { webContents, contentsId, clientId, cwd });
+    this.subscriptions.set(key, { webContents, contentsId, clientId, cwd, flowDir });
     if (!this.trackedContents.has(contentsId)) {
       this.trackedContents.add(contentsId);
       const drop = () => {
@@ -96,7 +97,7 @@ export class LiveAgentRelay {
       // A reload unmounts the graphs without unsubscribing
       webContents.on('did-start-loading', drop);
     }
-    this.post({ type: 'subscribe', clientId: key, cwd, claudeDirs: getClaudeConfigDirs() });
+    this.post({ type: 'subscribe', clientId: key, cwd, flowDir, claudeDirs: getClaudeConfigDirs() });
   }
 
   unsubscribe(webContents: WebContents, clientId: string): void {
@@ -172,7 +173,7 @@ export class LiveAgentRelay {
     const claudeDirs = getClaudeConfigDirs();
     this.post({ type: 'start', claudeDirs });
     for (const [key, subscription] of this.subscriptions) {
-      this.post({ type: 'subscribe', clientId: key, cwd: subscription.cwd, claudeDirs });
+      this.post({ type: 'subscribe', clientId: key, cwd: subscription.cwd, flowDir: subscription.flowDir, claudeDirs });
     }
   }
 

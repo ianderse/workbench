@@ -112,7 +112,8 @@ const toGraphEvent = (event: AgentEvent): GraphEvent => ({
 /**
  * Connects the graph to the relay (a worker in the main process, see
  * src/main/live-agent), which sends the messages agent-flow's SSE stream did,
- * for the Claude Code sessions run in `cwd` (the agent window's directory).
+ * for the Claude Code sessions run in `cwd` (the agent window's directory, in
+ * the project at `projectPath`).
  *
  * Shows one session at a time: on connect the one already shown if the relay
  * still has it, else the active one with the latest activity; then whichever
@@ -121,7 +122,7 @@ const toGraphEvent = (event: AgentEvent): GraphEvent => ({
  * authoritative: one that differs from what we have replaces that session's
  * buffer, so a reconnect or a resend never duplicates events.
  */
-export function useRelay(cwd: string): RelayHookResult {
+export function useRelay(cwd: string, projectPath: string): RelayHookResult {
   // Agent windows only show live sessions (agent-flow's demo scenario is off)
   const useMockData = false
   const pendingEventsRef = useRef<GraphEvent[]>([])
@@ -286,13 +287,13 @@ export function useRelay(cwd: string): RelayHookResult {
           break
       }
     })
-    void window.electronAPI.subscribeLiveAgent(clientId, cwd)
+    void window.electronAPI.subscribeLiveAgent(clientId, cwd, projectPath)
 
     return () => {
       removeListener()
       void window.electronAPI.unsubscribeLiveAgent(clientId)
     }
-  }, [useMockData, switchTo, cwd])
+  }, [useMockData, switchTo, cwd, projectPath])
 
   const consumeEvents = useCallback(() => {
     const shown = shownSessionIdRef.current

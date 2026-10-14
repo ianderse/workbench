@@ -4,6 +4,7 @@
  * Claude Code plans, implements and validates in the task's worktree.
  */
 
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
@@ -29,6 +30,8 @@ import {
   type TriageMode
 } from '../../../shared/types/claude-code';
 import type { AppSettings } from '../../../shared/types';
+import { useProjectStore } from '../../stores/project-store';
+import { useLiveAgentStore } from '../../stores/live-agent-store';
 
 interface ClaudeCodeTaskSettingsProps {
   settings: AppSettings;
@@ -47,6 +50,22 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
   const update = (patch: Partial<TaskSettings>) => {
     onSettingsChange({ ...settings, claudeCodeTasks: { ...stored, ...patch } });
   };
+
+  // Live agent is the selected project's setting (its .auto-claude/flow directory), saved at once
+  const project = useProjectStore((state) => state.projects.find((p) => p.id === state.selectedProjectId));
+  const projectPath = project?.path;
+  const liveAgent = useLiveAgentStore((state) => (projectPath ? state.enabled[projectPath] === true : false));
+  const hooksError = useLiveAgentStore((state) => (projectPath ? state.hooksError[projectPath] : undefined));
+  const [liveAgentError, setLiveAgentError] = useState<string | undefined>();
+  useEffect(() => {
+    setLiveAgentError(undefined);
+    if (projectPath) void useLiveAgentStore.getState().load(projectPath);
+  }, [projectPath]);
+  const liveAgentProblem = liveAgentError
+    ? t('claudeCode.agentWindows.liveAgentFailed', { error: liveAgentError })
+    : liveAgent && hooksError
+      ? t('claudeCode.agentWindows.liveAgentHooksFailed', { error: hooksError })
+      : undefined;
 
   const modelLabel = (model: ClaudeModelAlias) => t(`claudeCode.models.${model}`);
   const effortLabel = (effort: ClaudeEffort) => t(`claudeCode.efforts.${effort}`);
@@ -206,14 +225,25 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             />
           </SettingsRow>
 
-          {/* Agent windows show a live agent-flow graph of their Claude Code session */}
+          {/* The project's agent windows show a live agent-flow graph of their Claude Code session */}
           <SettingsRow
             label={t('claudeCode.agentWindows.liveAgent')}
-            description={t('claudeCode.agentWindows.liveAgentDescription')}
+            description={
+              <>
+                {project
+                  ? t('claudeCode.agentWindows.liveAgentDescription', { project: project.name })
+                  : t('claudeCode.agentWindows.liveAgentNoProject')}
+                {liveAgentProblem && <span className="mt-1 block text-destructive">{liveAgentProblem}</span>}
+              </>
+            }
           >
             <Switch
-              checked={settings.liveAgent === true}
-              onCheckedChange={(liveAgent) => onSettingsChange({ ...settings, liveAgent })}
+              checked={liveAgent}
+              disabled={!projectPath}
+              onCheckedChange={(enabled) => {
+                if (!projectPath) return;
+                void useLiveAgentStore.getState().setEnabled(projectPath, enabled).then(setLiveAgentError);
+              }}
               aria-label={t('claudeCode.agentWindows.liveAgent')}
             />
           </SettingsRow>

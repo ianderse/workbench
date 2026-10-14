@@ -253,8 +253,6 @@ export interface AppSettings {
   customCLIPath?: string;
   // YOLO mode: invoke Claude with --dangerously-skip-permissions flag
   dangerouslySkipPermissions?: boolean;
-  // Live agent: agent windows show a live agent-flow graph of their Claude Code session
-  liveAgent?: boolean;
   // Version the user has permanently skipped for update notifications
   skippedUpdateVersion?: string;
   // Timestamp (ms) after which update notifications should resume (snooze)

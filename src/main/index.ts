@@ -48,6 +48,7 @@ import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHE
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
 import { liveAgentRelay } from './live-agent/live-agent-relay';
+import { syncLiveAgentAtStartup } from './live-agent/live-agent-projects';
 import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
@@ -541,10 +542,8 @@ app.whenReady().then(async () => {
   // Setup IPC handlers
   setupIpcHandlers(agentManager, terminalManager, () => mainWindow);
 
-  // Live agent: its relay runs from startup when the setting is on (until the app quits)
-  if (readSettingsFile()?.liveAgent === true) {
-    liveAgentRelay.setEnabled(true);
-  }
+  // Live agent: refresh the setup of projects that have it on and start their relay (until the app quits)
+  void syncLiveAgentAtStartup().catch((error) => appLog.error('[LiveAgent] Startup failed:', error));
 
   // Re-arm resume timers for tasks held by a rate limit (holds survive restarts;
   // holds whose reset time already passed resume shortly after startup)

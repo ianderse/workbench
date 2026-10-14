@@ -22,7 +22,7 @@ import { SortableTerminalWrapper } from './SortableTerminalWrapper';
 import { Button } from './ui/button';
 import { useTerminalStore } from '../stores/terminal-store';
 import { useTaskStore } from '../stores/task-store';
-import { useSettingsStore } from '../stores/settings-store';
+import { useLiveAgentStore } from '../stores/live-agent-store';
 import { TERMINAL_DOM_UPDATE_DELAY_MS, PANEL_CLEANUP_GRACE_PERIOD_MS } from '../../shared/constants';
 import { computeTerminalGridLayout, computeWeightedTerminalLayout } from '../lib/terminal-grid-layout';
 
@@ -237,9 +237,12 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
   // Near-square grid without empty cells: the newest row or column is shared by its windows
   const gridLayout = useMemo(() => computeTerminalGridLayout(terminals.length), [terminals.length]);
 
-  // Live agent: agent windows show their graph next to the terminal and take twice the width.
-  // Without any, the plain grid above is used as it is
-  const liveAgent = useSettingsStore((state) => state.settings.liveAgent === true);
+  // Live agent (the project's setting): agent windows show their graph next to the terminal and take
+  // twice the width. Without any, the plain grid above is used as it is
+  const liveAgent = useLiveAgentStore((state) => (projectPath ? state.enabled[projectPath] === true : false));
+  useEffect(() => {
+    if (projectPath) void useLiveAgentStore.getState().load(projectPath);
+  }, [projectPath]);
   const weightKey = terminals
     .map((terminal) => (liveAgent && terminal.isCLIMode && (terminal.cwd || projectPath) ? 2 : 1))
     .join(',');
