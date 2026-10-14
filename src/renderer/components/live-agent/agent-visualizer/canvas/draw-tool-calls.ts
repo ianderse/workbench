@@ -31,7 +31,7 @@ export function drawToolCalls(
     ctx.beginPath()
     ctx.arc(tool.x, tool.y, r, 0, Math.PI * 2)
     ctx.strokeStyle = getToolColor(tool.state)
-    ctx.lineWidth = 2
+    ctx.lineWidth = 1
     ctx.stroke()
 
     ctx.shadowBlur = 0
