@@ -37,14 +37,6 @@ export function detectStateChanges(
         color: COLORS.holoBase, age: 0, duration: FX.spawnDuration,
       })
     }
-
-    // Complete: just became complete
-    if (oldState && oldState !== 'complete' && state === 'complete') {
-      effects.push({
-        type: 'complete', x: agent.x, y: agent.y,
-        color: COLORS.complete, age: 0, duration: FX.completeDuration,
-      })
-    }
   }
 
   for (const [id, tool] of toolCalls) {

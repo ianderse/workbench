@@ -43,7 +43,7 @@ export const ANSWER_HOLD_S = 1.2
 export const CAMERA = {
   /** Resting zoom: used whenever the whole graph fits on the page; auto-fit
    *  only zooms out from here (never further in) when nodes would overflow */
-  restScale: 2,
+  restScale: 3,
   /** Screen pixels kept free between the graph and the page edge */
   viewMargin: 40,
   /** Furthest auto-fit will zoom out */
@@ -89,8 +89,8 @@ export const AGENT_DRAW = {
   sparkScale: 0.45,
   /** Centre of the Claude spark path (half its 512-unit viewBox), where it's drawn from */
   sparkViewBox: 256,
-  /** Sub-agent icon font size relative to radius */
-  subIconScale: 0.45,
+  /** Sub-agent icon (the Agents menu icon) width relative to radius */
+  subIconScale: 0.9,
 } as const
 
 // ─── Tool node drawing constants ────────────────────────────────────────────
@@ -137,16 +137,4 @@ export const SPAWN_FX = {
   flashMinRadius: 5,
   particleCount: 8,
   particleSize: 1.5,
-} as const
-
-export const COMPLETE_FX = {
-  ringStart: 20,
-  ringExpand: 80,
-  maxAlpha: 0.6,
-  flashThreshold: 0.2,
-  flashAlpha: 0.8,
-  flashRadius: 30,
-  lineWidthMax: 3,
-  glowInner: 5,
-  glowOuter: 10,
 } as const

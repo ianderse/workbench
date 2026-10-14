@@ -1,10 +1,9 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
-import { DepthParticle } from '../lib/agent-types'
 import { type GraphState, agentsAwaitingSubagents, displayedState } from '../hooks/graph/types'
 import { getStateColor } from '../lib/colors'
 import { ANIM_SPEED } from '../lib/canvas-constants'
 import { BloomRenderer } from './bloom-renderer'
-import { createDepthParticles, updateDepthParticles, drawBackground } from './background-layer'
+import { drawBackground } from './background-layer'
 import {
   type VisualEffect,
   drawEffects,
@@ -34,7 +33,8 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
   const animationRef = useRef<number>(0)
   const timeRef = useRef(0)
   const bloomRef = useRef<BloomRenderer | null>(null)
-  const depthParticlesRef = useRef<DepthParticle[]>([])
+  /** The canvas was sized once (a new canvas may already be the right size) */
+  const sizedRef = useRef(false)
   const lastFrameTimeRef = useRef(0)
   const viewKeyRef = useRef(viewKey)
   viewKeyRef.current = viewKey
@@ -156,11 +156,11 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       const pixelW = Math.round(w * dpr)
       const pixelH = Math.round(h * dpr)
       // (also on the first frame: a new canvas may already be the right size)
-      if (canvas.width !== pixelW || canvas.height !== pixelH || depthParticlesRef.current.length === 0) {
+      if (canvas.width !== pixelW || canvas.height !== pixelH || !sizedRef.current) {
         canvas.width = pixelW
         canvas.height = pixelH
         bloomRef.current?.resize(pixelW, pixelH)
-        depthParticlesRef.current = createDepthParticles(w, h)
+        sizedRef.current = true
       }
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
 
@@ -198,7 +198,6 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       }
 
       ctx.clearRect(0, 0, w, h)
-      updateDepthParticles(depthParticlesRef.current, deltaTime, w, h)
 
       let activeAgentPos: { x: number; y: number; color: string } | undefined
       for (const [, agent] of agents) {
@@ -209,7 +208,7 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
         }
       }
 
-      drawBackground(ctx, w, h, depthParticlesRef.current, transform, activeAgentPos)
+      drawBackground(ctx, w, h, transform, activeAgentPos)
 
       ctx.save()
       ctx.translate(transform.x, transform.y)

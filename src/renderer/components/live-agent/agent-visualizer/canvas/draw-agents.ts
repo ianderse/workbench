@@ -5,6 +5,7 @@ import { AGENT_DRAW } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
 import { drawHexagon, CLAUDE_SPARK_D } from './draw-misc'
 import { getAgentGlowSprite } from './render-cache'
+import { AGENTS_ICON_PATH } from '../../../icons/app-icons'
 
 let _claudeSparkPath: Path2D | null = null
 function getClaudeSparkPath() {
@@ -22,6 +23,27 @@ function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.shadowColor = color
   ctx.shadowBlur = 6 / scale
   ctx.fill(getClaudeSparkPath())
+  ctx.restore()
+}
+
+let _agentsIconPath: Path2D | null = null
+function getAgentsIconPath() {
+  if (!_agentsIconPath) _agentsIconPath = new Path2D(AGENTS_ICON_PATH)
+  return _agentsIconPath
+}
+
+/** The Agents menu icon (a pixel creature on a 1024 artboard, its figure spanning
+ *  x 0–1024 and y 213–853), centered on the node */
+function drawAgentsIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r: number, color: string) {
+  ctx.save()
+  ctx.translate(cx, cy)
+  const scale = (r * AGENT_DRAW.subIconScale) / 1024
+  ctx.scale(scale, scale)
+  ctx.translate(-512, -533)
+  ctx.fillStyle = color
+  ctx.shadowColor = color
+  ctx.shadowBlur = 6 / scale
+  ctx.fill(getAgentsIconPath())
   ctx.restore()
 }
 
@@ -96,11 +118,7 @@ function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, 
   } else if (agent.isMain) {
     drawClaudeSpark(ctx, agent.x, agent.y, r, color)
   } else {
-    ctx.fillStyle = color
-    ctx.font = `${r * AGENT_DRAW.subIconScale}px monospace`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText(agent.state === 'tool_calling' ? '\u2699' : '\u25C7', agent.x, agent.y)
+    drawAgentsIcon(ctx, agent.x, agent.y, r, color)
   }
 }
 

@@ -46,15 +46,6 @@ export interface GraphEvent {
   payload: Record<string, unknown>
 }
 
-export interface DepthParticle {
-  x: number
-  y: number
-  size: number
-  brightness: number
-  speed: number
-  depth: number
-}
-
 // ─── Layout Constants ────────────────────────────────────────────────────────
 
 export const NODE = {
@@ -79,7 +70,6 @@ export const ANIM = {
 
 export const FX = {
   spawnDuration: 0.8,
-  completeDuration: 1.0,
   shatterDuration: 0.8,
   shatterCount: 12,
   shatterSpeed: { min: 30, range: 60 },
