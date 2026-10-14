@@ -38,6 +38,11 @@ export const ANIM_SPEED = {
  *  back to the caller with the answer, before the node fades out */
 export const ANSWER_HOLD_S = 1.2
 
+/** Seconds a tool node stays on screen at least, from when it appeared: calls
+ *  such as Read, Edit or Write finish within milliseconds and would otherwise
+ *  only flash by */
+export const TOOL_MIN_VISIBLE_S = 3
+
 // ─── Camera constants ───────────────────────────────────────────────────────
 
 export const CAMERA = {

@@ -24,6 +24,8 @@ export interface ToolCallNode {
   state: 'running' | 'complete' | 'error'
   x: number
   y: number
+  /** Graph clock time the node appeared (keeps it TOOL_MIN_VISIBLE_S on screen) */
+  startTime: number
   completeTime?: number // when the tool call completed (starts the ANSWER_HOLD_S hold)
   opacity: number
 }

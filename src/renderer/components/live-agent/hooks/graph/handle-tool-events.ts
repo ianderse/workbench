@@ -37,6 +37,7 @@ export function handleToolCallStart(
     state: 'running',
     x: pos.x,
     y: pos.y,
+    startTime: eventTime,
     opacity: 0,
   })
 

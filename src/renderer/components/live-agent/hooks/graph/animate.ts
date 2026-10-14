@@ -3,6 +3,7 @@ import type { GraphState } from './types'
 import { agentsAwaitingSubagents } from './types'
 import {
   ANSWER_HOLD_S,
+  TOOL_MIN_VISIBLE_S,
   MOCK_END_BUFFER_S,
   ANIM_SPEED,
 } from '../../lib/canvas-constants'
@@ -20,9 +21,11 @@ function isFadingOut(agent: Agent, time: number, awaiting: Set<string>): boolean
     && time - (agent.completeTime ?? 0) >= ANSWER_HOLD_S
 }
 
-/** A finished tool call whose answer has been shown flowing back to its agent */
+/** A finished tool call whose answer has been shown flowing back to its agent,
+ *  and that has been on screen long enough to read */
 function isToolFadingOut(tc: ToolCallNode, time: number): boolean {
   return tc.state !== 'running' && time - (tc.completeTime ?? 0) >= ANSWER_HOLD_S
+    && time - tc.startTime >= TOOL_MIN_VISIBLE_S
 }
 
 function animateAgents(agents: GraphState['agents'], deltaTime: number, newTime: number): GraphState['agents'] {
