@@ -9,30 +9,20 @@ import type { AgentState, ToolCallNode } from './agent-types'
 // Holographic Color Palette
 export const COLORS = {
   // Primary Hologram
-  holoBase: '#0088FF',
-  holoHot: '#ffffff',
+  holoBase: '#C6613F',
+  holoHot: '#A855F7',
 
   // Agent States
   idle: '#FF4081',
   thinking: '#0088FF',
   tool_calling: '#FCA935',
-  complete: '#3FB950',
-  error: '#ff5566',
+  complete: '#00C950',
+  error: '#FB2C36',
   waiting_permission: '#A855F7',
 
   // Tool nodes: a finished call, a running one
-  return: '#3FB950',
+  return: '#00C950',
   tool: '#FCA935',
-
-  // UI Chrome
-  nodeInterior: 'rgba(10, 15, 40, 0.5)',
-
-  // Canvas drawing — tool node backgrounds (partial rgba, alpha appended at draw time)
-  toolNodeErrorBase: 'rgba(40, 10, 15,',
-  toolNodeBase: 'rgba(10, 15, 30,',
-
-  // Canvas drawing — near-invisible fill that casts an agent's drop shadow
-  agentShadowFill: 'rgba(0, 0, 0, 0.01)',
 } as const
 
 // ─── Color Helper Functions ──────────────────────────────────────────────────
@@ -51,9 +41,4 @@ export function getStateColor(state: AgentState): string {
     case 'error': return COLORS.error
     case 'waiting_permission': return COLORS.waiting_permission
   }
-}
-
-/** Safely combine a partial rgba base (e.g. 'rgba(10, 15, 30,') with an alpha value */
-export function withAlpha(rgbaBase: string, alpha: number): string {
-  return `${rgbaBase} ${alpha})`
 }

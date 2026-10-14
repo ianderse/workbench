@@ -1,6 +1,6 @@
 import { displayedState } from '../../hooks/graph/types'
 import { Agent, NODE, ANIM } from '../../lib/agent-types'
-import { COLORS, getStateColor } from '../../lib/colors'
+import { getStateColor } from '../../lib/colors'
 import { AGENT_DRAW } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
 import { drawHexagon, CLAUDE_SPARK_D } from './draw-misc'
@@ -25,35 +25,26 @@ function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.restore()
 }
 
-function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
-  ctx.save()
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
-  ctx.shadowBlur = AGENT_DRAW.shadowBlur
-  ctx.shadowOffsetX = AGENT_DRAW.shadowOffsetX
-  ctx.shadowOffsetY = AGENT_DRAW.shadowOffsetY
-  drawHexagon(ctx, agent.x, agent.y, r * 0.9)
-  ctx.fillStyle = COLORS.agentShadowFill
-  ctx.fill()
-  ctx.restore()
-}
-
 function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean) {
   const glowR = r + AGENT_DRAW.glowPadding
   const glowAlpha = isWaiting ? 0.3 : agent.state === 'thinking' ? 0.2 : 0.1
+  // Neon glow: strongest at the border (from the hexagon's edge midpoints, cos 30° of its
+  // radius) and fading outward; the inside of the node is clipped out, so it stays clear
+  const outer = Math.ceil(glowR)
+  ctx.save()
+  drawHexagon(ctx, agent.x, agent.y, r)
+  ctx.rect(agent.x - outer, agent.y - outer, outer * 2, outer * 2)
+  ctx.clip('evenodd')
   // Pre-rendered glow sprite instead of per-frame gradient creation
-  const sprite = getAgentGlowSprite(color, Math.round(r * 0.5), Math.ceil(glowR), alphaHex(glowAlpha))
-  ctx.drawImage(sprite, agent.x - Math.ceil(glowR), agent.y - Math.ceil(glowR))
+  const sprite = getAgentGlowSprite(color, Math.round(r * Math.cos(Math.PI / 6)), outer, alphaHex(glowAlpha))
+  ctx.drawImage(sprite, agent.x - outer, agent.y - outer)
+  ctx.restore()
 
   // Ambient outer hex ring
   drawHexagon(ctx, agent.x, agent.y, r + AGENT_DRAW.outerRingOffset)
   ctx.strokeStyle = color + '25'
   ctx.lineWidth = 1
   ctx.stroke()
-
-  // Inner hex fill
-  drawHexagon(ctx, agent.x, agent.y, r)
-  ctx.fillStyle = COLORS.nodeInterior
-  ctx.fill()
 }
 
 function drawScanline(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean, time: number) {
@@ -90,8 +81,8 @@ function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, 
     // Geometric lock icon — fits the holographic style
     const s = r * 0.3
     ctx.save()
-    ctx.strokeStyle = color + '90'
-    ctx.fillStyle = color + '90'
+    ctx.strokeStyle = color
+    ctx.fillStyle = color
     ctx.lineWidth = 1.5
     // Lock body (rounded rect)
     ctx.beginPath()
@@ -103,9 +94,9 @@ function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, 
     ctx.stroke()
     ctx.restore()
   } else if (agent.isMain) {
-    drawClaudeSpark(ctx, agent.x, agent.y, r, color + '90')
+    drawClaudeSpark(ctx, agent.x, agent.y, r, color)
   } else {
-    ctx.fillStyle = color + '90'
+    ctx.fillStyle = color
     ctx.font = `${r * AGENT_DRAW.subIconScale}px monospace`
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
@@ -151,7 +142,6 @@ export function drawAgents(
     ctx.save()
     ctx.globalAlpha = agent.opacity
 
-    drawDepthShadow(ctx, agent, r)
     drawAgentGlow(ctx, agent, r, color, isWaiting)
     drawScanline(ctx, agent, r, color, isWaiting, time)
     drawStateRing(ctx, agent, r, color, isWaiting, time)

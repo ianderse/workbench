@@ -1,5 +1,5 @@
 import { ToolCallNode } from '../../lib/agent-types'
-import { COLORS, withAlpha, getToolColor } from '../../lib/colors'
+import { COLORS, getToolColor } from '../../lib/colors'
 import { TOOL_DRAW, toolNodeRadius } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
 import { measureTextCached } from './render-cache'
@@ -15,7 +15,6 @@ export function drawToolCalls(
   for (const tool of toolCalls.values()) {
     const isRunning = tool.state === 'running'
     const isError = tool.state === 'error'
-    const pulse = isRunning ? Math.sin(time * 4) * 0.2 + 0.8 : isError ? Math.sin(time * 6) * 0.15 + 0.85 : 0.5
 
     ctx.save()
     ctx.globalAlpha = tool.opacity
@@ -31,12 +30,8 @@ export function drawToolCalls(
 
     ctx.beginPath()
     ctx.arc(tool.x, tool.y, r, 0, Math.PI * 2)
-    ctx.fillStyle = isError
-      ? withAlpha(COLORS.toolNodeErrorBase, 0.8 * pulse)
-      : withAlpha(COLORS.toolNodeBase, 0.7 * pulse)
-    ctx.fill()
-    ctx.strokeStyle = getToolColor(tool.state) + (isError ? '90' : isRunning ? '60' : '40')
-    ctx.lineWidth = isError ? 2 : 1
+    ctx.strokeStyle = getToolColor(tool.state)
+    ctx.lineWidth = 2
     ctx.stroke()
 
     ctx.shadowBlur = 0

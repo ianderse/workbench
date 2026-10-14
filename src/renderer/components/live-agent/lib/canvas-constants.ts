@@ -70,10 +70,6 @@ export const AGENT_DRAW = {
   glowPadding: 20,
   /** Ambient outer hex ring offset from agent radius */
   outerRingOffset: 3,
-  /** Shadow blur for depth shadow */
-  shadowBlur: 15,
-  shadowOffsetX: 3,
-  shadowOffsetY: 5,
   /** Scanline gradient half-height */
   scanlineHalfH: 4,
   /** Scanline width = 2 * scanlineHalfH */
