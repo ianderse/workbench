@@ -3,6 +3,7 @@
  * isn't restarted by agent windows subscribing or going away, and is stopped when the app quits
  */
 import { EventEmitter } from 'events';
+import path from 'path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 class FakeWorker extends EventEmitter {
@@ -83,7 +84,8 @@ describe('LiveAgentRelay', () => {
     relay.setEnabled(true);
     expect(workers).toHaveLength(1);
     expect(workers[0].posted[0]).toMatchObject({ type: 'start' });
-    expect(workers[0].posted[0].claudeDirs).toContain('/tmp/claude-work');
+    // Resolved, as Claude Code resolves it (a drive path on Windows)
+    expect(workers[0].posted[0].claudeDirs).toContain(path.resolve('/tmp/claude-work'));
     expect(relay.getStatus().state).toBe('starting');
 
     workers[0].emit('message', { type: 'ready' });
