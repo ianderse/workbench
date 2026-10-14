@@ -205,6 +205,18 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
               aria-label={t('claudeCode.agentWindows.skipPermissions')}
             />
           </SettingsRow>
+
+          {/* Agent windows show a live agent-flow graph of their Claude Code session */}
+          <SettingsRow
+            label={t('claudeCode.agentWindows.liveAgent')}
+            description={t('claudeCode.agentWindows.liveAgentDescription')}
+          >
+            <Switch
+              checked={settings.liveAgent === true}
+              onCheckedChange={(liveAgent) => onSettingsChange({ ...settings, liveAgent })}
+              aria-label={t('claudeCode.agentWindows.liveAgent')}
+            />
+          </SettingsRow>
         </SettingsRows>
       </SettingsSection>
 

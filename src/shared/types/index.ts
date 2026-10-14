@@ -19,6 +19,7 @@ export * from './app-update';
 export * from './cli';
 export * from './provider-account';
 export * from './claude-code';
+export * from './live-agent';
 
 // IPC types (must be last to use types from other modules)
 export * from './ipc';

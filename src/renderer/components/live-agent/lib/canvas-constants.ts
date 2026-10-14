@@ -1,0 +1,156 @@
+// ─── Visibility threshold ───────────────────────────────────────────────────
+
+/** Minimum opacity for an element to be considered visible (edges to fainter nodes aren't drawn) */
+export const MIN_VISIBLE_OPACITY = 0.05
+
+// ─── Agent spawn distance ───────────────────────────────────────────────────
+
+export const AGENT_SPAWN_DISTANCE = 250
+
+// ─── Mock scenario buffer ──────────────────────────────────────────────────
+
+export const MOCK_END_BUFFER_S = 8
+
+// ─── Animation speeds and frame timing ───────────────────────────────────────
+// The rates are per second (multiplied by deltaTime); the rest cap, default or
+// gate the frame time
+
+export const ANIM_SPEED = {
+  /** Agent fade-in (opacity per dt) */
+  agentFadeIn: 3,
+  /** Agent scale-in (scale per dt) */
+  agentScaleIn: 4,
+  /** Agent fade-out after complete (opacity per dt) */
+  agentFadeOut: 3,
+  /** Tool fade-in (opacity per dt) */
+  toolFadeIn: 4,
+  /** Tool fade-out after it has finished (opacity per dt) */
+  toolFadeOut: 3,
+  /** Default delta time cap (seconds) */
+  maxDeltaTime: 0.1,
+  /** Default delta time when time info unavailable */
+  defaultDeltaTime: 0.016,
+  /** Minimum ms between frames (60fps cap, with 1ms slack for timing jitter) */
+  minFrameInterval: (1000 / 60) - 1,
+} as const
+
+/** Seconds a finished tool or sub-agent stays fully visible, its edge flowing
+ *  back to the caller with the answer, before the node fades out */
+export const ANSWER_HOLD_S = 1.2
+
+// ─── Camera constants ───────────────────────────────────────────────────────
+
+export const CAMERA = {
+  /** Resting zoom: used whenever the whole graph fits on the page; auto-fit
+   *  only zooms out from here (never further in) when nodes would overflow */
+  restScale: 2,
+  /** Screen pixels kept free between the graph and the page edge */
+  viewMargin: 40,
+  /** Furthest auto-fit will zoom out */
+  minZoom: 0.2,
+} as const
+
+// ─── Tool slot placement config ─────────────────────────────────────────────
+
+export const TOOL_SLOT = {
+  /** Rings tried outward from the agent; if every slot is taken, the outermost ring's least crowded one is used */
+  maxRings: 12,
+  baseDistance: 100,
+  ringIncrement: 35,
+  baseSteps: 5,
+  stepsPerRing: 2,
+  /** Minimum space between a tool circle and another tool or agent */
+  gap: 12,
+} as const
+
+// ─── Agent drawing constants ────────────────────────────────────────────────
+
+export const AGENT_DRAW = {
+  /** Outer glow extra radius beyond agent radius */
+  glowPadding: 20,
+  /** Ambient outer hex ring offset from agent radius */
+  outerRingOffset: 3,
+  /** Shadow blur for depth shadow */
+  shadowBlur: 15,
+  shadowOffsetX: 3,
+  shadowOffsetY: 5,
+  /** Scanline gradient half-height */
+  scanlineHalfH: 4,
+  /** Scanline width = 2 * scanlineHalfH */
+  scanlineWidth: 8,
+  /** Dash offset animation speed for waiting state */
+  waitingDashSpeed: 25,
+  /** Active-state pulse (thinking / waiting for permission): 2 staggered hexagon
+   *  rings expanding from the node edge and fading out */
+  rippleInnerOffset: 5,
+  rippleMaxExpand: 45,
+  rippleMaxAlpha: 0.4,
+  rippleSpeed: 0.65,
+  /** Waiting state breathe parameters */
+  waitingBreatheSpeed: 1.2,
+  waitingBreatheAmp: 0.08,
+  /** Claude spark logo scale: the radius times this spans `sparkViewBox` path units */
+  sparkScale: 0.45,
+  /** Centre of the Claude spark path (half its 512-unit viewBox), where it's drawn from */
+  sparkViewBox: 256,
+  /** Sub-agent icon font size relative to radius */
+  subIconScale: 0.45,
+} as const
+
+// ─── Tool node drawing constants ────────────────────────────────────────────
+
+export const TOOL_DRAW = {
+  /** Tool name font size */
+  fontSize: 8,
+  /** Space between the text and the circle edge */
+  padding: 5,
+  minRadius: 14,
+  /** Error glow base blur + pulse amplitude */
+  errorGlowBase: 8,
+  errorGlowPulse: 4,
+  /** Running-state ripples: 2 staggered rings expanding from the circle edge
+   *  and fading out (like a busy agent's hexagon rings) */
+  rippleInnerOffset: 3,
+  rippleMaxExpand: 22,
+  rippleMaxAlpha: 0.45,
+  rippleSpeed: 0.65,
+} as const
+
+/** Radius of a tool circle that fully contains its name, given its measured width */
+export function toolNodeRadius(nameWidth: number): number {
+  return Math.max(TOOL_DRAW.minRadius, Math.ceil(Math.hypot(nameWidth / 2, TOOL_DRAW.fontSize / 2)) + TOOL_DRAW.padding)
+}
+
+/** Monospace glyphs are ~0.6em wide. Used where no canvas context is available. */
+const MONO_CHAR_W = 0.6
+
+/** Estimate a tool circle's radius without a canvas (layout, auto-fit and edge trimming). */
+export function estimateToolNodeRadius(toolName: string): number {
+  return toolNodeRadius(toolName.length * TOOL_DRAW.fontSize * MONO_CHAR_W)
+}
+
+// ─── Effect drawing constants ───────────────────────────────────────────────
+
+export const SPAWN_FX = {
+  ringStart: 10,
+  ringExpand: 60,
+  maxAlpha: 0.7,
+  flashThreshold: 0.3,
+  flashAlpha: 0.6,
+  flashBaseRadius: 20,
+  flashMinRadius: 5,
+  particleCount: 8,
+  particleSize: 1.5,
+} as const
+
+export const COMPLETE_FX = {
+  ringStart: 20,
+  ringExpand: 80,
+  maxAlpha: 0.6,
+  flashThreshold: 0.2,
+  flashAlpha: 0.8,
+  flashRadius: 30,
+  lineWidthMax: 3,
+  glowInner: 5,
+  glowOuter: 10,
+} as const

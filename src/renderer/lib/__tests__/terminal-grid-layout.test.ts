@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { computeTerminalGridLayout, type TerminalGridLayout } from '../terminal-grid-layout';
+import {
+  computeTerminalGridLayout,
+  computeWeightedTerminalLayout,
+  type TerminalBox,
+  type TerminalGridLayout,
+} from '../terminal-grid-layout';
 
 /** Each window's share of the grid's width and height, and whether the cells tile the grid */
 function shares(layout: TerminalGridLayout) {
@@ -53,5 +58,58 @@ describe('computeTerminalGridLayout', () => {
     expect(shares(computeTerminalGridLayout(2)).sizes).toEqual([[1 / 2, 1], [1 / 2, 1]]);
     expect(shares(computeTerminalGridLayout(9)).sizes.every(([w, h]) => w === 1 / 3 && h === 1 / 3)).toBe(true);
     expect(computeTerminalGridLayout(0)).toEqual({ rows: 0, columns: 0, cells: [] });
+  });
+});
+
+describe('computeWeightedTerminalLayout', () => {
+  /** Boxes cover the area once: no overlap, no gap */
+  function expectTiled(boxes: TerminalBox[]) {
+    const area = boxes.reduce((sum, box) => sum + box.width * box.height, 0);
+    expect(area).toBeCloseTo(1, 9);
+    for (const [i, a] of boxes.entries()) {
+      expect(a.x + a.width).toBeLessThanOrEqual(1 + 1e-9);
+      expect(a.y + a.height).toBeLessThanOrEqual(1 + 1e-9);
+      for (const b of boxes.slice(i + 1)) {
+        const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        expect(overlapX > 1e-9 && overlapY > 1e-9).toBe(false);
+      }
+    }
+  }
+
+  it('gives a single agent window the whole area', () => {
+    expect(computeWeightedTerminalLayout([2])).toEqual([{ x: 0, y: 0, width: 1, height: 1 }]);
+  });
+
+  it('makes an agent window twice as wide as a terminal in the same row', () => {
+    const boxes = computeWeightedTerminalLayout([1, 2, 1]);
+    expect(boxes[0].y).toBe(boxes[1].y);
+    expect(boxes[1].width).toBeCloseTo(boxes[0].width * 2, 9);
+    expectTiled(boxes);
+  });
+
+  it('keeps the windows in reading order', () => {
+    const boxes = computeWeightedTerminalLayout([2, 1, 1]);
+    expect(boxes[0]).toEqual({ x: 0, y: 0, width: 1, height: 0.5 });
+    expect(boxes[1]).toEqual({ x: 0, y: 0.5, width: 0.5, height: 0.5 });
+    expect(boxes[2]).toEqual({ x: 0.5, y: 0.5, width: 0.5, height: 0.5 });
+  });
+
+  it('uses the rows of the plain layout for that many slots', () => {
+    // Three agent windows are six slots: two rows
+    const boxes = computeWeightedTerminalLayout([2, 2, 2]);
+    expect(new Set(boxes.map((box) => box.y)).size).toBe(2);
+    expectTiled(boxes);
+  });
+
+  it('tiles the area for any mix of windows', () => {
+    for (let count = 1; count <= 24; count++) {
+      for (const pattern of [() => 2, (i: number) => (i % 2 ? 2 : 1), (i: number) => (i % 3 ? 1 : 2)]) {
+        const weights = Array.from({ length: count }, (_, i) => pattern(i));
+        const boxes = computeWeightedTerminalLayout(weights);
+        expect(boxes).toHaveLength(count);
+        expectTiled(boxes);
+      }
+    }
   });
 });

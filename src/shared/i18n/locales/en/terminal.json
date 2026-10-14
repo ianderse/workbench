@@ -70,5 +70,12 @@
   "header": {
     "agent": "Agent",
     "terminal": "Terminal"
+  },
+  "liveAgent": {
+    "graphLabel": "Live agent graph",
+    "starting": "Live agent is starting",
+    "failed": "Live agent could not start",
+    "waitingTitle": "Waiting for the Claude Code session",
+    "waitingDescription": "Its agents and tool calls show up here as it works"
   }
 }

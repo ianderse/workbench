@@ -62,6 +62,8 @@ export const DEFAULT_APP_SETTINGS = {
   logOrder: 'chronological' as const,
   // Beta updates opt-in (receive pre-release versions)
   betaUpdates: false,
+  // Live agent: agent windows show a live graph of their Claude Code session (off by default)
+  liveAgent: false,
   // Auto-name Claude terminals based on initial message (enabled by default)
   // GPU acceleration for terminal rendering
   // Default to 'off' until WebGL stability is proven across all GPU drivers.

@@ -14,6 +14,7 @@ import type { BrowserWindow } from 'electron';
 import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { taskQueue } from '../services/task-queue';
+import { liveAgentRelay } from '../live-agent/live-agent-relay';
 import { configureTools, getToolPath, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache } from '../cli-tool-manager';
 
 const settingsPath = getSettingsPath();
@@ -153,6 +154,11 @@ export function registerSettingsHandlers(
         // A higher parallel task limit frees slots for queued tasks
         if (settings.maxParallelTasks !== undefined) {
           taskQueue.request();
+        }
+
+        // Live agent: start or stop the relay worker with the setting (starting doesn't block)
+        if (settings.liveAgent !== undefined) {
+          liveAgentRelay.setEnabled(settings.liveAgent === true);
         }
 
         // Update auto-updater channel if betaUpdates setting changed

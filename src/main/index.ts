@@ -47,6 +47,7 @@ import { initializeAppUpdater, stopPeriodicUpdates } from './app-updater';
 import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, ADD_TO_DICTIONARY_LABELS } from '../shared/constants';
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
+import { liveAgentRelay } from './live-agent/live-agent-relay';
 import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
@@ -540,6 +541,11 @@ app.whenReady().then(async () => {
   // Setup IPC handlers
   setupIpcHandlers(agentManager, terminalManager, () => mainWindow);
 
+  // Live agent: its relay runs from startup when the setting is on (until the app quits)
+  if (readSettingsFile()?.liveAgent === true) {
+    liveAgentRelay.setEnabled(true);
+  }
+
   // Re-arm resume timers for tasks held by a rate limit (holds survive restarts;
   // holds whose reset time already passed resume shortly after startup)
   setImmediate(() => {
@@ -746,6 +752,9 @@ app.on('before-quit', (event) => {
   // Perform async cleanup, then allow quit to proceed
   (async () => {
     try {
+      // Stop the Live agent relay worker (removes its discovery files, closes its hook server)
+      await liveAgentRelay.shutdown();
+
       // Kill all running agent processes
       if (agentManager) {
         await agentManager.killAll();
@@ -767,6 +776,11 @@ app.on('before-quit', (event) => {
       app.quit();
     }
   })();
+});
+
+// Safety net: no Live agent relay worker outlives the app (before-quit normally stopped it)
+app.on('will-quit', () => {
+  liveAgentRelay.terminateNow();
 });
 
 // Note: Uncaught exceptions and unhandled rejections are now

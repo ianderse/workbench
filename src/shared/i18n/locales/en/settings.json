@@ -546,7 +546,9 @@
     },
     "agentWindows": {
       "skipPermissions": "Skip permission prompts",
-      "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions, so it runs commands and edits files without asking"
+      "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions, so it runs commands and edits files without asking",
+      "liveAgent": "Live agent",
+      "liveAgentDescription": "Agent windows show a live graph of the Claude Code session next to the terminal"
     }
   },
   "claudeAccounts": {

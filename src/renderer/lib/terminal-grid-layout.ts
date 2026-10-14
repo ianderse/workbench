@@ -74,3 +74,68 @@ export function computeTerminalGridLayout(count: number): TerminalGridLayout {
   }
   return { rows, columns: units, cells };
 }
+
+/** A window's box in the grid area, as fractions (0 to 1) of its width and height */
+export interface TerminalBox {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Layout of the agent windows grid when some windows are wider (Live agent: an agent window
+ * shows its graph next to the terminal and counts as two windows).
+ *
+ * A window of weight w takes w slots. The rows are those of the plain layout for that many
+ * slots; the windows fill them in reading order (each row as full as it can be while all fit),
+ * and share a row's width by weight, so a weight-2 window is twice as wide as a weight-1
+ * window next to it. Rows that end up shorter are shared by their windows, as in the plain
+ * layout. Returns boxes rather than grid cells: rows with different slot counts would need the
+ * least common multiple of those counts as grid columns.
+ */
+export function computeWeightedTerminalLayout(weights: number[]): TerminalBox[] {
+  if (weights.length === 0) return [];
+  const slots = weights.reduce((sum, w) => sum + w, 0);
+  const plainColumns = slots === 2 ? 2 : Math.ceil(Math.sqrt(slots));
+  const maxRows = Math.ceil(slots / plainColumns);
+
+  // Windows split into rows of at most `limit` slots, in reading order
+  const packRows = (limit: number): number[][] => {
+    const rows: number[][] = [];
+    let current: number[] = [];
+    let total = 0;
+    weights.forEach((w, index) => {
+      if (current.length > 0 && total + w > limit) {
+        rows.push(current);
+        current = [];
+        total = 0;
+      }
+      current.push(index);
+      total += w;
+    });
+    rows.push(current);
+    return rows;
+  };
+
+  // The smallest row size that fits every window into the plain layout's rows
+  let limit = Math.max(...weights);
+  let rows = packRows(limit);
+  while (rows.length > maxRows) {
+    limit++;
+    rows = packRows(limit);
+  }
+
+  const boxes: TerminalBox[] = new Array(weights.length);
+  const height = 1 / rows.length;
+  rows.forEach((row, rowIndex) => {
+    const rowSlots = row.reduce((sum, index) => sum + weights[index], 0);
+    let x = 0;
+    for (const index of row) {
+      const width = weights[index] / rowSlots;
+      boxes[index] = { x, y: rowIndex * height, width, height };
+      x += width;
+    }
+  });
+  return boxes;
+}

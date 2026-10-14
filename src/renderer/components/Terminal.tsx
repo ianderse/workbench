@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState, useMemo, forwardRef, useImperativeHandle } from 'react';
+import { useEffect, useRef, useCallback, useState, useMemo, forwardRef, useImperativeHandle, lazy, Suspense } from 'react';
 import { useDroppable } from '@dnd-kit/core';
 import '@xterm/xterm/css/xterm.css';
 import {
@@ -7,6 +7,7 @@ import {
   useTerminalStore,
   type PendingTaskSession
 } from '../stores/terminal-store';
+import { useSettingsStore } from '../stores/settings-store';
 import { getTaskSessionBlocker } from '../../shared/utils/claude-run';
 import type { TerminalProps } from './terminal/types';
 import type { TerminalWorktreeConfig } from '../../shared/types';
@@ -17,6 +18,9 @@ import { usePtyProcess } from './terminal/usePtyProcess';
 import { useTerminalEvents } from './terminal/useTerminalEvents';
 import { debugLog } from '../../shared/utils/debug-logger';
 import { isWindows as checkIsWindows } from '../lib/os-detection';
+
+// Live agent graph, loaded only when the setting is on and an agent window shows it
+const LiveAgentGraph = lazy(() => import('./live-agent/LiveAgentGraph'));
 
 // Minimum dimensions to prevent PTY creation with invalid sizes
 const MIN_COLS = 10;
@@ -82,6 +86,8 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
   // Track previous isExpanded state to detect actual expansion changes
   // This prevents forcing PTY resize on initial mount (only on actual state changes)
   const prevIsExpandedRef = useRef<boolean | undefined>(undefined);
+  // Same for the Live agent graph next to the terminal (it halves the terminal's width)
+  const prevShowGraphRef = useRef<boolean | undefined>(undefined);
   // Track when last auto-correction was performed to implement cooldown
   const lastAutoCorrectionTimeRef = useRef<number>(0);
   // Track auto-correction frequency to detect potential deeper issues
@@ -106,6 +112,10 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
 
   // Use cwd from store if available (for worktree), otherwise use prop
   const effectiveCwd = terminal?.cwd || cwd;
+
+  // Live agent: an agent window shows a graph of its Claude Code session next to the terminal
+  const liveAgent = useSettingsStore((state) => state.settings.liveAgent === true);
+  const showGraph = liveAgent && terminal?.isCLIMode === true && !!effectiveCwd;
 
   const associatedTask = terminal?.associatedTaskId
     ? tasks.find((t) => t.id === terminal.associatedTaskId)
@@ -419,16 +429,18 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     }
   }, [isActive, focus]);
 
-  // Refit terminal when expansion state changes
+  // Refit terminal when expansion state changes or the Live agent graph is shown or hidden
   // Uses transitionend event listener and RAF-based retry logic instead of fixed timeout
   // for more reliable resizing after CSS transitions complete
   useEffect(() => {
-    // Detect if this is an actual expansion state change vs initial mount
+    // Detect if this is an actual layout change vs initial mount
     // Only force PTY resize on actual state changes to avoid resizing with invalid dimensions on mount
     const isFirstMount = prevIsExpandedRef.current === undefined;
-    const expansionStateChanged = !isFirstMount && prevIsExpandedRef.current !== isExpanded;
-    debugLog(`[Terminal ${id}] Expansion effect: isExpanded=${isExpanded}, isFirstMount=${isFirstMount}, expansionStateChanged=${expansionStateChanged}, prevIsExpanded=${prevIsExpandedRef.current}`);
+    const expansionStateChanged = !isFirstMount
+      && (prevIsExpandedRef.current !== isExpanded || prevShowGraphRef.current !== showGraph);
+    debugLog(`[Terminal ${id}] Expansion effect: isExpanded=${isExpanded}, showGraph=${showGraph}, isFirstMount=${isFirstMount}, expansionStateChanged=${expansionStateChanged}, prevIsExpanded=${prevIsExpandedRef.current}`);
     prevIsExpandedRef.current = isExpanded;
+    prevShowGraphRef.current = showGraph;
 
     // RAF fallback for test environments where requestAnimationFrame may not be defined
     const raf = typeof requestAnimationFrame !== 'undefined'
@@ -545,7 +557,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
         container.parentElement?.removeEventListener('transitionend', handleTransitionEnd);
       }
     };
-  }, [isExpanded, fit, id, resizePtyWithTracking]);
+  }, [isExpanded, showGraph, fit, id, resizePtyWithTracking]);
 
   // Resume a restored agent window's Claude Code session as soon as the window is shown. The
   // store queues the resumes, so the project's windows start one after another, not all at once
@@ -723,10 +735,22 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
         onToggleExpand={onToggleExpand}
       />
 
-      {/* Padding lives on the wrapper: xterm's fit addon sizes rows from its container's height,
-          which would include the container's own padding and cut off the last line */}
-      <div className="flex-1 px-2 py-1.5" style={{ minHeight: 0 }}>
-        <div ref={terminalRef} className="h-full w-full" />
+      {/* The terminal, and with Live agent on the agent's graph in the second half. The row is
+          always there, so showing or hiding the graph never remounts xterm (session and scrollback stay) */}
+      <div className="flex flex-1" style={{ minHeight: 0 }}>
+        {/* Padding lives on the wrapper: xterm's fit addon sizes rows from its container's height,
+            which would include the container's own padding and cut off the last line */}
+        <div className="min-w-0 flex-1 px-2 py-1.5">
+          <div ref={terminalRef} className="h-full w-full" />
+        </div>
+        {showGraph && effectiveCwd && (
+          <div className="min-w-0 flex-1 border-l border-border">
+            <Suspense fallback={null}>
+              {/* A new directory (worktree switch) starts a fresh graph */}
+              <LiveAgentGraph key={effectiveCwd} cwd={effectiveCwd} />
+            </Suspense>
+          </div>
+        )}
       </div>
 
       {/* Worktree creation dialog */}
