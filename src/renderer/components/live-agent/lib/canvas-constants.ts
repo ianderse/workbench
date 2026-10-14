@@ -73,7 +73,7 @@ export const TOOL_SLOT = {
 export const AGENT_DRAW = {
   /** Outer glow extra radius beyond agent radius */
   glowPadding: 20,
-  /** Ambient outer hex ring offset from agent radius */
+  /** Ambient outer ring offset from agent radius */
   outerRingOffset: 3,
   /** Scanline gradient half-height */
   scanlineHalfH: 4,
@@ -81,8 +81,8 @@ export const AGENT_DRAW = {
   scanlineWidth: 8,
   /** Dash offset animation speed for waiting state */
   waitingDashSpeed: 25,
-  /** Active-state pulse (thinking / waiting for permission): 2 staggered hexagon
-   *  rings expanding from the node edge and fading out */
+  /** Active-state pulse (thinking / waiting for permission): 2 staggered rings
+   *  of the node's shape expanding from its edge and fading out */
   rippleInnerOffset: 5,
   rippleMaxExpand: 45,
   rippleMaxAlpha: 0.4,
@@ -96,6 +96,36 @@ export const AGENT_DRAW = {
   sparkViewBox: 256,
   /** Sub-agent icon (the Agents menu icon) width relative to radius */
   subIconScale: 0.9,
+} as const
+
+// ─── Main agent face ────────────────────────────────────────────────────────
+// Sizes and offsets are in node radii
+
+export const FACE = {
+  /** Eye width; its height is this times eyeAspect */
+  eyeWidth: 0.36,
+  eyeAspect: 1.15,
+  /** Each eye's center from the node's (the pentagon's middle sits a bit below its center) */
+  eyeOffsetX: 0.28,
+  eyeOffsetY: 0.08,
+  /** How far the eyes move when looking aside, and how much bigger the nearer eye gets */
+  gazeShiftX: 0.14,
+  gazeShiftY: 0.1,
+  gazePerspective: 0.08,
+  /** Easing rates (per second): the pose between expressions, opening/closing, an expression's motion */
+  poseEase: 10,
+  openSpeed: 7,
+  motionEase: 5,
+  /** Seconds between blinks (at least blinkMinGap, plus up to blinkJitter) */
+  blinkMinGap: 2.4,
+  blinkJitter: 3,
+  blinkDuration: 0.16,
+  doubleBlinkGap: 0.24,
+  doubleBlinkChance: 0.25,
+  /** Seconds the face laughs after a turn ends, before resting */
+  happyDuration: 2.2,
+  /** Eye glow blur (pixels) */
+  glowBlur: 8,
 } as const
 
 // ─── Tool node drawing constants ────────────────────────────────────────────

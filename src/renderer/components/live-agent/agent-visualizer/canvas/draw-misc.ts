@@ -1,13 +1,18 @@
-export function drawHexagon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
+/** A regular polygon path with a point at the top */
+export function drawPolygon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, sides: number) {
   ctx.beginPath()
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 3) * i - Math.PI / 2
+  for (let i = 0; i < sides; i++) {
+    const angle = ((Math.PI * 2) / sides) * i - Math.PI / 2
     const px = x + radius * Math.cos(angle)
     const py = y + radius * Math.sin(angle)
     if (i === 0) ctx.moveTo(px, py)
     else ctx.lineTo(px, py)
   }
   ctx.closePath()
+}
+
+export function drawHexagon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number) {
+  drawPolygon(ctx, x, y, radius, 6)
 }
 
 /** Claude spark logo — actual brand SVG path */

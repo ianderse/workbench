@@ -13,6 +13,7 @@ import {
   detectStateChanges as detectStateChangesPure,
 } from './canvas/index'
 import { useCanvasCamera } from '../hooks/use-canvas-camera'
+import type { FaceState } from './canvas/draw-face'
 
 interface CanvasProps {
   /** Ref to the graph state — read every frame without React re-renders */
@@ -41,6 +42,9 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
   const drawnViewKeyRef = useRef(viewKey)
   /** Effects are held back until the new graph has its queued events */
   const quietRef = useRef(false)
+
+  /** The main agent's face animation (eyes, blinks), kept between frames */
+  const facesRef = useRef<Map<string, FaceState>>(new Map())
 
   // Effects system
   const effectsRef = useRef<VisualEffect[]>([])
@@ -169,6 +173,7 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       if (drawnViewKeyRef.current !== viewKeyRef.current) {
         drawnViewKeyRef.current = viewKeyRef.current
         effectsRef.current.length = 0
+        facesRef.current.clear()
         quietRef.current = true
         resetPlacement()
       }
@@ -216,7 +221,7 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
 
       drawEdges(ctx, edges, agents, toolCalls, awaiting, deltaTime)
       drawToolCalls(ctx, toolCalls, timeRef.current)
-      drawAgents(ctx, agents, awaiting, timeRef.current)
+      drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, timeRef.current)
       drawEffects(ctx, effectsRef.current)
 
       ctx.restore()
