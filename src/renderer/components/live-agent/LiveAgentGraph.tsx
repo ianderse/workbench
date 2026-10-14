@@ -123,7 +123,9 @@ export default function LiveAgentGraph({ cwd }: LiveAgentGraphProps) {
       : { title: t('liveAgent.waitingTitle'), description: t('liveAgent.waitingDescription') }
 
   return (
-    <div className="h-full w-full relative overflow-hidden bg-background" aria-label={t('liveAgent.graphLabel')}>
+    // No background of its own: the agent window's (bg-sidebar, the terminal's too) shows through,
+    // so the terminal and the graph read as one piece
+    <div className="h-full w-full relative overflow-hidden" aria-label={t('liveAgent.graphLabel')}>
       {/* Empty state when no live data */}
       {isEmpty && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none px-4">

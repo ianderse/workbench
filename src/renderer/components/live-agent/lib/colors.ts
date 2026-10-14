@@ -1,7 +1,7 @@
 /**
  * Holographic color palette, in a dark and a light variant that follow the
- * app's theme (see setGraphTheme). The background itself is the page's
- * (bg-background), so the canvas only draws on top of it.
+ * app's theme (see setGraphTheme). The background is the agent window's
+ * (bg-sidebar, as behind the terminal), so the canvas only draws on top of it.
  */
 
 import type { AgentState, ToolCallNode } from './agent-types'

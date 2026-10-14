@@ -43,7 +43,7 @@ export function drawBackground(
   transform: { x: number; y: number; scale: number },
   activeAgentPos?: { x: number; y: number; color: string },
 ): void {
-  // The background is the page's (bg-background): nothing to fill
+  // The background is the agent window's (bg-sidebar): nothing to fill
 
   // Ambient spotlight following active agent
   if (activeAgentPos) {

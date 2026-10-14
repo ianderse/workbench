@@ -744,7 +744,7 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
           <div ref={terminalRef} className="h-full w-full" />
         </div>
         {showGraph && effectiveCwd && (
-          <div className="min-w-0 flex-1 border-l border-border">
+          <div className="min-w-0 flex-1">
             <Suspense fallback={null}>
               {/* A new directory (worktree switch) starts a fresh graph */}
               <LiveAgentGraph key={effectiveCwd} cwd={effectiveCwd} />
