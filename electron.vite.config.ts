@@ -113,7 +113,9 @@ export default defineConfig({
           '**/node_modules/**',
           '**/.git/**',
           '**/.worktrees/**',
-          '**/.auto-claude/**',
+          // The project's own .auto-claude (task worktrees, data); not a match on any path, which
+          // would ignore every file when the app itself runs from a task worktree
+          resolve(__dirname, '.auto-claude/**'),
           '**/out/**',
           // Ignore the parent autonomous-coding directory's worktrees
           resolve(__dirname, '../.worktrees/**'),
