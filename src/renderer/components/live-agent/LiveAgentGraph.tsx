@@ -5,23 +5,9 @@ import { useRelay } from './hooks/use-relay'
 import { useLiveAgentStatus } from './hooks/use-live-agent-status'
 import { AgentCanvas } from "./agent-visualizer/canvas"
 import { TIMING } from './lib/agent-types'
-import { setGraphTheme } from './lib/colors'
 
 /** Graph snapshots kept for sessions that aren't shown */
 const MAX_CACHED_SESSIONS = 10
-
-/** Use the light or dark palette with the app's theme (the `dark` class on
- *  the root element), as MemoryGraph does */
-function useGraphTheme() {
-  useLayoutEffect(() => {
-    const root = document.documentElement
-    const apply = () => setGraphTheme(root.classList.contains('dark'))
-    apply()
-    const observer = new MutationObserver(apply)
-    observer.observe(root, { attributes: true, attributeFilter: ['class', 'data-theme'] })
-    return () => observer.disconnect()
-  }, [])
-}
 
 interface LiveAgentGraphProps {
   /** The agent window's working directory: the graph shows the Claude Code sessions run in it */
@@ -37,7 +23,6 @@ interface LiveAgentGraphProps {
  */
 export default function LiveAgentGraph({ cwd, projectPath }: LiveAgentGraphProps) {
   const { t } = useTranslation('terminal')
-  useGraphTheme()
   const status = useLiveAgentStatus()
   const relay = useRelay(cwd, projectPath)
   // Set while events queued at a session swap or rebuild wait to be applied

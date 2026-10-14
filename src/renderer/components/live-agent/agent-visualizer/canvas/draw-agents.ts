@@ -27,7 +27,7 @@ function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
 
 function drawDepthShadow(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
   ctx.save()
-  ctx.shadowColor = COLORS.agentShadow
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.5)'
   ctx.shadowBlur = AGENT_DRAW.shadowBlur
   ctx.shadowOffsetX = AGENT_DRAW.shadowOffsetX
   ctx.shadowOffsetY = AGENT_DRAW.shadowOffsetY

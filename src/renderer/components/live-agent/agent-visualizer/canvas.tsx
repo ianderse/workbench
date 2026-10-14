@@ -1,7 +1,7 @@
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { DepthParticle } from '../lib/agent-types'
 import { type GraphState, agentsAwaitingSubagents, displayedState } from '../hooks/graph/types'
-import { getStateColor, isGraphThemeDark } from '../lib/colors'
+import { getStateColor } from '../lib/colors'
 import { ANIM_SPEED } from '../lib/canvas-constants'
 import { BloomRenderer } from './bloom-renderer'
 import { createDepthParticles, updateDepthParticles, drawBackground } from './background-layer'
@@ -222,7 +222,7 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
 
       ctx.restore()
 
-      if (bloomRef.current && isGraphThemeDark()) bloomRef.current.apply(canvas, ctx)
+      if (bloomRef.current) bloomRef.current.apply(canvas, ctx)
     } catch (err) {
       // Log at most once every 5s to avoid flooding the console
       const now = Date.now()

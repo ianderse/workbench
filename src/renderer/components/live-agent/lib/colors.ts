@@ -1,13 +1,13 @@
 /**
- * Holographic color palette, in a dark and a light variant that follow the
- * app's theme (see setGraphTheme). The background is the agent window's
- * (bg-sidebar, as behind the terminal), so the canvas only draws on top of it.
+ * Holographic color palette, the same in the light and dark themes. The
+ * background is the agent window's (bg-sidebar, as behind the terminal), so
+ * the canvas only draws on top of it.
  */
 
 import type { AgentState, ToolCallNode } from './agent-types'
 
-// Holographic Color Palette (dark theme)
-const DARK = {
+// Holographic Color Palette
+export const COLORS = {
   // Primary Hologram
   holoBase: '#0088FF',
   holoHot: '#ffffff',
@@ -33,52 +33,7 @@ const DARK = {
 
   // Canvas drawing — near-invisible fill that casts an agent's drop shadow
   agentShadowFill: 'rgba(0, 0, 0, 0.01)',
-  agentShadow: 'rgba(0, 0, 0, 0.5)',
-}
-
-type Palette = { [K in keyof typeof DARK]: string }
-
-// Light theme: deeper state colors that keep their contrast on a light
-// background, light node interiors, and flashes in the base color (white
-// doesn't show there)
-const LIGHT: Palette = {
-  holoBase: '#0969DA',
-  holoHot: '#0550AE',
-
-  idle: '#C2255C',
-  thinking: '#0969DA',
-  tool_calling: '#B86E00',
-  complete: '#1A7F37',
-  error: '#CF222E',
-  waiting_permission: '#8250DF',
-
-  return: '#1A7F37',
-  tool: '#B86E00',
-
-  nodeInterior: 'rgba(255, 255, 255, 0.85)',
-
-  toolNodeErrorBase: 'rgba(255, 235, 238,',
-  toolNodeBase: 'rgba(255, 255, 255,',
-
-  agentShadowFill: 'rgba(0, 0, 0, 0.01)',
-  agentShadow: 'rgba(0, 0, 0, 0.15)',
-}
-
-/** The colors of the current theme */
-export const COLORS: Palette = { ...DARK }
-
-let darkTheme = true
-
-/** Switch the palette to the app's light or dark theme */
-export function setGraphTheme(dark: boolean): void {
-  darkTheme = dark
-  Object.assign(COLORS, dark ? DARK : LIGHT)
-}
-
-/** Whether the dark palette is in use (the glow (bloom) only adds up on a dark background) */
-export function isGraphThemeDark(): boolean {
-  return darkTheme
-}
+} as const
 
 // ─── Color Helper Functions ──────────────────────────────────────────────────
 
