@@ -36,7 +36,8 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit --incremental",
     "lint": "knip && knip --production",
-    "lint:fix": "knip --fix --fix-type exports,types"
+    "lint:fix": "knip --fix --fix-type exports,types",
+    "fix": "sudo chown root:root ./node_modules/electron/dist/chrome-sandbox && sudo chmod 4755 ./node_modules/electron/dist/chrome-sandbox"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
