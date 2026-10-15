@@ -252,6 +252,8 @@ export const IPC_CHANNELS = {
   GRAPHIFY_GET_INDEX: 'graphify:getIndex',
   GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
   GRAPHIFY_HAS_GRAPH: 'graphify:hasGraph',
+  GRAPHIFY_IS_ENABLED: 'graphify:isEnabled',
+  GRAPHIFY_SET_ENABLED: 'graphify:setEnabled',
   GRAPHIFY_GET_GRAPH: 'graphify:getGraph',
   GRAPHIFY_INDEX_UPDATED: 'graphify:indexUpdated', // main -> renderer: a project's graph was rebuilt
 

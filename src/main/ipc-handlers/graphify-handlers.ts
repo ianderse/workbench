@@ -14,7 +14,9 @@ import {
   detectGraphify,
   getGraphifyInstallCommand,
   hasGraphifyGraph,
+  isGraphifyEnabled,
   readGraphifyGraph,
+  setGraphifyEnabled,
   readGraphifyIndex,
   setUpClaudeCommandAfterInstall,
 } from '../graphify';
@@ -65,6 +67,30 @@ export function registerGraphifyHandlers(): void {
       const project = projectStore.getProject(projectId);
       if (!project) return { success: false, error: 'Project not found' };
       return { success: true, data: await hasGraphifyGraph(project.path) };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GRAPHIFY_IS_ENABLED,
+    async (_event, projectId: string): Promise<IPCResult<boolean>> => {
+      const project = projectStore.getProject(projectId);
+      if (!project) return { success: false, error: 'Project not found' };
+      return { success: true, data: await isGraphifyEnabled(project.path) };
+    }
+  );
+
+  ipcMain.handle(
+    IPC_CHANNELS.GRAPHIFY_SET_ENABLED,
+    async (_event, projectId: string, enabled: boolean): Promise<IPCResult> => {
+      const project = projectStore.getProject(projectId);
+      if (!project) return { success: false, error: 'Project not found' };
+      try {
+        await setGraphifyEnabled(project.path, enabled);
+        return { success: true };
+      } catch (error) {
+        appLog.error('[Graphify] Switching Use Graphify failed:', error);
+        return { success: false, error: errorMessage(error) };
+      }
     }
   );
 

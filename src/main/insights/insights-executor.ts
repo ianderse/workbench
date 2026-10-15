@@ -9,7 +9,7 @@ import type {
 } from '../../shared/types';
 import { detectRateLimit, createSDKRateLimitInfo } from '../rate-limit-detector';
 import { runInsights } from './claude-code-runner';
-import { getGraphifyPromptContext } from '../graphify';
+import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { projectStore } from '../project-store';
 import { openTaskToolsSession } from './task-tools-server';
 
@@ -102,8 +102,8 @@ export class InsightsExecutor extends EventEmitter {
 
     try {
       const projectSettings = projectStore.getProject(projectId)?.settings;
-      // The project's memory graph, searchable from the chat when its "Use Graphify" setting is on
-      const graphify = projectSettings?.useGraphify
+      // The project's memory graph, searchable from the chat when the project uses Graphify
+      const graphify = (await isGraphifyEnabled(projectPath))
         ? (await getGraphifyPromptContext(projectPath)) ?? undefined
         : undefined;
       const result = await runInsights(

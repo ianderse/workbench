@@ -18,7 +18,7 @@ import { detectClaudeLimitMessage } from '../claude-code/limit';
 import { createOrGetWorktree } from '../worktree';
 import { addToWorktree } from '../live-agent/project-setup';
 import { readSettingsFile } from '../settings-utils';
-import { getGraphifyPromptContext } from '../graphify';
+import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { getAugmentedEnvAsync } from '../env-utils';
 import { getToolPath } from '../cli-tool-manager';
 import { getClaudeProfileManager } from '../claude-profile-manager';
@@ -388,7 +388,7 @@ export class AgentManager extends EventEmitter {
       profileId: options.profileId,
     };
 
-    if (project.settings?.useGraphify) {
+    if (await isGraphifyEnabled(project.path)) {
       try {
         const graphify = await getGraphifyPromptContext(project.path);
         if (graphify) {

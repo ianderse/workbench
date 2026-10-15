@@ -3,8 +3,8 @@
  *
  * Workbench detects the `graphify` CLI (Settings > Updates), sets up its /graphify command in
  * Claude Code, builds each project's memory graph into .workbench/knowledge (Settings > Project >
- * Knowledge index), and gives agents a CodebaseGraph tool to search it when the project's "Use
- * Graphify" setting is on. Everything runs asynchronously so the main process never blocks on the
+ * Knowledge index), and gives agents a CodebaseGraph tool to search it when the project uses
+ * Graphify (its "Use Graphify" switch, which is on while .workbench/knowledge exists). Everything runs asynchronously so the main process never blocks on the
  * CLI.
  */
 
@@ -19,7 +19,7 @@ import { isWindows, requiresShell } from './platform';
 import { appLog } from './app-logger';
 import { getClaudeProfileManager } from './claude-profile-manager';
 import { expandHomePath } from './claude-profile/profile-utils';
-import { getGraphifyGraphPath, getGraphifyMemoryDir, hasGraphifyGraph } from './graphify-paths';
+import { getGraphifyGraphPath, getGraphifyMemoryDir, hasGraphifyGraph, isGraphifyEnabled } from './graphify-paths';
 import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../shared/types/cli';
 import { formatDateTime } from '../shared/utils/format-date-time';
 
@@ -43,15 +43,18 @@ interface GraphifyInstallation {
 let detection: Promise<GraphifyInstallation | null> | null = null;
 let latestVersion: Promise<string | null> | null = null;
 const buildsInProgress = new Map<string, Promise<GraphifyIndexInfo>>();
+/** Stops a project's running build (when Use Graphify is switched off) */
+const buildAborts = new Map<string, AbortController>();
 
-export {   hasGraphifyGraph };
+export { hasGraphifyGraph, isGraphifyEnabled };
 
 async function runGraphify(
   executable: string,
   args: string[],
   cwd?: string,
   timeout = VERSION_TIMEOUT_MS,
-  extraEnv: Record<string, string | undefined> = {}
+  extraEnv: Record<string, string | undefined> = {},
+  signal?: AbortSignal
 ) {
   const env: Record<string, string | undefined> = { ...(await getAugmentedEnvAsync()), ...extraEnv };
   for (const key of Object.keys(env)) {
@@ -64,6 +67,7 @@ async function runGraphify(
     maxBuffer: 20 * 1024 * 1024,
     windowsHide: true,
     shell: requiresShell(executable),
+    signal,
   });
 }
 
@@ -241,12 +245,12 @@ export async function readGraphifyIndex(projectPath: string): Promise<GraphifyIn
   }
 }
 
-async function build(projectPath: string): Promise<GraphifyIndexInfo> {
+async function build(projectPath: string, signal: AbortSignal): Promise<GraphifyIndexInfo> {
   const installation = await detectGraphify();
   if (!installation) throw new Error('Graphify is not installed');
+  if (!(await isGraphifyEnabled(projectPath))) throw new Error('Use Graphify is off for this project');
 
   const memoryDir = getGraphifyMemoryDir(projectPath);
-  await fs.mkdir(memoryDir, { recursive: true });
 
   // Code-only extraction parses the code locally (tree-sitter), so no API key is needed.
   // The graph mirrors the current code, so a rebuild may shrink it (graphify refuses that by default)
@@ -254,14 +258,16 @@ async function build(projectPath: string): Promise<GraphifyIndexInfo> {
     installation.path,
     ['extract', projectPath, '--code-only', '--allow-dedup-shrink', '--out', memoryDir],
     projectPath,
-    BUILD_TIMEOUT_MS
+    BUILD_TIMEOUT_MS,
+    {},
+    signal
   );
   const output = `${stdout}\n${stderr}`;
   const stats = output.match(/(\d+) nodes, (\d+) edges(?:, (\d+) communities)?/);
 
   // A readable summary for agents (GRAPH_REPORT.md), without naming communities through an LLM
   try {
-    await runGraphify(installation.path, ['cluster-only', memoryDir, '--no-label', '--no-viz'], projectPath, BUILD_TIMEOUT_MS);
+    await runGraphify(installation.path, ['cluster-only', memoryDir, '--no-label', '--no-viz'], projectPath, BUILD_TIMEOUT_MS, {}, signal);
   } catch (error) {
     appLog.warn('[Graphify] Could not write the graph report:', error);
   }
@@ -294,6 +300,8 @@ export async function refreshGraphifyIndex(projectPath: string): Promise<Graphif
     await running.catch(() => undefined);
     refreshesQueued.delete(projectPath);
   }
+  // Use Graphify may have been switched off meanwhile
+  if (!(await isGraphifyEnabled(projectPath))) return null;
   return buildGraphifyIndex(projectPath);
 }
 
@@ -301,9 +309,29 @@ export async function refreshGraphifyIndex(projectPath: string): Promise<Graphif
 export function buildGraphifyIndex(projectPath: string): Promise<GraphifyIndexInfo> {
   const running = buildsInProgress.get(projectPath);
   if (running) return running;
-  const promise = build(projectPath).finally(() => buildsInProgress.delete(projectPath));
+  const abort = new AbortController();
+  const promise = build(projectPath, abort.signal).finally(() => {
+    buildsInProgress.delete(projectPath);
+    buildAborts.delete(projectPath);
+  });
   buildsInProgress.set(projectPath, promise);
+  buildAborts.set(projectPath, abort);
   return promise;
+}
+
+/**
+ * Switch the project's Use Graphify on (creates .workbench/knowledge) or off (stops a running build
+ * and removes .workbench/knowledge with its graph)
+ */
+export async function setGraphifyEnabled(projectPath: string, enabled: boolean): Promise<void> {
+  const memoryDir = getGraphifyMemoryDir(projectPath);
+  if (enabled) {
+    await fs.mkdir(memoryDir, { recursive: true });
+    return;
+  }
+  buildAborts.get(projectPath)?.abort();
+  await buildsInProgress.get(projectPath)?.catch(() => undefined);
+  await fs.rm(memoryDir, { recursive: true, force: true });
 }
 
 /** What an agent session needs to search the project's memory graph */

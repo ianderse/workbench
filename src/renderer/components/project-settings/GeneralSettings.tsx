@@ -27,7 +27,6 @@ interface GeneralSettingsProps {
  */
 export function GeneralSettings({
   project,
-  settings,
   isUpdating,
   handleInitialize
 }: GeneralSettingsProps) {
@@ -59,7 +58,7 @@ export function GeneralSettings({
           ) : (
             <>
               <ProjectIndexRows projectId={project.id} />
-              <MemoryIndexRows projectId={project.id} useGraphify={!!settings.useGraphify} />
+              <MemoryIndexRows projectId={project.id} />
             </>
           )}
         </SettingsRows>

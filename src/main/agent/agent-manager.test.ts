@@ -46,6 +46,7 @@ vi.mock('../settings-utils', () => ({
 
 vi.mock('../graphify', () => ({
   getGraphifyPromptContext: vi.fn(async () => null),
+  isGraphifyEnabled: vi.fn(async () => false),
 }));
 
 vi.mock('../env-utils', () => ({

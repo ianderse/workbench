@@ -24,7 +24,7 @@ import { getClaudeProfileManager } from "../claude-profile-manager";
 import { taskStateManager } from "../task-state-manager";
 import { parseRateLimitHold } from "../../shared/utils/rate-limit-hold";
 import { applyRateLimitHold } from "./task/rate-limit-hold";
-import { refreshGraphifyIndex } from "../graphify";
+import { isGraphifyEnabled, refreshGraphifyIndex } from "../graphify";
 import { projectStore } from "../project-store";
 import { appLog } from "../app-logger";
 import { registerTaskChangelog } from "../task-changelog-writer";
@@ -97,9 +97,9 @@ export function registerAgenteventsHandlers(
 
   // Learning between sessions: rebuild the project's memory graph when a task completes, so the
   // agents of the next tasks search code that includes its changes
-  taskStateManager.setTaskCompletedListener((taskId, taskProject) => {
+  taskStateManager.setTaskCompletedListener(async (taskId, taskProject) => {
     const project = projectStore.getProject(taskProject.id) ?? taskProject;
-    if (!project.settings?.useGraphify) return;
+    if (!(await isGraphifyEnabled(project.path))) return;
     appLog.info(`[Graphify] Task ${taskId} completed, refreshing the memory graph of ${project.path}`);
     void refreshGraphifyIndex(project.path)
       .then((info) => {

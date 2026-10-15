@@ -19,6 +19,10 @@ export interface GraphifyAPI {
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo>>;
   /** Whether the project has a memory graph (.workbench/knowledge) */
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
+  /** Whether the project uses Graphify (its .workbench/knowledge folder exists) */
+  isGraphifyEnabled: (projectId: string) => Promise<IPCResult<boolean>>;
+  /** Switch Use Graphify on (creates .workbench/knowledge) or off (removes it with the graph) */
+  setGraphifyEnabled: (projectId: string, enabled: boolean) => Promise<IPCResult>;
   /** The project's memory graph for the graph view */
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<GraphifyGraph | null>>;
   /** A project's memory graph was rebuilt in the background (after a task completed) */
@@ -31,6 +35,9 @@ export const createGraphifyAPI = (): GraphifyAPI => ({
   getGraphifyIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_GET_INDEX, projectId),
   buildGraphifyIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_BUILD_INDEX, projectId),
   hasGraphifyGraph: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_HAS_GRAPH, projectId),
+  isGraphifyEnabled: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_IS_ENABLED, projectId),
+  setGraphifyEnabled: (projectId: string, enabled: boolean) =>
+    invokeIpc(IPC_CHANNELS.GRAPHIFY_SET_ENABLED, projectId, enabled),
   getGraphifyGraph: (projectId: string) => invokeIpc(IPC_CHANNELS.GRAPHIFY_GET_GRAPH, projectId),
   onGraphifyIndexUpdated: (callback: (projectId: string, info: GraphifyIndexInfo) => void) =>
     createIpcListener(IPC_CHANNELS.GRAPHIFY_INDEX_UPDATED, callback),

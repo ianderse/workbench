@@ -215,7 +215,9 @@ session, on top of the user's own Claude Code MCP configuration. Helpers live in
 `src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
 Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
 .workbench/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
-`index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Project page) is on,
+`index.json` summary. The project's "Use Graphify" switch (Project page) is on while `.workbench/knowledge` exists
+(`isGraphifyEnabled()`); switching it on builds the graph (the switch is disabled while a build from the app runs,
+`memory-graph-store.ts`), switching it off stops a running build and removes the folder, which hides the Graph item. While it is on,
 task runs and the Claude page (Insights) get `GRAPHIFY_OUT`, the graphify CLI on `PATH` and a prompt section about
 graphify's search commands (Insights limits Bash to those commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
 `~/.claude` and each Claude profile's config dir, after an install or update), and agent windows
@@ -250,7 +252,7 @@ loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "W
 
 **Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Agents,
 Project, Connectors, Developer, Updates (Project is the selected project's page: index, Knowledge, Tasks, Branches).
-The project's `useGraphify`, `useClaudeMd`, `maxBudgetUsd` (budget per task) and `claudeProfileId` (its Claude account;
+The project's `useClaudeMd`, `maxBudgetUsd` (budget per task) and `claudeProfileId` (its Claude account;
 unset = the account in use) are kept in the project's own `.workbench/settings.json` (`src/main/project-store.ts`). Build pages from `SettingsSection` +
 `SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
 `SETTINGS_MENU_TRIGGER_CLASS` (no collapsible rows). UI copy conventions: sentence case, no em dashes, no trailing

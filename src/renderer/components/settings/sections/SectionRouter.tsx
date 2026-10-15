@@ -54,7 +54,7 @@ export function SectionRouter({
           {/* Kept in the project's .workbench folder, so they need an initialized project */}
           {project.autoBuildPath && (
             <>
-              <KnowledgeSettings settings={settings} setSettings={setSettings} />
+              <KnowledgeSettings projectId={project.id} settings={settings} setSettings={setSettings} />
               <ProjectTaskSettings settings={settings} setSettings={setSettings} />
               <BranchSettings
                 projectPath={project.path}

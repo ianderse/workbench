@@ -270,18 +270,18 @@ describe('ProjectStore', () => {
     const projectFile = () => path.join(TEST_PROJECT_PATH, '.workbench', 'settings.json');
     const storeFile = () => path.join(USER_DATA_PATH, 'store', 'projects.json');
 
-    it('writes Graphify, CLAUDE.md, budget and account to the project and keeps them out of the app list', async () => {
+    it('writes CLAUDE.md, budget and account to the project and keeps them out of the app list', async () => {
       initializeProject();
       const { ProjectStore } = await import('../project-store');
       const store = new ProjectStore();
       const project = store.addProject(TEST_PROJECT_PATH);
 
-      store.updateProjectSettings(project.id, { useGraphify: true, useClaudeMd: false, maxBudgetUsd: 2.5, claudeProfileId: 'work', model: 'sonnet' });
+      store.updateProjectSettings(project.id, { useClaudeMd: false, maxBudgetUsd: 2.5, claudeProfileId: 'work', model: 'sonnet' });
 
-      expect(JSON.parse(readFileSync(projectFile(), 'utf-8'))).toEqual({ useGraphify: true, useClaudeMd: false, maxBudgetUsd: 2.5, claudeProfileId: 'work' });
+      expect(JSON.parse(readFileSync(projectFile(), 'utf-8'))).toEqual({ useClaudeMd: false, maxBudgetUsd: 2.5, claudeProfileId: 'work' });
       const listed = JSON.parse(readFileSync(storeFile(), 'utf-8')).projects[0].settings;
       expect(listed.model).toBe('sonnet');
-      for (const key of ['useGraphify', 'useClaudeMd', 'maxBudgetUsd', 'claudeProfileId']) expect(listed).not.toHaveProperty(key);
+      for (const key of ['useClaudeMd', 'maxBudgetUsd', 'claudeProfileId']) expect(listed).not.toHaveProperty(key);
     });
 
     it('loads them back from the project, and clearing one removes it from the file', async () => {
@@ -305,15 +305,15 @@ describe('ProjectStore', () => {
     it('keeps older values from the app list until the project has its own file', async () => {
       initializeProject();
       writeFileSync(storeFile(), JSON.stringify({
-        projects: [{ id: 'p1', name: 'test-project', path: TEST_PROJECT_PATH, autoBuildPath: '.workbench', settings: { model: 'opus', useGraphify: true }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
+        projects: [{ id: 'p1', name: 'test-project', path: TEST_PROJECT_PATH, autoBuildPath: '.workbench', settings: { model: 'opus', useClaudeMd: false }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }],
         settings: {}
       }));
       const { ProjectStore } = await import('../project-store');
       const store = new ProjectStore();
-      expect(store.getProject('p1')?.settings.useGraphify).toBe(true);
+      expect(store.getProject('p1')?.settings.useClaudeMd).toBe(false);
 
       store.updateProjectSettings('p1', { model: 'sonnet' });
-      expect(JSON.parse(readFileSync(projectFile(), 'utf-8')).useGraphify).toBe(true);
+      expect(JSON.parse(readFileSync(projectFile(), 'utf-8')).useClaudeMd).toBe(false);
     });
   });
 

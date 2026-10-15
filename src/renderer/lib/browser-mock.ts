@@ -132,6 +132,8 @@ const browserMockAPI: ElectronAPI = {
   getGraphifyIndex: async () => ({ success: true, data: null }),
   buildGraphifyIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
   hasGraphifyGraph: async () => ({ success: true, data: false }),
+  isGraphifyEnabled: async () => ({ success: true, data: false }),
+  setGraphifyEnabled: async () => ({ success: false, error: 'Not available in browser mode' }),
   getGraphifyGraph: async () => ({ success: true, data: null }),
   onGraphifyIndexUpdated: () => () => {},
 

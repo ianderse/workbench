@@ -32,8 +32,6 @@ export interface ProjectSettings {
   pushNewBranches?: boolean;
   /** Include CLAUDE.md instructions in agent system prompt (default: true) */
   useClaudeMd?: boolean;
-  /** Point agents at the project's Graphify memory graph (default: false; needs Graphify installed) */
-  useGraphify?: boolean;
   /** Stop a task once its estimated spend reaches this amount (`--max-budget-usd`); unset = no cap */
   maxBudgetUsd?: number;
   /** Claude account (profile id) the project's tasks and chats run on; unset = the account in use */

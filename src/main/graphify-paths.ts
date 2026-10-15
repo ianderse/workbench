@@ -22,6 +22,15 @@ export function getGraphifyGraphPath(projectPath: string): string {
   return path.join(getGraphifyOutDir(projectPath), 'graph.json');
 }
 
+/** Whether the project uses Graphify (its "Use Graphify" switch): its .workbench/knowledge folder exists */
+export async function isGraphifyEnabled(projectPath: string): Promise<boolean> {
+  try {
+    return (await fs.stat(getGraphifyMemoryDir(projectPath))).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** Whether the project has a memory graph (.workbench/knowledge/graphify-out/graph.json) */
 export async function hasGraphifyGraph(projectPath: string): Promise<boolean> {
   try {
