@@ -1,6 +1,6 @@
 /**
  * Relay — watches agent sessions, receives hook events, and streams them to the
- * subscribed clients (Auto Claude's agent windows, through the worker's port).
+ * subscribed clients (Workbench's agent windows, through the worker's port).
  * From agent-flow (relay/relay.ts); here it runs in a worker thread
  * (see ../relay-worker.ts) and serves several workspaces at once.
  */
@@ -524,7 +524,7 @@ interface Workspace {
   key: string
   /** Its names as Claude Code project dirs (every non-alphanumeric character is encoded as `-`) */
   encodedNames: string[]
-  /** Its project's .auto-claude/flow dir, where the hook script looks for relays */
+  /** Its project's .workbench/flow dir, where the hook script looks for relays */
   flowDir: string
   discoveryFile: string | null
 }
@@ -534,7 +534,7 @@ const projectDirWatchers = new Map<string, fs.FSWatcher>()
 
 /** Whether a session's recorded cwd is the workspace itself. Only sessions run
  *  in an agent window's own directory are shown in it: one run in a
- *  subdirectory (e.g. a task's worktree under .auto-claude) belongs elsewhere. */
+ *  subdirectory (e.g. a task's worktree under .workbench) belongs elsewhere. */
 function isWorkspaceDir(cwd: string, workspace: Workspace): boolean {
   const dir = foldPathCase(cwd)
   return dir === workspace.key || dir === foldPathCase(workspace.path) || dirKey(cwd) === workspace.key
@@ -648,7 +648,7 @@ function removeDiscoveryFile(discoveryFilePath: string | null) {
 export interface Relay {
   /** Send a client the sessions run in `cwd` (its list and history now, then
    *  live events), watching that directory from now on; `flowDir` is its
-   *  project's .auto-claude/flow dir */
+   *  project's .workbench/flow dir */
   subscribe: (clientId: string, cwd: string, flowDir: string) => void
   unsubscribe: (clientId: string) => void
   /** Watch the sessions of these Claude Code config dirs too */

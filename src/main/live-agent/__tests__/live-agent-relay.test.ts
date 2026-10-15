@@ -73,7 +73,7 @@ describe('LiveAgentRelay', () => {
   });
 
   it('starts no worker while the setting is off, even when agent windows subscribe', () => {
-    relay.subscribe(asContents(fakeContents(1)), 'graph-1', '/projects/app', '/projects/app/.auto-claude/flow');
+    relay.subscribe(asContents(fakeContents(1)), 'graph-1', '/projects/app', '/projects/app/.workbench/flow');
     relay.setEnabled(false);
     expect(workers).toHaveLength(0);
     expect(relay.getStatus().state).toBe('stopped');
@@ -96,8 +96,8 @@ describe('LiveAgentRelay', () => {
   it('is not restarted by agent windows opening, closing or reloading', () => {
     relay.setEnabled(true);
     const contents = fakeContents(7);
-    relay.subscribe(asContents(contents), 'graph-1', '/projects/app', '/projects/app/.auto-claude/flow');
-    relay.subscribe(asContents(contents), 'graph-2', '/projects/app/.auto-claude/worktrees/tasks/001', '/projects/app/.auto-claude/flow');
+    relay.subscribe(asContents(contents), 'graph-1', '/projects/app', '/projects/app/.workbench/flow');
+    relay.subscribe(asContents(contents), 'graph-2', '/projects/app/.workbench/worktrees/tasks/001', '/projects/app/.workbench/flow');
     relay.unsubscribe(asContents(contents), 'graph-1');
     contents.emit('did-start-loading');
     contents.emit('destroyed');
@@ -107,15 +107,15 @@ describe('LiveAgentRelay', () => {
     expect(workers[0].posted.map((message) => message.type)).toEqual([
       'start', 'subscribe', 'subscribe', 'unsubscribe', 'unsubscribe',
     ]);
-    expect(workers[0].posted[1]).toMatchObject({ clientId: '7:graph-1', cwd: '/projects/app', flowDir: '/projects/app/.auto-claude/flow' });
+    expect(workers[0].posted[1]).toMatchObject({ clientId: '7:graph-1', cwd: '/projects/app', flowDir: '/projects/app/.workbench/flow' });
   });
 
   it('sends a graph only the messages meant for it', () => {
     relay.setEnabled(true);
     const first = fakeContents(1);
     const second = fakeContents(2);
-    relay.subscribe(asContents(first), 'a', '/projects/one', '/projects/app/.auto-claude/flow');
-    relay.subscribe(asContents(second), 'b', '/projects/two', '/projects/app/.auto-claude/flow');
+    relay.subscribe(asContents(first), 'a', '/projects/one', '/projects/app/.workbench/flow');
+    relay.subscribe(asContents(second), 'b', '/projects/two', '/projects/app/.workbench/flow');
 
     workers[0].emit('message', { type: 'message', clientIds: ['1:a'], data: '{"type":"session-list"}' });
     expect(first.send).toHaveBeenCalledWith('liveAgent:message', 'a', '{"type":"session-list"}');
@@ -123,7 +123,7 @@ describe('LiveAgentRelay', () => {
   });
 
   it('subscriptions made before the relay starts reach the new worker', () => {
-    relay.subscribe(asContents(fakeContents(3)), 'graph', '/projects/app', '/projects/app/.auto-claude/flow');
+    relay.subscribe(asContents(fakeContents(3)), 'graph', '/projects/app', '/projects/app/.workbench/flow');
     relay.setEnabled(true);
     expect(workers[0].posted.map((message) => message.type)).toEqual(['start', 'subscribe']);
   });

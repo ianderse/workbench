@@ -12,7 +12,7 @@ const MAX_CACHED_SESSIONS = 10
 interface LiveAgentGraphProps {
   /** The agent window's working directory: the graph shows the Claude Code sessions run in it */
   cwd: string
-  /** The window's project (its .auto-claude/flow directory is where the relay advertises itself) */
+  /** The window's project (its .workbench/flow directory is where the relay advertises itself) */
   projectPath: string
   /** The window's terminal: of the sessions in `cwd`, the graph shows the ones run in it */
   terminalId: string

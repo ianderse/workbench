@@ -112,7 +112,7 @@ describe('discardTaskWorktree', () => {
     git(repo, 'config', 'commit.gpgsign', 'false');
     // Keep README.md's line endings as written (Windows checks out CRLF by default)
     git(repo, 'config', 'core.autocrlf', 'false');
-    writeFileSync(path.join(repo, '.gitignore'), '.auto-claude/\n');
+    writeFileSync(path.join(repo, '.gitignore'), '.workbench/\n');
     writeFileSync(path.join(repo, 'README.md'), 'base\n');
     git(repo, 'add', '.');
     git(repo, 'commit', '-q', '-m', 'base');
@@ -122,7 +122,7 @@ describe('discardTaskWorktree', () => {
   it('removes the worktree with its commits and changes; the next start branches from the base', async () => {
     const repo = initRepo();
     const specId = '001-feature';
-    const branch = `auto-claude/${specId}`;
+    const branch = `workbench/${specId}`;
 
     const first = await createOrGetWorktree(repo, specId, 'main', true, false);
     writeFileSync(path.join(first.worktreePath, 'feature.ts'), 'export const x = 1;\n');
@@ -147,11 +147,11 @@ describe('discardTaskWorktree', () => {
   it('deletes a task branch left behind without a worktree', async () => {
     const repo = initRepo();
     const specId = '002-feature';
-    git(repo, 'branch', `auto-claude/${specId}`);
+    git(repo, 'branch', `workbench/${specId}`);
 
     const result = await discardTaskWorktree(repo, specId, '[test]');
 
     expect(result.success).toBe(true);
-    expect(git(repo, 'branch', '--list', `auto-claude/${specId}`)).toBe('');
+    expect(git(repo, 'branch', '--list', `workbench/${specId}`)).toBe('');
   });
 });

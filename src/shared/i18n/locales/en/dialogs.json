@@ -1,20 +1,20 @@
 {
   "initialize": {
-    "title": "Initialize Auto Claude",
-    "description": "This project doesn't have Auto Claude initialized. Would you like to set it up now?",
+    "title": "Initialize Workbench",
+    "description": "This project doesn't have Workbench initialized. Would you like to set it up now?",
     "willDo": "This will:",
-    "createFolder": "Create a .auto-claude folder in your project",
+    "createFolder": "Create a .workbench folder in your project",
     "setupSpecs": "Set up the specs directory for your tasks",
     "initFailed": "Initialization failed",
-    "initFailedDescription": "Failed to initialize Auto Claude. Please try again."
+    "initFailedDescription": "Failed to initialize Workbench. Please try again."
   },
   "gitSetup": {
     "title": "Git repository required",
-    "description": "Auto Claude uses git to safely build features in isolated workspaces",
+    "description": "Workbench uses git to safely build features in isolated workspaces",
     "notGitRepo": "This folder is not a git repository",
     "noCommits": "Git repository has no commits",
-    "needsInit": "Git needs to be initialized before Auto Claude can manage your code.",
-    "needsCommit": "At least one commit is required for Auto Claude to create worktrees.",
+    "needsInit": "Git needs to be initialized before Workbench can manage your code.",
+    "needsCommit": "At least one commit is required for Workbench to create worktrees.",
     "willSetup": "We'll set up git for you:",
     "initRepo": "Initialize a new git repository",
     "createCommit": "Create an initial commit with your current files",
@@ -22,7 +22,7 @@
     "settingUp": "Setting up git",
     "initializingRepo": "Initializing git repository and creating initial commit...",
     "success": "Git initialized",
-    "readyToUse": "Your project is now ready to use with Auto Claude!",
+    "readyToUse": "Your project is now ready to use with Workbench!",
     "manualInstructions": "Open a terminal in your project folder and run:",
     "skipForNow": "Skip for now",
     "initializeGit": "Initialize git"
@@ -39,7 +39,7 @@
     "errorDescription": "Failed to cleanup worktree. Please try again."
   },
   "update": {
-    "title": "Auto Claude",
+    "title": "Workbench",
     "projectInitialized": "Project is initialized."
   },
   "addProject": {
@@ -86,7 +86,7 @@
   },
   "appUpdate": {
     "title": "App update available",
-    "description": "A new version of Auto Claude is ready to download",
+    "description": "A new version of Workbench is ready to download",
     "newVersion": "New version",
     "released": "Released",
     "downloading": "Downloading...",
@@ -99,7 +99,7 @@
     "claudeCodeChangelog": "View Claude Code changelog",
     "claudeCodeChangelogAriaLabel": "View Claude Code changelog (opens in new window)",
     "readOnlyVolumeTitle": "Cannot install from disk image",
-    "readOnlyVolumeDescription": "Please move Auto Claude to your Applications folder before updating.",
+    "readOnlyVolumeDescription": "Please move Workbench to your Applications folder before updating.",
     "skipThisVersion": "Skip this version"
   },
   "addWorkspace": {

@@ -51,7 +51,7 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
     onSettingsChange({ ...settings, claudeCodeTasks: { ...stored, ...patch } });
   };
 
-  // Live agent is the selected project's setting (its .auto-claude/flow directory), saved at once
+  // Live agent is the selected project's setting (its .workbench/flow directory), saved at once
   const project = useProjectStore((state) => state.projects.find((p) => p.id === state.selectedProjectId));
   const projectPath = project?.path;
   const liveAgent = useLiveAgentStore((state) => (projectPath ? state.enabled[projectPath] === true : false));

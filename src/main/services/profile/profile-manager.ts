@@ -1,7 +1,7 @@
 /**
  * Profile Manager - File I/O for API profiles
  *
- * Handles loading and saving profiles.json from the auto-claude directory.
+ * Handles loading and saving profiles.json from the workbench directory.
  * Provides graceful handling for missing or corrupted files.
  * Uses file locking to prevent race conditions in concurrent operations.
  */
@@ -14,11 +14,11 @@ import * as lockfile from 'proper-lockfile';
 import type { APIProfile, ProfilesFile } from '@shared/types/profile';
 
 /**
- * Get the path to profiles.json in the auto-claude directory
+ * Get the path to profiles.json in the workbench directory
  */
 export function getProfilesFilePath(): string {
   const userDataPath = app.getPath('userData');
-  return path.join(userDataPath, 'auto-claude', 'profiles.json');
+  return path.join(userDataPath, 'workbench', 'profiles.json');
 }
 
 /**

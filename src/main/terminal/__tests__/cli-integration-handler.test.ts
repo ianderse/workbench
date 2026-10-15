@@ -805,13 +805,13 @@ describe('invokeCLIAsync', () => {
       const terminal = createMockTerminal({ claudeProfileId: 'work' });
 
       const { invokeCLIAsync } = await import('../cli-integration-handler');
-      await invokeCLIAsync(terminal, '/tmp/project/.auto-claude/worktrees/tasks/001-x', 'work', () => null, true, {
+      await invokeCLIAsync(terminal, '/tmp/project/.workbench/worktrees/tasks/001-x', 'work', () => null, true, {
         resumeSessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
         configDir: '/tmp/task-config',
       });
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      expect(written).toContain(buildCdCommand('/tmp/project/.auto-claude/worktrees/tasks/001-x'));
+      expect(written).toContain(buildCdCommand('/tmp/project/.workbench/worktrees/tasks/001-x'));
       // The config dir is resolved on the host (a drive letter on Windows)
       expect(written).toContain(getConfigDirCommand(platform, path.resolve('/tmp/task-config')));
       expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455 --dangerously-skip-permissions');

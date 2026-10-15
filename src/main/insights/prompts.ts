@@ -26,7 +26,7 @@ export interface TaskSuggestion {
 function loadProjectContext(projectDir: string): string {
   const contextParts: string[] = [];
 
-  const indexPath = join(projectDir, '.auto-claude', 'project_index.json');
+  const indexPath = join(projectDir, '.workbench', 'project_index.json');
   if (existsSync(indexPath)) {
     try {
       const index = safeParseJson<Record<string, unknown>>(readFileSync(indexPath, 'utf-8'));
@@ -44,7 +44,7 @@ function loadProjectContext(projectDir: string): string {
     }
   }
 
-  const tasksPath = join(projectDir, '.auto-claude', DATA_DIR_NAMES.tasks);
+  const tasksPath = join(projectDir, '.workbench', DATA_DIR_NAMES.tasks);
   if (existsSync(tasksPath)) {
     try {
       const taskDirs = readdirSync(tasksPath, { withFileTypes: true })
@@ -78,7 +78,7 @@ export function buildSystemPrompt(projectDir: string, options: { taskTools?: boo
 
   // The Kanban button gives Claude the project's task tools; without it, tasks are only suggested
   const tasks = options.taskTools
-    ? `5. Manage the project's tasks with the Auto Claude task tools (mcp__auto-claude__*): list and inspect tasks (status, plan, logs, validation, worktree changes), create and edit them, start, stop and retry them, move them between columns, request changes, create and merge their pull requests, archive and delete them
+    ? `5. Manage the project's tasks with the Workbench task tools (mcp__workbench__*): list and inspect tasks (status, plan, logs, validation, worktree changes), create and edit them, start, stop and retry them, move them between columns, request changes, create and merge their pull requests, archive and delete them
 
 You can read the project's files but not change them: code changes are made by tasks. To get something done, create a task whose description gives Claude Code everything it needs, and start it when the user wants it done now.
 
@@ -95,7 +95,7 @@ You can read the project's files but not change them, and you can't create or ch
 When the user asks you to create a task, wants to turn the conversation into a task, or when you believe a task would be useful (a bug you came across, a feature, a docs update, a refactor, anything a task could do), suggest it with this exact format on a SINGLE LINE:
 ${suggestionFormat}`;
 
-  return `You are an AI assistant helping developers understand and work with their codebase, inside Auto Claude, a desktop app where Claude Code does coding tasks autonomously, each in its own git worktree, and the user follows them on a Kanban board (Planning, Queue, In Progress, AI Review, Human Review, Done).
+  return `You are an AI assistant helping developers understand and work with their codebase, inside Workbench, a desktop app where Claude Code does coding tasks autonomously, each in its own git worktree, and the user follows them on a Kanban board (Planning, Queue, In Progress, AI Review, Human Review, Done).
 You have access to the following project context:
 
 ${context}

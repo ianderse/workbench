@@ -22,7 +22,7 @@ interface GeneralSettingsProps {
 }
 
 /**
- * Project page's first section: initialize Auto Claude for the project, then its project index
+ * Project page's first section: initialize Workbench for the project, then its project index
  * and Graphify memory graph (the Knowledge, Tasks and Branches sections follow it).
  */
 export function GeneralSettings({

@@ -116,7 +116,7 @@ const toGraphEvent = (event: AgentEvent): GraphEvent => ({
  * the project at `projectPath`).
  *
  * Shows only the window's own sessions: those whose hooks report its terminal
- * (`terminalId`), and those run outside Auto Claude's agent windows (no window
+ * (`terminalId`), and those run outside Workbench's agent windows (no window
  * reported). Another window in the same directory has its own.
  *
  * Shows one session at a time: on connect the one already shown if the relay

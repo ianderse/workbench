@@ -1,11 +1,11 @@
 /**
  * Live agent setup for one project, from agent-flow's setup script (relay/setup.js):
- *   1. Installs the hook forwarding script at <project>/.auto-claude/flow/hook.cjs
+ *   1. Installs the hook forwarding script at <project>/.workbench/flow/hook.cjs
  *   2. Configures Claude Code hooks in <project>/.claude/settings.local.json, and in the
  *      settings.local.json of the project's worktrees (Claude Code reads it from a worktree's own
  *      .claude, which git doesn't check out: it is copied there)
  *
- * The project's .auto-claude/flow directory is also where the relay advertises itself (its
+ * The project's .workbench/flow directory is also where the relay advertises itself (its
  * discovery files), and whether it exists is the project's "Live agent" setting.
  */
 import * as fs from 'fs'
@@ -22,11 +22,11 @@ const execFileAsync = promisify(execFile)
 /** Set in each agent window's shell to its terminal id. Claude Code passes it on to its hooks,
  *  and the hook script adds it to what it forwards, so the relay knows which window each session
  *  runs in (each window's graph shows only its own sessions) */
-export const LIVE_AGENT_TERMINAL_ENV = 'AUTO_CLAUDE_TERMINAL_ID'
+export const LIVE_AGENT_TERMINAL_ENV = 'WORKBENCH_TERMINAL_ID'
 
 /** A project's Live agent directory: the hook script and the relay's discovery files */
 export function getFlowDir(projectPath: string): string {
-  return path.join(projectPath, '.auto-claude', 'flow')
+  return path.join(projectPath, '.workbench', 'flow')
 }
 
 const hookScriptPath = (projectPath: string) => path.join(getFlowDir(projectPath), 'hook.cjs')
@@ -36,14 +36,14 @@ const HOOK_TIMEOUT_S = 2
 const HOOK_SAFETY_MARGIN_MS = 500
 const HOOK_FORWARD_TIMEOUT_MS = 1000
 // Where the hook script lives, as it appears in our hook commands
-const HOOK_COMMAND_MARKER = '/.auto-claude/flow/hook.cjs'
+const HOOK_COMMAND_MARKER = '/.workbench/flow/hook.cjs'
 
 // ─── Hook script content ────────────────────────────────────────────────────
 
 // .cjs: a project whose package.json says "type": "module" would load a .js as ESM
 function getHookScriptContent() {
   return `#!/usr/bin/env node
-// Agent Flow hook forwarder — installed by Auto Claude (Live agent).
+// Agent Flow hook forwarder — installed by Workbench (Live agent).
 // Claude Code invokes this as a command hook. It reads the discovery files next
 // to it to find live relay instances, checks their PIDs, and forwards the event
 // via HTTP POST, with the agent window it runs in (${LIVE_AGENT_TERMINAL_ENV}).
@@ -79,7 +79,7 @@ process.stdin.on('end', () => {
   const cwd = payload && payload.cwd;
   if (!cwd) process.exit(0);
   const terminalId = process.env.${LIVE_AGENT_TERMINAL_ENV};
-  if (terminalId) payload.auto_claude_terminal_id = terminalId;
+  if (terminalId) payload.workbench_terminal_id = terminalId;
   const body = JSON.stringify(payload);
 
   const resolvedCwd = normPath(cwd);
@@ -165,7 +165,7 @@ interface CommandHook { type?: string; command?: string; url?: string; timeout?:
 interface HookEntry { matcher?: string; hooks?: CommandHook[] }
 type Settings = Record<string, unknown> & { hooks?: Record<string, HookEntry[]> }
 
-/** Our hook entry for an event. Auto Claude's own executable runs the hook as
+/** Our hook entry for an event. Workbench's own executable runs the hook as
  *  Node (Claude Code's PATH may have no node); hook commands run in a POSIX
  *  shell (Git Bash on Windows), so the variable prefix works everywhere. */
 function ourHookEntry(projectPath: string, event: string): HookEntry {
@@ -323,7 +323,7 @@ function isAlreadySetup(projectPath: string) {
 
   // Set up exactly when our current hook entry (alone in its matcher group) is
   // registered for HOOK_EVENTS and nothing else, so running setup again
-  // migrates older installs (or a moved Auto Claude executable)
+  // migrates older installs (or a moved Workbench executable)
   const { settings } = readSettings(settingsPath(projectPath))
   const hooks = settings?.hooks
   if (!hooks || typeof hooks !== 'object' || Array.isArray(hooks)) return false
@@ -408,7 +408,7 @@ export function addToWorktree(projectPath: string, worktreePath: string): void {
   } catch (err) {
     appLog.warn(`[LiveAgent] Can't copy ${source} to ${target}:`, err)
   }
-  // Also brings a copy up to date (e.g. Auto Claude's executable moved)
+  // Also brings a copy up to date (e.g. Workbench's executable moved)
   const hooksError = configureHooks(projectPath, target)
   if (hooksError) appLog.warn('[LiveAgent]', hooksError)
 }

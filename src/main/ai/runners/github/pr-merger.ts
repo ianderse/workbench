@@ -36,7 +36,7 @@ export interface MergePRConfig {
   taskDescription?: string;
   /** Claude profile for the merge agent */
   profileId?: string;
-  /** Auto Claude's data folder, ignored when checking for uncommitted changes */
+  /** Workbench's data folder, ignored when checking for uncommitted changes */
   dataDir?: string;
   onProgress?: (step: MergePRStep, params?: Record<string, string | number>) => void;
   /** Runs gh (tests replace it) */
@@ -95,7 +95,7 @@ export async function mergePR(config: MergePRConfig): Promise<MergePRResult> {
   const gh = config.gh ?? (async (args: string[]) =>
     (await execFileAsync(config.ghPath, args, { cwd: projectDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })).stdout);
   const mergeAgent = config.mergeAgent ?? runMergeAgent;
-  const dataDir = `${(config.dataDir || '.auto-claude').replace(/\\/g, '/')}/`;
+  const dataDir = `${(config.dataDir || '.workbench').replace(/\\/g, '/')}/`;
   const isMerging = () => git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).then(() => true, () => false);
 
   // 1. The pull request

@@ -1,5 +1,5 @@
 /**
- * The "Live agent" setting, per project: on while the project has a .auto-claude/flow directory.
+ * The "Live agent" setting, per project: on while the project has a .workbench/flow directory.
  * Switching it on sets the project up (project-setup.ts) and starts the relay; it keeps running
  * while any project has Live agent on, until the app quits.
  */
@@ -72,7 +72,7 @@ export async function setLiveAgentEnabled(projectPath: string, enabled: boolean)
 
 /**
  * At startup: run the setup again for projects with Live agent on (it only writes when something
- * changed, e.g. Auto Claude's executable moved) and start the relay when any has it on
+ * changed, e.g. Workbench's executable moved) and start the relay when any has it on
  */
 export async function syncLiveAgentAtStartup(): Promise<void> {
   let anyEnabled = false;

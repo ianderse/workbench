@@ -18,7 +18,7 @@ import { mergePR, type MergePRConfig } from '../github/pr-merger';
 import type { MergeAgentFn, MergeAgentInput } from '../merge-agent';
 
 const PR_URL = 'https://github.com/example/repo/pull/7';
-const BRANCH = 'auto-claude/001-a';
+const BRANCH = 'workbench/001-a';
 
 let tmp: string;
 let seed: string;

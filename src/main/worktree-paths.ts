@@ -9,11 +9,11 @@ import path from 'path';
 import { existsSync } from 'fs';
 
 // Path constants for worktree directories
-const TASK_WORKTREE_DIR = '.auto-claude/worktrees/tasks';
-const TERMINAL_WORKTREE_DIR = '.auto-claude/worktrees/terminal';
+const TASK_WORKTREE_DIR = '.workbench/worktrees/tasks';
+const TERMINAL_WORKTREE_DIR = '.workbench/worktrees/terminal';
 
 // Metadata directories (separate from git worktrees to avoid uncommitted files)
-const TERMINAL_WORKTREE_METADATA_DIR = '.auto-claude/terminal/metadata';
+const TERMINAL_WORKTREE_METADATA_DIR = '.workbench/terminal/metadata';
 
 // Legacy path for backwards compatibility
 const LEGACY_WORKTREE_DIR = '.worktrees';

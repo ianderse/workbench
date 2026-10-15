@@ -22,7 +22,7 @@ import type { RelayWorkerMessage, RelayWorkerRequest } from './relay-worker-prot
 /** How long the worker gets to clean up (discovery files, hook server, watchers) before it is terminated */
 const STOP_TIMEOUT_MS = 2000;
 
-/** A graph in an agent window, shown sessions run in `cwd` (`flowDir`: its project's .auto-claude/flow) */
+/** A graph in an agent window, shown sessions run in `cwd` (`flowDir`: its project's .workbench/flow) */
 interface Subscription {
   webContents: WebContents;
   contentsId: number;

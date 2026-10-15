@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 
 interface LiveAgentState {
-  /** Whether each project has Live agent on (its .auto-claude/flow directory exists), by project path */
+  /** Whether each project has Live agent on (its .workbench/flow directory exists), by project path */
   enabled: Record<string, boolean>;
   /** Why the project's Claude Code hooks couldn't be set up when Live agent was last switched on */
   hooksError: Record<string, string | undefined>;

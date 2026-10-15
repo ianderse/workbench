@@ -65,7 +65,7 @@ const MAX_LOG_CONTENT = 600;
 
 function project(context: TaskToolContext): Project {
   const found = projectStore.getProject(context.projectId);
-  if (!found) throw new Error('The project is not open in Auto Claude');
+  if (!found) throw new Error('The project is not open in Workbench');
   return found;
 }
 

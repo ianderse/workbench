@@ -15,13 +15,13 @@ import { loadClaudeRunInfo } from './claude-code/task-runner';
 import { appLog } from './app-logger';
 
 /**
- * Project settings kept in the project's own `.auto-claude/settings.json` (next to its tasks)
+ * Project settings kept in the project's own `.workbench/settings.json` (next to its tasks)
  * instead of the app's project list
  */
 const PROJECT_FILE_SETTING_KEYS = ['useGraphify', 'useClaudeMd', 'maxBudgetUsd', 'claudeProfileId'] as const;
 const PROJECT_SETTINGS_FILE = 'settings.json';
 
-/** The project's settings file, or null while the project isn't initialized (no `.auto-claude`) */
+/** The project's settings file, or null while the project isn't initialized (no `.workbench`) */
 function projectSettingsFile(project: Project): string | null {
   return project.autoBuildPath ? path.join(project.path, project.autoBuildPath, PROJECT_SETTINGS_FILE) : null;
 }
@@ -122,7 +122,7 @@ export class ProjectStore {
     writeFileAtomicSync(this.storePath, JSON.stringify({ ...this.data, projects }, null, 2));
   }
 
-  /** Write the project's file-kept settings to `.auto-claude/settings.json` (initialized projects) */
+  /** Write the project's file-kept settings to `.workbench/settings.json` (initialized projects) */
   private saveProjectFileSettings(project: Project): void {
     const file = projectSettingsFile(project);
     if (!file) return;
@@ -150,10 +150,10 @@ export class ProjectStore {
     // Check if project already exists (using absolute path for comparison)
     const existing = this.data.projects.find((p) => p.path === absolutePath);
     if (existing) {
-      // Validate that .auto-claude folder still exists for existing project
+      // Validate that .workbench folder still exists for existing project
       // If manually deleted, reset autoBuildPath so UI prompts for reinitialization
       if (existing.autoBuildPath && !isInitialized(existing.path)) {
-        console.warn(`[ProjectStore] .auto-claude folder was deleted for project "${existing.name}" - resetting autoBuildPath`);
+        console.warn(`[ProjectStore] .workbench folder was deleted for project "${existing.name}" - resetting autoBuildPath`);
         existing.autoBuildPath = '';
         existing.updatedAt = new Date();
         this.save();
@@ -164,7 +164,7 @@ export class ProjectStore {
     // Derive name from path if not provided
     const projectName = name || path.basename(absolutePath);
 
-    // Determine auto-claude path (supports both 'auto-claude' and '.auto-claude')
+    // Determine workbench path (supports both 'workbench' and '.workbench')
     const autoBuildPath = getAutoBuildPath(absolutePath) || '';
 
     const project: Project = {
@@ -266,11 +266,11 @@ export class ProjectStore {
   }
 
   /**
-   * Validate all projects to ensure their .auto-claude folders still exist.
+   * Validate all projects to ensure their .workbench folders still exist.
    * If a project has autoBuildPath set but the folder was deleted,
    * reset autoBuildPath to empty string so the UI prompts for reinitialization.
    *
-   * @returns Array of project IDs that were reset due to missing .auto-claude folder
+   * @returns Array of project IDs that were reset due to missing .workbench folder
    */
   validateProjects(): string[] {
     const resetProjectIds: string[] = [];
@@ -288,9 +288,9 @@ export class ProjectStore {
         continue; // Don't reset - let user handle this case
       }
 
-      // Check if .auto-claude folder still exists
+      // Check if .workbench folder still exists
       if (!isInitialized(project.path)) {
-        console.warn(`[ProjectStore] .auto-claude folder missing for project "${project.name}" at ${project.path}`);
+        console.warn(`[ProjectStore] .workbench folder missing for project "${project.name}" at ${project.path}`);
         project.autoBuildPath = '';
         project.updatedAt = new Date();
         resetProjectIds.push(project.id);
@@ -300,7 +300,7 @@ export class ProjectStore {
 
     if (hasChanges) {
       this.save();
-      console.warn(`[ProjectStore] Reset ${resetProjectIds.length} project(s) due to missing .auto-claude folder`);
+      console.warn(`[ProjectStore] Reset ${resetProjectIds.length} project(s) due to missing .workbench folder`);
     }
 
     return resetProjectIds;

@@ -90,7 +90,7 @@ export interface GraphifyVersionInfo {
 }
 
 /**
- * A project's memory graph, built by Graphify into .auto-claude/knowledge
+ * A project's memory graph, built by Graphify into .workbench/knowledge
  */
 export interface GraphifyIndexInfo {
   nodes: number;

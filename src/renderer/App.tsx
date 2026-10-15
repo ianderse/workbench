@@ -114,7 +114,7 @@ export function App() {
   const [skippedInitProjectId, setSkippedInitProjectId] = useState<string | null>(null);
   const [showAddProjectModal, setShowAddProjectModal] = useState(false);
 
-  // GitHub setup state (shown after Auto Claude init)
+  // GitHub setup state (shown after Workbench init)
 
   // Remove project confirmation state
   const [showRemoveProjectDialog, setShowRemoveProjectDialog] = useState(false);
@@ -256,7 +256,7 @@ export function App() {
     setInitError(null);
   }, []);
 
-  // Check if selected project needs initialization (e.g., .auto-claude folder was deleted)
+  // Check if selected project needs initialization (e.g., .workbench folder was deleted)
   useEffect(() => {
     // Don't show dialog while initialization is in progress
     if (isInitializing) return;
@@ -575,7 +575,7 @@ export function App() {
       } else {
         // Initialization failed - show error but keep dialog open
         console.warn('[InitDialog] Initialization failed, showing error');
-        const errorMessage = result?.error || 'Failed to initialize Auto Claude. Please try again.';
+        const errorMessage = result?.error || 'Failed to initialize Workbench. Please try again.';
         setInitError(errorMessage);
         setIsInitializing(false);
       }
@@ -708,7 +708,7 @@ export function App() {
           initialStep={addProjectInitialStep}
         />
 
-        {/* Initialize Auto Claude Dialog */}
+        {/* Initialize Workbench Dialog */}
         <Dialog open={showInitDialog} onOpenChange={(open) => {
           console.warn('[InitDialog] onOpenChange called', { open, pendingProject: !!pendingProject, isInitializing, initSuccess });
           // Only trigger skip if user manually closed the dialog

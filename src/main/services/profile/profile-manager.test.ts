@@ -118,15 +118,15 @@ describe('profile-manager', () => {
       expect(result).toEqual(mockData);
     });
 
-    it('should use auto-claude directory for profiles.json path', async () => {
+    it('should use workbench directory for profiles.json path', async () => {
       fsMocks.readFile.mockRejectedValue(new Error('ENOENT'));
 
       await loadProfilesFile();
 
-      // Verify the file path includes auto-claude
+      // Verify the file path includes workbench
       const readFileCalls = fsMocks.readFile.mock.calls;
       const filePath = readFileCalls[0]?.[0];
-      expect(filePath).toContain('auto-claude');
+      expect(filePath).toContain('workbench');
       expect(filePath).toContain('profiles.json');
     });
   });

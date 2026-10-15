@@ -248,7 +248,7 @@ const YOLO_MODE_FLAG = ' --dangerously-skip-permissions';
  * restarting the CLI, e.g. for an account switch). The typed command shows it as the literal text
  * "\\033...", so only the real output matches.
  */
-export const CLI_EXIT_MARKER = '\x1b]777;auto-claude-cli-exit\x07';
+export const CLI_EXIT_MARKER = '\x1b]777;workbench-cli-exit\x07';
 
 /**
  * Type a CLI launch command into the window's shell, followed (in POSIX shells: bash, zsh, fish)
@@ -278,14 +278,14 @@ export function shouldCloseOnCliExit(
 
 function writeCliCommand(terminal: TerminalProcess, command: string): void {
   const line = command.endsWith('\r') ? command.slice(0, -1) : command;
-  const withMarker = isWindows() ? line : `${line}; printf '\\033]777;auto-claude-cli-exit\\007'`;
+  const withMarker = isWindows() ? line : `${line}; printf '\\033]777;workbench-cli-exit\\007'`;
   PtyManager.writeToPty(terminal, `${withMarker}\r`);
 }
 
 /**
  * Claude Code flag that tells it where the project's memory graph is, when the terminal's project
  * has one: Graphify's /graphify skill looks for graphify-out in the working directory, while the
- * graph lives in .auto-claude/knowledge (the terminal's GRAPHIFY_OUT points there). Left out when the
+ * graph lives in .workbench/knowledge (the terminal's GRAPHIFY_OUT points there). Left out when the
  * path has characters that would need escaping inside the shell command.
  */
 function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut'>): string {
@@ -641,7 +641,7 @@ export function handleOAuthToken(
 
     if (keychainCreds.token) {
       // NOTE: We intentionally do NOT store the OAuth token in the profile.
-      // Storing causes AutoClaude to use a stale cached token instead of letting
+      // Storing causes Workbench to use a stale cached token instead of letting
       // Claude CLI read fresh tokens from Keychain (which auto-refreshes).
       // See: docs/LONG_LIVED_AUTH_PLAN.md for full context.
 

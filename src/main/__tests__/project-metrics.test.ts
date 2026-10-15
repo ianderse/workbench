@@ -9,7 +9,7 @@ const project = (id: string, dir: string): Project => ({
   id,
   name: id,
   path: dir,
-  autoBuildPath: '.auto-claude',
+  autoBuildPath: '.workbench',
   settings: {} as Project['settings'],
   createdAt: new Date(),
   updatedAt: new Date(),
@@ -28,7 +28,7 @@ describe('getProjectCostMetrics', () => {
 
   it('sums the run costs of every task in initialized projects and skips the others', async () => {
     const initialized = path.join(root, 'a');
-    const specs = path.join(initialized, '.auto-claude', 'tasks');
+    const specs = path.join(initialized, '.workbench', 'tasks');
     mkdirSync(path.join(specs, '001-one'), { recursive: true });
     mkdirSync(path.join(specs, '002-two'), { recursive: true });
     mkdirSync(path.join(specs, '003-never-ran'), { recursive: true });
@@ -36,7 +36,7 @@ describe('getProjectCostMetrics', () => {
     writeFileSync(path.join(specs, '002-two', 'claude_run.json'), JSON.stringify({ totalCostUsd: 1.5 }));
 
     const empty = path.join(root, 'b');
-    mkdirSync(path.join(empty, '.auto-claude'), { recursive: true });
+    mkdirSync(path.join(empty, '.workbench'), { recursive: true });
 
     const notInitialized = path.join(root, 'c');
     mkdirSync(notInitialized, { recursive: true });

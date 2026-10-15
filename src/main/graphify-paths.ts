@@ -9,7 +9,7 @@ import { DATA_DIR_NAMES } from '../shared/constants';
 
 /** Where a project's memory graph is stored */
 export function getGraphifyMemoryDir(projectPath: string): string {
-  return path.join(projectPath, '.auto-claude', DATA_DIR_NAMES.knowledge);
+  return path.join(projectPath, '.workbench', DATA_DIR_NAMES.knowledge);
 }
 
 /** Graphify's output directory for a project (its GRAPHIFY_OUT) */
@@ -22,7 +22,7 @@ export function getGraphifyGraphPath(projectPath: string): string {
   return path.join(getGraphifyOutDir(projectPath), 'graph.json');
 }
 
-/** Whether the project has a memory graph (.auto-claude/knowledge/graphify-out/graph.json) */
+/** Whether the project has a memory graph (.workbench/knowledge/graphify-out/graph.json) */
 export async function hasGraphifyGraph(projectPath: string): Promise<boolean> {
   try {
     await fs.access(getGraphifyGraphPath(projectPath));

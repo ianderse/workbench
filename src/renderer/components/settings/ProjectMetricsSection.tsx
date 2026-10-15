@@ -1,6 +1,6 @@
 /**
  * Metrics (Settings > Accounts): spending per project, the sum of every task's Claude Code run
- * cost in each registered project with an initialized `.auto-claude` directory. Shows the last
+ * cost in each registered project with an initialized `.workbench` directory. Shows the last
  * result (refresh cache) and only reads the projects again on Refresh, or once when nothing was
  * read before.
  */

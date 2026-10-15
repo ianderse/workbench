@@ -74,7 +74,7 @@ describe('FileWatcher concurrency', () => {
   // -------------------------------------------------------------------------
   describe('deduplication: second watch() with same specDir is a no-op', () => {
     it('should only create one FSWatcher when watch() is called twice with the same specDir while the first is still in-flight', async () => {
-      const specDir = '/project/.auto-claude/tasks/001-task';
+      const specDir = '/project/.workbench/tasks/001-task';
       const taskId = 'task-1';
 
       // To create a real async gap we need an existing watcher whose close() is slow.
@@ -111,8 +111,8 @@ describe('FileWatcher concurrency', () => {
   describe('supersession: watch() with different specDir replaces the in-flight call', () => {
     it('should let the second call win when the first is awaiting close()', async () => {
       const taskId = 'task-2';
-      const specDir1 = path.join('/project', '.auto-claude', 'tasks', '001-first');
-      const specDir2 = path.join('/project', '.auto-claude', 'tasks', '002-second');
+      const specDir1 = path.join('/project', '.workbench', 'tasks', '001-first');
+      const specDir2 = path.join('/project', '.workbench', 'tasks', '002-second');
 
       // First call installs an existing watcher (simulate: the watcher for
       // specDir1 is already set up so the second watch() needs to close it).
@@ -148,8 +148,8 @@ describe('FileWatcher concurrency', () => {
 
     it('first watch() bails when pendingWatches changes to a different specDir', async () => {
       const taskId = 'task-super';
-      const specDir1 = path.join('/project', '.auto-claude', 'tasks', 'super-first');
-      const specDir2 = path.join('/project', '.auto-claude', 'tasks', 'super-second');
+      const specDir1 = path.join('/project', '.workbench', 'tasks', 'super-first');
+      const specDir2 = path.join('/project', '.workbench', 'tasks', 'super-second');
 
       // Make the first watcher's close() slow so we can interleave.
       let resolveFirstClose!: () => void;
@@ -187,7 +187,7 @@ describe('FileWatcher concurrency', () => {
   describe('cancellation: unwatch() during in-flight watch() prevents watcher creation', () => {
     it('should not create a watcher when unwatch() is called before the async gap resolves', async () => {
       const taskId = 'task-3';
-      const specDir = '/project/.auto-claude/tasks/003-cancel';
+      const specDir = '/project/.workbench/tasks/003-cancel';
 
       // There's no pre-existing watcher, so watch() won't call close(). But it
       // does go async (chokidar.watch is sync but we can test the cancellation
@@ -207,7 +207,7 @@ describe('FileWatcher concurrency', () => {
       );
 
       // Start a second watch() — it will await the slow close().
-      const specDir2 = '/project/.auto-claude/tasks/003-cancel-v2';
+      const specDir2 = '/project/.workbench/tasks/003-cancel-v2';
       const watchPromise = fw.watch(taskId, specDir2);
 
       // While watch() is in-flight, call unwatch().
@@ -231,8 +231,8 @@ describe('FileWatcher concurrency', () => {
     it('should cancel pending watch() calls and clear pendingWatches', async () => {
       const taskId1 = 'task-4a';
       const taskId2 = 'task-4b';
-      const specDir1 = '/project/.auto-claude/tasks/004a';
-      const specDir2 = '/project/.auto-claude/tasks/004b';
+      const specDir1 = '/project/.workbench/tasks/004a';
+      const specDir2 = '/project/.workbench/tasks/004b';
 
       // Set up slow-close scenario for taskId1 (so watch() is in-flight).
       await fw.watch(taskId1, specDir1);
@@ -243,7 +243,7 @@ describe('FileWatcher concurrency', () => {
       );
 
       // Start a new watch for taskId1 with a different specDir — this is now in-flight.
-      const newSpecDir1 = '/project/.auto-claude/tasks/004a-v2';
+      const newSpecDir1 = '/project/.workbench/tasks/004a-v2';
       const watchPromise1 = fw.watch(taskId1, newSpecDir1);
 
       // Start a fresh watch for taskId2.
@@ -262,7 +262,7 @@ describe('FileWatcher concurrency', () => {
 
       // pendingWatches should be cleared (we verify indirectly: a fresh
       // watch() call for taskId1 must succeed without treating it as a duplicate).
-      const specDirFresh = path.join('/project', '.auto-claude', 'tasks', '004a-fresh');
+      const specDirFresh = path.join('/project', '.workbench', 'tasks', '004a-fresh');
       await fw.watch(taskId1, specDirFresh);
       expect(fw.isWatching(taskId1)).toBe(true);
       expect(fw.getWatchedSpecDir(taskId1)).toBe(specDirFresh);
@@ -275,7 +275,7 @@ describe('FileWatcher concurrency', () => {
   describe('getWatchedSpecDir()', () => {
     it('returns the specDir that was passed to watch()', async () => {
       const taskId = 'task-5';
-      const specDir = path.join('/project', '.auto-claude', 'tasks', '005-specdir');
+      const specDir = path.join('/project', '.workbench', 'tasks', '005-specdir');
 
       await fw.watch(taskId, specDir);
 
@@ -288,8 +288,8 @@ describe('FileWatcher concurrency', () => {
 
     it('returns updated specDir after re-watch with different specDir', async () => {
       const taskId = 'task-5b';
-      const specDir1 = path.join('/project', '.auto-claude', 'tasks', '005b-first');
-      const specDir2 = path.join('/project', '.auto-claude', 'tasks', '005b-second');
+      const specDir1 = path.join('/project', '.workbench', 'tasks', '005b-first');
+      const specDir2 = path.join('/project', '.workbench', 'tasks', '005b-second');
 
       await fw.watch(taskId, specDir1);
       expect(fw.getWatchedSpecDir(taskId)).toBe(specDir1);

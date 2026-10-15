@@ -20,7 +20,7 @@ export function registerLiveAgentHandlers(): void {
     data: liveAgentRelay.getStatus(),
   }));
 
-  // Whether the project has Live agent on (its .auto-claude/flow directory exists)
+  // Whether the project has Live agent on (its .workbench/flow directory exists)
   ipcMain.handle(IPC_CHANNELS.LIVE_AGENT_GET_PROJECT, async (_event, projectPath: string): Promise<IPCResult<boolean>> => {
     if (!isKnownProject(projectPath)) return { success: false, error: 'Project not found' };
     const enabled = await isLiveAgentEnabled(projectPath);

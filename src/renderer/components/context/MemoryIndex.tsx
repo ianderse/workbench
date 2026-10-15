@@ -11,7 +11,7 @@ import { useMemoryGraphStore } from '../../stores/memory-graph-store';
 import type { GraphifyIndexInfo } from '../../../shared/types/cli';
 
 /**
- * The Knowledge index row: builds a Graphify graph of the project's code into .auto-claude/knowledge,
+ * The Knowledge index row: builds a Graphify graph of the project's code into .workbench/knowledge,
  * placed under the project index in the Project page's Project section.
  */
 export function MemoryIndexRows({ projectId, useGraphify }: { projectId: string; useGraphify: boolean }) {

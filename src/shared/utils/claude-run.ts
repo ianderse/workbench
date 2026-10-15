@@ -84,7 +84,7 @@ export function isTaskSessionActive(task: Pick<Task, 'status'>): boolean {
   return task.status === 'in_progress' || task.status === 'ai_review';
 }
 
-/** Git branch of a task's worktree (`<project>/.auto-claude/worktrees/tasks/<specId>`) */
+/** Git branch of a task's worktree (`<project>/.workbench/worktrees/tasks/<specId>`) */
 export function getTaskWorktreeBranch(specId: string): string {
-  return `auto-claude/${specId}`;
+  return `workbench/${specId}`;
 }

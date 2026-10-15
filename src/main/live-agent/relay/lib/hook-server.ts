@@ -38,7 +38,7 @@ interface HookPayload {
   // Notification
   notification_type?: string
   // The agent window the session runs in (added by the hook script)
-  auto_claude_terminal_id?: string
+  workbench_terminal_id?: string
   [key: string]: unknown
 }
 
@@ -117,7 +117,7 @@ export class HookServer implements TypedDisposable {
   }
 
   private handleHook(payload: HookPayload): void {
-    const terminalId = payload.auto_claude_terminal_id
+    const terminalId = payload.workbench_terminal_id
     if (typeof terminalId === 'string' && terminalId) {
       this._onOwner.fire({ sessionId: payload.session_id, terminalId })
     }

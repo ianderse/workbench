@@ -168,7 +168,7 @@ function main() {
           'Usage: node .github/scripts/bump-version.js <major|minor|patch|x.y.z>');
   }
 
-  log('\nAuto Claude Version Bump\n', colors.cyan);
+  log('\nWorkbench Version Bump\n', colors.cyan);
 
   // 1. Check git status
   info('Checking git status...');

@@ -1,5 +1,5 @@
 {
-  "name": "auto-claude",
+  "name": "workbench",
   "version": "1.0.0-beta",
   "author": {
     "name": "Artyom Vancyan",
@@ -26,9 +26,9 @@
     "package:win": "electron-builder --win",
     "package:linux": "electron-builder --linux",
     "verify:linux": "node .github/scripts/verify-linux-packages.cjs dist",
-    "start:packaged:mac": "open \"dist/mac-arm64/Auto Claude.app\" || open \"dist/mac/Auto Claude.app\"",
-    "start:packaged:win": "start \"\" \"dist\\win-unpacked\\Auto Claude.exe\"",
-    "start:packaged:linux": "./dist/linux-unpacked/auto-claude",
+    "start:packaged:mac": "open \"dist/mac-arm64/Workbench.app\" || open \"dist/mac/Workbench.app\"",
+    "start:packaged:win": "start \"\" \"dist\\win-unpacked\\Workbench.exe\"",
+    "start:packaged:linux": "./dist/linux-unpacked/workbench",
     "test": "vitest run",
     "test:unit": "vitest run --exclude src/__tests__/integration/ --exclude src/__tests__/e2e/",
     "test:integration": "vitest run src/__tests__/integration/",
@@ -123,16 +123,16 @@
     "@electron/rebuild": "$@electron/rebuild"
   },
   "build": {
-    "appId": "com.autoclaude.app",
-    "productName": "Auto Claude",
+    "appId": "com.workbench.app",
+    "productName": "Workbench",
     "npmRebuild": false,
-    "artifactName": "Auto-Claude-${version}-${platform}-${arch}.${ext}",
+    "artifactName": "Workbench-${version}-${platform}-${arch}.${ext}",
     "detectUpdateChannel": false,
     "publish": [
       {
         "provider": "github",
         "owner": "proactive-agent",
-        "repo": "auto-claude"
+        "repo": "workbench"
       }
     ],
     "directories": {
@@ -185,8 +185,8 @@
       "category": "Development",
       "desktop": {
         "entry": {
-          "Name": "Auto Claude",
-          "StartupWMClass": "Auto Claude"
+          "Name": "Workbench",
+          "StartupWMClass": "Workbench"
         }
       }
     }

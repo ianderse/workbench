@@ -62,12 +62,12 @@ import { projectStore } from './project-store';
 import { migrateProjectDataDirs } from './data-dir-migration';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Migrate userData from previous app names (aperant, then auto-claude-ui → auto-claude)
+// Migrate userData from the previous app name (aperant)
 // Must run before any code accesses app.getPath('userData')
 // ─────────────────────────────────────────────────────────────────────────────
 {
   const newUserData = app.getPath('userData');
-  const oldUserData = ['aperant', 'auto-claude-ui']
+  const oldUserData = ['aperant']
     .map((name) => join(dirname(newUserData), name))
     .find((dir) => existsSync(dir));
   if (oldUserData && !existsSync(join(newUserData, '.migrated'))) {
@@ -120,7 +120,6 @@ function loadSettingsSync(): AppSettings {
 function cleanupStaleUpdateMetadata(): void {
   const userData = app.getPath('userData');
   const stalePaths = [
-    join(userData, 'auto-claude-source'),
     join(userData, 'backend-source'),
   ];
 
@@ -468,7 +467,7 @@ function createWindow(): void {
 // Set app name before ready (for dock tooltip on macOS in dev mode). Development builds get their
 // own name, which also gives their window its own class, so taskbars don't group them with (and
 // show the icon of) the installed app. userData was resolved above, so both still share it.
-const APP_NAME = is.dev ? 'Auto Claude Dev' : 'Auto Claude';
+const APP_NAME = is.dev ? 'Workbench Dev' : 'Workbench';
 app.setName(APP_NAME);
 if (isMacOS()) {
   // Force the name to appear in dock on macOS
@@ -485,10 +484,10 @@ if (isWindows()) {
 // Initialize the application
 app.whenReady().then(async () => {
   // Set app user model id for Windows
-  electronApp.setAppUserModelId(is.dev ? 'com.autoclaude.app.dev' : 'com.autoclaude.app');
+  electronApp.setAppUserModelId(is.dev ? 'com.workbench.app.dev' : 'com.workbench.app');
 
   // Linux shells take the dock/taskbar icon from a desktop entry matching the window class; give the
-  // development build ("Auto Claude Dev") its own one, or it shows a generic icon
+  // development build ("Workbench Dev") its own one, or it shows a generic icon
   if (is.dev && isLinux()) {
     void ensureDevDesktopEntry(APP_NAME, resolve(getIconPath()), resolve(__dirname, '../..'));
   }

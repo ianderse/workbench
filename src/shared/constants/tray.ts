@@ -15,7 +15,7 @@ export interface TrayMenuLabels {
 
 export const TRAY_MENU_LABELS: Record<string, TrayMenuLabels> = {
   en: {
-    tooltip: 'Auto Claude',
+    tooltip: 'Workbench',
     showApp: 'Show App',
     plan: '{{plan}} plan',
     usage: 'Usage: {{percent}}%',

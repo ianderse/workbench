@@ -11,7 +11,7 @@
   "sections": {
     "appearance": {
       "title": "Appearance",
-      "description": "Customize how Auto Claude looks"
+      "description": "Customize how Workbench looks"
     },
     "display": {
       "title": "Display",
@@ -39,7 +39,7 @@
     },
     "updates": {
       "title": "Updates",
-      "description": "Auto Claude updates"
+      "description": "Workbench updates"
     },
     "notifications": {
       "title": "Notifications",
@@ -211,7 +211,7 @@
   },
   "theme": {
     "title": "Appearance",
-    "description": "Customize how Auto Claude looks",
+    "description": "Customize how Workbench looks",
     "mode": "Theme",
     "modeDescription": "Use light or dark mode, or match your system",
     "light": "Light",
@@ -242,8 +242,8 @@
     }
   },
   "updates": {
-    "title": "Auto Claude Desktop",
-    "description": "Manage Auto Claude updates",
+    "title": "Workbench Desktop",
+    "description": "Manage Workbench updates",
     "appUpdateReady": "Update available",
     "newVersion": "New version",
     "released": "Released",
@@ -262,7 +262,7 @@
     "unableToCheck": "Unable to check for updates",
     "checkForUpdates": "Check for updates",
     "autoUpdateProjects": "Auto-update projects",
-    "autoUpdateProjectsDescription": "Automatically update Auto Claude in projects when a new version is available",
+    "autoUpdateProjectsDescription": "Automatically update Workbench in projects when a new version is available",
     "betaUpdates": "Beta updates",
     "betaUpdatesDescription": "Receive pre-release beta versions with new features (may be less stable)",
     "stableDowngradeAvailable": "Stable version available",
@@ -270,7 +270,7 @@
     "stableVersion": "Stable version",
     "downloadStableVersion": "Download stable version",
     "readOnlyVolumeTitle": "Cannot install from disk image",
-    "readOnlyVolumeDescription": "Auto Claude is running from a read-only disk image (DMG). Please drag the app to your Applications folder and relaunch it from there to install updates.",
+    "readOnlyVolumeDescription": "Workbench is running from a read-only disk image (DMG). Please drag the app to your Applications folder and relaunch it from there to install updates.",
     "downloadError": "Failed to download update"
   },
   "notifications": {
@@ -482,7 +482,7 @@
       "loadFailed": "Failed to load project index",
       "memoryIndex": "Knowledge index",
       "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
-      "noMemoryIndex": "Map the project's code into a Graphify graph in .auto-claude/knowledge",
+      "noMemoryIndex": "Map the project's code into a Graphify graph in .workbench/knowledge",
       "memoryIndexNotInstalled": "Install Graphify on the Updates page to build a memory graph",
       "memoryIndexNotEnabled": "Turn on Use Graphify in the Knowledge section to build a memory graph",
       "buildMemoryIndex": "Build",

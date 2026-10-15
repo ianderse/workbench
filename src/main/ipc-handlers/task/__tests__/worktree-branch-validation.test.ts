@@ -15,10 +15,10 @@ import { GIT_BRANCH_REGEX } from '../worktree-handlers';
 vi.mock('../../../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
 describe('GIT_BRANCH_REGEX', () => {
-  it('should accept valid auto-claude branch names', () => {
-    expect(GIT_BRANCH_REGEX.test('auto-claude/my-feature')).toBe(true);
-    expect(GIT_BRANCH_REGEX.test('auto-claude/123-fix-bug')).toBe(true);
-    expect(GIT_BRANCH_REGEX.test('auto-claude/feature_with_underscore')).toBe(true);
+  it('should accept valid workbench branch names', () => {
+    expect(GIT_BRANCH_REGEX.test('workbench/my-feature')).toBe(true);
+    expect(GIT_BRANCH_REGEX.test('workbench/123-fix-bug')).toBe(true);
+    expect(GIT_BRANCH_REGEX.test('workbench/feature_with_underscore')).toBe(true);
   });
 
   it('should accept valid feature branch names', () => {

@@ -70,7 +70,7 @@ const MERGE_AGENT_SCHEMA = {
 } as const;
 
 function systemPrompt(input: MergeAgentInput): string {
-  return `You are the merge agent of Auto Claude, a desktop app that runs coding tasks in parallel, each in its own git worktree. Nobody watches this session and nobody can answer questions.
+  return `You are the merge agent of Workbench, a desktop app that runs coding tasks in parallel, each in its own git worktree. Nobody watches this session and nobody can answer questions.
 
 Your working directory is the worktree of a task on branch \`${input.branch}\`. Its pull request is about to be merged into \`${input.targetRef}\`, so \`${input.targetRef}\` was merged into \`${input.branch}\` first, and that merge stopped with conflicts. Other tasks that ran in parallel have already merged their changes into \`${input.targetRef}\`: none of those changes may be lost, and none of this task's changes either.
 

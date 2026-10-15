@@ -3,7 +3,7 @@
  *
  * GNOME (and other shells) take a window's taskbar/dock icon from the .desktop file whose
  * StartupWMClass matches the window class, falling back to a generic gear when none does. The
- * installed app ships an entry for "Auto Claude"; `npm run dev` runs as "Auto Claude Dev", so it
+ * installed app ships an entry for "Workbench"; `npm run dev` runs as "Workbench Dev", so it
  * installs its own hidden entry with the app icon.
  */
 
@@ -12,9 +12,9 @@ import os from 'os';
 import path from 'path';
 import { appLog } from './app-logger';
 
-const ENTRY_FILE = 'auto-claude-dev.desktop';
+const ENTRY_FILE = 'workbench-dev.desktop';
 
-/** Write (or update) ~/.local/share/applications/auto-claude-dev.desktop for the dev window class */
+/** Write (or update) ~/.local/share/applications/workbench-dev.desktop for the dev window class */
 export async function ensureDevDesktopEntry(wmClass: string, iconPath: string, projectDir: string): Promise<void> {
   const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
   const file = path.join(dataHome, 'applications', ENTRY_FILE);
@@ -22,7 +22,7 @@ export async function ensureDevDesktopEntry(wmClass: string, iconPath: string, p
     '[Desktop Entry]',
     'Type=Application',
     `Name=${wmClass}`,
-    'Comment=Auto Claude development build (npm run dev)',
+    'Comment=Workbench development build (npm run dev)',
     `Exec=sh -c "cd '${projectDir}' && npm run dev"`,
     `Icon=${iconPath}`,
     `StartupWMClass=${wmClass}`,

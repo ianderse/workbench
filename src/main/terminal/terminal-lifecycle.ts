@@ -77,7 +77,7 @@ export async function createTerminal(
     // 3. Custom env from TerminalCreateOptions
     const mergedEnv: Record<string, string> = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
 
-    // Point Claude Code's /graphify command at the project's memory graph (.auto-claude/knowledge)
+    // Point Claude Code's /graphify command at the project's memory graph (.workbench/knowledge)
     // instead of graphify-out in the working directory
     const graphifyOut = projectPath && (await hasGraphifyGraph(projectPath)) ? getGraphifyOutDir(projectPath) : undefined;
     if (graphifyOut) mergedEnv.GRAPHIFY_OUT = graphifyOut;

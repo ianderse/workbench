@@ -110,8 +110,8 @@ function getFileFromBranch(
 function findWorktree(projectDir: string, taskId: string): string | undefined {
   // Common worktree locations
   const candidates = [
-    path.join(projectDir, '.auto-claude', 'worktrees', taskId),
-    path.join(projectDir, '.auto-claude', 'worktrees', 'tasks', taskId),
+    path.join(projectDir, '.workbench', 'worktrees', taskId),
+    path.join(projectDir, '.workbench', 'worktrees', 'tasks', taskId),
   ];
   for (const c of candidates) {
     if (fs.existsSync(c)) return c;
@@ -254,7 +254,7 @@ export class MergeOrchestrator {
     dryRun?: boolean;
   }) {
     this.projectDir = path.resolve(options.projectDir);
-    this.storageDir = options.storageDir ?? path.join(this.projectDir, '.auto-claude');
+    this.storageDir = options.storageDir ?? path.join(this.projectDir, '.workbench');
     this.enableAi = options.enableAi ?? true;
     this.dryRun = options.dryRun ?? false;
     this.aiResolver = options.aiResolver;

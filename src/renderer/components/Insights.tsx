@@ -789,8 +789,8 @@ function MessageBubble({
   );
 }
 
-/** Auto Claude's task tools (MCP server "auto-claude") as Claude Code names them */
-const TASK_TOOL_PREFIX = 'mcp__auto-claude__';
+/** Workbench's task tools (MCP server "workbench") as Claude Code names them */
+const TASK_TOOL_PREFIX = 'mcp__workbench__';
 
 /** The task tool's own name (create_task, move_task, ...), or null for other tools */
 const taskToolName = (toolName: string): string | null =>

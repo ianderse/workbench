@@ -68,7 +68,7 @@ describe('task tools server', () => {
   it('speaks MCP to its own chat turn only', async () => {
     const session = await open();
     const init = await rpc(session, 'initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'claude-code', version: '2' } });
-    expect(init.body.result).toMatchObject({ protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'auto-claude' } });
+    expect(init.body.result).toMatchObject({ protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'workbench' } });
 
     const notification = await fetch(session.mcpServer.url, {
       method: 'POST',

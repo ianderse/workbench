@@ -156,7 +156,7 @@ export function initializeGit(projectPath: string): InitializationResult {
 /**
  * Entries to add to .gitignore when initializing a project
  */
-const GITIGNORE_ENTRIES = ['.auto-claude/'];
+const GITIGNORE_ENTRIES = ['.workbench/'];
 
 /**
  * Ensure entries exist in the project's .gitignore file.
@@ -206,21 +206,21 @@ function ensureGitignoreEntries(projectPath: string, entries: string[]): void {
       appendContent += '\n';
     }
 
-    appendContent += '\n# Auto Claude data directory\n';
+    appendContent += '\n# Workbench data directory\n';
     for (const entry of entriesToAdd) {
       appendContent += entry + '\n';
     }
 
     appendFileSync(gitignorePath, appendContent);
   } else {
-    writeFileSync(gitignorePath, '# Auto Claude data directory\n' + entriesToAdd.join('\n') + '\n', 'utf-8');
+    writeFileSync(gitignorePath, '# Workbench data directory\n' + entriesToAdd.join('\n') + '\n', 'utf-8');
   }
 
   debug('Added entries to .gitignore', { entries: entriesToAdd });
 }
 
 /**
- * Data directories created in .auto-claude for each project
+ * Data directories created in .workbench for each project
  */
 const DATA_DIRECTORIES = [
   DATA_DIR_NAMES.tasks,
@@ -246,17 +246,17 @@ export function hasLocalSource(projectPath: string): boolean {
 }
 
 /**
- * Check if project is initialized (has .auto-claude directory)
+ * Check if project is initialized (has .workbench directory)
  */
 export function isInitialized(projectPath: string): boolean {
-  const dotAutoBuildPath = path.join(projectPath, '.auto-claude');
+  const dotAutoBuildPath = path.join(projectPath, '.workbench');
   return existsSync(dotAutoBuildPath);
 }
 
 /**
- * Initialize auto-claude data directory in a project.
+ * Initialize the Workbench data directory in a project.
  *
- * Creates .auto-claude/ with data directories (specs, insights).
+ * Creates .workbench/ with data directories (specs, insights).
  * The framework code runs from the source repo - only data is stored here.
  *
  * Requires:
@@ -275,31 +275,31 @@ export function initializeProject(projectPath: string): InitializationResult {
     };
   }
 
-  // Check git status - Auto Claude requires git for worktree-based builds
+  // Check git status - Workbench requires git for worktree-based builds
   const gitStatus = checkGitStatus(projectPath);
   if (!gitStatus.isGitRepo || !gitStatus.hasCommits) {
     debug('Git check failed', { gitStatus });
     return {
       success: false,
-      error: gitStatus.error || 'Git repository required. Auto Claude uses git worktrees for isolated builds.'
+      error: gitStatus.error || 'Git repository required. Workbench uses git worktrees for isolated builds.'
     };
   }
 
   // Check if already initialized
-  const dotAutoBuildPath = path.join(projectPath, '.auto-claude');
+  const dotAutoBuildPath = path.join(projectPath, '.workbench');
 
   if (existsSync(dotAutoBuildPath)) {
-    debug('Already initialized - .auto-claude exists');
+    debug('Already initialized - .workbench exists');
     return {
       success: false,
-      error: 'Project already has auto-claude initialized (.auto-claude exists)'
+      error: 'Project already has Workbench initialized (.workbench exists)'
     };
   }
 
   try {
-    debug('Creating .auto-claude data directory', { dotAutoBuildPath });
+    debug('Creating .workbench data directory', { dotAutoBuildPath });
 
-    // Create the .auto-claude directory
+    // Create the .workbench directory
     mkdirSync(dotAutoBuildPath, { recursive: true });
 
     // Create data directories
@@ -310,7 +310,7 @@ export function initializeProject(projectPath: string): InitializationResult {
       writeFileSync(path.join(dirPath, '.gitkeep'), '', 'utf-8');
     }
 
-    // Update .gitignore to exclude .auto-claude/
+    // Update .gitignore to exclude .workbench/
     ensureGitignoreEntries(projectPath, GITIGNORE_ENTRIES);
 
     debug('Initialization complete');
@@ -326,22 +326,22 @@ export function initializeProject(projectPath: string): InitializationResult {
 }
 
 /**
- * Get the auto-claude folder path for a project.
+ * Get the Workbench data folder path for a project.
  *
- * IMPORTANT: Only .auto-claude/ is considered a valid "installed" auto-claude.
- * The auto-claude/ folder (if it exists) is the SOURCE CODE being developed,
- * not an installation. This allows Auto Claude to be used to develop itself.
+ * IMPORTANT: Only .workbench/ is considered a valid "installed" Workbench.
+ * The workbench/ folder (if it exists) is the SOURCE CODE being developed,
+ * not an installation. This allows Workbench to be used to develop itself.
  */
 export function getAutoBuildPath(projectPath: string): string | null {
-  const dotAutoBuildPath = path.join(projectPath, '.auto-claude');
+  const dotAutoBuildPath = path.join(projectPath, '.workbench');
 
   debug('getAutoBuildPath called', { projectPath, dotAutoBuildPath });
 
   if (existsSync(dotAutoBuildPath)) {
-    debug('Returning .auto-claude (installed version)');
-    return '.auto-claude';
+    debug('Returning .workbench (installed version)');
+    return '.workbench';
   }
 
-  debug('No .auto-claude folder found - project not initialized');
+  debug('No .workbench folder found - project not initialized');
   return null;
 }

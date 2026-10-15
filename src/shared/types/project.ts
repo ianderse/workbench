@@ -191,7 +191,7 @@ export interface ProjectEnvConfig {
 
 /**
  * Per-agent MCP override configuration.
- * Stored in .auto-claude/.env as AGENT_MCP_<agent>_ADD and AGENT_MCP_<agent>_REMOVE
+ * Stored in .workbench/.env as AGENT_MCP_<agent>_ADD and AGENT_MCP_<agent>_REMOVE
  */
 interface AgentMcpOverride {
   /** MCP servers to add beyond the agent's defaults */
@@ -276,10 +276,10 @@ export interface McpTestConnectionResult {
   responseTime?: number;
 }
 
-// Auto Claude Initialization Types
+// Workbench Initialization Types
 export interface AutoBuildVersionInfo {
   isInitialized: boolean;
-  updateAvailable: boolean; // Always false - .auto-claude only contains data, no code to update
+  updateAvailable: boolean; // Always false - .workbench only contains data, no code to update
 }
 
 export interface InitializationResult {

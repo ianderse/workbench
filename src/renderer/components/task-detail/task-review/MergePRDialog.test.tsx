@@ -41,7 +41,7 @@ const task: Task = {
 const worktreeStatus: WorktreeStatus = {
   exists: true,
   worktreePath: '/wt',
-  branch: 'auto-claude/001-auth',
+  branch: 'workbench/001-auth',
   baseBranch: 'develop',
   commitCount: 2,
   filesChanged: 3,
@@ -62,7 +62,7 @@ describe('MergePRDialog', () => {
     onMergePR.mockReturnValue(new Promise((resolve) => { finish = resolve; }));
     render(<MergePRDialog open task={task} worktreeStatus={worktreeStatus} onOpenChange={onOpenChange} onMergePR={onMergePR} />);
 
-    expect(screen.getByText('auto-claude/001-auth')).toBeInTheDocument();
+    expect(screen.getByText('workbench/001-auth')).toBeInTheDocument();
     expect(screen.getByText('example/repo/pull/7')).toBeInTheDocument();
     // The PR already has a target: no branch to pick
     expect(screen.queryByRole('combobox')).not.toBeInTheDocument();

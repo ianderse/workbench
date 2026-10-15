@@ -92,7 +92,7 @@ export function registerAgenteventsHandlers(
   getMainWindow: () => BrowserWindow | null
 ): void {
   taskStateManager.configure(getMainWindow);
-  // Every task state and the files tasks edit go to the project's .auto-claude/changelog.jsonl
+  // Every task state and the files tasks edit go to the project's .workbench/changelog.jsonl
   registerTaskChangelog();
 
   // Learning between sessions: rebuild the project's memory graph when a task completes, so the

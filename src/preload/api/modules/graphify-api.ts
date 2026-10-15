@@ -15,9 +15,9 @@ export interface GraphifyAPI {
   installGraphify: () => Promise<IPCResult<{ command: string }>>;
   /** The project's memory graph, or null when it has not been built */
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo | null>>;
-  /** Build (or rebuild) the project's memory graph in .auto-claude/knowledge */
+  /** Build (or rebuild) the project's memory graph in .workbench/knowledge */
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<GraphifyIndexInfo>>;
-  /** Whether the project has a memory graph (.auto-claude/knowledge) */
+  /** Whether the project has a memory graph (.workbench/knowledge) */
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   /** The project's memory graph for the graph view */
   getGraphifyGraph: (projectId: string) => Promise<IPCResult<GraphifyGraph | null>>;

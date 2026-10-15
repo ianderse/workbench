@@ -1,5 +1,5 @@
 /**
- * The project's task changelog (.auto-claude/changelog.jsonl):
+ * The project's task changelog (.workbench/changelog.jsonl):
  * - the task hooks write an entry for every state a task enters, with the files its branch
  *   changes, and one entry for the files its session starts editing
  * - each task's prompt lists the other tasks' unmerged changes from it
@@ -99,7 +99,7 @@ describe('task changelog writer', () => {
   });
 
   const readEntries = (project: Project) =>
-    parseTaskChangelog(readFileSync(path.join(project.path, '.auto-claude', 'changelog.jsonl'), 'utf-8'));
+    parseTaskChangelog(readFileSync(path.join(project.path, '.workbench', 'changelog.jsonl'), 'utf-8'));
 
   it("logs each state with the branch's changed files, and new edits once", async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
@@ -114,10 +114,10 @@ describe('task changelog writer', () => {
       git(repo, 'add', '.');
       git(repo, 'commit', '-q', '-m', 'base');
       const worktree = path.join(tmp, 'wt');
-      git(repo, 'worktree', 'add', '-q', '-b', 'auto-claude/001-a', worktree, 'main');
+      git(repo, 'worktree', 'add', '-q', '-b', 'workbench/001-a', worktree, 'main');
       worktrees.set('001-a', worktree);
 
-      const project = { id: 'p1', path: repo, autoBuildPath: '.auto-claude', settings: { mainBranch: 'main' } } as unknown as Project;
+      const project = { id: 'p1', path: repo, autoBuildPath: '.workbench', settings: { mainBranch: 'main' } } as unknown as Project;
       const task = { id: 't1', specId: '001-a', title: 'Task A', metadata: { baseBranch: 'main' } } as unknown as Task;
 
       taskHooks.emit('state', { project, task, status: 'in_progress', state: 'planning' });
@@ -126,11 +126,11 @@ describe('task changelog writer', () => {
       taskHooks.emit('files-edited', { project, task, files: ['src/b.ts', 'src/a.ts'] });
       await flushTaskChangelog();
 
-      // Committed and untracked changes; Auto Claude's own files are left out
+      // Committed and untracked changes; Workbench's own files are left out
       mkdirSync(path.join(worktree, 'src'));
-      mkdirSync(path.join(worktree, '.auto-claude'));
+      mkdirSync(path.join(worktree, '.workbench'));
       writeFileSync(path.join(worktree, 'src', 'a.ts'), 'a\n');
-      writeFileSync(path.join(worktree, '.auto-claude', 'x.json'), '{}\n');
+      writeFileSync(path.join(worktree, '.workbench', 'x.json'), '{}\n');
       git(worktree, 'add', 'src/a.ts');
       git(worktree, 'commit', '-q', '-m', 'a');
       writeFileSync(path.join(worktree, 'src', 'c.ts'), 'c\n');
@@ -140,19 +140,19 @@ describe('task changelog writer', () => {
       await flushTaskChangelog();
 
       expect(readEntries(project).map(({ at: _at, ...entry }) => entry)).toEqual([
-        { task: '001-a', title: 'Task A', event: 'state', status: 'in_progress', state: 'planning', branch: 'auto-claude/001-a', files: [] },
+        { task: '001-a', title: 'Task A', event: 'state', status: 'in_progress', state: 'planning', branch: 'workbench/001-a', files: [] },
         { task: '001-a', title: 'Task A', event: 'edit', files: ['src/a.ts', 'src/b.ts'] },
-        { task: '001-a', title: 'Task A', event: 'state', status: 'human_review', state: 'human_review', branch: 'auto-claude/001-a', files: ['src/a.ts', 'src/c.ts'] },
+        { task: '001-a', title: 'Task A', event: 'state', status: 'human_review', state: 'human_review', branch: 'workbench/001-a', files: ['src/a.ts', 'src/c.ts'] },
       ]);
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it('logs edits on their own after a short wait, and skips projects without .auto-claude', async () => {
+  it('logs edits on their own after a short wait, and skips projects without .workbench', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      const project = { id: 'p2', path: path.join(tmp, 'p2'), autoBuildPath: '.auto-claude', settings: {} } as unknown as Project;
+      const project = { id: 'p2', path: path.join(tmp, 'p2'), autoBuildPath: '.workbench', settings: {} } as unknown as Project;
       const task = { id: 't2', specId: '002-b', title: 'Task B', metadata: { useWorktree: false } } as unknown as Task;
       taskHooks.emit('files-edited', { project, task, files: ['x.ts'] });
       vi.advanceTimersByTime(3000);
@@ -162,7 +162,7 @@ describe('task changelog writer', () => {
       const uninitialized = { id: 'p3', path: path.join(tmp, 'p3'), autoBuildPath: '', settings: {} } as unknown as Project;
       taskHooks.emit('state', { project: uninitialized, task, status: 'queue' });
       await flushTaskChangelog();
-      expect(() => readFileSync(path.join(tmp, 'p3', '.auto-claude', 'changelog.jsonl'))).toThrow();
+      expect(() => readFileSync(path.join(tmp, 'p3', '.workbench', 'changelog.jsonl'))).toThrow();
     } finally {
       vi.useRealTimers();
     }

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Product Overview
 
-Auto Claude is a TypeScript Electron desktop app where users describe a goal and the **Claude Code CLI** does the work
+Workbench is a TypeScript Electron desktop app where users describe a goal and the **Claude Code CLI** does the work
 autonomously. Every task runs in its own git worktree so the main branch stays safe.
 
 **Core workflow:** User creates a task (description, images, connectors, git options) → a short Claude Code **triage**
@@ -19,7 +19,7 @@ reviews, requests changes (same session continues) or merges.
 - **Kanban Board** — Visual task management from planning through completion
 - **Agent Terminals** — Parallel AI-powered terminals (12 by default, up to 24) with task context injection
 - **Insights** — Chat for exploring a codebase (runs through Claude Code; can't change files) that can also manage
-  the project's tasks: Auto Claude's task tools (`src/main/insights/task-tools.ts`, served over local MCP HTTP by
+  the project's tasks: Workbench's task tools (`src/main/insights/task-tools.ts`, served over local MCP HTTP by
   `task-tools-server.ts` with a token per chat turn) create, edit, start, stop, retry, move, review, PR, merge, archive
   and delete tasks through the same IPC handlers as the UI (`ipc-handlers/ipc-registry.ts`); ideas the user didn't ask
   for stay task suggestions (`__TASK_SUGGESTION__`)
@@ -30,7 +30,7 @@ reviews, requests changes (same session continues) or merges.
 - **Connectors** — MCP servers added to a task's Claude Code session (`--mcp-config`: Context7, Electron, Puppeteer,
   user-added servers) with app-wide defaults in Settings and per-task choices in the task dialog
 - **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
-  project's code, built into `.auto-claude/knowledge` and offered to agents
+  project's code, built into `.workbench/knowledge` and offered to agents
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
 - **Authentication** — Claude subscription accounts (each a `CLAUDE_CONFIG_DIR`) or API profiles with any
   Anthropic-compatible endpoint
@@ -140,7 +140,7 @@ manually via `beta-release.yml`.
 ## Project Structure
 
 ```
-auto-claude/
+workbench/
 ├── src/
 │   ├── main/                # Electron main process
 │   │   ├── claude-code/     # Claude Code CLI integration (task runner, triage, one-shot calls, inventory)
@@ -189,7 +189,7 @@ permission modes, worktrees, hooks, skills).
 
 ### Task Directory
 
-Each task's `.auto-claude/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and
+Each task's `.workbench/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and
 mirrored task list), `claude_run.json`, `task_logs.json`, `plan.md` (when planned) and `attachments/`.
 
 ### Task Changelog (parallel tasks)
@@ -197,7 +197,7 @@ mirrored task list), `claude_run.json`, `task_logs.json`, `plan.md` (when planne
 Task hooks (`src/main/task-hooks.ts`, `taskHooks.on('state' | 'files-edited', ...)`) run on every state a task
 enters (state machine transitions and manual moves) and on the files its Claude Code session edits (Edit, Write,
 MultiEdit, NotebookEdit tool calls). `src/main/task-changelog-writer.ts` turns them into the project's
-`.auto-claude/changelog.jsonl` (one JSON entry per line; state entries carry every file the task's branch changes).
+`.workbench/changelog.jsonl` (one JSON entry per line; state entries carry every file the task's branch changes).
 At every phase, `buildParallelTasksPrompt()` (`src/main/task-changelog.ts`) adds a "Parallel tasks" section to the
 task's system prompt: the other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
 them and avoid merge conflicts.
@@ -214,12 +214,12 @@ session, on top of the user's own Claude Code MCP configuration. Helpers live in
 
 `src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
 Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
-.auto-claude/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
+.workbench/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
 `index.json` summary. When the project's "Use Graphify" setting (`ProjectSettings.useGraphify`, Project page) is on,
 task runs and the Claude page (Insights) get `GRAPHIFY_OUT`, the graphify CLI on `PATH` and a prompt section about
 graphify's search commands (Insights limits Bash to those commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
 `~/.claude` and each Claude profile's config dir, after an install or update), and agent windows
-get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.auto-claude/knowledge`.
+get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.workbench/knowledge`.
 
 ### Electron MCP (testing the app from a task)
 
@@ -245,13 +245,13 @@ via CSS custom properties in `src/renderer/styles/globals.css`. Elements with a 
 the pointer cursor automatically from a base rule.
 
 **Fonts** — Bundled in `src/renderer/assets/fonts/`: Anthropic Sans (UI), Dank Mono (terminals and agent windows,
-loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "Auto Claude" title only) and Inter
+loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "Workbench" title only) and Inter
 (optional interface font). Settings > General > Appearance picks the interface and command line fonts.
 
 **Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Agents,
 Project, Connectors, Developer, Updates (Project is the selected project's page: index, Knowledge, Tasks, Branches).
 The project's `useGraphify`, `useClaudeMd`, `maxBudgetUsd` (budget per task) and `claudeProfileId` (its Claude account;
-unset = the account in use) are kept in the project's own `.auto-claude/settings.json` (`src/main/project-store.ts`). Build pages from `SettingsSection` +
+unset = the account in use) are kept in the project's own `.workbench/settings.json` (`src/main/project-store.ts`). Build pages from `SettingsSection` +
 `SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
 `SETTINGS_MENU_TRIGGER_CLASS` (no collapsible rows). UI copy conventions: sentence case, no em dashes, no trailing
 period in setting descriptions, and no green check / red x status icons (state the status in text).

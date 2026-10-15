@@ -14,7 +14,7 @@ interface ProjectTaskSettingsProps {
 
 /**
  * Project page "Tasks" section: the Claude account the project's tasks and chats run on, and the
- * budget per task. Saved in the project's `.auto-claude/settings.json`.
+ * budget per task. Saved in the project's `.workbench/settings.json`.
  */
 export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettingsProps) {
   const { t } = useTranslation('settings');

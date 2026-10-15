@@ -1,8 +1,8 @@
 /**
  * Data folder migration
  *
- * Older versions kept a project's data in .auto-claude/specs (tasks), .auto-claude/memory (the
- * Graphify graph) and .auto-claude/insights (Claude page chats). They are now tasks, knowledge
+ * Older versions kept a project's data in .workbench/specs (tasks), .workbench/memory (the
+ * Graphify graph) and .workbench/insights (Claude page chats). They are now tasks, knowledge
  * and chats (DATA_DIR_NAMES). This renames the old folders, in the project and in each task
  * worktree's copy of its task folder, when the app starts and when a project is added.
  *
@@ -51,7 +51,7 @@ async function migrateFolder(base: string, legacy: string, current: string): Pro
  * the task folder copies inside its task worktrees. Never throws.
  */
 export async function migrateProjectDataDirs(projectPath: string, autoBuildPath?: string): Promise<void> {
-  const dataDir = path.join(projectPath, autoBuildPath || '.auto-claude');
+  const dataDir = path.join(projectPath, autoBuildPath || '.workbench');
   if (!(await isDirectory(dataDir))) return;
   try {
     const moved: string[] = [];
@@ -61,7 +61,7 @@ export async function migrateProjectDataDirs(projectPath: string, autoBuildPath?
       }
     }
 
-    // Each task worktree holds a copy of its task folder (.auto-claude is gitignored)
+    // Each task worktree holds a copy of its task folder (.workbench is gitignored)
     const worktreesDir = path.join(dataDir, 'worktrees', 'tasks');
     let worktrees: string[] = [];
     try {
@@ -72,7 +72,7 @@ export async function migrateProjectDataDirs(projectPath: string, autoBuildPath?
       // No task worktrees
     }
     for (const worktree of worktrees) {
-      const worktreeDataDir = path.join(worktreesDir, worktree, autoBuildPath || '.auto-claude');
+      const worktreeDataDir = path.join(worktreesDir, worktree, autoBuildPath || '.workbench');
       if (await migrateFolder(worktreeDataDir, LEGACY_DATA_DIR_NAMES.tasks, DATA_DIR_NAMES.tasks)) {
         moved.push(`worktrees/tasks/${worktree}: ${LEGACY_DATA_DIR_NAMES.tasks} -> ${DATA_DIR_NAMES.tasks}`);
       }

@@ -47,11 +47,11 @@ npm-debug.log*
 .worktrees/
 
 # ===========================
-# Auto Claude Generated
+# Workbench Generated
 # ===========================
-.auto-claude/
-.auto-claude-security.json
-.auto-claude-status
+.workbench/
+.workbench-security.json
+.workbench-status
 .claude_settings.json
 .update-metadata.json
 

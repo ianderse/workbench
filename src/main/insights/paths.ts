@@ -1,7 +1,7 @@
 import path from 'path';
 import { DATA_DIR_NAMES } from '../../shared/constants';
 
-const INSIGHTS_DIR = `.auto-claude/${DATA_DIR_NAMES.chats}`;
+const INSIGHTS_DIR = `.workbench/${DATA_DIR_NAMES.chats}`;
 const SESSIONS_DIR = 'sessions';
 const CURRENT_SESSION_FILE = 'current_session.json';
 const ATTACHMENTS_DIR = 'attachments';

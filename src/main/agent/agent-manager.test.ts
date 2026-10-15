@@ -35,8 +35,8 @@ vi.mock('../claude-code/task-runner', () => ({
 
 vi.mock('../worktree', () => ({
   createOrGetWorktree: vi.fn(async (_projectPath: string, specId: string) => ({
-    worktreePath: `/project/.auto-claude/worktrees/tasks/${specId}`,
-    branch: `auto-claude/${specId}`,
+    worktreePath: `/project/.workbench/worktrees/tasks/${specId}`,
+    branch: `workbench/${specId}`,
   })),
 }));
 
@@ -85,7 +85,7 @@ const project = {
   id: 'project-1',
   name: 'Project',
   path: '/project',
-  autoBuildPath: '.auto-claude',
+  autoBuildPath: '.workbench',
   settings: { mainBranch: 'develop' },
 } as unknown as Project;
 
@@ -128,12 +128,12 @@ describe('AgentManager', () => {
     await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
     const run = await nextRun(1);
 
-    expect(run.config.worktreePath).toBe('/project/.auto-claude/worktrees/tasks/001-add-login');
-    expect(run.config.branch).toBe('auto-claude/001-add-login');
+    expect(run.config.worktreePath).toBe('/project/.workbench/worktrees/tasks/001-add-login');
+    expect(run.config.branch).toBe('workbench/001-add-login');
     expect(run.config.baseBranch).toBe('develop');
-    expect(run.config.specDir).toBe(path.join('/project', '.auto-claude', 'tasks', '001-add-login'));
+    expect(run.config.specDir).toBe(path.join('/project', '.workbench', 'tasks', '001-add-login'));
     expect(run.config.attachments).toEqual([{
-      path: path.join('/project', '.auto-claude', 'tasks', '001-add-login', 'attachments', 'mock.png'),
+      path: path.join('/project', '.workbench', 'tasks', '001-add-login', 'attachments', 'mock.png'),
       filename: 'mock.png',
       mimeType: 'image/png',
     }]);

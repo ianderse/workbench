@@ -26,7 +26,7 @@ function project(id: string, name: string, updatedAt: string): Project {
     id,
     name,
     path: `/work/${name.toLowerCase()}`,
-    autoBuildPath: `/work/${name.toLowerCase()}/.auto-claude`,
+    autoBuildPath: `/work/${name.toLowerCase()}/.workbench`,
     settings: {
       model: 'sonnet',
       notifications: { onTaskComplete: true, onTaskFailed: true, onReviewNeeded: true, sound: false }

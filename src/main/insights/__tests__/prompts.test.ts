@@ -44,11 +44,11 @@ describe('extractToolInput', () => {
 describe('buildSystemPrompt', () => {
   it('describes the task tools only when the Kanban button is on', () => {
     const withTools = buildSystemPrompt('/nonexistent-project', { taskTools: true });
-    expect(withTools).toContain('mcp__auto-claude__');
+    expect(withTools).toContain('mcp__workbench__');
     expect(withTools).toContain("don't create it. Suggest it instead");
 
     const withoutTools = buildSystemPrompt('/nonexistent-project');
-    expect(withoutTools).not.toContain('mcp__auto-claude__');
+    expect(withoutTools).not.toContain('mcp__workbench__');
     expect(withoutTools).toContain('Kanban button');
     expect(withoutTools).toContain('When the user asks you to create a task');
     expect(withoutTools).toContain('__TASK_SUGGESTION__:');

@@ -172,7 +172,7 @@ function fallbackPRText(config: CreatePRConfig, commitLog: string): PRText {
   const body = commitLog.trim()
     ? `## Summary\n\n${summary.slice(0, 2000)}\n\n## Commits\n\n${commitLog.trim()}`
     : `## Summary\n\n${summary.slice(0, 2000)}`;
-  return { title: config.taskTitle || `auto-claude: ${config.specId}`, body };
+  return { title: config.taskTitle || `workbench: ${config.specId}`, body };
 }
 
 /** Ask Claude Code for the PR title and body */

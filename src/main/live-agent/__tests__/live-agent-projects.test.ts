@@ -1,5 +1,5 @@
 /**
- * The per-project "Live agent" setting: on while the project's .auto-claude/flow directory exists.
+ * The per-project "Live agent" setting: on while the project's .workbench/flow directory exists.
  * Switching it on creates that directory and runs the setup (hook script, Claude Code hooks in
  * .claude/settings.local.json); switching it off undoes both. The relay runs while any project has it on.
  */
@@ -38,7 +38,7 @@ describe('Live agent per project', () => {
   let projectB: string;
   const settingsFile = (project: string) => path.join(project, '.claude', 'settings.local.json');
   const readSettings = (project: string) => JSON.parse(fs.readFileSync(settingsFile(project), 'utf-8'));
-  const flowDir = (project: string) => path.join(project, '.auto-claude', 'flow');
+  const flowDir = (project: string) => path.join(project, '.workbench', 'flow');
 
   beforeEach(() => {
     setEnabled.mockClear();
@@ -79,7 +79,7 @@ describe('Live agent per project', () => {
     expect(settings.hooks.PreToolUse[0]).toEqual(userHook);
     const ours = settings.hooks.Stop[0].hooks[0];
     expect(ours.command).toContain('ELECTRON_RUN_AS_NODE=1');
-    expect(ours.command.replace(/\\/g, '/')).toContain('/.auto-claude/flow/hook.cjs');
+    expect(ours.command.replace(/\\/g, '/')).toContain('/.workbench/flow/hook.cjs');
 
     // The other project is untouched
     expect(await isLiveAgentEnabled(projectB)).toBe(false);
@@ -166,7 +166,7 @@ describe('Live agent per project', () => {
   describe('worktrees', () => {
     const git = (cwd: string, ...args: string[]) =>
       execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], { cwd, stdio: 'ignore' });
-    const worktree = (name: string) => path.join(projectA, '.auto-claude', 'worktrees', name);
+    const worktree = (name: string) => path.join(projectA, '.workbench', 'worktrees', name);
 
     beforeEach(() => {
       git(projectA, 'init', '-q');

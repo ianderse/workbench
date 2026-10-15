@@ -90,7 +90,7 @@ export const DEFAULT_PROJECT_SETTINGS = {
 // ============================================
 
 /**
- * Folders inside a project's .auto-claude data directory. Older versions used other names
+ * Folders inside a project's .workbench data directory. Older versions used other names
  * (LEGACY_DATA_DIR_NAMES); projects are migrated when the app starts or a project is added.
  */
 export const DATA_DIR_NAMES = {
@@ -110,23 +110,23 @@ export const LEGACY_DATA_DIR_NAMES: Record<keyof typeof DATA_DIR_NAMES, string> 
 };
 
 // File paths relative to project
-// IMPORTANT: All paths use .auto-claude/ (the installed instance), NOT auto-claude/ (source code)
+// IMPORTANT: All paths use .workbench/ (the installed instance), NOT workbench/ (source code)
 export const AUTO_BUILD_PATHS = {
-  SPECS_DIR: `.auto-claude/${DATA_DIR_NAMES.tasks}`,
+  SPECS_DIR: `.workbench/${DATA_DIR_NAMES.tasks}`,
   IMPLEMENTATION_PLAN: 'implementation_plan.json',
   SPEC_FILE: 'spec.md',
   QA_REPORT: 'qa_report.md',
   BUILD_PROGRESS: 'build-progress.txt',
   CONTEXT: 'context.json',
   REQUIREMENTS: 'requirements.json',
-  PROJECT_INDEX: '.auto-claude/project_index.json'
+  PROJECT_INDEX: '.workbench/project_index.json'
 } as const;
 
 /**
  * Get the tasks directory path (relative to the project): one folder per task in
- * .auto-claude/tasks/ (the project's data directory).
+ * .workbench/tasks/ (the project's data directory).
  */
 export function getSpecsDir(autoBuildPath: string | undefined): string {
-  const basePath = autoBuildPath || '.auto-claude';
+  const basePath = autoBuildPath || '.workbench';
   return `${basePath}/${DATA_DIR_NAMES.tasks}`;
 }

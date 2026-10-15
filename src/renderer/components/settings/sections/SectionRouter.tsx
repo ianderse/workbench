@@ -51,7 +51,7 @@ export function SectionRouter({
             isUpdating={isUpdating}
             handleInitialize={handleInitialize}
           />
-          {/* Kept in the project's .auto-claude folder, so they need an initialized project */}
+          {/* Kept in the project's .workbench folder, so they need an initialized project */}
           {project.autoBuildPath && (
             <>
               <KnowledgeSettings settings={settings} setSettings={setSettings} />

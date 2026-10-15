@@ -100,7 +100,7 @@ describe('ClaudeTaskRun', () => {
       specId: '001-task',
       specDir,
       worktreePath: worktree,
-      branch: 'auto-claude/001-task',
+      branch: 'workbench/001-task',
       baseBranch: 'main',
       title: 'Task',
       description: 'Add a subtract function',

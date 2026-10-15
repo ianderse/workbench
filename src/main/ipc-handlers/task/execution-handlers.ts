@@ -251,7 +251,7 @@ export function registerTaskExecutionHandlers(
     if (!gitStatus.isGitRepo) {
       sendTaskError(
         taskId,
-        'Git repository required. Please run "git init" in your project directory. Auto Claude uses git worktrees for isolated builds.'
+        'Git repository required. Please run "git init" in your project directory. Workbench uses git worktrees for isolated builds.'
       );
       return;
     }
@@ -502,8 +502,8 @@ export function registerTaskExecutionHandlers(
         try {
           await execFileAsync(git, ['reset', 'HEAD'], gitOptions);
           await execFileAsync(git, ['checkout', '--', '.'], gitOptions);
-          // Exclude .auto-claude to preserve specs and worktree data
-          await execFileAsync(git, ['clean', '-fd', '-e', '.auto-claude'], gitOptions);
+          // Exclude .workbench to preserve specs and worktree data
+          await execFileAsync(git, ['clean', '-fd', '-e', '.workbench'], gitOptions);
           console.warn('[TASK_REVIEW] Main project restored to pre-merge state');
         } catch (error) {
           console.warn('[TASK_REVIEW] Could not discard staged changes in the main project:', error);

@@ -18,8 +18,8 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const SOCKET_PATH = isWindows()
-  ? `\\\\.\\pipe\\auto-claude-pty-${process.getuid?.() || 'default'}`
-  : `/tmp/auto-claude-pty-${process.getuid?.() || 'default'}.sock`;
+  ? `\\\\.\\pipe\\workbench-pty-${process.getuid?.() || 'default'}`
+  : `/tmp/workbench-pty-${process.getuid?.() || 'default'}.sock`;
 
 interface DaemonResponseData {
   exitCode?: number;

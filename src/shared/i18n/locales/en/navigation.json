@@ -1,6 +1,6 @@
 {
   "header": {
-    "title": "Auto Claude"
+    "title": "Workbench"
   },
   "sections": {
     "project": "Project",
@@ -23,7 +23,7 @@
     "settings": "Application Settings"
   },
   "messages": {
-    "initializeToCreateTasks": "Initialize Auto Claude to create tasks"
+    "initializeToCreateTasks": "Initialize Workbench to create tasks"
   },
   "claudeCode": {
     "title": "Claude Code CLI",

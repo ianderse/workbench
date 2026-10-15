@@ -76,7 +76,7 @@ async function branchChanges(project: Project, task: Task): Promise<{ branch?: s
     git(worktree, ['diff', '--name-only', 'HEAD']),
     git(worktree, ['ls-files', '--others', '--exclude-standard']),
   ]);
-  const dataDir = `${(project.autoBuildPath || '.auto-claude').replace(/\\/g, '/')}/`;
+  const dataDir = `${(project.autoBuildPath || '.workbench').replace(/\\/g, '/')}/`;
   const files = [...new Set([...committed, ...uncommitted, ...untracked])].filter((file) => !file.startsWith(dataDir)).sort();
   return { branch: branch[0], files };
 }

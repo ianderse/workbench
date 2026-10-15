@@ -8,7 +8,7 @@
  *
  * The CLI can't change the project's files: only Read/Glob/Grep (plus Bash limited to graphify's
  * read-only searches when the project's memory graph is on) are available, and the only MCP
- * server is Auto Claude's task tools (`task-tools-server.ts`), so Claude can manage the
+ * server is Workbench's task tools (`task-tools-server.ts`), so Claude can manage the
  * project's tasks. Anything else is denied without prompting (`--permission-mode dontAsk`) and
  * no session is persisted. Credentials come from the best available Claude profile or the active API profile
  * (`resolveClaudeEnv`).
@@ -124,7 +124,7 @@ function toClaudeEffort(level: string | undefined): ClaudeEffort {
   return level && (CLAUDE_EFFORTS as readonly string[]).includes(level) ? (level as ClaudeEffort) : 'medium';
 }
 
-/** MCP tools rule for Auto Claude's task tools (every tool of the server) */
+/** MCP tools rule for Workbench's task tools (every tool of the server) */
 export const INSIGHTS_TASK_TOOLS_RULE = `mcp__${TASK_TOOLS_SERVER_NAME}`;
 
 /** How long a task tool may run (merging a PR with conflicts takes a while) */
@@ -274,7 +274,7 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     }
 
     // System prompt goes through a file: no argument length or shell quoting limits
-    const tempDir = await mkdtemp(join(tmpdir(), 'auto-claude-insights-'));
+    const tempDir = await mkdtemp(join(tmpdir(), 'workbench-insights-'));
     const systemPromptFile = join(tempDir, 'system-prompt.md');
     const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!config.taskTools });
     const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;

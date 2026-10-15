@@ -243,11 +243,11 @@ export function registerProjectHandlers(
   ipcMain.handle(
     IPC_CHANNELS.PROJECT_LIST,
     async (): Promise<IPCResult<Project[]>> => {
-      // Validate that .auto-claude folders still exist for all projects
+      // Validate that .workbench folders still exist for all projects
       // If a folder was deleted, reset autoBuildPath so UI prompts for reinitialization
       const resetIds = projectStore.validateProjects();
       if (resetIds.length > 0) {
-        console.warn('[IPC] PROJECT_LIST: Detected missing .auto-claude folders for', resetIds.length, 'project(s)');
+        console.warn('[IPC] PROJECT_LIST: Detected missing .workbench folders for', resetIds.length, 'project(s)');
       }
 
       const projects = projectStore.getProjects();
@@ -351,7 +351,7 @@ export function registerProjectHandlers(
 
         if (result.success) {
           // Update project's autoBuildPath
-          projectStore.updateAutoBuildPath(projectId, '.auto-claude');
+          projectStore.updateAutoBuildPath(projectId, '.workbench');
         }
 
         return { success: result.success, data: result, error: result.error };
@@ -365,7 +365,7 @@ export function registerProjectHandlers(
   );
 
   // PROJECT_CHECK_VERSION now just checks if project is initialized
-  // Version tracking for .auto-claude is removed since it only contains data
+  // Version tracking for .workbench is removed since it only contains data
   ipcMain.handle(
     IPC_CHANNELS.PROJECT_CHECK_VERSION,
     async (_, projectId: string): Promise<IPCResult<AutoBuildVersionInfo>> => {
@@ -379,7 +379,7 @@ export function registerProjectHandlers(
           success: true,
           data: {
             isInitialized: isInitialized(project.path),
-            updateAvailable: false // No updates for .auto-claude - it's just data
+            updateAvailable: false // No updates for .workbench - it's just data
           }
         };
       } catch (error) {
@@ -391,7 +391,7 @@ export function registerProjectHandlers(
     }
   );
 
-  // Check if project has local auto-claude source (is dev project)
+  // Check if project has local workbench source (is dev project)
   ipcMain.handle(
     'project:has-local-source',
     async (_, projectId: string): Promise<IPCResult<boolean>> => {

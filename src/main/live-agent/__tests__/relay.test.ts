@@ -1,7 +1,7 @@
 /**
  * The relay (agent-flow's, run in the Live agent worker): a client gets the sessions run in its
  * own directory and nothing from other directories, and the relay advertises itself in the
- * project's .auto-claude/flow directory
+ * project's .workbench/flow directory
  */
 import fs from 'fs';
 import os from 'os';
@@ -28,7 +28,7 @@ describe('relay', () => {
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'live-agent-relay-')));
     workspace = path.join(root, 'project');
     otherDir = path.join(root, 'other');
-    flowDir = path.join(workspace, '.auto-claude', 'flow');
+    flowDir = path.join(workspace, '.workbench', 'flow');
     fs.mkdirSync(flowDir, { recursive: true });
     fs.mkdirSync(otherDir);
     const claudeDir = path.join(root, 'claude-config');
@@ -87,7 +87,7 @@ describe('relay', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        session_id: SESSION_ID, hook_event_name: 'UserPromptSubmit', cwd: workspace, auto_claude_terminal_id: 'terminal-1',
+        session_id: SESSION_ID, hook_event_name: 'UserPromptSubmit', cwd: workspace, workbench_terminal_id: 'terminal-1',
       }),
     });
 

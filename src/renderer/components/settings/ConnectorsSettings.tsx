@@ -190,7 +190,7 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
     }
   }, [handleSaveCustomServer, rememberHealth]);
 
-  // Enabled count includes Auto Claude's own server, which is always on
+  // Enabled count includes Workbench's own server, which is always on
   const enabledCount = getDefaultMcpConnectorIds(connectors).length + 1;
 
   const renderCustomServerStatus = (server: CustomMcpServer) => {

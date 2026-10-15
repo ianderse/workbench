@@ -16,7 +16,7 @@ describe('shouldCloseOnCliExit', () => {
   });
 
   it('ignores the typed command, which shows the marker as escaped text', () => {
-    const echoed = "claude; printf '\\033]777;auto-claude-cli-exit\\007'\r\n";
+    const echoed = "claude; printf '\\033]777;workbench-cli-exit\\007'\r\n";
     expect(shouldCloseOnCliExit({}, echoed)).toBe(false);
   });
 

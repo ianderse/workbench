@@ -54,7 +54,7 @@ async function handleMessage(context: TaskToolContext, message: JsonRpcRequest):
         protocolVersion: PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: TASK_TOOLS_SERVER_NAME, version: '1.0.0' },
-        instructions: "Manage this project's Auto Claude tasks.",
+        instructions: "Manage this project's Workbench tasks.",
       });
     }
     case 'ping':

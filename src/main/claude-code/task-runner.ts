@@ -2,7 +2,7 @@
  * Claude Code task runner
  * =======================
  *
- * Runs one Auto Claude task through the Claude Code CLI, in the task's git worktree:
+ * Runs one Workbench task through the Claude Code CLI, in the task's git worktree:
  *
  *   triage    short read-only run: model, effort, plan or not (see triage.ts)
  *   plan      optional: `--permission-mode plan`, returns the plan as structured output
@@ -209,16 +209,16 @@ const VALIDATION_SCHEMA = {
 
 function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string): string {
   const sections = [
-    `You are running autonomously inside Auto Claude, a desktop app that hands coding tasks to Claude Code. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
+    `You are running autonomously inside Workbench, a desktop app that hands coding tasks to Claude Code. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
     config.isolated === false
       ? `## Environment
 - Your working directory is the user's project checkout on branch \`${config.branch}\` (this task runs without a separate worktree). Keep changes focused on the task.
 - Never push, force-push, rewrite history, publish packages or deploy.
-- Auto Claude keeps its own task files in \`${specDirRelative}\`. Don't modify or commit them.`
+- Workbench keeps its own task files in \`${specDirRelative}\`. Don't modify or commit them.`
       : `## Environment
 - Your working directory is an isolated git worktree on branch \`${config.branch}\`, created from \`${config.baseBranch}\`. Edits here never touch the user's main checkout. Stay inside this worktree.
 - Permission checks are off because of that isolation. Still never push, force-push, rewrite the history of \`${config.baseBranch}\`, publish packages, deploy, or change anything outside the worktree.
-- Auto Claude keeps its own task files in \`${specDirRelative}\`. Don't modify or commit them.`,
+- Workbench keeps its own task files in \`${specDirRelative}\`. Don't modify or commit them.`,
     `## How to work
 - Follow the project's CLAUDE.md, conventions and existing patterns. Keep the change focused on the task.
 - Track work with the task list (TaskCreate / TaskUpdate) only when it has several distinct steps worth tracking; skip it for small changes.
@@ -638,7 +638,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       this.info.configDir = configDir;
       this.saveInfo();
     }
-    const specDirRelative = path.join('.auto-claude', DATA_DIR_NAMES.tasks, this.config.specId);
+    const specDirRelative = path.join('.workbench', DATA_DIR_NAMES.tasks, this.config.specId);
     // Read at every phase, so a resumed session learns what the other tasks changed meanwhile
     const parallelTasksPrompt = this.config.changelogPath
       ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir))
@@ -968,9 +968,9 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
   private async commitLeftovers(): Promise<void> {
     const cwd = this.config.worktreePath;
     try {
-      const { stdout } = await execFileAsync('git', ['status', '--porcelain', '--', '.', ':(exclude).auto-claude'], { cwd });
+      const { stdout } = await execFileAsync('git', ['status', '--porcelain', '--', '.', ':(exclude).workbench'], { cwd });
       if (!stdout.trim()) return;
-      await execFileAsync('git', ['add', '-A', '--', '.', ':(exclude).auto-claude'], { cwd });
+      await execFileAsync('git', ['add', '-A', '--', '.', ':(exclude).workbench'], { cwd });
       const title = this.info.triage?.title || this.config.title;
       await execFileAsync('git', ['commit', '-m', title, '--no-verify'], { cwd });
       this.emitLog('Committed remaining changes');

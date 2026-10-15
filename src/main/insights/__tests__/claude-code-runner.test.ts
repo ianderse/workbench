@@ -159,7 +159,7 @@ describe('runInsights', () => {
         prompt: 'CodebaseGraph tool section',
         commandPrompt: 'graphify commands section',
         cli: '/home/me/.local/bin/graphify',
-        graph: '/project/.auto-claude/knowledge/graphify-out/graph.json',
+        graph: '/project/.workbench/knowledge/graphify-out/graph.json',
       },
     })).promise;
     const { args, systemPrompt, graphifyOut } = record();
@@ -170,7 +170,7 @@ describe('runInsights', () => {
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
     expect(systemPrompt).toContain('graphify commands section');
     expect(systemPrompt).not.toContain('CodebaseGraph tool section');
-    expect(graphifyOut).toBe('/project/.auto-claude/knowledge/graphify-out');
+    expect(graphifyOut).toBe('/project/.workbench/knowledge/graphify-out');
   });
 
   it('shows the command of a Bash graph search', async () => {
@@ -187,20 +187,20 @@ describe('runInsights', () => {
     expect(events[0]).toEqual({ type: 'tool-start', name: 'Bash', input: 'graphify explain AgentManager' });
   });
 
-  it("gives the CLI Auto Claude's task tools as its only MCP server", async () => {
+  it("gives the CLI Workbench's task tools as its only MCP server", async () => {
     setRun(conversation);
     const mcpServer = { type: 'http' as const, url: 'http://127.0.0.1:4567/mcp', headers: { Authorization: 'Bearer secret' } };
     await (await run({ taskTools: mcpServer })).promise;
     const { args, mcpConfig, mcpToolTimeout, systemPrompt } = record();
 
-    expect(mcpConfig).toEqual({ mcpServers: { 'auto-claude': mcpServer } });
+    expect(mcpConfig).toEqual({ mcpServers: { 'workbench': mcpServer } });
     // The token stays in the config file, out of the process arguments
     expect(args.join(' ')).not.toContain('secret');
     expect(args).toContain('--strict-mcp-config');
     expect(args.slice(args.indexOf('--allowedTools') + 1)).toContain(INSIGHTS_TASK_TOOLS_RULE);
     expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
     expect(Number(mcpToolTimeout)).toBeGreaterThan(10 * 60 * 1000);
-    expect(systemPrompt).toContain('mcp__auto-claude__');
+    expect(systemPrompt).toContain('mcp__workbench__');
     expect(systemPrompt).toContain('__TASK_SUGGESTION__');
   });
 

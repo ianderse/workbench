@@ -10,7 +10,7 @@ import { createIpcListener, invokeIpc, type IpcListenerCleanup } from './ipc-uti
 export interface LiveAgentAPI {
   /** Whether the relay is stopped, starting, running or failed */
   getLiveAgentStatus: () => Promise<IPCResult<LiveAgentStatus>>;
-  /** Whether the project has Live agent on (its .auto-claude/flow directory exists) */
+  /** Whether the project has Live agent on (its .workbench/flow directory exists) */
   getLiveAgentProject: (projectPath: string) => Promise<IPCResult<boolean>>;
   /** Switch Live agent on (create the flow directory, set up the hooks) or off for a project */
   setLiveAgentProject: (projectPath: string, enabled: boolean) => Promise<IPCResult<{ hooksError?: string }>>;

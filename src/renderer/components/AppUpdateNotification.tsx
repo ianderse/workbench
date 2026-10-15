@@ -201,7 +201,7 @@ export function AppUpdateNotification() {
           <DialogDescription>
             {t(
               "dialogs:appUpdate.description",
-              "A new version of Auto Claude is ready to download"
+              "A new version of Workbench is ready to download"
             )}
           </DialogDescription>
         </DialogHeader>
@@ -288,7 +288,7 @@ export function AppUpdateNotification() {
                   {t("dialogs:appUpdate.readOnlyVolumeTitle", "Cannot install from disk image")}
                 </p>
                 <p className="text-muted-foreground">
-                  {t("dialogs:appUpdate.readOnlyVolumeDescription", "Please move Auto Claude to your Applications folder before updating.")}
+                  {t("dialogs:appUpdate.readOnlyVolumeDescription", "Please move Workbench to your Applications folder before updating.")}
                 </p>
               </div>
             </div>

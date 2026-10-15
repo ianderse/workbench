@@ -3,8 +3,8 @@
  * runner doesn't load the tools and the project store)
  */
 
-/** Name of the MCP server in the chat session (tools are `mcp__auto-claude__<tool>`) */
-export const TASK_TOOLS_SERVER_NAME = 'auto-claude';
+/** Name of the MCP server in the chat session (tools are `mcp__workbench__<tool>`) */
+export const TASK_TOOLS_SERVER_NAME = 'workbench';
 
 /** MCP server entry for the chat's `--mcp-config` */
 export interface TaskToolsMcpServer {

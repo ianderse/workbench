@@ -1,5 +1,5 @@
 /**
- * The project's task changelog: `.auto-claude/changelog.jsonl`, one JSON entry per line (oldest
+ * The project's task changelog: `.workbench/changelog.jsonl`, one JSON entry per line (oldest
  * first) for every state a task enters and the files its Claude Code session edits. Tasks run in
  * parallel in their own worktrees, so each task's prompt lists what the others are changing, and
  * they can re-read the file to avoid editing the same files (merge conflicts).
@@ -16,7 +16,7 @@ export const TASK_CHANGELOG_FILE = 'changelog.jsonl';
 export interface TaskChangelogEntry {
   /** ISO time */
   at: string;
-  /** Task spec id (its folder in .auto-claude/tasks) */
+  /** Task spec id (its folder in .workbench/tasks) */
   task: string;
   title?: string;
   /** state: the task entered a state; edit: its session started editing files */
@@ -56,7 +56,7 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 
 /** The project's changelog file */
 export function getTaskChangelogPath(projectPath: string, autoBuildPath: string | undefined): string {
-  return path.join(projectPath, autoBuildPath || '.auto-claude', TASK_CHANGELOG_FILE);
+  return path.join(projectPath, autoBuildPath || '.workbench', TASK_CHANGELOG_FILE);
 }
 
 /** Parse changelog lines; malformed lines are skipped */
@@ -131,7 +131,7 @@ export async function buildParallelTasksPrompt(changelogPath: string, specId: st
     ? `Other tasks whose changes are not merged yet, as of now:\n${others.map(describeTask).join('\n')}`
     : 'No other task has unmerged changes right now.';
   return `## Parallel tasks
-Other tasks of this project run in parallel in their own worktrees, and their branches are merged into the same base branch, so editing the same files causes merge conflicts. Auto Claude logs every task's states and the files it changes in \`${changelogPath}\` (JSON Lines, newest last; don't modify it).
+Other tasks of this project run in parallel in their own worktrees, and their branches are merged into the same base branch, so editing the same files causes merge conflicts. Workbench logs every task's states and the files it changes in \`${changelogPath}\` (JSON Lines, newest last; don't modify it).
 ${list}
 Before editing a file, check whether another task is changing it (re-read the changelog for newer entries during long work). Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.`;
 }

@@ -2,7 +2,7 @@
  * Project metrics
  *
  * Spending per project for Settings > Accounts: the sum of every task's Claude Code run cost
- * (`totalCostUsd` in `<specDir>/claude_run.json`) in projects whose `.auto-claude` directory is
+ * (`totalCostUsd` in `<specDir>/claude_run.json`) in projects whose `.workbench` directory is
  * initialized. All file access is async so the main process stays responsive.
  */
 import path from 'path';
@@ -33,8 +33,8 @@ async function readTaskCost(specDir: string): Promise<number> {
 export async function getProjectCostMetrics(projects: Project[]): Promise<ProjectCostMetrics[]> {
   const results = await Promise.all(
     projects.map(async (project): Promise<ProjectCostMetrics | null> => {
-      const autoClaudeDir = path.join(project.path, project.autoBuildPath || '.auto-claude');
-      if (!(await isDirectory(autoClaudeDir))) return null;
+      const workbenchDir = path.join(project.path, project.autoBuildPath || '.workbench');
+      if (!(await isDirectory(workbenchDir))) return null;
 
       const specsDir = path.join(project.path, getSpecsDir(project.autoBuildPath));
       let specDirs: string[] = [];

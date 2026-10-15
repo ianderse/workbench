@@ -154,7 +154,7 @@ export function getTaskSessionRequest(task: Task, projectPath: string): TaskSess
   const worktreePath =
     run.worktreePath ||
     run.init?.cwd ||
-    [projectPath.replace(/[\\/]+$/, ''), '.auto-claude', 'worktrees', 'tasks', task.specId].join(separator);
+    [projectPath.replace(/[\\/]+$/, ''), '.workbench', 'worktrees', 'tasks', task.specId].join(separator);
   return {
     projectPath,
     taskId: task.id,
