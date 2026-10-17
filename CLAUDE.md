@@ -309,3 +309,7 @@ Supports Windows, macOS, and Linux; CI runs tests on all three. Use `src/main/pl
 **Electron path resolution** — Paths often differ between dev and packaged builds (`app.isPackaged`,
 `process.resourcesPath`). In dev, `__dirname` is `out/main`; in production, bundled assets live under
 `process.resourcesPath`. Verify both contexts.
+
+<!-- workbench:project-memory:start -->
+Preferences learned in past sessions: @.workbench/compeng/MEMORY.md
+<!-- workbench:project-memory:end -->
