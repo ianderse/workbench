@@ -295,6 +295,8 @@
       "description": "Auto-Build and agent config",
       "useClaudeMd": "Use CLAUDE.md",
       "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context",
+      "selfLearning": "Self-learning",
+      "selfLearningDescription": "Let sessions save the preferences you state to .workbench/learning and load them in every later session",
       "useGraphify": "Use Graphify",
       "useGraphifyDescription": "Give agents the project's knowledge graph, built under Knowledge index above. Turning it off deletes the graph (.workbench/knowledge)",
       "useGraphifyNotInstalled": "Install Graphify on the Updates page to use the project's knowledge graph"

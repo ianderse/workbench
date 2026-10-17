@@ -61,6 +61,18 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
             aria-label={t('projectSections.general.useClaudeMd')}
           />
         </SettingsRow>
+        {/* Switching this on points Claude Code's own memory at .workbench/learning and tells
+            sessions to save what they learn; switching it off leaves every note in place */}
+        <SettingsRow
+          label={t('projectSections.general.selfLearning')}
+          description={t('projectSections.general.selfLearningDescription')}
+        >
+          <Switch
+            checked={settings.selfLearning ?? false}
+            onCheckedChange={(checked) => setSettings({ ...settings, selfLearning: checked })}
+            aria-label={t('projectSections.general.selfLearning')}
+          />
+        </SettingsRow>
       </SettingsRows>
     </SettingsSection>
   );
