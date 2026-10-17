@@ -40,9 +40,9 @@ export interface ProjectSettings {
   maxParallelTasks?: number;
   /**
    * Let sessions save what they learn about this project (Claude Code's auto memory, relocated to
-   * `.workbench/learning` so every session in the project shares it); off unless set
+   * `.workbench/compeng` so every session in the project shares it); off unless set
    */
-  selfLearning?: boolean;
+  selfImprove?: boolean;
 }
 
 export interface NotificationSettings {

@@ -43,7 +43,7 @@ vi.mock('../triage', async (importOriginal) => {
 });
 
 import { ClaudeTaskRun, loadClaudeRunInfo } from '../task-runner';
-import { SELF_LEARNING_NUDGE } from '../../self-learning/nudge';
+import { SELF_IMPROVE_NUDGE } from '../../self-improve/nudge';
 
 function result(sessionId: string, fields: Record<string, unknown> = {}): ClaudeStreamMessage {
   return {
@@ -326,7 +326,7 @@ describe('ClaudeTaskRun', () => {
     expect(edited).toEqual([['src/a.ts'], ['docs/notes.md']]);
   });
 
-  it('says nothing about project memory while the self-learning switch is off', async () => {
+  it('says nothing about project memory while the self-improve switch is off', async () => {
     triageMock.mockResolvedValue({ triage: triage() });
     scripts.push({ messages: [result('s12')] });
     await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
@@ -340,7 +340,7 @@ describe('ClaudeTaskRun', () => {
     scripts.push({ messages: [result('s13')] });
     await makeRun({
       settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false },
-      selfLearningPrompt: SELF_LEARNING_NUDGE,
+      selfImprovePrompt: SELF_IMPROVE_NUDGE,
     }).run();
     const prompt = argValue(spawned[0].args, '--append-system-prompt') ?? '';
     expect(prompt).toContain('## Project memory');

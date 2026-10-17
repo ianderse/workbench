@@ -20,8 +20,8 @@ import { appLog } from '../app-logger';
 import { getIsolatedGitEnv } from '../utils/git-isolation';
 import { waitForMemoryIndexBuild } from './backfill';
 import { MEMORY_INDEX_STUB } from './memory-writer';
-import { getLearningDir, getMemoryIndexImportPath, getMemoryIndexPath, getStashedLearningDir } from './paths';
-import { SELF_LEARNING_RULE_FILE, SELF_LEARNING_RULE_FILENAME } from './nudge';
+import { getCompengDir, getMemoryIndexImportPath, getMemoryIndexPath, getStashedCompengDir } from './paths';
+import { SELF_IMPROVE_RULE_FILE, SELF_IMPROVE_RULE_FILENAME } from './nudge';
 
 /** The settings key Claude Code reads before it loads or saves auto memory */
 const AUTO_MEMORY_DIRECTORY_KEY = 'autoMemoryDirectory';
@@ -196,7 +196,7 @@ async function patchSettings(dir: string, key: string, value: string | null): Pr
 async function addImport(projectPath: string): Promise<void> {
   const file = await findInstructionFile(projectPath);
   if (!file) {
-    appLog.warn('[SelfLearning] No CLAUDE.md in the project, so memories will not reach subagents');
+    appLog.warn('[SelfImprove] No CLAUDE.md in the project, so memories will not reach subagents');
     return;
   }
   const content = await readIfPresent(file);
@@ -235,28 +235,28 @@ export async function applyProjectMemory(projectPath: string): Promise<void> {
     throw new Error('This project is not initialized yet, so it has nowhere to keep what it learns');
   }
 
-  const learningDir = getLearningDir(projectPath);
-  await mkdir(learningDir, { recursive: true });
+  const compengDir = getCompengDir(projectPath);
+  await mkdir(compengDir, { recursive: true });
 
   // Anything set aside the last time the switch went off comes back, merged with what is here now
-  const stashed = await moveMemories(getStashedLearningDir(projectPath), learningDir);
-  if (stashed > 0) appLog.info(`[SelfLearning] Restored ${stashed} memory file(s) for ${projectPath}`);
+  const stashed = await moveMemories(getStashedCompengDir(projectPath), compengDir);
+  if (stashed > 0) appLog.info(`[SelfImprove] Restored ${stashed} memory file(s) for ${projectPath}`);
 
   const index = getMemoryIndexPath(projectPath);
   if ((await readIfPresent(index)) === null) await writeFile(index, MEMORY_INDEX_STUB, 'utf-8');
 
   // The settings key is what makes the feature work, so a failure here reaches the caller
-  await patchSettings(projectPath, AUTO_MEMORY_DIRECTORY_KEY, learningDir);
+  await patchSettings(projectPath, AUTO_MEMORY_DIRECTORY_KEY, compengDir);
 
   // The rest is best effort: without it memories are still saved and loaded, just not by sessions
   // Workbench didn't start, and not inside subagents
   try {
     const rulesDir = path.join(projectPath, '.claude', 'rules');
     await mkdir(rulesDir, { recursive: true });
-    await writeFile(path.join(rulesDir, SELF_LEARNING_RULE_FILENAME), SELF_LEARNING_RULE_FILE, 'utf-8');
+    await writeFile(path.join(rulesDir, SELF_IMPROVE_RULE_FILENAME), SELF_IMPROVE_RULE_FILE, 'utf-8');
     await addImport(projectPath);
   } catch (error) {
-    appLog.warn('[SelfLearning] Could not install the project rule or the memory import:', error);
+    appLog.warn('[SelfImprove] Could not install the project rule or the memory import:', error);
   }
 }
 
@@ -267,28 +267,28 @@ export async function applyProjectMemory(projectPath: string): Promise<void> {
 export async function removeProjectMemory(projectPath: string): Promise<void> {
   await patchSettings(projectPath, AUTO_MEMORY_DIRECTORY_KEY, null);
   try {
-    await rm(path.join(projectPath, '.claude', 'rules', SELF_LEARNING_RULE_FILENAME), { force: true });
+    await rm(path.join(projectPath, '.claude', 'rules', SELF_IMPROVE_RULE_FILENAME), { force: true });
     await removeImport(projectPath);
   } catch (error) {
-    appLog.warn('[SelfLearning] Could not remove the project rule or the memory import:', error);
+    appLog.warn('[SelfImprove] Could not remove the project rule or the memory import:', error);
   }
 
-  // A build writes into the learning directory, so let it finish before moving the directory away
+  // A build writes into the memory directory, so let it finish before moving the directory away
   await waitForMemoryIndexBuild(projectPath);
 
-  // Nothing points at the learning directory any more, so set it aside rather than leave it orphaned:
+  // Nothing points at the memory directory any more, so set it aside rather than leave it orphaned:
   // switching the feature back on restores it. Committed memories stay put, since removing tracked
   // files on a settings toggle is not ours to do.
-  const learningDir = getLearningDir(projectPath);
+  const compengDir = getCompengDir(projectPath);
   try {
-    if (await isTrackedByGit(learningDir, projectPath)) {
-      appLog.info(`[SelfLearning] ${learningDir} is tracked by git, so it was left in place`);
+    if (await isTrackedByGit(compengDir, projectPath)) {
+      appLog.info(`[SelfImprove] ${compengDir} is tracked by git, so it was left in place`);
       return;
     }
-    const stashed = await moveMemories(learningDir, getStashedLearningDir(projectPath));
-    if (stashed > 0) appLog.info(`[SelfLearning] Set aside ${stashed} memory file(s) for ${projectPath}`);
+    const stashed = await moveMemories(compengDir, getStashedCompengDir(projectPath));
+    if (stashed > 0) appLog.info(`[SelfImprove] Set aside ${stashed} memory file(s) for ${projectPath}`);
   } catch (error) {
-    appLog.warn('[SelfLearning] Could not set the project memories aside:', error);
+    appLog.warn('[SelfImprove] Could not set the project memories aside:', error);
   }
 }
 
@@ -301,8 +301,8 @@ export async function removeProjectMemory(projectPath: string): Promise<void> {
  */
 export async function ensureWorktreeProjectMemory(worktreePath: string, projectPath: string): Promise<void> {
   try {
-    await patchSettings(worktreePath, AUTO_MEMORY_DIRECTORY_KEY, getLearningDir(projectPath));
+    await patchSettings(worktreePath, AUTO_MEMORY_DIRECTORY_KEY, getCompengDir(projectPath));
   } catch (error) {
-    appLog.warn(`[SelfLearning] Could not point ${worktreePath} at the project's memory:`, error);
+    appLog.warn(`[SelfImprove] Could not point ${worktreePath} at the project's memory:`, error);
   }
 }

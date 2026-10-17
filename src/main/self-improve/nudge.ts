@@ -15,7 +15,7 @@
  * Written without apostrophes on purpose: the agent-window flag is wrapped in shell single quotes,
  * and rewriting the text to escape them would change the instruction the model reads.
  */
-export const SELF_LEARNING_NUDGE = `## Project memory
+export const SELF_IMPROVE_NUDGE = `## Project memory
 This project keeps what you learn about it in its own memory directory, loaded into every later session.
 
 - Save a memory (\`type: feedback\`) when this session surfaces a durable preference, rule or convention the user stated: something a later session would otherwise get wrong again. A correction the user has had to give more than once is the strongest signal.
@@ -24,14 +24,14 @@ This project keeps what you learn about it in its own memory directory, loaded i
 - Write it as a general instruction in the words the user used, never as a quote of the conversation, and never record secrets or credentials.`;
 
 /** The same text on one line, for a flag that is written into a shell command */
-export const SELF_LEARNING_NUDGE_ONE_LINE = SELF_LEARNING_NUDGE.replace(/\s+/g, ' ').trim();
+export const SELF_IMPROVE_NUDGE_ONE_LINE = SELF_IMPROVE_NUDGE.replace(/\s+/g, ' ').trim();
 
 /**
  * The same instruction as a project rule file, for the sessions Workbench doesn't start (a plain
  * `claude` in the project). A rule file with no `paths` frontmatter loads at launch, at the same
  * priority as the project's CLAUDE.md.
  */
-export const SELF_LEARNING_RULE_FILE = `${SELF_LEARNING_NUDGE}\n`;
+export const SELF_IMPROVE_RULE_FILE = `${SELF_IMPROVE_NUDGE}\n`;
 
 /** Name of that rule file under `.claude/rules/` */
-export const SELF_LEARNING_RULE_FILENAME = 'workbench-project-memory.md';
+export const SELF_IMPROVE_RULE_FILENAME = 'workbench-project-memory.md';

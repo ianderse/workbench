@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { countMemories, writeMemories, MAX_MEMORIES, type MemoryDraft } from '../memory-writer';
-import { getLearningDir, getMemoryIndexPath } from '../paths';
+import { getCompengDir, getMemoryIndexPath } from '../paths';
 
 let tmp: string;
 let project: string;
@@ -31,7 +31,7 @@ describe('writeMemories', () => {
   it("writes Claude Code's own memory shape and one index line each", async () => {
     await writeMemories(project, [draft('use-tabs')]);
 
-    const file = await readFile(path.join(getLearningDir(project), 'use-tabs.md'), 'utf-8');
+    const file = await readFile(path.join(getCompengDir(project), 'use-tabs.md'), 'utf-8');
     expect(file).toContain('name: use-tabs');
     expect(file).toContain('  node_type: memory');
     expect(file).toContain('  type: feedback');
@@ -45,11 +45,11 @@ describe('writeMemories', () => {
 
   it('never overwrites a memory already on disk, since it may have been edited', async () => {
     await writeMemories(project, [draft('use-tabs')]);
-    await writeFile(path.join(getLearningDir(project), 'use-tabs.md'), 'edited by hand\n');
+    await writeFile(path.join(getCompengDir(project), 'use-tabs.md'), 'edited by hand\n');
 
     await writeMemories(project, [draft('use-tabs'), draft('run-typecheck')]);
 
-    expect(await readFile(path.join(getLearningDir(project), 'use-tabs.md'), 'utf-8')).toBe('edited by hand\n');
+    expect(await readFile(path.join(getCompengDir(project), 'use-tabs.md'), 'utf-8')).toBe('edited by hand\n');
     const index = await readFile(getMemoryIndexPath(project), 'utf-8');
     expect(index.match(/\]\(use-tabs\.md\)/g)).toHaveLength(1);
     expect(index).toContain('](run-typecheck.md)');

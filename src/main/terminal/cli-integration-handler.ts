@@ -13,7 +13,7 @@ import { getClaudeProfileManager, initializeClaudeProfileManager } from '../clau
 import { getFullCredentialsFromKeychain, clearKeychainCache, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getEmailFromConfigDir } from '../claude-profile/profile-utils';
 import { findStandaloneLimitReset } from '../claude-profile/rate-limit-manager';
-import { SELF_LEARNING_NUDGE_ONE_LINE } from '../self-learning/nudge';
+import { SELF_IMPROVE_NUDGE_ONE_LINE } from '../self-improve/nudge';
 import * as OutputParser from './output-parser';
 import * as SessionHandler from './session-handler';
 import * as PtyManager from './pty-manager';
@@ -302,12 +302,12 @@ function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut'>): strin
 
 /**
  * Claude Code flag telling an agent window's session to save what it learns about the project, when
- * the project's self-learning switch is on. The project's own rule file carries the same text for
+ * the project's self-improve switch is on. The project's own rule file carries the same text for
  * sessions started outside the app; this covers the window Workbench launches.
  */
-function selfLearningFlag(terminal: Pick<TerminalProcess, 'selfLearning'>): string {
-  if (!terminal.selfLearning) return '';
-  return ` --append-system-prompt ${isWindows() ? `"${SELF_LEARNING_NUDGE_ONE_LINE}"` : `'${SELF_LEARNING_NUDGE_ONE_LINE}'`}`;
+function selfImproveFlag(terminal: Pick<TerminalProcess, 'selfImprove'>): string {
+  if (!terminal.selfImprove) return '';
+  return ` --append-system-prompt ${isWindows() ? `"${SELF_IMPROVE_NUDGE_ONE_LINE}"` : `'${SELF_IMPROVE_NUDGE_ONE_LINE}'`}`;
 }
 
 /**
@@ -347,14 +347,14 @@ export function buildResumeSessionFlag(sessionId: string): string {
  * and the Graphify hint
  */
 function buildClaudeExtraFlags(
-  terminal: Pick<TerminalProcess, 'graphifyOut' | 'selfLearning'>,
+  terminal: Pick<TerminalProcess, 'graphifyOut' | 'selfImprove'>,
   dangerouslySkipPermissions: boolean | undefined,
   resumeSessionId?: string
 ): string | undefined {
   const flags =
     `${resumeSessionId ? buildResumeSessionFlag(resumeSessionId) : ''}` +
     `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` +
-    `${selfLearningFlag(terminal)}`;
+    `${selfImproveFlag(terminal)}`;
   return flags || undefined;
 }
 

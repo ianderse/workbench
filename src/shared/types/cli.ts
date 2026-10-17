@@ -103,7 +103,7 @@ export interface GraphifyIndexInfo {
 }
 
 /** Stats of a project's memory index: the memories built from its past Claude Code sessions */
-export interface SelfLearningIndexInfo {
+export interface SelfImproveIndexInfo {
   /** Memories the project holds now, by its MEMORY.md index */
   memories: number;
   /** Sessions the last build read */

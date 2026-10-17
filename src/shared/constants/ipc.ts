@@ -252,10 +252,10 @@ export const IPC_CHANNELS = {
   GRAPHIFY_GET_INDEX: 'graphify:getIndex',
   GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
 
-  // Self-learning: the project's memory index, built from its past sessions
-  SELF_LEARNING_GET_INDEX: 'selfLearning:getIndex',
-  SELF_LEARNING_BUILD_INDEX: 'selfLearning:buildIndex',
-  SELF_LEARNING_IS_BUILDING: 'selfLearning:isBuilding',
+  // Self-improve: the project's memory index, built from its past sessions
+  SELF_IMPROVE_GET_INDEX: 'selfImprove:getIndex',
+  SELF_IMPROVE_BUILD_INDEX: 'selfImprove:buildIndex',
+  SELF_IMPROVE_IS_BUILDING: 'selfImprove:isBuilding',
   GRAPHIFY_HAS_GRAPH: 'graphify:hasGraph',
   GRAPHIFY_IS_ENABLED: 'graphify:isEnabled',
   GRAPHIFY_SET_ENABLED: 'graphify:setEnabled',

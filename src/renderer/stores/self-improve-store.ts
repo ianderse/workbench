@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import type { SelfLearningIndexInfo } from '../../shared/types/cli';
+import type { SelfImproveIndexInfo } from '../../shared/types/cli';
 
-interface SelfLearningState {
+interface SelfImproveState {
   /** The project's memory index stats, by project id (null once checked and never built) */
-  index: Record<string, SelfLearningIndexInfo | null>;
+  index: Record<string, SelfImproveIndexInfo | null>;
   /** Whether a build is running, by project id */
   building: Record<string, boolean>;
   /** The last build's error by project id ('' when it failed without a message), null when it worked */
@@ -19,13 +19,13 @@ interface SelfLearningState {
 /**
  * The project's memory index (Settings > Project > Knowledge): the memories built from the sessions
  * the project already had. Builds read every past transcript, so they take a while and the
- * Self-learning switch waits for them.
+ * Self-improve switch waits for them.
  */
-export const useSelfLearningStore = create<SelfLearningState>((set, get) => {
+export const useSelfImproveStore = create<SelfImproveState>((set, get) => {
   const runBuild = async (projectId: string) => {
     set((state) => ({ building: { ...state.building, [projectId]: true } }));
     let error: string | null = null;
-    let index: SelfLearningIndexInfo | null = get().index[projectId] ?? null;
+    let index: SelfImproveIndexInfo | null = get().index[projectId] ?? null;
     try {
       const result = await window.electronAPI.buildMemoryIndex(projectId);
       if (result.success && result.data) index = result.data;

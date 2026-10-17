@@ -35,7 +35,7 @@ function configDirs(): string[] {
     dirs.push(...getClaudeProfileManager().getProfileConfigDirs());
   } catch (error) {
     // Profiles are unavailable in some contexts (tests, early startup); the default dir still works
-    appLog.warn('[SelfLearning] Could not list the Claude account config dirs:', error);
+    appLog.warn('[SelfImprove] Could not list the Claude account config dirs:', error);
   }
   const expanded = dirs
     .filter((dir): dir is string => !!dir)

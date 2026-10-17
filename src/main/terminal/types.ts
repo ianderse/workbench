@@ -26,7 +26,7 @@ export interface TerminalProcess {
   /** The project's Graphify output directory (its GRAPHIFY_OUT), when the project has a memory graph */
   graphifyOut?: string;
   /** Whether the project learns from its sessions, so Claude is told to save what it learns */
-  selfLearning?: boolean;
+  selfImprove?: boolean;
   /** Shell type for Windows (affects command chaining syntax) */
   shellType?: WindowsShellType;
   /** Whether PTY has emitted exit; used to avoid writes/resizes on dead PTYs */

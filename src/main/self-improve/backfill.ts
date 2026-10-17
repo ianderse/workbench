@@ -1,7 +1,7 @@
 /**
  * The memory index: the project's first set of memories, built from the sessions it already had.
  *
- * Switching self-learning on only changes what later sessions do, so a project that has been worked
+ * Switching self-improve on only changes what later sessions do, so a project that has been worked
  * on for weeks would start empty while every preference the user already stated sits in transcripts
  * nobody reads. This pass reads those transcripts once and writes what they taught, as if the feature
  * had been on all along. It is also re-runnable by hand, which is how a user folds in sessions that
@@ -10,10 +10,10 @@
 
 import { readFile, writeFile } from 'fs/promises';
 import path from 'path';
-import type { SelfLearningIndexInfo } from '../../shared/types/cli';
+import type { SelfImproveIndexInfo } from '../../shared/types/cli';
 import { appLog } from '../app-logger';
 import { runClaudeText } from '../claude-code/run-text';
-import { getLearningDir } from './paths';
+import { getCompengDir } from './paths';
 import { countMemories, MAX_MEMORIES, writeMemories, type MemoryDraft } from './memory-writer';
 import { findProjectTranscripts, readUserTurns } from './transcripts';
 
@@ -31,7 +31,7 @@ const MODEL = 'haiku';
 const EFFORT = 'medium';
 
 /** One build per project at a time; a second request joins the first */
-const inFlight = new Map<string, Promise<SelfLearningIndexInfo>>();
+const inFlight = new Map<string, Promise<SelfImproveIndexInfo>>();
 
 const schema = {
   type: 'object',
@@ -82,14 +82,14 @@ ${transcript}`;
 }
 
 /** Where the build's stats live */
-const infoPath = (projectPath: string) => path.join(getLearningDir(projectPath), INDEX_INFO_FILE);
+const infoPath = (projectPath: string) => path.join(getCompengDir(projectPath), INDEX_INFO_FILE);
 
 /** The last build's stats, or null when the project has never built one */
-export async function readMemoryIndexInfo(projectPath: string): Promise<SelfLearningIndexInfo | null> {
+export async function readMemoryIndexInfo(projectPath: string): Promise<SelfImproveIndexInfo | null> {
   try {
     const parsed: unknown = JSON.parse(await readFile(infoPath(projectPath), 'utf-8'));
     if (parsed === null || typeof parsed !== 'object') return null;
-    const info = parsed as SelfLearningIndexInfo;
+    const info = parsed as SelfImproveIndexInfo;
     // The index is the truth about how many memories there are; the file only records the build
     return { ...info, memories: await countMemories(projectPath) };
   } catch {
@@ -103,14 +103,14 @@ export function isMemoryIndexBuilding(projectPath: string): boolean {
 }
 
 /**
- * Settle once no build is writing into the project's learning directory, so a caller that is about
+ * Settle once no build is writing into the project's memory directory, so a caller that is about
  * to move those files does not race one. A failed build is not this caller's problem.
  */
 export async function waitForMemoryIndexBuild(projectPath: string): Promise<void> {
   await inFlight.get(path.resolve(projectPath))?.catch(() => undefined);
 }
 
-async function run(projectPath: string, profileId?: string): Promise<SelfLearningIndexInfo> {
+async function run(projectPath: string, profileId?: string): Promise<SelfImproveIndexInfo> {
   const transcripts = await findProjectTranscripts(projectPath, { maxSessions: MAX_SESSIONS });
 
   const sessions: { turns: string[] }[] = [];
@@ -139,14 +139,14 @@ async function run(projectPath: string, profileId?: string): Promise<SelfLearnin
     if (drafts.length > 0) written = await writeMemories(projectPath, drafts.slice(0, MAX_MEMORIES - existing));
   }
 
-  const info: SelfLearningIndexInfo = {
+  const info: SelfImproveIndexInfo = {
     memories: await countMemories(projectPath),
     sessionsScanned: sessions.length,
     builtAt: new Date().toISOString(),
   };
   await writeFile(infoPath(projectPath), `${JSON.stringify(info, null, 2)}\n`, 'utf-8');
   appLog.info(
-    `[SelfLearning] Memory index for ${projectPath}: ${written.length} new memory file(s) from ${sessions.length} session(s)`
+    `[SelfImprove] Memory index for ${projectPath}: ${written.length} new memory file(s) from ${sessions.length} session(s)`
   );
   return info;
 }
@@ -155,7 +155,7 @@ async function run(projectPath: string, profileId?: string): Promise<SelfLearnin
  * Build (or rebuild) the project's memory index from its past sessions. Concurrent callers join the
  * build already running rather than starting a second one.
  */
-export function buildMemoryIndex(projectPath: string, profileId?: string): Promise<SelfLearningIndexInfo> {
+export function buildMemoryIndex(projectPath: string, profileId?: string): Promise<SelfImproveIndexInfo> {
   const key = path.resolve(projectPath);
   const running = inFlight.get(key);
   if (running) return running;

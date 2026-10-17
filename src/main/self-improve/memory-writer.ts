@@ -9,7 +9,7 @@
 
 import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
-import { getLearningDir, getMemoryIndexPath } from './paths';
+import { getCompengDir, getMemoryIndexPath } from './paths';
 
 /**
  * What the index says while it holds no memories. It is a comment, so it costs the session nothing,
@@ -82,14 +82,14 @@ async function readIndexEntries(projectPath: string): Promise<Map<string, string
 }
 
 /**
- * Write memories into the project's learning directory and add them to the index.
+ * Write memories into the project's memory directory and add them to the index.
  *
  * Existing memories are kept: a draft whose slug is already there is skipped rather than overwritten,
  * because a memory on disk may have been edited by hand or refined by a later session, and this
  * writer only ever adds. Returns the names actually written.
  */
 export async function writeMemories(projectPath: string, drafts: MemoryDraft[]): Promise<string[]> {
-  const dir = getLearningDir(projectPath);
+  const dir = getCompengDir(projectPath);
   await mkdir(dir, { recursive: true });
 
   const entries = await readIndexEntries(projectPath);

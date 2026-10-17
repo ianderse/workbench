@@ -477,9 +477,9 @@ export interface ElectronAPI {
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo | null>>;
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
   /** The project's memory index stats, or null when it has never been built */
-  getMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfLearningIndexInfo | null>>;
+  getMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo | null>>;
   /** Build (or rebuild) the project's memories from its past Claude Code sessions */
-  buildMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfLearningIndexInfo>>;
+  buildMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo>>;
   /** Whether a memory index build is running for the project */
   isMemoryIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;

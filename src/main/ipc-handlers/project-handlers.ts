@@ -15,7 +15,7 @@ import type {
 } from '../../shared/types';
 import { appLog } from '../app-logger';
 import { projectStore } from '../project-store';
-import { applyProjectMemory, removeProjectMemory } from '../self-learning';
+import { applyProjectMemory, removeProjectMemory } from '../self-improve';
 import { getProjectCostMetrics } from '../project-metrics';
 import { migrateProjectDataDirs } from '../data-dir-migration';
 import {
@@ -265,26 +265,26 @@ export function registerProjectHandlers(
       projectId: string,
       settings: Partial<ProjectSettings>
     ): Promise<IPCResult> => {
-      const before = projectStore.getProject(projectId)?.settings.selfLearning === true;
+      const before = projectStore.getProject(projectId)?.settings.selfImprove === true;
       const project = projectStore.updateProjectSettings(projectId, settings);
       if (!project) return { success: false, error: 'Project not found' };
 
-      // Switching self-learning on or off relocates the project's Claude Code memory, so it takes
+      // Switching self-improve on or off relocates the project's Claude Code memory, so it takes
       // effect outside the app too. A failure leaves the setting saved but says what went wrong.
-      if (settings.selfLearning !== undefined && settings.selfLearning !== before) {
+      if (settings.selfImprove !== undefined && settings.selfImprove !== before) {
         try {
-          if (settings.selfLearning) {
+          if (settings.selfImprove) {
             await applyProjectMemory(project.path);
           } else {
             await removeProjectMemory(project.path);
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
-          appLog.error('[IPC] PROJECT_UPDATE_SETTINGS: self-learning setup failed:', error);
+          appLog.error('[IPC] PROJECT_UPDATE_SETTINGS: self-improve setup failed:', error);
           // Turning it on half way is worse than not turning it on: the nudge would ask sessions to
           // save memories that nothing would read back. Turning it off half way is closer to off,
           // so only this direction is reverted.
-          if (settings.selfLearning) projectStore.updateProjectSettings(projectId, { selfLearning: before });
+          if (settings.selfImprove) projectStore.updateProjectSettings(projectId, { selfImprove: before });
           return { success: false, error: message };
         }
       }
