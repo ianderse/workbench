@@ -1,6 +1,6 @@
 import { app } from 'electron';
 import { join } from 'path';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, promises as fsPromises } from 'fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, promises as fsPromises } from 'fs';
 import type { TerminalWorktreeConfig } from '../shared/types';
 import { debugLog } from '../shared/utils/debug-logger';
 
@@ -33,15 +33,18 @@ export interface SessionDateInfo {
 }
 
 /**
- * All persisted sessions grouped by date, then by project
+ * One project's persisted sessions, grouped by date.
+ *
+ * The file lives in the project, so it holds that project's sessions only: moving or renaming a
+ * checkout takes its terminals with it, and no other project can be affected by writing this one.
  */
 interface SessionData {
   version: number;
-  // date (YYYY-MM-DD) -> projectPath -> sessions
-  sessionsByDate: Record<string, Record<string, TerminalSession[]>>;
+  // date (YYYY-MM-DD) -> sessions
+  sessionsByDate: Record<string, TerminalSession[]>;
 }
 
-const STORE_VERSION = 2;  // Bumped for new structure
+const STORE_VERSION = 3;  // Bumped for the per-project file
 const MAX_OUTPUT_BUFFER = 100000;  // 100KB per terminal
 const MAX_DAYS_TO_KEEP = 10;  // Keep sessions for 10 days
 
@@ -103,15 +106,16 @@ export class TerminalSessionStore {
   private consecutiveFailures = 0;
   private static readonly MAX_FAILURES_BEFORE_WARNING = 3;
 
-  constructor() {
-    const sessionsDir = join(app.getPath('userData'), 'sessions');
+  constructor(private readonly projectPath: string) {
+    const sessionsDir = join(projectPath, '.workbench');
     this.storePath = join(sessionsDir, 'terminals.json');
     this.tempPath = join(sessionsDir, 'terminals.json.tmp');
     this.backupPath = join(sessionsDir, 'terminals.json.backup');
 
-    // Ensure directory exists
+    // `.workbench` existing is what marks a project as initialized, so this never creates it: an
+    // uninitialized project keeps its sessions in memory for as long as the app runs
     if (!existsSync(sessionsDir)) {
-      mkdirSync(sessionsDir, { recursive: true });
+      console.warn(`[TerminalSessionStore] ${projectPath} is not initialized, so sessions are not persisted`);
     }
 
     // Load existing data or initialize
@@ -149,7 +153,44 @@ export class TerminalSessionStore {
       console.error('[TerminalSessionStore] Backup recovery failed, starting fresh');
     }
 
-    return { version: STORE_VERSION, sessionsByDate: {} };
+    return this.importLegacyAppSessions();
+  }
+
+  /**
+   * Take this project's sessions out of the app-wide file terminals used to share.
+   *
+   * Runs only when the project has no file of its own, so a user upgrading keeps the terminals they
+   * had. The old file is left alone: other projects still need their slice of it.
+   */
+  private importLegacyAppSessions(): SessionData {
+    const empty: SessionData = { version: STORE_VERSION, sessionsByDate: {} };
+    const legacyPath = join(app.getPath('userData'), 'sessions', 'terminals.json');
+    if (!existsSync(legacyPath)) return empty;
+
+    try {
+      const legacy = JSON.parse(readFileSync(legacyPath, 'utf-8')) as {
+        version?: number;
+        sessionsByDate?: Record<string, Record<string, TerminalSession[]>>;
+      };
+      const byDate = legacy.sessionsByDate ?? {};
+      const mine: Record<string, TerminalSession[]> = {};
+      for (const [date, projects] of Object.entries(byDate)) {
+        const sessions = projects?.[this.projectPath];
+        if (sessions && sessions.length > 0) mine[date] = sessions;
+      }
+      if (Object.keys(mine).length === 0) return empty;
+
+      console.warn(
+        `[TerminalSessionStore] Imported ${Object.keys(mine).length} date(s) of sessions from the app-wide file`
+      );
+      const imported: SessionData = { version: STORE_VERSION, sessionsByDate: mine };
+      this.data = imported;
+      this.save();
+      return imported;
+    } catch (error) {
+      console.error('[TerminalSessionStore] Could not read the app-wide session file:', error);
+      return empty;
+    }
   }
 
   /**
@@ -163,19 +204,6 @@ export class TerminalSessionStore {
 
       const content = readFileSync(filePath, 'utf-8');
       const data = JSON.parse(content);
-
-      // Migrate from v1 to v2 structure
-      if (data.version === 1 && data.sessions) {
-        console.warn('[TerminalSessionStore] Migrating from v1 to v2 structure');
-        const today = getDateString();
-        const migratedData: SessionData = {
-          version: STORE_VERSION,
-          sessionsByDate: {
-            [today]: data.sessions
-          }
-        };
-        return { success: true, data: migratedData };
-      }
 
       if (data.version === STORE_VERSION) {
         return { success: true, data: data as SessionData };
@@ -359,12 +387,12 @@ export class TerminalSessionStore {
   }
 
   /**
-   * Get sessions for today, organized by project
+   * Get today's sessions for this project
    */
-  private getTodaysSessions(): Record<string, TerminalSession[]> {
+  private getTodaysSessions(): TerminalSession[] {
     const today = getDateString();
     if (!this.data.sessionsByDate[today]) {
-      this.data.sessionsByDate[today] = {};
+      this.data.sessionsByDate[today] = [];
     }
     return this.data.sessionsByDate[today];
   }
@@ -383,12 +411,7 @@ export class TerminalSessionStore {
       return false;
     }
 
-    const { projectPath } = session;
     const todaySessions = this.getTodaysSessions();
-
-    if (!todaySessions[projectPath]) {
-      todaySessions[projectPath] = [];
-    }
 
     // Debug: Log incoming outputBuffer info
     const incomingBufferLen = session.outputBuffer?.length ?? 0;
@@ -397,18 +420,18 @@ export class TerminalSessionStore {
       'isCLIMode:', session.isCLIMode);
 
     // Update existing or add new
-    const existingIndex = todaySessions[projectPath].findIndex(s => s.id === session.id);
+    const existingIndex = todaySessions.findIndex(s => s.id === session.id);
     if (existingIndex >= 0) {
       // Preserve displayOrder from existing session if not provided in incoming session
       // This prevents periodic saves (which don't include displayOrder) from losing tab order
-      const existingSession = todaySessions[projectPath][existingIndex];
+      const existingSession = todaySessions[existingIndex];
       const existingBufferLen = existingSession.outputBuffer?.length ?? 0;
       const truncatedLen = session.outputBuffer.slice(-MAX_OUTPUT_BUFFER).length;
       debugLog('[TerminalSessionStore] Updating existing session:', session.id,
         'existing outputBuffer:', existingBufferLen, 'bytes',
         'new outputBuffer (after truncation):', truncatedLen, 'bytes');
 
-      todaySessions[projectPath][existingIndex] = {
+      todaySessions[existingIndex] = {
         ...session,
         // Limit output buffer size
         outputBuffer: session.outputBuffer.slice(-MAX_OUTPUT_BUFFER),
@@ -421,7 +444,7 @@ export class TerminalSessionStore {
       debugLog('[TerminalSessionStore] Creating new session:', session.id,
         'outputBuffer (after truncation):', truncatedLen, 'bytes');
 
-      todaySessions[projectPath].push({
+      todaySessions.push({
         ...session,
         outputBuffer: session.outputBuffer.slice(-MAX_OUTPUT_BUFFER),
         createdAt: new Date().toISOString(),
@@ -464,23 +487,23 @@ export class TerminalSessionStore {
    * duplication issues across days.
    * Validates worktree configs - clears them if worktree no longer exists.
    */
-  getSessions(projectPath: string): TerminalSession[] {
+  getSessions(): TerminalSession[] {
     const today = getDateString();
 
-    debugLog('[TerminalSessionStore] Getting sessions for project:', projectPath, 'date:', today);
+    debugLog('[TerminalSessionStore] Getting sessions for project:', this.projectPath, 'date:', today);
 
     // First check today
     const todaySessions = this.getTodaysSessions();
-    if (todaySessions[projectPath]?.length > 0) {
+    if (todaySessions.length > 0) {
       // Debug: Log outputBuffer info for each session
-      for (const session of todaySessions[projectPath]) {
+      for (const session of todaySessions) {
         const bufferLen = session.outputBuffer?.length ?? 0;
         debugLog('[TerminalSessionStore] Session', session.id, 'outputBuffer:', bufferLen, 'bytes',
           'isCLIMode:', session.isCLIMode,
           'hasBuffer:', bufferLen > 0);
       }
       // Validate worktree configs before returning
-      return todaySessions[projectPath].map(session => ({
+      return todaySessions.map(session => ({
         ...session,
         worktreeConfig: this.validateWorktreeConfig(session.worktreeConfig),
       }));
@@ -491,15 +514,14 @@ export class TerminalSessionStore {
       .filter(date => {
         // Exclude today since we already checked it
         if (date === today) return false;
-        const sessions = this.data.sessionsByDate[date][projectPath];
-        return sessions && sessions.length > 0;
+        return this.data.sessionsByDate[date]?.length > 0;
       })
       .sort((a, b) => b.localeCompare(a));  // Most recent first
 
     if (dates.length > 0) {
       const mostRecentDate = dates[0];
       console.warn(`[TerminalSessionStore] No sessions today, migrating sessions from ${mostRecentDate} to today`);
-      const sessions = this.data.sessionsByDate[mostRecentDate][projectPath] || [];
+      const sessions = this.data.sessionsByDate[mostRecentDate] || [];
 
       // Debug: Log outputBuffer info for sessions being migrated
       for (const session of sessions) {
@@ -518,16 +540,9 @@ export class TerminalSessionStore {
         lastActiveAt: new Date().toISOString(),
       }));
 
-      // Add migrated sessions to today
-      todaySessions[projectPath] = migratedSessions;
-
-      // Remove sessions from the old date to prevent duplication
-      delete this.data.sessionsByDate[mostRecentDate][projectPath];
-
-      // Clean up empty date buckets
-      if (Object.keys(this.data.sessionsByDate[mostRecentDate]).length === 0) {
-        delete this.data.sessionsByDate[mostRecentDate];
-      }
+      // Add migrated sessions to today, and drop the old date so they cannot come back twice
+      this.data.sessionsByDate[today] = migratedSessions;
+      delete this.data.sessionsByDate[mostRecentDate];
 
       // Save the migration
       this.save();
@@ -544,10 +559,8 @@ export class TerminalSessionStore {
    * Get sessions for a specific date and project
    * Validates worktree configs - clears them if worktree no longer exists.
    */
-  getSessionsForDate(date: string, projectPath: string): TerminalSession[] {
-    const dateSessions = this.data.sessionsByDate[date];
-    if (!dateSessions) return [];
-    const sessions = dateSessions[projectPath] || [];
+  getSessionsForDate(date: string): TerminalSession[] {
+    const sessions = this.data.sessionsByDate[date] ?? [];
     // Validate worktree configs before returning
     return sessions.map(session => ({
       ...session,
@@ -556,57 +569,25 @@ export class TerminalSessionStore {
   }
 
   /**
-   * Get all sessions for a specific date (all projects)
-   */
-  getAllSessionsForDate(date: string): Record<string, TerminalSession[]> {
-    return this.data.sessionsByDate[date] || {};
-  }
-
-  /**
    * Get available session dates with metadata
    */
-  getAvailableDates(projectPath?: string): SessionDateInfo[] {
-    const dates = Object.keys(this.data.sessionsByDate)
-      .filter(date => {
-        // If projectPath specified, only include dates with sessions for that project
-        if (projectPath) {
-          const sessions = this.data.sessionsByDate[date][projectPath];
-          return sessions && sessions.length > 0;
-        }
-        return true;
-      })
-      .sort((a, b) => b.localeCompare(a));  // Most recent first
-
-    return dates.map(date => {
-      const dateSessions = this.data.sessionsByDate[date];
-      let sessionCount = 0;
-      let projectCount = 0;
-
-      for (const [projPath, sessions] of Object.entries(dateSessions)) {
-        if (!projectPath || projPath === projectPath) {
-          if (sessions.length > 0) {
-            sessionCount += sessions.length;
-            projectCount++;
-          }
-        }
-      }
-
-      return {
+  getAvailableDates(): SessionDateInfo[] {
+    return Object.keys(this.data.sessionsByDate)
+      .filter(date => this.data.sessionsByDate[date]?.length > 0)
+      .sort((a, b) => b.localeCompare(a))  // Most recent first
+      .map(date => ({
         date,
         label: getDateLabel(date),
-        sessionCount,
-        projectCount
-      };
-    }).filter(info => info.sessionCount > 0);  // Only dates with actual sessions
+        sessionCount: this.data.sessionsByDate[date].length,
+        projectCount: 1,
+      }));
   }
 
   /**
    * Get a specific session
    */
-  getSession(projectPath: string, sessionId: string): TerminalSession | undefined {
-    const todaySessions = this.getTodaysSessions();
-    const sessions = todaySessions[projectPath] || [];
-    return sessions.find(s => s.id === sessionId);
+  getSession(sessionId: string): TerminalSession | undefined {
+    return this.getTodaysSessions().find(s => s.id === sessionId);
   }
 
   /**
@@ -636,7 +617,7 @@ export class TerminalSessionStore {
    * Adds the session ID to pendingDelete to prevent async writes from
    * resurrecting the session if saveSessionAsync() is in-flight.
    */
-  removeSession(projectPath: string, sessionId: string): void {
+  removeSession(sessionId: string): void {
     // Mark as pending delete BEFORE modifying data to prevent race condition
     // with in-flight saveSessionAsync() calls
     this.pendingDelete.add(sessionId);
@@ -644,13 +625,17 @@ export class TerminalSessionStore {
       'pendingDelete size:', this.pendingDelete.size,
       'all pending IDs:', [...this.pendingDelete].join(', '));
 
-    const todaySessions = this.getTodaysSessions();
-    if (todaySessions[projectPath]) {
-      todaySessions[projectPath] = todaySessions[projectPath].filter(
-        s => s.id !== sessionId
-      );
-      this.save();
+    // Every date, not only today: a window opened before midnight and closed after it lives in
+    // yesterday's bucket, and leaving it there is what brings closed windows back on the next start
+    let removed = false;
+    for (const [date, sessions] of Object.entries(this.data.sessionsByDate)) {
+      const kept = sessions.filter(s => s.id !== sessionId);
+      if (kept.length !== sessions.length) {
+        this.data.sessionsByDate[date] = kept;
+        removed = true;
+      }
     }
+    if (removed) this.save();
 
     // Cancel any existing cleanup timer for this session (prevents timer accumulation
     // when the same session ID is deleted multiple times rapidly)
@@ -673,35 +658,24 @@ export class TerminalSessionStore {
   /**
    * Clear all sessions for a project (from today)
    */
-  clearProjectSessions(projectPath: string): void {
-    const todaySessions = this.getTodaysSessions();
-    delete todaySessions[projectPath];
+  clearProjectSessions(): void {
+    this.data.sessionsByDate[getDateString()] = [];
     this.save();
   }
 
   /**
    * Clear sessions for a specific date and project
    */
-  clearSessionsForDate(date: string, projectPath?: string): void {
-    if (projectPath) {
-      if (this.data.sessionsByDate[date]) {
-        delete this.data.sessionsByDate[date][projectPath];
-      }
-    } else {
-      delete this.data.sessionsByDate[date];
-    }
+  clearSessionsForDate(date: string): void {
+    delete this.data.sessionsByDate[date];
     this.save();
   }
 
   /**
    * Update output buffer for a session (called frequently, batched save)
    */
-  updateOutputBuffer(projectPath: string, sessionId: string, output: string): void {
-    const todaySessions = this.getTodaysSessions();
-    const sessions = todaySessions[projectPath];
-    if (!sessions) return;
-
-    const session = sessions.find(s => s.id === sessionId);
+  updateOutputBuffer(sessionId: string, output: string): void {
+    const session = this.getTodaysSessions().find(s => s.id === sessionId);
     if (session) {
       const prevLen = session.outputBuffer?.length ?? 0;
       session.outputBuffer = (session.outputBuffer + output).slice(-MAX_OUTPUT_BUFFER);
@@ -729,10 +703,8 @@ export class TerminalSessionStore {
    * Update display orders for multiple terminals (after drag-drop reorder).
    * This updates the displayOrder property for matching sessions in today's bucket.
    */
-  updateDisplayOrders(projectPath: string, orders: Array<{ terminalId: string; displayOrder: number }>): void {
-    const todaySessions = this.getTodaysSessions();
-    const sessions = todaySessions[projectPath];
-    if (!sessions) return;
+  updateDisplayOrders(orders: Array<{ terminalId: string; displayOrder: number }>): void {
+    const sessions = this.getTodaysSessions();
 
     let hasChanges = false;
     for (const { terminalId, displayOrder } of orders) {
@@ -773,12 +745,14 @@ export class TerminalSessionStore {
   }
 }
 
-// Singleton instance
-let instance: TerminalSessionStore | null = null;
+// One store per project, each backed by that project's own file
+const instances = new Map<string, TerminalSessionStore>();
 
-export function getTerminalSessionStore(): TerminalSessionStore {
+export function getTerminalSessionStore(projectPath: string): TerminalSessionStore {
+  let instance = instances.get(projectPath);
   if (!instance) {
-    instance = new TerminalSessionStore();
+    instance = new TerminalSessionStore(projectPath);
+    instances.set(projectPath, instance);
   }
   return instance;
 }

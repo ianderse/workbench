@@ -695,7 +695,8 @@ export function registerTerminalHandlers(
     IPC_CHANNELS.TERMINAL_GET_SESSION_DATES,
     async (_, projectPath?: string) => {
       try {
-        const dates = terminalManager.getAvailableSessionDates(projectPath);
+        // Sessions are kept per project, so there is nothing to list without one
+        const dates = projectPath ? terminalManager.getAvailableSessionDates(projectPath) : [];
         return { success: true, data: dates };
       } catch (error) {
         return {

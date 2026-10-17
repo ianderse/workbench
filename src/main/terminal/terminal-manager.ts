@@ -344,7 +344,7 @@ export class TerminalManager {
   /**
    * Get available session dates
    */
-  getAvailableSessionDates(projectPath?: string): import('../terminal-session-store').SessionDateInfo[] {
+  getAvailableSessionDates(projectPath: string): import('../terminal-session-store').SessionDateInfo[] {
     return SessionHandler.getAvailableSessionDates(projectPath);
   }
 

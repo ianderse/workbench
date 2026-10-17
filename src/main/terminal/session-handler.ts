@@ -81,7 +81,7 @@ export function persistSession(terminal: TerminalProcess): void {
     return;
   }
 
-  const store = getTerminalSessionStore();
+  const store = getTerminalSessionStore(terminal.projectPath);
   store.saveSession(createSessionObject(terminal));
 }
 
@@ -94,7 +94,7 @@ export function persistSessionAsync(terminal: TerminalProcess): void {
     return;
   }
 
-  const store = getTerminalSessionStore();
+  const store = getTerminalSessionStore(terminal.projectPath);
   store.saveSessionAsync(createSessionObject(terminal)).catch((error) => {
     debugError('[SessionHandler] Failed to persist session:', error);
   });
@@ -107,11 +107,10 @@ export function persistSessionAsync(terminal: TerminalProcess): void {
  * multiple sessions (e.g., on app quit).
  */
 export async function persistAllSessionsAsync(terminals: Map<string, TerminalProcess>): Promise<void> {
-  const store = getTerminalSessionStore();
-
   const savePromises: Promise<void>[] = [];
   terminals.forEach((terminal) => {
     if (terminal.projectPath) {
+      const store = getTerminalSessionStore(terminal.projectPath);
       savePromises.push(store.saveSessionAsync(createSessionObject(terminal)));
     }
   });
@@ -126,9 +125,8 @@ export async function persistAllSessionsAsync(terminals: Map<string, TerminalPro
  * (e.g., worktree switching, terminal restart after shell exit). Without this,
  * the pendingDelete guard blocks persistence for the new terminal.
  */
-export function clearPendingDelete(terminalId: string): void {
-  const store = getTerminalSessionStore();
-  store.clearPendingDelete(terminalId);
+export function clearPendingDelete(projectPath: string, terminalId: string): void {
+  getTerminalSessionStore(projectPath).clearPendingDelete(terminalId);
 }
 
 /**
@@ -139,42 +137,38 @@ export function removePersistedSession(terminal: TerminalProcess): void {
     return;
   }
 
-  const store = getTerminalSessionStore();
-  store.removeSession(terminal.projectPath, terminal.id);
+  const store = getTerminalSessionStore(terminal.projectPath);
+  store.removeSession(terminal.id);
 }
 
 /**
  * Get saved sessions for a project
  */
 export function getSavedSessions(projectPath: string): TerminalSession[] {
-  const store = getTerminalSessionStore();
-  return store.getSessions(projectPath);
+  return getTerminalSessionStore(projectPath).getSessions();
 }
 
 /**
  * Clear all saved sessions for a project
  */
 export function clearSavedSessions(projectPath: string): void {
-  const store = getTerminalSessionStore();
-  store.clearProjectSessions(projectPath);
+  getTerminalSessionStore(projectPath).clearProjectSessions();
 }
 
 /**
  * Get available session dates
  */
 export function getAvailableSessionDates(
-  projectPath?: string
+  projectPath: string
 ): import('../terminal-session-store').SessionDateInfo[] {
-  const store = getTerminalSessionStore();
-  return store.getAvailableDates(projectPath);
+  return getTerminalSessionStore(projectPath).getAvailableDates();
 }
 
 /**
  * Get sessions for a specific date
  */
 export function getSessionsForDate(date: string, projectPath: string): TerminalSession[] {
-  const store = getTerminalSessionStore();
-  return store.getSessionsForDate(date, projectPath);
+  return getTerminalSessionStore(projectPath).getSessionsForDate(date);
 }
 
 /**
@@ -184,6 +178,5 @@ export function updateDisplayOrders(
   projectPath: string,
   orders: Array<{ terminalId: string; displayOrder: number }>
 ): void {
-  const store = getTerminalSessionStore();
-  store.updateDisplayOrders(projectPath, orders);
+  getTerminalSessionStore(projectPath).updateDisplayOrders(orders);
 }

@@ -60,7 +60,8 @@ export async function createTerminal(
   // worktree switching, terminal restart after shell exit). Without this, the
   // pendingDelete guard (5-second window) blocks session persistence for the
   // new terminal, causing it to be invisible to the session store.
-  SessionHandler.clearPendingDelete(id);
+  // Sessions live with their project, so a terminal without one has nothing to clear
+  if (projectPath) SessionHandler.clearPendingDelete(projectPath, id);
 
   try {
     // For auth terminals, don't inject existing OAuth token - we want a fresh login

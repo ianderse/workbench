@@ -21,11 +21,12 @@ function initTestPaths(): void {
   // Create a unique temporary directory using mkdtempSync for security
   TEST_DIR = mkdtempSync(path.join(os.tmpdir(), 'terminal-session-store-test-'));
   USER_DATA_PATH = path.join(TEST_DIR, 'userData');
-  SESSIONS_DIR = path.join(USER_DATA_PATH, 'sessions');
+  TEST_PROJECT_PATH = path.join(TEST_DIR, 'test-project');
+  // One file per project, kept in that project's own .workbench
+  SESSIONS_DIR = path.join(TEST_PROJECT_PATH, '.workbench');
   STORE_PATH = path.join(SESSIONS_DIR, 'terminals.json');
   TEMP_PATH = path.join(SESSIONS_DIR, 'terminals.json.tmp');
   BACKUP_PATH = path.join(SESSIONS_DIR, 'terminals.json.backup');
-  TEST_PROJECT_PATH = path.join(TEST_DIR, 'test-project');
 }
 
 // Mock Electron before importing the store
@@ -57,9 +58,9 @@ function cleanupTestDirs(): void {
 }
 
 // Create a valid session data structure
-function createValidStoreData(sessionsByDate: Record<string, Record<string, unknown[]>> = {}): string {
+function createValidStoreData(sessionsByDate: Record<string, unknown[]> = {}): string {
   return JSON.stringify({
-    version: 2,
+    version: 3,
     sessionsByDate
   }, null, 2);
 }
@@ -104,37 +105,39 @@ describe('TerminalSessionStore', () => {
   });
 
   describe('initialization', () => {
-    it('should create sessions directory if not exists', async () => {
+    it('does not create .workbench for an uninitialized project', async () => {
       rmSync(SESSIONS_DIR, { recursive: true, force: true });
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
-      expect(existsSync(SESSIONS_DIR)).toBe(true);
+      // .workbench existing is what marks a project initialized, so sessions stay in memory
+      expect(existsSync(SESSIONS_DIR)).toBe(false);
+      store.saveSession(createTestSession());
+      expect(store.getSessions()).toHaveLength(1);
+      expect(existsSync(STORE_PATH)).toBe(false);
     });
 
     it('should initialize with empty data when no store file exists', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       const data = store.getAllSessions();
-      expect(data.version).toBe(2);
+      expect(data.version).toBe(3);
       expect(data.sessionsByDate).toEqual({});
     });
 
     it('should load existing valid store data', async () => {
       const today = new Date().toISOString().split('T')[0];
       const existingData = createValidStoreData({
-        [today]: {
-          [TEST_PROJECT_PATH]: [createTestSession()]
-        }
+        [today]: [createTestSession()]
       });
       writeFileSync(STORE_PATH, existingData);
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
-      const sessions = store.getSessions(TEST_PROJECT_PATH);
+      const sessions = store.getSessions();
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe('test-session-1');
     });
@@ -143,7 +146,7 @@ describe('TerminalSessionStore', () => {
   describe('atomic writes', () => {
     it('should write to temp file then rename atomically', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession());
 
@@ -154,21 +157,19 @@ describe('TerminalSessionStore', () => {
 
       // Verify content
       const content = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
-      expect(content.version).toBe(2);
+      expect(content.version).toBe(3);
     });
 
     it('should rotate current file to backup before overwriting', async () => {
       // Create initial store with one session
       const today = new Date().toISOString().split('T')[0];
       const initialData = createValidStoreData({
-        [today]: {
-          [TEST_PROJECT_PATH]: [createTestSession({ id: 'original-session' })]
-        }
+        [today]: [createTestSession({ id: 'original-session' })]
       });
       writeFileSync(STORE_PATH, initialData);
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Save a new session (triggers backup rotation)
       store.saveSession(createTestSession({ id: 'new-session' }));
@@ -176,7 +177,7 @@ describe('TerminalSessionStore', () => {
       // Backup should exist with original data
       expect(existsSync(BACKUP_PATH)).toBe(true);
       const backupContent = JSON.parse(readFileSync(BACKUP_PATH, 'utf-8'));
-      const backupSessions = backupContent.sessionsByDate[today][TEST_PROJECT_PATH];
+      const backupSessions = backupContent.sessionsByDate[today];
       expect(backupSessions.some((s: { id: string }) => s.id === 'original-session')).toBe(true);
     });
 
@@ -185,7 +186,7 @@ describe('TerminalSessionStore', () => {
       writeFileSync(STORE_PATH, 'not valid json {{{');
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Save a session
       store.saveSession(createTestSession());
@@ -199,7 +200,7 @@ describe('TerminalSessionStore', () => {
 
     it('should clean up temp file on error', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Force an error by making the directory read-only (if possible)
       // This test mainly verifies the code path exists
@@ -216,9 +217,7 @@ describe('TerminalSessionStore', () => {
 
       // Create valid backup
       const backupData = createValidStoreData({
-        [today]: {
-          [TEST_PROJECT_PATH]: [createTestSession({ id: 'recovered-session' })]
-        }
+        [today]: [createTestSession({ id: 'recovered-session' })]
       });
       writeFileSync(BACKUP_PATH, backupData);
 
@@ -226,10 +225,10 @@ describe('TerminalSessionStore', () => {
       writeFileSync(STORE_PATH, 'corrupted {{{ json');
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Should recover from backup
-      const sessions = store.getSessions(TEST_PROJECT_PATH);
+      const sessions = store.getSessions();
       expect(sessions).toHaveLength(1);
       expect(sessions[0].id).toBe('recovered-session');
     });
@@ -239,9 +238,7 @@ describe('TerminalSessionStore', () => {
 
       // Create valid backup
       const backupData = createValidStoreData({
-        [today]: {
-          [TEST_PROJECT_PATH]: [createTestSession()]
-        }
+        [today]: [createTestSession()]
       });
       writeFileSync(BACKUP_PATH, backupData);
 
@@ -249,11 +246,11 @@ describe('TerminalSessionStore', () => {
       writeFileSync(STORE_PATH, 'corrupted');
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      new TerminalSessionStore();
+      new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Main file should now be valid
       const mainContent = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
-      expect(mainContent.version).toBe(2);
+      expect(mainContent.version).toBe(3);
     });
 
     it('should start fresh if both main and backup are corrupted', async () => {
@@ -261,10 +258,10 @@ describe('TerminalSessionStore', () => {
       writeFileSync(BACKUP_PATH, 'corrupted backup');
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       const data = store.getAllSessions();
-      expect(data.version).toBe(2);
+      expect(data.version).toBe(3);
       expect(data.sessionsByDate).toEqual({});
     });
   });
@@ -272,31 +269,31 @@ describe('TerminalSessionStore', () => {
   describe('race condition prevention', () => {
     it('should not resurrect deleted sessions in async save', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Create and save a session
       const session = createTestSession({ id: 'to-be-deleted' });
       store.saveSession(session);
 
       // Verify session exists
-      expect(store.getSessions(TEST_PROJECT_PATH)).toHaveLength(1);
+      expect(store.getSessions()).toHaveLength(1);
 
       // Delete the session
-      store.removeSession(TEST_PROJECT_PATH, 'to-be-deleted');
+      store.removeSession('to-be-deleted');
 
       // Try to save the same session again (simulating in-flight async save)
       await store.saveSessionAsync(session);
 
       // Session should NOT be resurrected
-      expect(store.getSessions(TEST_PROJECT_PATH)).toHaveLength(0);
+      expect(store.getSessions()).toHaveLength(0);
     });
 
     it('should track session in pendingDelete after removal', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({ id: 'session-1' }));
-      store.removeSession(TEST_PROJECT_PATH, 'session-1');
+      store.removeSession('session-1');
 
       // Attempt to save the deleted session
       const result = await store.saveSessionAsync(createTestSession({ id: 'session-1' }));
@@ -307,43 +304,43 @@ describe('TerminalSessionStore', () => {
 
     it('should clean up pendingDelete after timeout', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({ id: 'cleanup-test' }));
-      store.removeSession(TEST_PROJECT_PATH, 'cleanup-test');
+      store.removeSession('cleanup-test');
 
       // Fast-forward past the cleanup timeout (5000ms)
       vi.advanceTimersByTime(5001);
 
       // Now the session should be saveable again
       store.saveSession(createTestSession({ id: 'cleanup-test' }));
-      expect(store.getSessions(TEST_PROJECT_PATH)).toHaveLength(1);
+      expect(store.getSessions()).toHaveLength(1);
     });
 
     it('should prevent timer accumulation on rapid deletes', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Create a session
       store.saveSession(createTestSession({ id: 'rapid-delete' }));
 
       // Delete the same session ID multiple times rapidly
       for (let i = 0; i < 100; i++) {
-        store.removeSession(TEST_PROJECT_PATH, 'rapid-delete');
+        store.removeSession('rapid-delete');
       }
 
       // Fast-forward to trigger cleanup
       vi.advanceTimersByTime(5001);
 
       // Should complete without issues (no timer accumulation)
-      expect(store.getSessions(TEST_PROJECT_PATH)).toHaveLength(0);
+      expect(store.getSessions()).toHaveLength(0);
     });
   });
 
   describe('write serialization', () => {
     it('should serialize concurrent async writes', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Start multiple concurrent saves
       const promises = [
@@ -355,13 +352,13 @@ describe('TerminalSessionStore', () => {
       await Promise.all(promises);
 
       // All sessions should be saved
-      const sessions = store.getSessions(TEST_PROJECT_PATH);
+      const sessions = store.getSessions();
       expect(sessions).toHaveLength(3);
     });
 
     it('should coalesce rapid writes using writePending flag', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Use real timers for this test since we need setImmediate to work
       vi.useRealTimers();
@@ -378,7 +375,7 @@ describe('TerminalSessionStore', () => {
       await Promise.all(promises);
 
       // All sessions should be saved
-      const sessions = store.getSessions(TEST_PROJECT_PATH);
+      const sessions = store.getSessions();
       expect(sessions).toHaveLength(10);
 
       vi.useFakeTimers();
@@ -388,7 +385,7 @@ describe('TerminalSessionStore', () => {
   describe('failure tracking', () => {
     it('should reset consecutive failures on successful save', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Successful save should work
       store.saveSession(createTestSession());
@@ -401,7 +398,7 @@ describe('TerminalSessionStore', () => {
   describe('session CRUD operations', () => {
     it('should save and retrieve sessions', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       const session = createTestSession({
         id: 'crud-test',
@@ -409,14 +406,14 @@ describe('TerminalSessionStore', () => {
       });
       store.saveSession(session);
 
-      const retrieved = store.getSession(TEST_PROJECT_PATH, 'crud-test');
+      const retrieved = store.getSession('crud-test');
       expect(retrieved).toBeDefined();
       expect(retrieved?.title).toBe('CRUD Test Terminal');
     });
 
     it('should update existing sessions', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Save initial session
       store.saveSession(createTestSession({
@@ -430,44 +427,44 @@ describe('TerminalSessionStore', () => {
         title: 'Updated Title'
       }));
 
-      const sessions = store.getSessions(TEST_PROJECT_PATH);
+      const sessions = store.getSessions();
       expect(sessions).toHaveLength(1);
       expect(sessions[0].title).toBe('Updated Title');
     });
 
     it('should remove sessions correctly', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({ id: 'to-remove' }));
       store.saveSession(createTestSession({ id: 'to-keep' }));
 
-      expect(store.getSessions(TEST_PROJECT_PATH)).toHaveLength(2);
+      expect(store.getSessions()).toHaveLength(2);
 
-      store.removeSession(TEST_PROJECT_PATH, 'to-remove');
+      store.removeSession('to-remove');
 
-      const remaining = store.getSessions(TEST_PROJECT_PATH);
+      const remaining = store.getSessions();
       expect(remaining).toHaveLength(1);
       expect(remaining[0].id).toBe('to-keep');
     });
 
     it('should clear all sessions for a project', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({ id: 'session-1' }));
       store.saveSession(createTestSession({ id: 'session-2' }));
 
-      store.clearProjectSessions(TEST_PROJECT_PATH);
+      store.clearProjectSessions();
 
-      expect(store.getSessions(TEST_PROJECT_PATH)).toHaveLength(0);
+      expect(store.getSessions()).toHaveLength(0);
     });
   });
 
   describe('output buffer management', () => {
     it('should limit output buffer size to MAX_OUTPUT_BUFFER', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       // Create session with large output buffer (> 100KB)
       const largeOutput = 'x'.repeat(150000);
@@ -476,22 +473,22 @@ describe('TerminalSessionStore', () => {
         outputBuffer: largeOutput
       }));
 
-      const session = store.getSession(TEST_PROJECT_PATH, 'large-buffer');
+      const session = store.getSession('large-buffer');
       expect(session?.outputBuffer.length).toBeLessThanOrEqual(100000);
     });
 
     it('should update output buffer incrementally', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({
         id: 'buffer-update',
         outputBuffer: 'initial'
       }));
 
-      store.updateOutputBuffer(TEST_PROJECT_PATH, 'buffer-update', ' appended');
+      store.updateOutputBuffer('buffer-update', ' appended');
 
-      const session = store.getSession(TEST_PROJECT_PATH, 'buffer-update');
+      const session = store.getSession('buffer-update');
       expect(session?.outputBuffer).toBe('initial appended');
     });
   });
@@ -499,19 +496,19 @@ describe('TerminalSessionStore', () => {
   describe('display order', () => {
     it('should update display orders for terminals', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({ id: 'term-1' }));
       store.saveSession(createTestSession({ id: 'term-2' }));
       store.saveSession(createTestSession({ id: 'term-3' }));
 
-      store.updateDisplayOrders(TEST_PROJECT_PATH, [
+      store.updateDisplayOrders([
         { terminalId: 'term-1', displayOrder: 2 },
         { terminalId: 'term-2', displayOrder: 0 },
         { terminalId: 'term-3', displayOrder: 1 }
       ]);
 
-      const sessions = store.getSessions(TEST_PROJECT_PATH);
+      const sessions = store.getSessions();
       const term1 = sessions.find(s => s.id === 'term-1');
       const term2 = sessions.find(s => s.id === 'term-2');
       const term3 = sessions.find(s => s.id === 'term-3');
@@ -523,10 +520,10 @@ describe('TerminalSessionStore', () => {
 
     it('should preserve display order on session update', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({ id: 'ordered-term' }));
-      store.updateDisplayOrders(TEST_PROJECT_PATH, [
+      store.updateDisplayOrders([
         { terminalId: 'ordered-term', displayOrder: 5 }
       ]);
 
@@ -536,38 +533,42 @@ describe('TerminalSessionStore', () => {
         outputBuffer: 'new output'
       }));
 
-      const session = store.getSession(TEST_PROJECT_PATH, 'ordered-term');
+      const session = store.getSession('ordered-term');
       expect(session?.displayOrder).toBe(5);
     });
   });
 
   describe('version migration', () => {
-    it('should migrate v1 data to v2 structure', async () => {
+    it("takes this project's sessions out of the old app-wide file, and leaves other projects alone", async () => {
       const today = new Date().toISOString().split('T')[0];
-
-      // Create v1 format data
-      const v1Data = JSON.stringify({
-        version: 1,
-        sessions: {
-          [TEST_PROJECT_PATH]: [createTestSession()]
-        }
-      });
-      writeFileSync(STORE_PATH, v1Data);
+      const otherProject = path.join(TEST_DIR, 'other-project');
+      const legacyDir = path.join(USER_DATA_PATH, 'sessions');
+      mkdirSync(legacyDir, { recursive: true });
+      writeFileSync(path.join(legacyDir, 'terminals.json'), JSON.stringify({
+        version: 2,
+        sessionsByDate: {
+          [today]: {
+            [TEST_PROJECT_PATH]: [createTestSession({ id: 'mine' })],
+            [otherProject]: [createTestSession({ id: 'theirs', projectPath: otherProject })],
+          },
+        },
+      }));
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
-      // Should have migrated to v2 with today's date
-      const data = store.getAllSessions();
-      expect(data.version).toBe(2);
-      expect(data.sessionsByDate[today]).toBeDefined();
+      expect(store.getSessions().map(s => s.id)).toEqual(['mine']);
+      // Written to the project's own file, while the app-wide one keeps every project's slice
+      expect(JSON.parse(readFileSync(STORE_PATH, 'utf-8')).version).toBe(3);
+      const legacy = JSON.parse(readFileSync(path.join(legacyDir, 'terminals.json'), 'utf-8'));
+      expect(legacy.sessionsByDate[today][otherProject]).toHaveLength(1);
     });
   });
 
   describe('date-based organization', () => {
     it('should get available dates with session info', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       store.saveSession(createTestSession({ id: 'today-1' }));
       store.saveSession(createTestSession({ id: 'today-2' }));
@@ -579,20 +580,19 @@ describe('TerminalSessionStore', () => {
       expect(dates[0].label).toBe('Today');
     });
 
-    it('should filter available dates by project', async () => {
+    it("lists only this project's dates, because the file holds only this project", async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
-      const store = new TerminalSessionStore();
+      const otherProject = path.join(TEST_DIR, 'other-project');
+      mkdirSync(path.join(otherProject, '.workbench'), { recursive: true });
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+      const otherStore = new TerminalSessionStore(otherProject);
 
-      const otherProjectPath = path.join(TEST_DIR, 'other-project');
-      mkdirSync(otherProjectPath, { recursive: true });
+      store.saveSession(createTestSession({ id: 'mine' }));
+      otherStore.saveSession(createTestSession({ id: 'theirs', projectPath: otherProject }));
 
-      store.saveSession(createTestSession({ projectPath: TEST_PROJECT_PATH }));
-      store.saveSession(createTestSession({ id: 'other', projectPath: otherProjectPath }));
-
-      const dates = store.getAvailableDates(TEST_PROJECT_PATH);
-
-      expect(dates).toHaveLength(1);
-      expect(dates[0].sessionCount).toBe(1);
+      expect(store.getAvailableDates()).toHaveLength(1);
+      expect(store.getAvailableDates()[0].sessionCount).toBe(1);
+      expect(store.getSessions().map(s => s.id)).toEqual(['mine']);
     });
   });
 });
