@@ -102,6 +102,16 @@ export interface GraphifyIndexInfo {
   version: string | null;
 }
 
+/** Stats of a project's memory index: the memories built from its past Claude Code sessions */
+export interface SelfLearningIndexInfo {
+  /** Memories the project holds now, by its MEMORY.md index */
+  memories: number;
+  /** Sessions the last build read */
+  sessionsScanned: number;
+  /** ISO timestamp of the last build */
+  builtAt: string;
+}
+
 /** A node of a project's memory graph (Graphify's graph.json, trimmed for display) */
 export interface GraphifyGraphNode {
   id: string;
