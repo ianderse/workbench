@@ -20,6 +20,7 @@ import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeCodeEnv } from '../claude-code-settings';
 import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
+import { isSelfLearningEnabledForPath } from '../self-learning/setting';
 import { LIVE_AGENT_TERMINAL_ENV } from '../live-agent/project-setup';
 
 /**
@@ -82,6 +83,9 @@ export async function createTerminal(
     const graphifyOut = projectPath && (await hasGraphifyGraph(projectPath)) ? getGraphifyOutDir(projectPath) : undefined;
     if (graphifyOut) mergedEnv.GRAPHIFY_OUT = graphifyOut;
 
+    // Agent windows in a self-learning project are told to save what they learn, like task runs are
+    const selfLearning = await isSelfLearningEnabledForPath(projectPath);
+
     // Live agent: the hooks of a Claude Code session run here report this window, so its graph
     // shows only its own sessions
     mergedEnv[LIVE_AGENT_TERMINAL_ENV] = id;
@@ -124,6 +128,7 @@ export async function createTerminal(
       title: `Terminal ${terminals.size + 1}`,
       shellType,
       graphifyOut,
+      selfLearning,
     };
 
     terminals.set(id, terminal);
