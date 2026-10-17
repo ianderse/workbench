@@ -22,6 +22,8 @@ import { join, resolve } from 'path';
 import { promisify } from 'util';
 
 import { getSpecsDir } from '../../shared/constants';
+import { ensureWorktreeProjectMemory } from '../self-learning/relocation';
+import { isSelfLearningEnabledForPath } from '../self-learning/setting';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -266,6 +268,12 @@ export async function createOrGetWorktree(
         `[WorktreeManager] Warning: Could not copy spec directory to worktree: ${message}`,
       );
     }
+  }
+
+  // A worktree is its own checkout and .claude/settings.local.json isn't committed, so a session
+  // started here would otherwise fall back to ~/.claude and split the project's memory in two
+  if (await isSelfLearningEnabledForPath(projectPath)) {
+    await ensureWorktreeProjectMemory(resolve(worktreePath), projectPath);
   }
 
   return { worktreePath: resolve(worktreePath), branch: branchName };
