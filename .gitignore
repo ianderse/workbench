@@ -49,7 +49,9 @@ npm-debug.log*
 # ===========================
 # Workbench Generated
 # ===========================
-.workbench/
+.workbench/*
+# The compounding-engineering memory is shared knowledge: commit it and it becomes team memory
+!.workbench/compeng/
 .workbench-security.json
 .workbench-status
 .claude_settings.json
@@ -108,5 +110,7 @@ playwright/.cache/
 *.temp
 
 # Local tooling and docs
-.claude/
+# .claude is tracked, so project rules and skills travel with the repo; the local settings file
+# is not, because it holds absolute machine paths
+.claude/settings.local.json
 /shared_docs
