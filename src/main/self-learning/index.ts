@@ -7,9 +7,7 @@
  */
 
 export { SELF_LEARNING_NUDGE } from './nudge';
-export { getLearningDir, getMemoryIndexPath, LEARNING_DIR_NAME } from './paths';
-export { applyProjectMemory, ensureWorktreeProjectMemory, removeProjectMemory } from './relocation';
-export { isSelfLearningEnabledForPath } from './setting';
+export { applyProjectMemory, removeProjectMemory } from './relocation';
 
 /** Whether the project learns from its sessions (its "Self-learning" switch; off unless set) */
 export function isSelfLearningEnabled(settings: { selfLearning?: boolean } | undefined): boolean {

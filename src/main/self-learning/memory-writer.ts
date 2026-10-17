@@ -11,6 +11,13 @@ import { mkdir, readFile, writeFile } from 'fs/promises';
 import path from 'path';
 import { getLearningDir, getMemoryIndexPath } from './paths';
 
+/**
+ * What the index says while it holds no memories. It is a comment, so it costs the session nothing,
+ * and it keeps the file present so the `@` import of it from CLAUDE.md always resolves.
+ */
+export const MEMORY_INDEX_STUB =
+  '<!-- Claude Code adds one line per memory here, and reads them at the start of every session. -->\n';
+
 /** A memory to write: the rule itself plus what the index line says about it */
 export interface MemoryDraft {
   /** kebab-case slug, used as the filename and the `name` field */
@@ -100,7 +107,8 @@ export async function writeMemories(projectPath: string, drafts: MemoryDraft[]):
     written.push(name);
   }
 
-  await writeFile(getMemoryIndexPath(projectPath), `${[...entries.values()].join('\n')}\n`, 'utf-8');
+  const index = entries.size === 0 ? MEMORY_INDEX_STUB : `${[...entries.values()].join('\n')}\n`;
+  await writeFile(getMemoryIndexPath(projectPath), index, 'utf-8');
   return written;
 }
 

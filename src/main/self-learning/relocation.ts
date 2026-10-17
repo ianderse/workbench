@@ -18,6 +18,8 @@ import path from 'path';
 import { promisify } from 'util';
 import { appLog } from '../app-logger';
 import { getIsolatedGitEnv } from '../utils/git-isolation';
+import { waitForMemoryIndexBuild } from './backfill';
+import { MEMORY_INDEX_STUB } from './memory-writer';
 import { getLearningDir, getMemoryIndexImportPath, getMemoryIndexPath, getStashedLearningDir } from './paths';
 import { SELF_LEARNING_RULE_FILE, SELF_LEARNING_RULE_FILENAME } from './nudge';
 
@@ -33,16 +35,18 @@ const LOCAL_SETTINGS_FILE = path.join('.claude', 'settings.local.json');
 const IMPORT_START = '<!-- workbench:project-memory:start -->';
 const IMPORT_END = '<!-- workbench:project-memory:end -->';
 
-/** Written when the index doesn't exist yet, so the import always resolves to a real file */
-const MEMORY_INDEX_STUB =
-  '<!-- Claude Code adds one line per memory here, and reads them at the start of every session. -->\n';
-
 const execFileAsync = promisify(execFile);
 
-/** Memory files in the directory, index first; empty when the directory is absent */
-async function listMemoryFiles(dir: string): Promise<string[]> {
+/**
+ * Everything the store holds: the memories, the index, and the build's own stats.
+ *
+ * `index.json` travels with the memories on purpose. Leaving it behind would make a project that
+ * already learned plenty look like it had never built an index, and switching the feature back on
+ * would scan every past session again for memories it already has.
+ */
+async function listStoreFiles(dir: string): Promise<string[]> {
   try {
-    return (await readdir(dir)).filter((name) => name.endsWith('.md'));
+    return (await readdir(dir)).filter((name) => name.endsWith('.md') || name === 'index.json');
   } catch {
     return [];
   }
@@ -94,7 +98,7 @@ function mergeIndexes(into: string, from: string): string {
  * replaced; duplicate guidance is something a later session folds together on its own.
  */
 async function moveMemories(from: string, to: string): Promise<number> {
-  const files = await listMemoryFiles(from);
+  const files = await listStoreFiles(from);
   if (files.length === 0) {
     await rm(from, { recursive: true, force: true });
     return 0;
@@ -110,6 +114,14 @@ async function moveMemories(from: string, to: string): Promise<number> {
     if (name === 'MEMORY.md') {
       const existing = (await readIfPresent(path.join(to, name))) ?? '';
       await writeFile(path.join(to, name), mergeIndexes(existing, content), 'utf-8');
+      continue;
+    }
+
+    // Stats describe one build; the side being restored keeps whichever it already has
+    if (name === 'index.json') {
+      if ((await readIfPresent(path.join(to, name))) === null) {
+        await writeFile(path.join(to, name), content, 'utf-8');
+      }
       continue;
     }
 
@@ -216,6 +228,13 @@ async function removeImport(projectPath: string): Promise<void> {
  * Safe to run again; it changes only what isn't already in place.
  */
 export async function applyProjectMemory(projectPath: string): Promise<void> {
+  // `.workbench` existing is what marks a project as initialized, so this never creates it
+  try {
+    await readdir(path.join(projectPath, '.workbench'));
+  } catch {
+    throw new Error('This project is not initialized yet, so it has nowhere to keep what it learns');
+  }
+
   const learningDir = getLearningDir(projectPath);
   await mkdir(learningDir, { recursive: true });
 
@@ -253,6 +272,9 @@ export async function removeProjectMemory(projectPath: string): Promise<void> {
   } catch (error) {
     appLog.warn('[SelfLearning] Could not remove the project rule or the memory import:', error);
   }
+
+  // A build writes into the learning directory, so let it finish before moving the directory away
+  await waitForMemoryIndexBuild(projectPath);
 
   // Nothing points at the learning directory any more, so set it aside rather than leave it orphaned:
   // switching the feature back on restores it. Committed memories stay put, since removing tracked

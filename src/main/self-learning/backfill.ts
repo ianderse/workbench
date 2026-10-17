@@ -27,6 +27,8 @@ const MAX_CHARS_TOTAL = 120_000;
 
 /** The model this runs on: the judgment is narrow and the input is long, so it runs cheap */
 const MODEL = 'haiku';
+/** Enough reasoning to tell a durable preference from a one-off instruction, and no more */
+const EFFORT = 'medium';
 
 /** One build per project at a time; a second request joins the first */
 const inFlight = new Map<string, Promise<SelfLearningIndexInfo>>();
@@ -100,6 +102,14 @@ export function isMemoryIndexBuilding(projectPath: string): boolean {
   return inFlight.has(path.resolve(projectPath));
 }
 
+/**
+ * Settle once no build is writing into the project's learning directory, so a caller that is about
+ * to move those files does not race one. A failed build is not this caller's problem.
+ */
+export async function waitForMemoryIndexBuild(projectPath: string): Promise<void> {
+  await inFlight.get(path.resolve(projectPath))?.catch(() => undefined);
+}
+
 async function run(projectPath: string, profileId?: string): Promise<SelfLearningIndexInfo> {
   const transcripts = await findProjectTranscripts(projectPath, { maxSessions: MAX_SESSIONS });
 
@@ -120,6 +130,7 @@ async function run(projectPath: string, profileId?: string): Promise<SelfLearnin
     const result = await runClaudeText({
       prompt: buildPrompt(sessions, []),
       model: MODEL,
+      effort: EFFORT,
       jsonSchema: schema as unknown as Record<string, unknown>,
       profileId,
       cwd: projectPath,

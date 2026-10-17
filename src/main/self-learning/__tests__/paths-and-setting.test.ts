@@ -11,6 +11,8 @@ let project: string;
 
 beforeEach(async () => {
   project = await mkdtemp(path.join(os.tmpdir(), 'wb-selflearning-paths-'));
+  // The switch only exists for an initialized project, which is what `.workbench` marks
+  await mkdir(path.join(project, '.workbench'), { recursive: true });
 });
 
 afterEach(async () => {

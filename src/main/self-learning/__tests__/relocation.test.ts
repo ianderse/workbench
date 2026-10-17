@@ -9,6 +9,7 @@ import { applyProjectMemory, ensureWorktreeProjectMemory, removeProjectMemory } 
 
 const execFileAsync = promisify(execFile);
 import { getLearningDir, getMemoryIndexPath, getStashedLearningDir } from '../paths';
+import { writeMemories } from '../memory-writer';
 import { SELF_LEARNING_RULE_FILENAME } from '../nudge';
 
 vi.mock('../../app-logger', () => ({
@@ -22,6 +23,8 @@ let project: string;
 
 beforeEach(async () => {
   project = await mkdtemp(path.join(os.tmpdir(), 'wb-selflearning-'));
+  // The switch only exists for an initialized project, which is what `.workbench` marks
+  await mkdir(path.join(project, '.workbench'), { recursive: true });
 });
 
 afterEach(async () => {
@@ -190,6 +193,42 @@ describe('switching off and on again', () => {
     // The user committed these deliberately: a settings toggle does not delete tracked files
     expect(existsSync(path.join(getLearningDir(project), 'tabs.md'))).toBe(true);
     expect(existsSync(getStashedLearningDir(project))).toBe(false);
+  });
+});
+
+describe('guards', () => {
+  it('refuses a project that is not initialized, rather than creating .workbench for it', async () => {
+    const bare = await mkdtemp(path.join(os.tmpdir(), 'wb-bare-'));
+    try {
+      // .workbench existing is what marks a project initialized, so creating it here would lie
+      await expect(applyProjectMemory(bare)).rejects.toThrow(/not initialized/);
+      expect(existsSync(path.join(bare, '.workbench'))).toBe(false);
+    } finally {
+      await rm(bare, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps the index present while it holds no memories, so the CLAUDE.md import resolves', async () => {
+    await applyProjectMemory(project);
+    await writeMemories(project, []);
+
+    const index = await readFile(getMemoryIndexPath(project), 'utf-8');
+    expect(index.trim().startsWith('<!--')).toBe(true);
+  });
+
+  it("carries the build's stats aside and back, so re-enabling is not a fresh start", async () => {
+    await applyProjectMemory(project);
+    await writeFile(path.join(getLearningDir(project), 'tabs.md'), 'Use tabs.\n');
+    const stats = path.join(getLearningDir(project), 'index.json');
+    await writeFile(stats, JSON.stringify({ memories: 1, sessionsScanned: 9, builtAt: '2026-10-18T00:00:00.000Z' }));
+
+    await removeProjectMemory(project);
+    expect(existsSync(path.join(getStashedLearningDir(project), 'index.json'))).toBe(true);
+
+    await applyProjectMemory(project);
+    // Without this the project looks unindexed and every past session gets scanned again
+    const restored = JSON.parse(await readFile(stats, 'utf-8')) as { sessionsScanned: number };
+    expect(restored.sessionsScanned).toBe(9);
   });
 });
 

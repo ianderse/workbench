@@ -41,7 +41,12 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
   const toggleSelfLearning = async (enabled: boolean) => {
     const next = { ...settings, selfLearning: enabled };
     setSettings(next);
-    await updateProjectSettings(projectId, next);
+    if (!(await updateProjectSettings(projectId, next))) {
+      // The relocation was refused, so the memory would not be read where it is written: show the
+      // switch as it really is rather than scanning past sessions into a store nothing points at
+      setSettings(settings);
+      return;
+    }
     if (enabled) await buildMemoryIndexIfEmpty(projectId);
   };
 

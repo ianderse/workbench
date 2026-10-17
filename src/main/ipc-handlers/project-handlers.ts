@@ -281,6 +281,10 @@ export function registerProjectHandlers(
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           appLog.error('[IPC] PROJECT_UPDATE_SETTINGS: self-learning setup failed:', error);
+          // Turning it on half way is worse than not turning it on: the nudge would ask sessions to
+          // save memories that nothing would read back. Turning it off half way is closer to off,
+          // so only this direction is reverted.
+          if (settings.selfLearning) projectStore.updateProjectSettings(projectId, { selfLearning: before });
           return { success: false, error: message };
         }
       }
