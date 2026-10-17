@@ -297,15 +297,6 @@
       "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context",
       "selfLearning": "Self-learning",
       "selfLearningDescription": "Let sessions save the preferences you state and load them in every later session",
-      "memoryIndex": "Memory index",
-      "memoryIndexNotEnabled": "Turn on self-learning to read what past sessions taught about this project",
-      "memoryIndexBuilding": "Reading past sessions for preferences you already stated",
-      "memoryIndexDescription": "{{memories}} memories from {{sessions}} past sessions, last built {{time}}",
-      "noMemoryIndex": "No memories yet from past sessions",
-      "buildMemoryIndex": "Build",
-      "rebuildMemoryIndex": "Rebuild",
-      "memoryIndexFailed": "Memory index failed",
-      "memoryIndexFailedUnknown": "The build stopped without a message",
       "useGraphify": "Use Graphify",
       "useGraphifyDescription": "Give agents the project's knowledge graph, built under Knowledge index above",
       "useGraphifyNotInstalled": "Install Graphify on the Updates page to use the project's knowledge graph"
@@ -498,7 +489,16 @@
       "memoryIndexNotEnabled": "Turn on Use Graphify in the Knowledge section to build a memory graph",
       "buildMemoryIndex": "Build",
       "rebuildMemoryIndex": "Rebuild",
-      "memoryIndexFailed": "Couldn't build the memory graph"
+      "memoryIndexFailed": "Couldn't build the memory graph",
+      "learningIndex": "Memory index",
+      "learningIndexNotEnabled": "Turn on Self-learning in the Knowledge section to read what past sessions taught",
+      "learningIndexBuilding": "Reading past sessions for preferences you already stated",
+      "learningIndexDescription": "{{memories}} memories · {{sessions}} sessions read · built {{time}}",
+      "noLearningIndex": "Read the project's past sessions for the preferences you already stated",
+      "buildLearningIndex": "Build",
+      "rebuildLearningIndex": "Rebuild",
+      "learningIndexFailed": "Couldn't read the past sessions",
+      "learningIndexFailedUnknown": "The build stopped without a message"
     },
     "mcp": {
       "serversTitle": "MCP servers",

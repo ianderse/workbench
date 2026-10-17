@@ -1,5 +1,6 @@
 import { RefreshCw, Download } from 'lucide-react';
 import { ProjectIndexRows } from '../context/ProjectIndex';
+import { LearningIndexRows } from '../context/LearningIndex';
 import { MemoryIndexRows } from '../context/MemoryIndex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
@@ -58,6 +59,7 @@ export function GeneralSettings({
           ) : (
             <>
               <ProjectIndexRows projectId={project.id} />
+              <LearningIndexRows projectId={project.id} />
               <MemoryIndexRows projectId={project.id} />
             </>
           )}
