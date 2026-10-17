@@ -13,7 +13,9 @@ import type {
   GitBranchDetail,
   ProjectCostMetrics
 } from '../../shared/types';
+import { appLog } from '../app-logger';
 import { projectStore } from '../project-store';
+import { applyProjectMemory, removeProjectMemory } from '../self-learning';
 import { getProjectCostMetrics } from '../project-metrics';
 import { migrateProjectDataDirs } from '../data-dir-migration';
 import {
@@ -263,11 +265,26 @@ export function registerProjectHandlers(
       projectId: string,
       settings: Partial<ProjectSettings>
     ): Promise<IPCResult> => {
+      const before = projectStore.getProject(projectId)?.settings.selfLearning === true;
       const project = projectStore.updateProjectSettings(projectId, settings);
-      if (project) {
-        return { success: true };
+      if (!project) return { success: false, error: 'Project not found' };
+
+      // Switching self-learning on or off relocates the project's Claude Code memory, so it takes
+      // effect outside the app too. A failure leaves the setting saved but says what went wrong.
+      if (settings.selfLearning !== undefined && settings.selfLearning !== before) {
+        try {
+          if (settings.selfLearning) {
+            await applyProjectMemory(project.path);
+          } else {
+            await removeProjectMemory(project.path);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          appLog.error('[IPC] PROJECT_UPDATE_SETTINGS: self-learning setup failed:', error);
+          return { success: false, error: message };
+        }
       }
-      return { success: false, error: 'Project not found' };
+      return { success: true };
     }
   );
 
