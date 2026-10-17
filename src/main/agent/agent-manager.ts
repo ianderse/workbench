@@ -19,6 +19,7 @@ import { createOrGetWorktree } from '../worktree';
 import { addToWorktree } from '../live-agent/project-setup';
 import { readSettingsFile } from '../settings-utils';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
+import { isSelfLearningEnabled, SELF_LEARNING_NUDGE } from '../self-learning';
 import { getAugmentedEnvAsync } from '../env-utils';
 import { getToolPath } from '../cli-tool-manager';
 import { getClaudeProfileManager } from '../claude-profile-manager';
@@ -387,6 +388,8 @@ export class AgentManager extends EventEmitter {
       ...(mode === 'revise' ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
       profileId: options.profileId,
     };
+
+    if (isSelfLearningEnabled(project.settings)) config.selfLearningPrompt = SELF_LEARNING_NUDGE;
 
     if (await isGraphifyEnabled(project.path)) {
       try {

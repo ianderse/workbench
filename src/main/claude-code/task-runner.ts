@@ -108,6 +108,8 @@ export interface TaskRunConfig {
   maxBudgetUsd?: number;
   /** Prompt section pointing Claude Code at the project's Graphify memory graph */
   graphifyPrompt?: string;
+  /** Tells the session to save what it learns, when the project's self-learning switch is on */
+  selfLearningPrompt?: string;
   /** The project's task changelog; each phase's prompt lists what the other tasks are changing */
   changelogPath?: string;
   /** Extra environment (e.g. GRAPHIFY_OUT, PATH with the graphify CLI) */
@@ -229,6 +231,7 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, paral
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
   if (config.graphifyPrompt) sections.push(config.graphifyPrompt);
+  if (config.selfLearningPrompt) sections.push(config.selfLearningPrompt);
   if (parallelTasksPrompt) sections.push(parallelTasksPrompt);
   return sections.join('\n\n');
 }
