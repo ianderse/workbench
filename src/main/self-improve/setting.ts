@@ -7,6 +7,11 @@
 import { readFile } from 'fs/promises';
 import path from 'path';
 
+/** Whether the project learns from its sessions (its "Self-improve" switch; off unless set) */
+export function isSelfImproveEnabled(settings: { selfImprove?: boolean } | undefined): boolean {
+  return settings?.selfImprove === true;
+}
+
 /** Whether the project at this path learns from its sessions; false when unreadable or unset */
 export async function isSelfImproveEnabledForPath(projectPath: string | undefined): Promise<boolean> {
   if (!projectPath) return false;

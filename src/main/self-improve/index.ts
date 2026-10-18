@@ -3,13 +3,12 @@
  *
  * Claude Code already saves typed notes from the user's corrections and loads them at the start of
  * every session; what it lacks is a reason to save one, and a location the whole project shares.
- * This module supplies both. See PLAN.md for the design and what was deliberately left out.
+ * This module supplies both.
+ *
+ * Importing this file reaches the app logger, and through it electron, so a caller that only needs
+ * to read the project's switch imports `./setting` directly instead.
  */
 
 export { SELF_IMPROVE_NUDGE } from './nudge';
 export { applyProjectMemory, removeProjectMemory } from './relocation';
-
-/** Whether the project learns from its sessions (its "Self-improve" switch; off unless set) */
-export function isSelfImproveEnabled(settings: { selfImprove?: boolean } | undefined): boolean {
-  return settings?.selfImprove === true;
-}
+export { isSelfImproveEnabled } from './setting';

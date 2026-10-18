@@ -22,7 +22,6 @@ import { join, resolve } from 'path';
 import { promisify } from 'util';
 
 import { getSpecsDir } from '../../shared/constants';
-import { ensureWorktreeProjectMemory } from '../self-improve/relocation';
 import { isSelfImproveEnabledForPath } from '../self-improve/setting';
 
 // ---------------------------------------------------------------------------
@@ -273,6 +272,9 @@ export async function createOrGetWorktree(
   // A worktree is its own checkout and .claude/settings.local.json isn't committed, so a session
   // started here would otherwise fall back to ~/.claude and split the project's memory in two
   if (await isSelfImproveEnabledForPath(projectPath)) {
+    // Imported here rather than at the top: this is the only use, and the module behind it reaches
+    // the app logger, which pulls electron into everything that imports worktree creation
+    const { ensureWorktreeProjectMemory } = await import('../self-improve/relocation');
     await ensureWorktreeProjectMemory(resolve(worktreePath), projectPath);
   }
 

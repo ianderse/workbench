@@ -3,8 +3,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { getCompengDir, getMemoryIndexImportPath, getMemoryIndexPath } from '../paths';
-import { isSelfImproveEnabledForPath } from '../setting';
-import { isSelfImproveEnabled } from '../index';
+import { isSelfImproveEnabled, isSelfImproveEnabledForPath } from '../setting';
 import { SELF_IMPROVE_NUDGE } from '../nudge';
 
 let project: string;
