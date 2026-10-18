@@ -1,11 +1,21 @@
+import { BEAM } from './agent-types'
+
 // ─── Visibility threshold ───────────────────────────────────────────────────
 
 /** Minimum opacity for an element to be considered visible (edges to fainter nodes aren't drawn) */
 export const MIN_VISIBLE_OPACITY = 0.05
 
-// ─── Agent spawn distance ───────────────────────────────────────────────────
+// ─── Node placement ─────────────────────────────────────────────────────────
 
-export const AGENT_SPAWN_DISTANCE = 250
+/**
+ * How far a node sits from its parent: close enough that the edge between them
+ * comes out exactly as long as the parent node is wide, and no longer. An edge
+ * runs from border to border with `BEAM.nodeGap` clear of each, so the distance
+ * is the parent's width plus what the two nodes take up.
+ */
+export function nodeDistance(parentRadius: number, nodeRadius: number): number {
+  return parentRadius * 2 + parentRadius + nodeRadius + BEAM.nodeGap * 2
+}
 
 // ─── Mock scenario buffer ──────────────────────────────────────────────────
 
@@ -60,8 +70,8 @@ export const CAMERA = {
 export const TOOL_SLOT = {
   /** Rings tried outward from the agent; if every slot is taken, the outermost ring's least crowded one is used */
   maxRings: 12,
-  baseDistance: 100,
-  ringIncrement: 35,
+  /** How much further out each ring past the first sits */
+  ringIncrement: 25,
   baseSteps: 5,
   stepsPerRing: 2,
   /** Minimum space between a tool circle and another tool or agent */

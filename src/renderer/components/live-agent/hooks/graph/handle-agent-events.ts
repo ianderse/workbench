@@ -1,5 +1,5 @@
-import type { Agent } from '../../lib/agent-types'
-import { AGENT_SPAWN_DISTANCE } from '../../lib/canvas-constants'
+import { NODE, type Agent } from '../../lib/agent-types'
+import { nodeDistance } from '../../lib/canvas-constants'
 import type { MutableEventState } from './process-event'
 import { asString, asBoolean } from './types'
 
@@ -62,8 +62,9 @@ export function handleAgentSpawn(
       angle = bestMid
     }
 
-    x = parent.x + Math.cos(angle) * AGENT_SPAWN_DISTANCE
-    y = parent.y + Math.sin(angle) * AGENT_SPAWN_DISTANCE
+    const distance = nodeDistance(parent.isMain ? NODE.radiusMain : NODE.radiusSub, NODE.radiusSub)
+    x = parent.x + Math.cos(angle) * distance
+    y = parent.y + Math.sin(angle) * distance
   }
 
   const agent: Agent = {

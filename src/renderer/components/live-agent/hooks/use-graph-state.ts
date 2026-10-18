@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { NODE, type Agent, type ToolCallNode, type GraphEvent } from '../lib/agent-types'
 import { MOCK_SCENARIO } from '../lib/mock-scenario'
-import { TOOL_SLOT, ANIM_SPEED, AGENT_DRAW, estimateToolNodeRadius } from '../lib/canvas-constants'
+import { TOOL_SLOT, ANIM_SPEED, AGENT_DRAW, estimateToolNodeRadius, nodeDistance } from '../lib/canvas-constants'
 
 import type { GraphState, UseGraphStateOptions } from './graph/types'
 import { createEmptyState } from './graph/types'
@@ -70,11 +70,13 @@ export function useGraphState(options: UseGraphStateOptions) {
     }
 
     // Try slots on rings sweeping outward from the agent, away from its parent;
-    // if every one is taken, use the outermost ring's slot that clashes least
+    // the first sits where the edge to it is as long as the agent is wide. If
+    // every slot is taken, use the outermost ring's slot that clashes least
+    const nearest = nodeDistance(agent.isMain ? NODE.radiusMain : NODE.radiusSub, radius)
     let best: { x: number; y: number } | undefined
     let bestClashes = Infinity
     for (let ring = 1; ring <= TOOL_SLOT.maxRings; ring++) {
-      const dist = TOOL_SLOT.baseDistance + ring * TOOL_SLOT.ringIncrement
+      const dist = nearest + (ring - 1) * TOOL_SLOT.ringIncrement
       const steps = TOOL_SLOT.baseSteps + ring * TOOL_SLOT.stepsPerRing
       for (let i = 0; i < steps; i++) {
         const sweep = (i / (steps - 1) - 0.5) * Math.PI
