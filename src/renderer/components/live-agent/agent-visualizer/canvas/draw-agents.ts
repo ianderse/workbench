@@ -5,6 +5,7 @@ import { AGENT_DRAW } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
 import { CLAUDE_SPARK_D } from './draw-misc'
 import { drawFace, type FaceState } from './draw-face'
+import { drawNotes } from './draw-notes'
 import { getAgentGlowSprite } from './render-cache'
 import { AGENTS_ICON_PATH } from '../../../icons/app-icons'
 import { drawJellyShape, applyJellyStretch, shapeInradius, type NodeMotion } from '../../lib/jelly'
@@ -121,10 +122,11 @@ function drawStateRing(
   ctx.lineDashOffset = 0
 }
 
-/** A sub-agent's icon: a lock while it waits for permission, else the Agents icon
- *  (the main agent shows its face, see drawFace) */
+/** A sub-agent's icon: a lock while it waits for permission, the Claude spark
+ *  for a background session the user started, else the Agents icon (the main
+ *  agent shows its face instead, see drawFace) */
 function drawCenterIcon(
-  ctx: CanvasRenderingContext2D, motion: NodeMotion, r: number, color: string, isWaiting: boolean,
+  ctx: CanvasRenderingContext2D, motion: NodeMotion, r: number, color: string, isWaiting: boolean, isSatellite: boolean,
 ) {
   if (isWaiting) {
     // Geometric lock icon — fits the holographic style
@@ -142,6 +144,8 @@ function drawCenterIcon(
     ctx.arc(motion.x, motion.y - s * 0.15, s * 0.4, Math.PI, 0)
     ctx.stroke()
     ctx.restore()
+  } else if (isSatellite) {
+    drawClaudeSpark(ctx, motion.x, motion.y, r, color)
   } else {
     drawAgentsIcon(ctx, motion.x, motion.y, r, color)
   }
@@ -192,19 +196,20 @@ export function drawAgents(
     ctx.save()
     applyJellyStretch(ctx, motion)
     if (agent.isMain) {
-      // Eyes while it works; the Claude spark (fading in as they close) while it doesn't
-      const spark = drawFace(ctx, faces, agent, state, awaiting.has(agent.id), agents, toolCalls, motion.x, motion.y, r, color, time)
-      if (spark > 0.01) {
-        ctx.save()
-        ctx.globalAlpha *= spark
-        drawClaudeSpark(ctx, motion.x, motion.y, r, color)
-        ctx.restore()
-      }
+      // The main agent always has its face on: at work, or bored and whistling
+      drawFace(ctx, faces, agent, state, awaiting.has(agent.id), agents, toolCalls, motion.x, motion.y, r, color, time)
     } else {
-      drawCenterIcon(ctx, motion, r, color, isWaiting)
+      drawCenterIcon(ctx, motion, r, color, isWaiting, agent.isSatellite === true)
     }
     ctx.restore()
 
     ctx.restore()
+  }
+
+  // The whistled notes are in the air, not in the body: drawn over every node,
+  // outside its clip and its squash, and still drifting off after it stopped
+  for (const agent of agents.values()) {
+    const face = faces.get(agent.id)
+    if (face && face.notes.length > 0) drawNotes(ctx, face.notes, agent.opacity)
   }
 }

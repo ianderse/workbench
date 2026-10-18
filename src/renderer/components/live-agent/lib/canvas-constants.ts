@@ -125,9 +125,8 @@ export const FACE = {
   gazeShiftX: 0.14,
   gazeShiftY: 0.1,
   gazePerspective: 0.08,
-  /** Easing rates (per second): the pose between expressions, opening/closing, an expression's motion */
+  /** Easing rates (per second): the pose between expressions, an expression's motion */
   poseEase: 10,
-  openSpeed: 7,
   motionEase: 5,
   /** Seconds between blinks (at least blinkMinGap, plus up to blinkJitter) */
   blinkMinGap: 2.4,
@@ -135,10 +134,102 @@ export const FACE = {
   blinkDuration: 0.16,
   doubleBlinkGap: 0.24,
   doubleBlinkChance: 0.25,
-  /** Seconds the face laughs after a turn ends, before resting */
+  /** Seconds the face laughs after a turn ends, before it has nothing to do */
   happyDuration: 2.2,
+  /** The resting cycle, with nothing to do: it looks about for lookDuration,
+   *  sulks for the rest of boredDuration, then whistles for as long again,
+   *  and around it goes (all in seconds) */
+  lookDuration: 5,
+  boredDuration: 30,
+  /** How long the bored lids take to sink before it catches itself (seconds) */
+  sagCycle: 7,
+  /** How far aside the bored gaze parks, and how far down it sits: it holds
+   *  there, looking for something interesting, and only moves on over a blink */
+  boredLookX: 0.85,
+  boredGazeY: 0.06,
+  /** The bored eye: wider and shorter, and (at boredShape 1) the lid flat
+   *  across the top with the eye rounded off underneath. How fast it takes
+   *  that shape, per second. */
+  boredShapeSpeed: 5,
+  /** The eyes closing into happy arcs as it whistles, and snapping back open
+   *  when it is caught at it (per second) */
+  squintSpeed: 6,
+  squintOpenSpeed: 16,
+  /** Caught whistling: the eyes snap open over startleOpen, stay open while
+   *  it takes in who wants it now, and only then does it get on with the work
+   *  (seconds) */
+  startleOpen: 0.26,
+  startleDuration: 0.62,
+  /** Closed happy eyes: an upward arc, as wide as an eye and bowed this far up,
+   *  stroked this thick */
+  arcWidth: 0.34,
+  arcLift: 0.11,
+  arcWeight: 0.07,
+  /** Which side it whistles its first blow out of (-1 left): the side the
+   *  mouth puckers to, with the eye above it squeezed narrower. It swaps over
+   *  on every breath, so the mouth works its way from one corner to the other
+   *  and back (see FaceState.whistleSide) */
+  whistleSide: -1,
+  /** The pucker it whistles through: it is there for a whole blow (the eyes
+   *  are shut with it), puckering up `blowLead` seconds before the blow's
+   *  first note (eased in at blowEase, per second) and going the instant its
+   *  last one is out, and opening a touch as each note comes out of it
+   *  (blowRise and blowFall, in seconds) */
+  mouthX: 0.21,
+  mouthY: 0.4,
+  mouthRadius: 0.08,
+  blowLead: 0.2,
+  blowEase: 9,
+  blowRise: 0.08,
+  blowFall: 0.22,
+  /** How fast the whistling head bobs along, and how far */
+  whistleBobSpeed: 4.4,
+  whistleBobAmp: 0.028,
   /** Eye glow blur (pixels) */
   glowBlur: 8,
+} as const
+
+// ─── Whistled notes ─────────────────────────────────────────────────────────
+// The sheet music the bored main agent whistles (see canvas/draw-notes.ts).
+// Notes come in short phrases, none of them the same, so the tune never repeats
+
+export const WHISTLE = {
+  /** Notes in one blow: never fewer than phraseMin, up to phraseMin +
+   *  phraseRange (the pucker holds until the blow's last note is out) */
+  phraseMin: 3,
+  phraseRange: 4,
+  /** Seconds between two notes of a blow, and between blows (plus jitter) */
+  noteGap: 0.26,
+  noteGapJitter: 0.22,
+  phraseGap: 0.9,
+  phraseGapJitter: 1.5,
+  /** Notes in the air at once (the oldest gives way) */
+  maxNotes: 14,
+  /** Half a note's height, in node radii */
+  size: 0.13,
+  sizeJitter: 0.06,
+  /** How far along the mouth a note can come out (node radii) */
+  mouthSpread: 0.12,
+  /** How fast it floats away and drifts aside (world units per second) */
+  riseSpeed: 24,
+  riseJitter: 14,
+  driftSpeed: 16,
+  driftJitter: 20,
+  /** Its sideways swing on the way up (world units) and how fast it swings */
+  sway: 2.5,
+  swayJitter: 3,
+  swaySpeed: 2.2,
+  /** Where it starts tilted (radians) and how fast it turns on the way */
+  tilt: 0.3,
+  spin: 0.5,
+  /** Seconds it stays in the air, and the fades at either end */
+  life: 1.9,
+  lifeJitter: 0.9,
+  fadeIn: 0.18,
+  fadeOut: 0.7,
+  alpha: 0.9,
+  /** Note glow blur (pixels) */
+  glowBlur: 6,
 } as const
 
 // ─── Tool node drawing constants ────────────────────────────────────────────
