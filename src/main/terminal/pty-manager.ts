@@ -15,6 +15,7 @@ import { readSettingsFile } from '../settings-utils';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import type { SupportedTerminal } from '../../shared/types/settings';
 import { withClaudeConfigDir } from '../claude-profile/config-dir-paths';
+import { noteTerminalWrite } from '../live-agent/terminal-activity';
 
 // Windows shell paths are now imported from the platform module via getWindowsShellPaths()
 
@@ -377,6 +378,8 @@ export function writeToPty(terminal: TerminalProcess, data: string): void {
     debugError('[PtyManager:writeToPty] Skipping write to exited terminal:', terminal.id);
     return;
   }
+  // Live agent tells which window a Claude Code session belongs to by which one was last used
+  noteTerminalWrite(terminal.id);
 
   // Get the previous write Promise for this terminal (if any)
   const previousWrite = pendingWrites.get(terminal.id) || Promise.resolve();

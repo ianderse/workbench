@@ -323,7 +323,7 @@ export function useRelay(cwd: string, projectPath: string, terminalId: string): 
           break
       }
     })
-    void window.electronAPI.subscribeLiveAgent(clientId, cwd, projectPath)
+    void window.electronAPI.subscribeLiveAgent(clientId, cwd, projectPath, terminalId)
 
     return () => {
       removeListener()

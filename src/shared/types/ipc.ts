@@ -487,7 +487,7 @@ export interface ElectronAPI {
   getLiveAgentStatus: () => Promise<IPCResult<import('./live-agent').LiveAgentStatus>>;
   getLiveAgentProject: (projectPath: string) => Promise<IPCResult<boolean>>;
   setLiveAgentProject: (projectPath: string, enabled: boolean) => Promise<IPCResult<{ hooksError?: string }>>;
-  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string) => Promise<IPCResult>;
+  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string, terminalId: string) => Promise<IPCResult>;
   unsubscribeLiveAgent: (clientId: string) => Promise<IPCResult>;
   onLiveAgentStatus: (callback: (status: import('./live-agent').LiveAgentStatus) => void) => () => void;
   onLiveAgentMessage: (callback: (clientId: string, data: string) => void) => () => void;

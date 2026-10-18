@@ -14,8 +14,9 @@ export interface LiveAgentAPI {
   getLiveAgentProject: (projectPath: string) => Promise<IPCResult<boolean>>;
   /** Switch Live agent on (create the flow directory, set up the hooks) or off for a project */
   setLiveAgentProject: (projectPath: string, enabled: boolean) => Promise<IPCResult<{ hooksError?: string }>>;
-  /** Show a graph (clientId, made by the renderer) the Claude Code sessions run in cwd, in the project */
-  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string) => Promise<IPCResult>;
+  /** Show a graph (clientId, made by the renderer) the Claude Code sessions run in cwd, in the
+   *  project; terminalId is the agent window the graph belongs to */
+  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string, terminalId: string) => Promise<IPCResult>;
   unsubscribeLiveAgent: (clientId: string) => Promise<IPCResult>;
   /** The relay started, stopped or failed */
   onLiveAgentStatus: (callback: (status: LiveAgentStatus) => void) => IpcListenerCleanup;
@@ -28,8 +29,8 @@ export const createLiveAgentAPI = (): LiveAgentAPI => ({
   getLiveAgentProject: (projectPath: string) => invokeIpc(IPC_CHANNELS.LIVE_AGENT_GET_PROJECT, projectPath),
   setLiveAgentProject: (projectPath: string, enabled: boolean) =>
     invokeIpc(IPC_CHANNELS.LIVE_AGENT_SET_PROJECT, projectPath, enabled),
-  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string) =>
-    invokeIpc(IPC_CHANNELS.LIVE_AGENT_SUBSCRIBE, clientId, cwd, projectPath),
+  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string, terminalId: string) =>
+    invokeIpc(IPC_CHANNELS.LIVE_AGENT_SUBSCRIBE, clientId, cwd, projectPath, terminalId),
   unsubscribeLiveAgent: (clientId: string) => invokeIpc(IPC_CHANNELS.LIVE_AGENT_UNSUBSCRIBE, clientId),
   onLiveAgentStatus: (callback: (status: LiveAgentStatus) => void) =>
     createIpcListener(IPC_CHANNELS.LIVE_AGENT_STATUS, callback),
