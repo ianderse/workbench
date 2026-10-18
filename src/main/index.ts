@@ -8,7 +8,6 @@ const require = createRequire(import.meta.url);
 globalThis.require = require;
 
 // Load .env file FIRST before any other imports that might use process.env
-import { config } from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
@@ -26,8 +25,7 @@ const possibleEnvPaths = [
 
 for (const envPath of possibleEnvPaths) {
   if (existsSync(envPath)) {
-    config({ path: envPath, quiet: true });
-    console.log(`[dotenv] Loaded environment from: ${envPath}`);
+    process.loadEnvFile(envPath);
     break;
   }
 }

@@ -4,7 +4,7 @@ import type { ConflictSeverity } from '../../../shared/types/task';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, PullRequestState, Project, Task } from '../../../shared/types';
 import path from 'path';
-import { minimatch } from 'minimatch';
+import { matchesExtensionGlob } from '../../utils/glob-markers';
 import { existsSync, readdirSync, statSync, readFileSync, promises as fsPromises } from 'fs';
 import { execFileSync, execFile } from 'child_process';
 import { projectStore } from '../../project-store';
@@ -65,7 +65,7 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
     // This covers multiple ecosystems: JS/TS, Python, Rust, Go, Java, C#, etc.
     //
     // Markers are separated into exact matches and glob patterns for efficiency.
-    // Exact matches use existsSync() directly, while glob patterns use minimatch
+    // Exact matches use existsSync() directly, while glob patterns are matched
     // against a cached directory listing.
     const EXACT_MARKERS = [
       // JavaScript/TypeScript ecosystem
@@ -126,8 +126,7 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
           }
         }
 
-        // Use minimatch for proper glob pattern matching
-        return directoryFiles.some(file => minimatch(file, pattern, { nocase: true }));
+        return directoryFiles.some(file => matchesExtensionGlob(file, pattern));
       });
 
       if (!hasGlobMatch) {

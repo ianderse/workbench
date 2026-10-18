@@ -1,17 +1,18 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 import { createCipheriv, randomBytes } from 'crypto';
-import { config as dotenvConfig } from 'dotenv';
 
 // Load .env file for build-time constants (embedded API keys)
-dotenvConfig({ path: resolve(__dirname, '.env') });
+const buildEnvPath = resolve(__dirname, '.env');
+if (existsSync(buildEnvPath)) process.loadEnvFile(buildEnvPath);
 
 /**
  * Build-time constants embedded via Vite `define`.
  *
  * In CI builds, these come from GitHub secrets.
- * In local development, these come from .env (loaded by dotenv).
+ * In local development, these come from .env (loaded above).
  *
  * The `define` option replaces these values at build time, so they're
  * embedded in the bundle and available at runtime in packaged apps.
@@ -47,7 +48,6 @@ export default defineConfig({
       // Bundle these packages into the main process (they won't be in node_modules in packaged app)
       exclude: [
         'chokidar',
-        'dotenv',
         'electron-log',
         'proper-lockfile',
         'semver',
@@ -58,8 +58,6 @@ export default defineConfig({
         // debug -> ms (used by bundled dependencies)
         'debug',
         'ms',
-        // Minimatch for glob pattern matching in worktree handlers
-        'minimatch',
         // XState for task state machine
         'xstate',
       ]
