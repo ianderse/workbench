@@ -1,13 +1,14 @@
-import { z } from 'zod';
-
-const TaskEventSchema = z.object({
-  type: z.string(),
-  taskId: z.string(),
-  specId: z.string(),
-  projectId: z.string(),
-  timestamp: z.string(),
-  eventId: z.string(),
-  sequence: z.number().int().min(0)
-}).passthrough();
-
-export type TaskEventPayload = z.infer<typeof TaskEventSchema>;
+/**
+ * Shape of a `task-event` payload: the fields every event carries, plus whatever
+ * the emitting phase adds on top.
+ */
+export interface TaskEventPayload {
+  type: string;
+  taskId: string;
+  specId: string;
+  projectId: string;
+  timestamp: string;
+  eventId: string;
+  sequence: number;
+  [key: string]: unknown;
+}

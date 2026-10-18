@@ -51,7 +51,6 @@ export default defineConfig({
         'electron-log',
         'proper-lockfile',
         'semver',
-        'zod',
         '@anthropic-ai/sdk',
         'electron-updater',
         '@electron-toolkit/utils',
