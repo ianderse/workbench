@@ -21,7 +21,7 @@ export const COLORS = {
   waiting_permission: '#A855F7',
 
   // Tool nodes: a finished call, a running one
-  return: '#00C950',
+  return: '#0088FF',
   tool: '#FCA935',
 } as const
 
