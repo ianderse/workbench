@@ -5,7 +5,7 @@ import {
   RefreshCw,
   PanelLeft
 } from 'lucide-react';
-import { AgentsIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
+import { AgentNodeIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
 import { useMemoryGraphStore } from '../stores/memory-graph-store';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -54,7 +54,7 @@ interface NavItem {
 // Main nav items
 const navItems: NavItem[] = [
   { id: 'kanban', labelKey: 'navigation:items.kanban', icon: KanbanIcon },
-  { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentsIcon },
+  { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentNodeIcon },
   { id: 'insights', labelKey: 'navigation:items.insights', icon: InsightsIcon },
   // Only shown when the project has a memory graph (.workbench/knowledge)
   { id: 'memory', labelKey: 'navigation:items.memory', icon: GraphIcon },
