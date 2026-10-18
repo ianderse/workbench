@@ -2,7 +2,7 @@ import { ToolCallNode } from '../../lib/agent-types'
 import { COLORS, getToolColor } from '../../lib/colors'
 import { TOOL_DRAW } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
-import { drawJellyShape, applyJellyStretch, type NodeMotion } from '../../lib/jelly'
+import { drawJellyShape, type NodeMotion } from '../../lib/jelly'
 import { clipOutsideAttached } from './node-motion'
 
 const NAME_FONT = `${TOOL_DRAW.fontSize}px monospace`
@@ -42,19 +42,18 @@ export function drawToolCalls(
 
     ctx.shadowBlur = 0
 
-    // Pulse while running: rings expanding outward from the edge, fading as they grow
+    // Pulse while running: rings expanding outward from the edge, fading as
+    // they grow. Each ring is the node's own border again, further out: the
+    // same jelly, so a ring is the shape it came off rather than a circle
     if (isRunning) {
-      ctx.save()
-      applyJellyStretch(ctx, motion)
       for (let i = 0; i < 2; i++) {
         const phase = (time * TOOL_DRAW.rippleSpeed + i * 0.5) % 1
-        ctx.beginPath()
-        ctx.arc(motion.x, motion.y, r + TOOL_DRAW.rippleInnerOffset + phase * TOOL_DRAW.rippleMaxExpand, 0, Math.PI * 2)
+        const ringR = r + TOOL_DRAW.rippleInnerOffset + phase * TOOL_DRAW.rippleMaxExpand
+        drawJellyShape(ctx, motion.x, motion.y, ringR, 0, 0, motion, time)
         ctx.strokeStyle = getToolColor(tool.state) + alphaHex((1 - phase) * TOOL_DRAW.rippleMaxAlpha)
         ctx.lineWidth = 1.5 * (1 - phase)
         ctx.stroke()
       }
-      ctx.restore()
     }
 
     // The name rides along with the node, but isn't squashed with it
