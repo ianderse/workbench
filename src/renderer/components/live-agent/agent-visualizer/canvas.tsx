@@ -11,6 +11,7 @@ import {
   drawEdges,
   drawToolCalls,
   detectStateChanges as detectStateChangesPure,
+  createJellyField, resetJellyField, updateJelly,
 } from './canvas/index'
 import { useCanvasCamera } from '../hooks/use-canvas-camera'
 import type { FaceState } from './canvas/draw-face'
@@ -45,6 +46,10 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
 
   /** The main agent's face animation (eyes, blinks), kept between frames */
   const facesRef = useRef<Map<string, FaceState>>(new Map())
+
+  /** The nodes' jelly: where each one is on its way out of or back into its
+   *  parent, and the dents they are ringing from (see canvas/node-motion.ts) */
+  const jellyRef = useRef(createJellyField())
 
   // Effects system
   const effectsRef = useRef<VisualEffect[]>([])
@@ -174,6 +179,7 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
         drawnViewKeyRef.current = viewKeyRef.current
         effectsRef.current.length = 0
         facesRef.current.clear()
+        resetJellyField(jellyRef.current)
         quietRef.current = true
         resetPlacement()
       }
@@ -187,6 +193,9 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
 
       // Detect state changes → visual effects
       detectStateChanges(awaiting)
+
+      // Advance the jelly: where every node is drawn this frame
+      const motions = updateJelly(jellyRef.current, agents, toolCalls, awaiting, timeRef.current, deltaTime)
 
       // Update effects (mutate in place to avoid GC pressure)
       {
@@ -219,9 +228,9 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       ctx.translate(transform.x, transform.y)
       ctx.scale(transform.scale, transform.scale)
 
-      drawEdges(ctx, edges, agents, toolCalls, awaiting, deltaTime)
-      drawToolCalls(ctx, toolCalls, timeRef.current)
-      drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, timeRef.current)
+      drawEdges(ctx, edges, agents, toolCalls, awaiting, motions, deltaTime)
+      drawToolCalls(ctx, toolCalls, motions, timeRef.current)
+      drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, motions, timeRef.current)
       drawEffects(ctx, effectsRef.current)
 
       ctx.restore()

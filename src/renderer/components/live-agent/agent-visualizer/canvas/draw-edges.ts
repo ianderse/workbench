@@ -1,7 +1,8 @@
-import { Agent, ToolCallNode, Edge, BEAM, NODE } from '../../lib/agent-types'
+import { Agent, ToolCallNode, Edge, BEAM } from '../../lib/agent-types'
 import { getStateColor, getToolColor } from '../../lib/colors'
 import { alphaHex } from '../../lib/utils'
-import { MIN_VISIBLE_OPACITY, estimateToolNodeRadius } from '../../lib/canvas-constants'
+import { MIN_VISIBLE_OPACITY } from '../../lib/canvas-constants'
+import { restingMotion, type NodeMotion } from '../../lib/jelly'
 import { displayedState } from '../../hooks/graph/types'
 
 const DASH = [...BEAM.dash]
@@ -51,12 +52,9 @@ function exitParam(r: number, fromEnd: boolean, p0: Point, p1: Point, p2: Point,
   return outside
 }
 
-/** Radius an edge stops short of: the node's own size plus a small gap */
-function nodeClearance(node: Agent | ToolCallNode, isTool: boolean): number {
-  const r = isTool
-    ? estimateToolNodeRadius((node as ToolCallNode).toolName)
-    : (node as Agent).isMain ? NODE.radiusMain : NODE.radiusSub
-  return r + BEAM.nodeGap
+/** Radius an edge stops short of: the node's drawn size plus a small gap */
+function nodeClearance(motion: NodeMotion): number {
+  return motion.radius * motion.scale + BEAM.nodeGap
 }
 
 /** Bezier control points for an edge: a gentle curve to one side */
@@ -78,8 +76,10 @@ function computeControlPoints(fromX: number, fromY: number, toX: number, toY: nu
  * finished) the dashes flow toward it; once it has answered they flow back to
  * the agent until the target fades out. An edge always has the current color
  * of the node its dashes flow from. Agents waiting on their own sub-agents are
- * still working (`awaiting`, see displayedState). `deltaTime` (seconds since
- * the last frame) moves the dashes.
+ * still working (`awaiting`, see displayedState). An edge runs between the
+ * nodes where the jelly has them (`motions`, see node-motion.ts), so it keeps
+ * hold of a node budding out of its parent or merging back into it.
+ * `deltaTime` (seconds since the last frame) moves the dashes.
  */
 export function drawEdges(
   ctx: CanvasRenderingContext2D,
@@ -87,6 +87,7 @@ export function drawEdges(
   agents: Map<string, Agent>,
   toolCalls: Map<string, ToolCallNode>,
   awaiting: Set<string>,
+  motions: Map<string, NodeMotion>,
   deltaTime: number,
 ) {
   for (const edge of edges) {
@@ -96,14 +97,17 @@ export function drawEdges(
     const target = isTool ? toolCalls.get(edge.to) : agents.get(edge.to)
     if (!target || target.opacity < MIN_VISIBLE_OPACITY) continue
 
-    const cp = computeControlPoints(from.x, from.y, target.x, target.y)
+    const fromMotion = motions.get(edge.from) ?? restingMotion(from.x, from.y)
+    const toMotion = motions.get(edge.to) ?? restingMotion(target.x, target.y)
+
+    const cp = computeControlPoints(fromMotion.x, fromMotion.y, toMotion.x, toMotion.y)
     if (!cp) continue
 
     // Only the part between the two nodes: it starts and ends at their borders
-    const p0 = { x: from.x, y: from.y }, p1 = { x: cp.cp1x, y: cp.cp1y }
-    const p2 = { x: cp.cp2x, y: cp.cp2y }, p3 = { x: target.x, y: target.y }
-    const t0 = exitParam(nodeClearance(from, false), false, p0, p1, p2, p3)
-    const t1 = exitParam(nodeClearance(target, isTool), true, p0, p1, p2, p3)
+    const p0 = { x: fromMotion.x, y: fromMotion.y }, p1 = { x: cp.cp1x, y: cp.cp1y }
+    const p2 = { x: cp.cp2x, y: cp.cp2y }, p3 = { x: toMotion.x, y: toMotion.y }
+    const t0 = exitParam(nodeClearance(fromMotion), false, p0, p1, p2, p3)
+    const t1 = exitParam(nodeClearance(toMotion), true, p0, p1, p2, p3)
     if (t1 <= t0) continue // the nodes overlap: nothing in between to draw
     const [s0, s1, s2, s3] = bezierSegment(t0, t1, p0, p1, p2, p3)
 

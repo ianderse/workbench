@@ -15,7 +15,8 @@ interface AnimateOptions {
 }
 
 /** A finished sub-agent whose answer has been shown flowing back to its
- *  parent, and that isn't waiting on sub-agents of its own (they'd lose their parent) */
+ *  parent, and that isn't waiting on sub-agents of its own (they'd lose their
+ *  parent): it is fading out and, with it, merging back into the parent */
 function isFadingOut(agent: Agent, time: number, awaiting: Set<string>): boolean {
   return agent.state === 'complete' && !agent.isMain && !awaiting.has(agent.id)
     && time - (agent.completeTime ?? 0) >= ANSWER_HOLD_S
@@ -34,20 +35,19 @@ function animateAgents(agents: GraphState['agents'], deltaTime: number, newTime:
   for (const [id, agent] of agents) {
     let updated = false
     let opacity = agent.opacity
-    let scale = agent.scale
 
     // A finished sub-agent holds while its answer flows back to the parent,
-    // then fades out; everything else, and a finished sub-agent during
-    // its hold (it may finish before it has faded in), fades and scales in fully
+    // then fades out as it is drawn back into it; everything else, and a
+    // finished sub-agent during its hold (it may finish before it has faded
+    // in), fades in fully
     if (isFadingOut(agent, newTime, awaiting)) {
       if (opacity > 0) { opacity = Math.max(0, opacity - deltaTime * ANIM_SPEED.agentFadeOut); updated = true }
     } else {
       if (opacity < 1) { opacity = Math.min(1, opacity + deltaTime * ANIM_SPEED.agentFadeIn); updated = true }
-      if (scale < 1) { scale = Math.min(1, scale + deltaTime * ANIM_SPEED.agentScaleIn); updated = true }
     }
     if (updated) {
       if (newAgents === agents) newAgents = new Map(agents)
-      newAgents.set(id, { ...agent, opacity, scale })
+      newAgents.set(id, { ...agent, opacity })
     }
   }
   return newAgents

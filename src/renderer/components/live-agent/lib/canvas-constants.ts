@@ -25,17 +25,22 @@ export const MOCK_END_BUFFER_S = 8
 // The rates are per second (multiplied by deltaTime); the rest cap, default or
 // gate the frame time
 
+/**
+ * Seconds a node takes to come out of its parent, and to merge back into it.
+ * Its fade is what carries it (see JELLY.merge), so every node fades in and out
+ * over this same stretch and the two moves are each other's mirror.
+ */
+export const MERGE_S = 0.56
+
 export const ANIM_SPEED = {
-  /** Agent fade-in (opacity per dt) */
-  agentFadeIn: 3,
-  /** Agent scale-in (scale per dt) */
-  agentScaleIn: 4,
-  /** Agent fade-out after complete (opacity per dt) */
-  agentFadeOut: 3,
-  /** Tool fade-in (opacity per dt) */
-  toolFadeIn: 4,
-  /** Tool fade-out after it has finished (opacity per dt) */
-  toolFadeOut: 3,
+  /** Agent fade-in, as it comes out of its parent (opacity per dt) */
+  agentFadeIn: 1 / MERGE_S,
+  /** Agent fade-out after complete, as it merges back into its parent (opacity per dt) */
+  agentFadeOut: 1 / MERGE_S,
+  /** Tool fade-in, as it comes out of its agent (opacity per dt) */
+  toolFadeIn: 1 / MERGE_S,
+  /** Tool fade-out after it has finished, as it merges back into its agent (opacity per dt) */
+  toolFadeOut: 1 / MERGE_S,
   /** Default delta time cap (seconds) */
   maxDeltaTime: 0.1,
   /** Default delta time when time info unavailable */
@@ -155,15 +160,17 @@ export const TOOL_DRAW = {
   rippleSpeed: 0.65,
 } as const
 
-/** Radius of a tool circle that fully contains its name, given its measured width */
-export function toolNodeRadius(nameWidth: number): number {
+/** Radius of a tool circle that fully contains its name, given its width */
+function toolNodeRadius(nameWidth: number): number {
   return Math.max(TOOL_DRAW.minRadius, Math.ceil(Math.hypot(nameWidth / 2, TOOL_DRAW.fontSize / 2)) + TOOL_DRAW.padding)
 }
 
-/** Monospace glyphs are ~0.6em wide. Used where no canvas context is available. */
+/** Monospace glyphs are ~0.6em wide: the tool circles are sized from that
+ *  rather than measured, so their layout, their edges and the shapes clipped
+ *  out of them (see lib/jelly.ts) all agree. */
 const MONO_CHAR_W = 0.6
 
-/** Estimate a tool circle's radius without a canvas (layout, auto-fit and edge trimming). */
+/** A tool circle's radius, from its name alone. */
 export function estimateToolNodeRadius(toolName: string): number {
   return toolNodeRadius(toolName.length * TOOL_DRAW.fontSize * MONO_CHAR_W)
 }

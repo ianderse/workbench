@@ -30,10 +30,12 @@ export function detectStateChanges(
     newAgentStates.set(id, state)
     const oldState = prevAgentStates.get(id)
 
-    // Spawn: new agent (wasn't in prev)
+    // Spawn: new agent (wasn't in prev). It bursts at the parent it is pushed
+    // out of, where the node itself still is (see lib/jelly.ts)
     if (!oldState && agent.opacity < 0.5) {
+      const parent = agent.parentId ? agents.get(agent.parentId) : undefined
       effects.push({
-        type: 'spawn', x: agent.x, y: agent.y,
+        type: 'spawn', x: parent?.x ?? agent.x, y: parent?.y ?? agent.y,
         color: COLORS.holoBase, age: 0, duration: FX.spawnDuration,
       })
     }

@@ -18,7 +18,6 @@ export interface Agent {
    *  agent is waiting for it; each prompt sets it) */
   waitingToolId?: string
   opacity: number
-  scale: number
 }
 
 export interface ToolCallNode {
