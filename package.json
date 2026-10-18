@@ -85,7 +85,6 @@
     "remark-gfm": "^4.0.1",
     "semver": "^7.7.4",
     "tailwind-merge": "^3.5.0",
-    "uuid": "^13.0.0",
     "xstate": "^5.28.0",
     "zod": "^4.3.6",
     "zustand": "^5.0.11"
@@ -105,7 +104,6 @@
     "@types/semver": "^7.7.1",
     "@vitejs/plugin-react": "^5.1.2",
     "@vitest/coverage-v8": "^4.1.0",
-    "autoprefixer": "^10.4.27",
     "cross-env": "^10.1.0",
     "electron": "40.0.0",
     "electron-builder": "^26.8.1",

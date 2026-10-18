@@ -26,11 +26,6 @@ vi.mock('../../../shared/utils/debug-logger', () => ({
   debugError: vi.fn(),
 }));
 
-// Mock uuid for zustand store
-vi.mock('uuid', () => ({
-  v4: vi.fn(() => 'mock-uuid-1234'),
-}));
-
 // Mock @dnd-kit/sortable for zustand store
 vi.mock('@dnd-kit/sortable', () => ({
   arrayMove: vi.fn((arr, from, to) => {
@@ -78,10 +73,6 @@ describe('terminal-store callback registration functions', () => {
         clear: vi.fn(),
         dispose: vi.fn(),
       },
-    }));
-
-    vi.doMock('uuid', () => ({
-      v4: vi.fn(() => 'mock-uuid-1234'),
     }));
 
     vi.doMock('@dnd-kit/sortable', () => ({

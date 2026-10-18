@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { v4 as uuid } from 'uuid';
 import { arrayMove } from '@dnd-kit/sortable';
 import type { Task, TerminalSession, TerminalTaskSessionOptions, TerminalWorktreeConfig } from '../../shared/types';
 import { getTaskWorktreeBranch } from '../../shared/utils/claude-run';
@@ -303,7 +302,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const newTerminal: Terminal = {
-      id: uuid(),
+      id: crypto.randomUUID(),
       title: `Terminal ${state.terminals.length + 1}`,
       status: 'idle',
       cwd: cwd || process.env.HOME || '~',

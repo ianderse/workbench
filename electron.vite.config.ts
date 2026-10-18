@@ -46,7 +46,6 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({
       // Bundle these packages into the main process (they won't be in node_modules in packaged app)
       exclude: [
-        'uuid',
         'chokidar',
         'dotenv',
         'electron-log',
