@@ -81,12 +81,10 @@ export const AGENT_DRAW = {
   scanlineWidth: 8,
   /** Dash offset animation speed for waiting state */
   waitingDashSpeed: 25,
-  /** Active-state pulse (thinking / waiting for permission): 2 staggered rings
-   *  of the node's shape expanding from its edge and fading out */
-  rippleInnerOffset: 5,
-  rippleMaxExpand: 45,
-  rippleMaxAlpha: 0.4,
-  rippleSpeed: 0.65,
+  /** Active-state pulse (thinking / waiting for permission): the node's own glow
+   *  brightens and dims, down to `glowPulseTrough` of its full brightness */
+  glowPulseSpeed: 2.4,
+  glowPulseTrough: 0.4,
   /** Waiting state breathe parameters */
   waitingBreatheSpeed: 1.2,
   waitingBreatheAmp: 0.08,

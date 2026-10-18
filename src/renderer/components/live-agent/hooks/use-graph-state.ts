@@ -8,9 +8,9 @@ import { createEmptyState } from './graph/types'
 import { processEvent, type ProcessEventContext } from './graph/process-event'
 import { computeNextFrame } from './graph/animate'
 
-/** Room an agent node takes for tool placement: its radius plus its pulse rings */
+/** Room an agent node takes for tool placement: its radius plus its glow */
 const agentFootprint = (agent: Agent) =>
-  (agent.isMain ? NODE.radiusMain : NODE.radiusSub) + AGENT_DRAW.rippleInnerOffset + AGENT_DRAW.rippleMaxExpand
+  (agent.isMain ? NODE.radiusMain : NODE.radiusSub) + AGENT_DRAW.glowPadding
 
 export function useGraphState(options: UseGraphStateOptions) {
   const { useMockData, externalEvents, onExternalEventsConsumed } = options

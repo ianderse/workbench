@@ -56,9 +56,13 @@ function drawAgentsIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
   ctx.restore()
 }
 
-function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean) {
+/** `pulse` dims the glow (1 = full brightness); it carries the active-state pulse,
+ *  applied to the sprite as it's drawn so the cached sprites stay the same few */
+function drawAgentGlow(
+  ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean, pulse: number,
+) {
   const glowR = r + AGENT_DRAW.glowPadding
-  const glowAlpha = isWaiting ? 0.3 : agent.state === 'thinking' ? 0.2 : 0.1
+  const glowAlpha = isWaiting ? 0.45 : agent.state === 'thinking' ? 0.3 : 0.1
   // Neon glow: strongest at the border (from the shape's edge midpoints, cos(180° / sides)
   // of its radius) and fading outward; the inside of the node is clipped out, so it stays clear
   const outer = Math.ceil(glowR)
@@ -68,6 +72,7 @@ function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, c
   ctx.clip('evenodd')
   // Pre-rendered glow sprite instead of per-frame gradient creation
   const sprite = getAgentGlowSprite(color, Math.round(r * Math.cos(Math.PI / sidesOf(agent))), outer, alphaHex(glowAlpha))
+  ctx.globalAlpha *= pulse
   ctx.drawImage(sprite, agent.x - outer, agent.y - outer)
   ctx.restore()
 
@@ -132,16 +137,12 @@ function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, 
   }
 }
 
-/** Pulse for an active agent (thinking or waiting for permission): two staggered
- *  rings of its shape expand outward from the node and fade as they grow. */
-function drawPulseRipples(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, time: number) {
-  for (let i = 0; i < 2; i++) {
-    const phase = (time * AGENT_DRAW.rippleSpeed + i * 0.5) % 1
-    drawNodeShape(ctx, agent, r + AGENT_DRAW.rippleInnerOffset + phase * AGENT_DRAW.rippleMaxExpand)
-    ctx.strokeStyle = color + alphaHex((1 - phase) * AGENT_DRAW.rippleMaxAlpha)
-    ctx.lineWidth = 1.5 * (1 - phase)
-    ctx.stroke()
-  }
+/** Pulse for an active agent (thinking or waiting for permission): its glow
+ *  brightens and dims, between `glowPulseTrough` of full brightness and full. */
+function glowPulse(isActive: boolean, time: number) {
+  if (!isActive) return 1
+  const trough = AGENT_DRAW.glowPulseTrough
+  return trough + (1 - trough) * (Math.sin(time * AGENT_DRAW.glowPulseSpeed) * 0.5 + 0.5)
 }
 
 /** `awaiting`: the agents waiting on their sub-agents (see displayedState);
@@ -161,6 +162,7 @@ export function drawAgents(
     const color = getStateColor(agent.state)
 
     const isWaiting = agent.state === 'waiting_permission'
+    const isActive = agent.state === 'thinking' || isWaiting
 
     const breathe = isWaiting
       ? Math.sin(time * AGENT_DRAW.waitingBreatheSpeed) * AGENT_DRAW.waitingBreatheAmp + 1
@@ -173,7 +175,7 @@ export function drawAgents(
     ctx.save()
     ctx.globalAlpha = agent.opacity
 
-    drawAgentGlow(ctx, agent, r, color, isWaiting)
+    drawAgentGlow(ctx, agent, r, color, isWaiting, glowPulse(isActive, time))
     drawScanline(ctx, agent, r, color, isWaiting, time)
     drawStateRing(ctx, agent, r, color, isWaiting, time)
     if (agent.isMain) {
@@ -187,10 +189,6 @@ export function drawAgents(
       }
     } else {
       drawCenterIcon(ctx, agent, r, color, isWaiting)
-    }
-
-    if (agent.state === 'thinking' || isWaiting) {
-      drawPulseRipples(ctx, agent, r, color, time)
     }
 
     ctx.restore()
