@@ -62,8 +62,6 @@ import type {
   TerminalCreateOptions,
   TerminalSession,
   TerminalRestoreResult,
-  SessionDateInfo,
-  SessionDateRestoreResult,
   AuthFailureInfo,
   RetryWithProfileRequest,
   CreateTerminalWorktreeRequest,
@@ -206,9 +204,6 @@ export interface ElectronAPI {
   clearTerminalSessions: (projectPath: string) => Promise<IPCResult>;
   resumeClaudeInTerminal: (id: string, options?: { dangerouslySkipPermissions?: boolean }) => void;
   activateDeferredClaudeResume: (id: string) => void;
-  getTerminalSessionDates: (projectPath?: string) => Promise<IPCResult<SessionDateInfo[]>>;
-  getTerminalSessionsForDate: (date: string, projectPath: string) => Promise<IPCResult<TerminalSession[]>>;
-  restoreTerminalSessionsFromDate: (date: string, projectPath: string, cols?: number, rows?: number) => Promise<IPCResult<SessionDateRestoreResult>>;
   saveTerminalBuffer: (terminalId: string, serialized: string) => Promise<void>;
   checkTerminalPtyAlive: (terminalId: string) => Promise<IPCResult<{ alive: boolean }>>;
   updateTerminalDisplayOrders: (

@@ -58,11 +58,8 @@ function cleanupTestDirs(): void {
 }
 
 // Create a valid session data structure
-function createValidStoreData(sessionsByDate: Record<string, unknown[]> = {}): string {
-  return JSON.stringify({
-    version: 3,
-    sessionsByDate
-  }, null, 2);
+function createValidStoreData(windows: unknown[] = []): string {
+  return JSON.stringify({ version: 4, windows }, null, 2);
 }
 
 // Create a test session
@@ -123,15 +120,12 @@ describe('TerminalSessionStore', () => {
       const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       const data = store.getAllSessions();
-      expect(data.version).toBe(3);
-      expect(data.sessionsByDate).toEqual({});
+      expect(data.version).toBe(4);
+      expect(data.windows).toEqual([]);
     });
 
     it('should load existing valid store data', async () => {
-      const today = new Date().toISOString().split('T')[0];
-      const existingData = createValidStoreData({
-        [today]: [createTestSession()]
-      });
+      const existingData = createValidStoreData([createTestSession()]);
       writeFileSync(STORE_PATH, existingData);
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
@@ -157,15 +151,12 @@ describe('TerminalSessionStore', () => {
 
       // Verify content
       const content = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
-      expect(content.version).toBe(3);
+      expect(content.version).toBe(4);
     });
 
     it('should rotate current file to backup before overwriting', async () => {
       // Create initial store with one session
-      const today = new Date().toISOString().split('T')[0];
-      const initialData = createValidStoreData({
-        [today]: [createTestSession({ id: 'original-session' })]
-      });
+      const initialData = createValidStoreData([createTestSession({ id: 'original-session' })]);
       writeFileSync(STORE_PATH, initialData);
 
       const { TerminalSessionStore } = await import('../terminal-session-store');
@@ -177,7 +168,7 @@ describe('TerminalSessionStore', () => {
       // Backup should exist with original data
       expect(existsSync(BACKUP_PATH)).toBe(true);
       const backupContent = JSON.parse(readFileSync(BACKUP_PATH, 'utf-8'));
-      const backupSessions = backupContent.sessionsByDate[today];
+      const backupSessions = backupContent.windows;
       expect(backupSessions.some((s: { id: string }) => s.id === 'original-session')).toBe(true);
     });
 
@@ -213,12 +204,9 @@ describe('TerminalSessionStore', () => {
 
   describe('backup recovery', () => {
     it('should recover from corrupted main file using backup', async () => {
-      const today = new Date().toISOString().split('T')[0];
 
       // Create valid backup
-      const backupData = createValidStoreData({
-        [today]: [createTestSession({ id: 'recovered-session' })]
-      });
+      const backupData = createValidStoreData([createTestSession({ id: 'recovered-session' })]);
       writeFileSync(BACKUP_PATH, backupData);
 
       // Create corrupted main file
@@ -234,12 +222,9 @@ describe('TerminalSessionStore', () => {
     });
 
     it('should restore main file from backup after recovery', async () => {
-      const today = new Date().toISOString().split('T')[0];
 
       // Create valid backup
-      const backupData = createValidStoreData({
-        [today]: [createTestSession()]
-      });
+      const backupData = createValidStoreData([createTestSession()]);
       writeFileSync(BACKUP_PATH, backupData);
 
       // Create corrupted main file
@@ -250,7 +235,7 @@ describe('TerminalSessionStore', () => {
 
       // Main file should now be valid
       const mainContent = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
-      expect(mainContent.version).toBe(3);
+      expect(mainContent.version).toBe(4);
     });
 
     it('should start fresh if both main and backup are corrupted', async () => {
@@ -261,8 +246,8 @@ describe('TerminalSessionStore', () => {
       const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       const data = store.getAllSessions();
-      expect(data.version).toBe(3);
-      expect(data.sessionsByDate).toEqual({});
+      expect(data.version).toBe(4);
+      expect(data.windows).toEqual([]);
     });
   });
 
@@ -559,28 +544,25 @@ describe('TerminalSessionStore', () => {
 
       expect(store.getSessions().map(s => s.id)).toEqual(['mine']);
       // Written to the project's own file, while the app-wide one keeps every project's slice
-      expect(JSON.parse(readFileSync(STORE_PATH, 'utf-8')).version).toBe(3);
+      expect(JSON.parse(readFileSync(STORE_PATH, 'utf-8')).version).toBe(4);
       const legacy = JSON.parse(readFileSync(path.join(legacyDir, 'terminals.json'), 'utf-8'));
       expect(legacy.sessionsByDate[today][otherProject]).toHaveLength(1);
     });
   });
 
-  describe('date-based organization', () => {
-    it('should get available dates with session info', async () => {
+  describe('the window list', () => {
+    it('keeps the windows a project had, with no notion of when', async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
       const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
-      store.saveSession(createTestSession({ id: 'today-1' }));
-      store.saveSession(createTestSession({ id: 'today-2' }));
+      store.saveSession(createTestSession({ id: 'one' }));
+      store.saveSession(createTestSession({ id: 'two' }));
 
-      const dates = store.getAvailableDates();
-
-      expect(dates).toHaveLength(1);
-      expect(dates[0].sessionCount).toBe(2);
-      expect(dates[0].label).toBe('Today');
+      expect(store.getSessions().map(s => s.id)).toEqual(['one', 'two']);
+      expect(JSON.parse(readFileSync(STORE_PATH, 'utf-8')).windows).toHaveLength(2);
     });
 
-    it("lists only this project's dates, because the file holds only this project", async () => {
+    it("holds only this project's windows", async () => {
       const { TerminalSessionStore } = await import('../terminal-session-store');
       const otherProject = path.join(TEST_DIR, 'other-project');
       mkdirSync(path.join(otherProject, '.workbench'), { recursive: true });
@@ -590,9 +572,8 @@ describe('TerminalSessionStore', () => {
       store.saveSession(createTestSession({ id: 'mine' }));
       otherStore.saveSession(createTestSession({ id: 'theirs', projectPath: otherProject }));
 
-      expect(store.getAvailableDates()).toHaveLength(1);
-      expect(store.getAvailableDates()[0].sessionCount).toBe(1);
       expect(store.getSessions().map(s => s.id)).toEqual(['mine']);
+      expect(otherStore.getSessions().map(s => s.id)).toEqual(['theirs']);
     });
   });
 });

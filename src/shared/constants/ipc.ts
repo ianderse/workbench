@@ -87,9 +87,6 @@ export const IPC_CHANNELS = {
   TERMINAL_RESUME_CLAUDE: 'terminal:resumeClaude',
   TERMINAL_RESUME_TASK_SESSION: 'terminal:resumeTaskSession',  // Resume a task's Claude Code session in an agent window
   TERMINAL_ACTIVATE_DEFERRED_RESUME: 'terminal:activateDeferredResume',  // Resume a restored terminal's Claude Code session once its window is shown
-  TERMINAL_GET_SESSION_DATES: 'terminal:getSessionDates',
-  TERMINAL_GET_SESSIONS_FOR_DATE: 'terminal:getSessionsForDate',
-  TERMINAL_RESTORE_FROM_DATE: 'terminal:restoreFromDate',
   TERMINAL_CHECK_PTY_ALIVE: 'terminal:checkPtyAlive',
   TERMINAL_UPDATE_DISPLAY_ORDERS: 'terminal:updateDisplayOrders',  // Persist terminal display order after drag-drop reorder
 

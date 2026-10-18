@@ -49,17 +49,6 @@ export interface TerminalAPI {
   clearTerminalSessions: (projectPath: string) => Promise<IPCResult>;
   resumeClaudeInTerminal: (id: string, options?: { dangerouslySkipPermissions?: boolean }) => void;
   activateDeferredClaudeResume: (id: string) => void;
-  getTerminalSessionDates: (projectPath?: string) => Promise<IPCResult<import('../../shared/types').SessionDateInfo[]>>;
-  getTerminalSessionsForDate: (
-    date: string,
-    projectPath: string
-  ) => Promise<IPCResult<import('../../shared/types').TerminalSession[]>>;
-  restoreTerminalSessionsFromDate: (
-    date: string,
-    projectPath: string,
-    cols?: number,
-    rows?: number
-  ) => Promise<IPCResult<import('../../shared/types').SessionDateRestoreResult>>;
   checkTerminalPtyAlive: (terminalId: string) => Promise<IPCResult<{ alive: boolean }>>;
   updateTerminalDisplayOrders: (
     projectPath: string,
@@ -171,23 +160,6 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   activateDeferredClaudeResume: (id: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TERMINAL_ACTIVATE_DEFERRED_RESUME, id),
-
-  getTerminalSessionDates: (projectPath?: string): Promise<IPCResult<import('../../shared/types').SessionDateInfo[]>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_GET_SESSION_DATES, projectPath),
-
-  getTerminalSessionsForDate: (
-    date: string,
-    projectPath: string
-  ): Promise<IPCResult<import('../../shared/types').TerminalSession[]>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_GET_SESSIONS_FOR_DATE, date, projectPath),
-
-  restoreTerminalSessionsFromDate: (
-    date: string,
-    projectPath: string,
-    cols?: number,
-    rows?: number
-  ): Promise<IPCResult<import('../../shared/types').SessionDateRestoreResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_RESTORE_FROM_DATE, date, projectPath, cols, rows),
 
   checkTerminalPtyAlive: (terminalId: string): Promise<IPCResult<{ alive: boolean }>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_CHECK_PTY_ALIVE, terminalId),

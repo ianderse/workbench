@@ -156,22 +156,6 @@ export function clearSavedSessions(projectPath: string): void {
 }
 
 /**
- * Get available session dates
- */
-export function getAvailableSessionDates(
-  projectPath: string
-): import('../terminal-session-store').SessionDateInfo[] {
-  return getTerminalSessionStore(projectPath).getAvailableDates();
-}
-
-/**
- * Get sessions for a specific date
- */
-export function getSessionsForDate(date: string, projectPath: string): TerminalSession[] {
-  return getTerminalSessionStore(projectPath).getSessionsForDate(date);
-}
-
-/**
  * Update display orders for terminals after drag-drop reorder
  */
 export function updateDisplayOrders(

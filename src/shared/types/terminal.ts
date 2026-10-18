@@ -47,28 +47,7 @@ export interface TerminalRestoreResult {
   error?: string;
 }
 
-/**
- * Session date information for dropdown display
- */
-export interface SessionDateInfo {
-  date: string;  // YYYY-MM-DD format
-  label: string;  // Human readable: "Today", "Yesterday", "Dec 10"
-  sessionCount: number;  // Total sessions across all projects
-  projectCount: number;  // Number of projects with sessions
-}
 
-/**
- * Result of restoring sessions from a specific date
- */
-export interface SessionDateRestoreResult {
-  restored: number;
-  failed: number;
-  sessions: Array<{
-    id: string;
-    success: boolean;
-    error?: string;
-  }>;
-}
 
 /**
  * Rate limit information for SDK/CLI calls (non-terminal)

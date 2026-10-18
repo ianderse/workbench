@@ -342,20 +342,6 @@ export class TerminalManager {
   }
 
   /**
-   * Get available session dates
-   */
-  getAvailableSessionDates(projectPath: string): import('../terminal-session-store').SessionDateInfo[] {
-    return SessionHandler.getAvailableSessionDates(projectPath);
-  }
-
-  /**
-   * Get sessions for a specific date
-   */
-  getSessionsForDate(date: string, projectPath: string): TerminalSession[] {
-    return SessionHandler.getSessionsForDate(date, projectPath);
-  }
-
-  /**
    * Update display orders for terminals after drag-drop reorder
    */
   updateDisplayOrders(
@@ -363,35 +349,6 @@ export class TerminalManager {
     orders: Array<{ terminalId: string; displayOrder: number }>
   ): void {
     SessionHandler.updateDisplayOrders(projectPath, orders);
-  }
-
-  /**
-   * Restore all sessions from a specific date
-   */
-  async restoreSessionsFromDate(
-    date: string,
-    projectPath: string,
-    cols = 80,
-    rows = 24
-  ): Promise<{ restored: number; failed: number; sessions: Array<{ id: string; success: boolean; error?: string }> }> {
-    return TerminalLifecycle.restoreSessionsFromDate(
-      date,
-      projectPath,
-      this.terminals,
-      this.getWindow,
-      (terminal, data) => this.handleTerminalData(terminal, data),
-      {
-        resumeClaudeSession: true,
-        onResumeNeeded: (terminalId) => {
-          // Use async version to avoid blocking main process
-          this.resumeClaudeAsync(terminalId).catch((error) => {
-            debugError('[terminal-manager] Failed to resume Claude session:', error);
-          });
-        }
-      },
-      cols,
-      rows
-    );
   }
 
   /**
