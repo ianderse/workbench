@@ -60,7 +60,10 @@ describe('findProjectTranscripts', () => {
     const mine = await session(configDir, 'anything-at-all', 'a.jsonl', [
       { type: 'user', cwd: project, message: { role: 'user', content: 'hello' } },
     ]);
-    await session(configDir, `-${project.replace(/\//g, '-')}`, 'b.jsonl', [
+    // A folder named the way Claude Code encodes this very project, holding someone else's session.
+    // Separators and the Windows drive colon are replaced, since this has to be one legal segment.
+    const temptingName = project.replace(/[\\/:]/g, '-');
+    await session(configDir, temptingName, 'b.jsonl', [
       { type: 'user', cwd: path.join(tmp, 'elsewhere'), message: { role: 'user', content: 'hi' } },
     ]);
 
