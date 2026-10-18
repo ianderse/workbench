@@ -81,10 +81,14 @@ function xmlTag(text: string, tag: string): string | undefined {
   return match[1].replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').trim()
 }
 
-/** Parse a `<task-notification>` block (sent when a background task stops). */
+/**
+ * Parse a `<task-notification>` block (sent when a background task stops). Its launch is named
+ * by `tool-use-id`, except for a background agent the session started itself (/subtask), which
+ * has no launching tool call and is known by its `task-id`.
+ */
 function parseTaskNotification(text: string): { toolUseId: string } | null {
   if (!text.startsWith(TASK_NOTIFICATION_PREFIX)) return null
-  const toolUseId = xmlTag(text, 'tool-use-id')
+  const toolUseId = xmlTag(text, 'tool-use-id') ?? xmlTag(text, 'task-id')
   return toolUseId ? { toolUseId } : null
 }
 
@@ -155,6 +159,18 @@ function sessionTurnEffect(entry: Record<string, unknown>, session: WatchedSessi
   return taskId && session.handedBackTasks.has(taskId) ? 'local' : turn
 }
 
+/**
+ * The background agent a line starts: Claude Code's /subtask runs the session's own agent in the
+ * background instead of making an Agent tool call, and records it with an informational line
+ * naming the agent it launched. Its work goes to subagents/agent-<id>.jsonl, like a sub-agent's,
+ * and it reports back with a <task-notification>, like a background one.
+ */
+function backgroundAgentLaunchId(entry: Record<string, unknown>): string | undefined {
+  return entry.type === 'system' && typeof entry.launchedAgentId === 'string' && entry.launchedAgentId
+    ? entry.launchedAgentId
+    : undefined
+}
+
 /** Whether a transcript line is the agent working (a message, a tool call or
  *  result), as opposed to bookkeeping such as titles, queue entries or local commands */
 export function isActivityLine(line: string): boolean {
@@ -198,6 +214,13 @@ export class TranscriptParser {
       return // skip unparseable line
     }
     if (!isRecord(parsed)) return // not an entry
+
+    // A background agent the session started (/subtask) gets its node right away
+    const launchedId = agentName === ORCHESTRATOR_NAME ? backgroundAgentLaunchId(parsed) : undefined
+    if (launchedId && !session.launches.has(launchedId)) {
+      session.launches.set(launchedId, { parent: ORCHESTRATOR_NAME, seenLive: true, background: true, fork: true, finished: false })
+      spawnSubagentNode(this.delegate, session, launchedId)
+    }
 
     // A background task finished. Only Agent/Task launches we're tracking are
     // acted on; background Bash and other tasks send the same block.
@@ -457,6 +480,11 @@ export class TranscriptParser {
         if (turn === 'end') { turnEnded = true; dropAbandonedCalls(session) }
         else if (turn === 'activity') turnEnded = false
         const entry = raw as unknown as TranscriptEntry & { toolUseResult?: unknown }
+        // A background agent the session started before we attached
+        const launchedId = backgroundAgentLaunchId(raw)
+        if (launchedId && !session.launches.has(launchedId)) {
+          session.launches.set(launchedId, { parent: ORCHESTRATOR_NAME, seenLive: false, background: true, fork: true, finished: false })
+        }
         // A background sub-agent that already sent its <task-notification> is finished
         const finishedLaunchId = taskNotificationLaunchId(raw)
         const finishedLaunch = finishedLaunchId && session.launches.get(finishedLaunchId)

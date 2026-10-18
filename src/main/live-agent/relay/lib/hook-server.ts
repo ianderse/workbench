@@ -139,8 +139,10 @@ export class HookServer implements TypedDisposable {
         break
       case 'Stop':
         // The main agent finished its turn. Background sub-agents may still be
-        // running, so only the main agent is completed (no `endsSession`).
-        this.emit('agent_complete', { name: ORCHESTRATOR_NAME }, payload.session_id)
+        // running, so only the main agent is completed (no `endsSession`). A Stop
+        // from inside an agent of the session (a /subtask fork) is that agent's
+        // turn ending, not the main one's.
+        if (!payload.agent_id) this.emit('agent_complete', { name: ORCHESTRATOR_NAME }, payload.session_id)
         break
       case 'SessionEnd':
         this.emit('agent_complete', { name: ORCHESTRATOR_NAME, endsSession: true }, payload.session_id)
@@ -172,11 +174,14 @@ export class HookServer implements TypedDisposable {
 
   /** Backstop for subagent completion: the transcript's tool_result or
    *  <task-notification> normally completes it first, and a repeat completion
-   *  has no effect. The node id is the launch tool_use ID from .meta.json. */
+   *  has no effect. The node id is the launch tool_use ID from .meta.json.
+   *  A background agent the session started itself (/subtask) is left out: it is done when
+   *  its <task-notification> reaches the session, while its SubagentStop fires on its way
+   *  there, with the agent still working. */
   private handleSubagentStop(payload: HookPayload): void {
     const subagentFile = payload.agent_transcript_path || this.subagentFile(payload)
     const meta = subagentFile ? readLaunchIdFromMeta(subagentFile) : 'none'
-    if (typeof meta === 'object') this.emit('agent_complete', { name: meta.id }, payload.session_id)
+    if (typeof meta === 'object' && !meta.fork) this.emit('agent_complete', { name: meta.id }, payload.session_id)
   }
 
   /** The transcript file of the sub-agent a hook fires in */

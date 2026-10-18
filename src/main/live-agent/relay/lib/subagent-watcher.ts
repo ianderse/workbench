@@ -25,19 +25,27 @@ interface SubagentWatcherDelegate {
   touchSession(sessionId: string): void
 }
 
+/** `agent-<id>.jsonl` → `<id>`, the id the session's transcript gives a background agent */
+function agentIdFromPath(jsonlPath: string): string {
+  return path.basename(jsonlPath).replace(/^agent-/, '').replace(/\.jsonl$/, '')
+}
+
 /**
- * Read the launching Agent tool_use ID from a subagent's .meta.json sidecar.
+ * Read the launch ID a subagent's .meta.json sidecar gives it: the Agent tool_use that started
+ * it, or, for a background agent session the user started (Claude Code's /subtask, which has no
+ * launching tool call), the agent ID its file is named after.
  * `pending`: the sidecar doesn't exist yet (Claude Code writes the .jsonl a
  * moment before it). `none`: the sidecar has no launch ID (some Claude Code
  * versions/agent types), so the file can't be matched to a launch.
  */
-export function readLaunchIdFromMeta(jsonlPath: string): { id: string } | 'pending' | 'none' {
+export function readLaunchIdFromMeta(jsonlPath: string): { id: string; fork?: boolean } | 'pending' | 'none' {
   const metaPath = jsonlPath.replace(/\.jsonl$/, '.meta.json')
   let raw: string
   try { raw = fs.readFileSync(metaPath, 'utf-8') } catch { return 'pending' }
   try {
     const meta = JSON.parse(raw) as Record<string, unknown>
-    return typeof meta.toolUseId === 'string' && meta.toolUseId ? { id: meta.toolUseId } : 'none'
+    if (typeof meta.toolUseId === 'string' && meta.toolUseId) return { id: meta.toolUseId }
+    return meta.isFork === true ? { id: agentIdFromPath(jsonlPath), fork: true } : 'none'
   } catch { return 'pending' /* partially written */ }
 }
 

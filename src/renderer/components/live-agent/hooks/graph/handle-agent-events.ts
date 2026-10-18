@@ -71,6 +71,7 @@ export function handleAgentSpawn(
     parentId: parentId || null,
     x, y,
     isMain,
+    isSatellite: asBoolean(payload.satellite) || undefined,
     opacity: 0, scale: 0.3,
   }
   state.agents.set(name, agent)

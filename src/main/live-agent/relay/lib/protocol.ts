@@ -80,7 +80,7 @@ export function spawnSubagentNode(emitter: AgentEventEmitter, session: WatchedSe
   emitter.emit({
     time: emitter.elapsed(session.sessionId),
     type: 'agent_spawn',
-    payload: { name: launchId, parent },
+    payload: { name: launchId, parent, satellite: session.launches.get(launchId)?.fork || undefined },
   }, session.sessionId)
 }
 
@@ -114,6 +114,9 @@ export interface SubagentLaunch {
   seenLive: boolean
   /** Launched in the background: finishes on its <task-notification> */
   background: boolean
+  /** A background agent session the user started (Claude Code's /subtask), rather than an
+   *  Agent/Task call of the agent itself: shown apart from ordinary sub-agents */
+  fork?: boolean
   finished: boolean
 }
 

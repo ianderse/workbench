@@ -7,6 +7,9 @@ export interface Agent {
   x: number
   y: number
   isMain: boolean
+  /** A background agent session the user started (Claude Code's /subtask), which the relay
+   *  reports like a sub-agent: drawn as one, with a square border */
+  isSatellite?: boolean
   /** Graph clock time the agent last completed, or a sub-agent under it last
    *  did: starts a finished sub-agent's ANSWER_HOLD_S hold before it fades out
    *  (only read for one; a sub-agent never leaves 'complete') */

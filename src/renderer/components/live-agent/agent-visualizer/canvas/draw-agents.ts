@@ -8,12 +8,15 @@ import { drawFace, type FaceState } from './draw-face'
 import { getAgentGlowSprite } from './render-cache'
 import { AGENTS_ICON_PATH } from '../../../icons/app-icons'
 
-/** The main agent is a pentagon, sub-agents hexagons */
-const sidesOf = (agent: Agent) => (agent.isMain ? 5 : 6)
+/** The main agent is a pentagon, sub-agents hexagons, a background session a square */
+const sidesOf = (agent: Agent) => (agent.isMain ? 5 : agent.isSatellite ? 4 : 6)
+
+/** Half a square's corner angle, which stands it on its side instead of on a vertex */
+const rotationOf = (agent: Agent) => (agent.isSatellite && !agent.isMain ? Math.PI / 4 : 0)
 
 /** The agent's outline at radius r, as a path */
 function drawNodeShape(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
-  drawPolygon(ctx, agent.x, agent.y, r, sidesOf(agent))
+  drawPolygon(ctx, agent.x, agent.y, r, sidesOf(agent), rotationOf(agent))
 }
 
 let _claudeSparkPath: Path2D | null = null
