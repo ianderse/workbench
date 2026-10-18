@@ -128,7 +128,11 @@ describe('relay', () => {
     fs.writeFileSync(path.join(subagentsDir, `agent-${agentId}.jsonl`), JSON.stringify({
       type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_read', name: 'Read' }] },
     }) + '\n');
-    await vi.waitFor(() => expect(events().some((event) => event.type === 'tool_call_start')).toBe(true));
+    // Past SCAN_INTERVAL_MS: where fs.watch delivers late (macOS), the scan tick is what finds the file
+    await vi.waitFor(
+      () => expect(events().some((event) => event.type === 'tool_call_start')).toBe(true),
+      { timeout: 5000 }
+    );
 
     // Its node is the session's, drawn apart from ordinary sub-agents, and its work hangs off it
     expect(events()).toEqual(expect.arrayContaining([
@@ -153,9 +157,12 @@ describe('relay', () => {
       type: 'user', uuid: 'u2',
       message: { role: 'user', content: `<task-notification>\n<task-id>${agentId}</task-id>\n</task-notification>` },
     });
-    await vi.waitFor(() => expect(events()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ type: 'agent_complete', payload: { name: agentId } }),
-    ])));
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_complete', payload: { name: agentId } }),
+      ])),
+      { timeout: 5000 }
+    );
   });
 
   it('gives no node to a sub-agent handing its report back (SubagentHandback)', async () => {
