@@ -175,10 +175,6 @@ export const IPC_CHANNELS = {
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
   SHELL_OPEN_TERMINAL: 'shell:openTerminal',
 
-  // Context operations
-  CONTEXT_GET: 'context:get',
-  CONTEXT_REFRESH_INDEX: 'context:refreshIndex',
-
   // Environment configuration
   ENV_GET: 'env:get',
   ENV_UPDATE: 'env:update',

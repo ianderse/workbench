@@ -41,10 +41,6 @@ export interface ProjectAPI {
   getKanbanPreferences: (projectId: string) => Promise<IPCResult<KanbanPreferences | null>>;
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences) => Promise<IPCResult>;
 
-  // Context Operations
-  getProjectContext: (projectId: string) => Promise<IPCResult<unknown>>;
-  refreshProjectIndex: (projectId: string) => Promise<IPCResult<unknown>>;
-
   // Environment Configuration
   getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
   updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
@@ -109,13 +105,6 @@ export const createProjectAPI = (): ProjectAPI => ({
 
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.KANBAN_PREFS_SAVE, projectId, preferences),
-
-  // Context Operations
-  getProjectContext: (projectId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET, projectId),
-
-  refreshProjectIndex: (projectId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_REFRESH_INDEX, projectId),
 
 
   // Environment Configuration

@@ -15,7 +15,6 @@ import { registerTaskHandlers } from './task-handlers';
 import { registerTerminalHandlers } from './terminal-handlers';
 import { registerAgenteventsHandlers } from './agent-events-handlers';
 import { registerSettingsHandlers } from './settings-handlers';
-import { registerContextHandlers } from './context-handlers';
 import { registerEnvHandlers } from './env-handlers';
 import { registerInsightsHandlers } from './insights-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
@@ -64,9 +63,6 @@ export function setupIpcHandlers(
 
   // Settings and dialog handlers
   registerSettingsHandlers(agentManager, getMainWindow);
-
-  // Project context handlers (project index)
-  registerContextHandlers(getMainWindow);
 
   // Environment configuration handlers
   registerEnvHandlers(getMainWindow);

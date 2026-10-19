@@ -262,111 +262,16 @@ interface DependencyConfig {
 }
 
 /**
- * Default mapping from dependency type to sharing strategy.
- *
- * Data-driven — add new entries here rather than writing if/else branches.
- * See src/main/ipc-handlers/terminal/worktree-handlers.ts for the TypeScript implementation.
+ * Dependencies shared into every worktree.
  */
-const DEFAULT_STRATEGY_MAP: Record<string, 'symlink' | 'recreate' | 'copy' | 'skip'> = {
-  // JavaScript / Node.js — symlink is safe and fast
-  node_modules: 'symlink',
-  // Python — symlink for fast worktree creation.
-  // CPython bug #106045 (pyvenv.cfg symlink resolution) does not affect
-  // typical usage (running scripts, imports, pip). If the health check
-  // after symlinking fails, we fall back to recreate automatically.
-  venv: 'symlink',
-  '.venv': 'symlink',
-  // PHP — Composer vendor dir is safe to symlink
-  vendor_php: 'symlink',
-  // Ruby — Bundler vendor/bundle is safe to symlink
-  vendor_bundle: 'symlink',
-  // Rust — build output dir, skip (rebuilt per-worktree)
-  cargo_target: 'skip',
-  // Go — global module cache, nothing in-tree to share
-  go_modules: 'skip',
-};
-
-/**
- * Load dependency configs from the project index, or fall back to hardcoded
- * node_modules-only behavior for backward compatibility.
- */
-function loadDependencyConfigs(projectPath: string): DependencyConfig[] {
-  const indexPath = path.join(projectPath, '.workbench', 'project_index.json');
-
-  if (existsSync(indexPath)) {
-    try {
-      const index = JSON.parse(readFileSync(indexPath, 'utf-8'));
-      // Use the aggregated top-level dependency_locations which already
-      // contain project-relative paths (e.g. "apps/backend/.venv" instead
-      // of just ".venv"), avoiding a monorepo path resolution bug.
-      const depLocations = index?.dependency_locations;
-      if (Array.isArray(depLocations)) {
-        const configs: DependencyConfig[] = [];
-        const seen = new Set<string>();
-
-        for (const dep of depLocations) {
-          if (!dep || typeof dep !== 'object') continue;
-          const depObj = dep as Record<string, unknown>;
-          const depType = String(depObj.type || '');
-          const relPath = String(depObj.path || '');
-          if (!depType || !relPath || seen.has(relPath)) continue;
-
-          // Path containment: reject absolute paths and traversals
-          if (path.isAbsolute(relPath)) continue;
-          if (relPath.split('/').includes('..') || relPath.split('\\').includes('..')) continue;
-
-          // Defense-in-depth: verify resolved path stays within project
-          const resolved = path.resolve(projectPath, relPath);
-          if (!resolved.startsWith(path.resolve(projectPath) + path.sep)) continue;
-
-          seen.add(relPath);
-
-          const strategy = DEFAULT_STRATEGY_MAP[depType] ?? 'skip';
-
-          // Validate requirementsFile path containment
-          let reqFile: string | undefined;
-          if (depObj.requirements_file) {
-            const rf = String(depObj.requirements_file);
-            const rfParts = rf.split('/');
-            const rfPartsWin = rf.split('\\');
-            if (!path.isAbsolute(rf) && !rfParts.includes('..') && !rfPartsWin.includes('..')) {
-              // Defense-in-depth: resolved-path containment (matches relPath check)
-              const resolvedReq = path.resolve(projectPath, rf);
-              if (resolvedReq.startsWith(path.resolve(projectPath) + path.sep)) {
-                reqFile = rf;
-              }
-            }
-          }
-
-          configs.push({
-            depType,
-            strategy,
-            sourceRelPath: relPath,
-            requirementsFile: reqFile,
-            packageManager: depObj.package_manager ? String(depObj.package_manager) : undefined,
-          });
-        }
-
-        if (configs.length > 0) {
-          return configs;
-        }
-      }
-    } catch (error) {
-      debugError('[TerminalWorktree] Failed to read project index:', error);
-    }
-  }
-
-  // Fallback: hardcoded node_modules-only behavior (same as legacy)
-  return [
-    { depType: 'node_modules', strategy: 'symlink', sourceRelPath: 'node_modules' },
-  ];
-}
+const WORKTREE_DEPENDENCIES: DependencyConfig[] = [
+  { depType: 'node_modules', strategy: 'symlink', sourceRelPath: 'node_modules' },
+];
 
 /**
  * Set up dependencies in a worktree using strategy-based dispatch.
  *
- * Reads dependency configs from the project index and applies the correct
- * strategy for each: symlink, recreate, copy, or skip.
+ * Applies the correct strategy for each: symlink, recreate, copy, or skip.
  *
  * All operations are non-blocking on failure — errors are logged but never thrown.
  *
@@ -375,7 +280,7 @@ function loadDependencyConfigs(projectPath: string): DependencyConfig[] {
  * @returns Array of successfully processed dependency relative paths
  */
 async function setupWorktreeDependencies(projectPath: string, worktreePath: string): Promise<string[]> {
-  const configs = loadDependencyConfigs(projectPath);
+  const configs = WORKTREE_DEPENDENCIES;
   const processed: string[] = [];
 
   for (const config of configs) {

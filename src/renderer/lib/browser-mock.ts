@@ -13,7 +13,6 @@ import {
   workspaceMock,
   terminalMock,
   claudeProfileMock,
-  contextMock,
   integrationMock,
   insightsMock,
   infrastructureMock,
@@ -45,9 +44,6 @@ const browserMockAPI: ElectronAPI = {
 
   // Settings
   ...settingsMock,
-
-  // Context Operations
-  ...contextMock,
 
   // Environment Configuration & Integration Operations
   ...integrationMock,

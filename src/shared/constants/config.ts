@@ -118,8 +118,7 @@ export const AUTO_BUILD_PATHS = {
   QA_REPORT: 'qa_report.md',
   BUILD_PROGRESS: 'build-progress.txt',
   CONTEXT: 'context.json',
-  REQUIREMENTS: 'requirements.json',
-  PROJECT_INDEX: '.workbench/project_index.json'
+  REQUIREMENTS: 'requirements.json'
 } as const;
 
 /**

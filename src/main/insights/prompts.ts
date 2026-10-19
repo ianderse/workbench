@@ -5,7 +5,7 @@
  * System prompt, conversation folding and task-suggestion parsing for the Insights chat.
  */
 
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { safeParseJson } from '../utils/json-repair';
 import { DATA_DIR_NAMES } from '../../shared/constants';
@@ -25,24 +25,6 @@ export interface TaskSuggestion {
 /** Load project context for the system prompt */
 function loadProjectContext(projectDir: string): string {
   const contextParts: string[] = [];
-
-  const indexPath = join(projectDir, '.workbench', 'project_index.json');
-  if (existsSync(indexPath)) {
-    try {
-      const index = safeParseJson<Record<string, unknown>>(readFileSync(indexPath, 'utf-8'));
-      if (index) {
-        const summary = {
-          project_root: index.project_root ?? '',
-          project_type: index.project_type ?? 'unknown',
-          services: Object.keys((index.services as Record<string, unknown>) ?? {}),
-          infrastructure: index.infrastructure ?? {},
-        };
-        contextParts.push(`## Project Structure\n\`\`\`json\n${JSON.stringify(summary, null, 2)}\n\`\`\``);
-      }
-    } catch {
-      // Ignore read errors
-    }
-  }
 
   const tasksPath = join(projectDir, '.workbench', DATA_DIR_NAMES.tasks);
   if (existsSync(tasksPath)) {

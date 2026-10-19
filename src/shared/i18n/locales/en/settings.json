@@ -475,13 +475,6 @@
       "budgetPlaceholder": "No limit"
     },
     "context": {
-      "index": "Project index",
-      "indexDescription": "AI-discovered knowledge about your codebase",
-      "noIndex": "No index yet. Analyze the project to create one.",
-      "analyze": "Analyze project",
-      "refresh": "Refresh",
-      "analyzing": "Analyzing project...",
-      "loadFailed": "Failed to load project index",
       "memoryIndex": "Knowledge index",
       "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
       "noMemoryIndex": "Map the project's code into a Graphify graph in .workbench/knowledge",

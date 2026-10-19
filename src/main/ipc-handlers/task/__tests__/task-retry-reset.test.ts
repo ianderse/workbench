@@ -63,7 +63,7 @@ describe('resetSpecDirToInitialState', () => {
     for (const file of [
       'claude_run.json', 'task_logs.json', 'plan.md', 'QA_FIX_REQUEST.md', 'qa_report.md',
       'spec.md', 'requirements.json', 'context.json', 'complexity_assessment.json',
-      'project_index.json', 'build-progress.txt', 'research.json', 'implementation_plan.json.tmp'
+      'stray-file.json', 'build-progress.txt', 'research.json', 'implementation_plan.json.tmp'
     ]) {
       writeFileSync(path.join(specDir, file), '{}');
     }
