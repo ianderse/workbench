@@ -13,7 +13,6 @@ import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
 import { BUILTIN_CONNECTOR_META, ConnectorRow, customServerIcon } from './ConnectorRow';
 import { CustomMcpDialog } from '../CustomMcpDialog';
-import { useProjectStore } from '../../stores/project-store';
 import { getDefaultMcpConnectorIds } from '../../../shared/utils/mcp-connectors';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import type { AppSettings, CustomMcpServer, McpConnectorSettings, McpHealthCheckResult } from '../../../shared/types';
@@ -38,7 +37,6 @@ const BUILTIN_SETTING_KEY = {
 
 export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSettingsProps) {
   const { t } = useTranslation(['settings']);
-  const selectedProjectId = useProjectStore((state) => state.selectedProjectId);
 
   // Async handlers (connection tests) must update the latest settings, not the ones they started with
   const settingsRef = useRef(settings);
@@ -52,26 +50,6 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
     settingsRef.current = next;
     onSettingsChange(next);
   }, [onSettingsChange]);
-
-  // One-time move: connectors used to be per project; seed the defaults from the selected project
-  useEffect(() => {
-    if (settings.mcpConnectors !== undefined || !selectedProjectId) return;
-    let cancelled = false;
-    window.electronAPI.getProjectEnv(selectedProjectId).then((result) => {
-      const env = result.success ? result.data : null;
-      if (cancelled || !env || settingsRef.current.mcpConnectors !== undefined) return;
-      if (!env.mcpServers && !env.customMcpServers?.length) return;
-      updateConnectors(() => ({
-        context7Enabled: env.mcpServers?.context7Enabled,
-        electronEnabled: env.mcpServers?.electronEnabled,
-        puppeteerEnabled: env.mcpServers?.puppeteerEnabled,
-        customServers: env.customMcpServers,
-      }));
-    }).catch(() => {
-      // Nothing to carry over
-    });
-    return () => { cancelled = true; };
-  }, [selectedProjectId, settings.mcpConnectors, updateConnectors]);
 
   // Custom MCP server dialog state
   const [showCustomMcpDialog, setShowCustomMcpDialog] = useState(false);

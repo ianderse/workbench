@@ -22,7 +22,6 @@ import { setupIpcHandlers as setupModularHandlers } from './ipc-handlers';
  * - agent-events-handlers.ts: Agent event forwarding
  * - settings-handlers.ts: App settings and dialogs
  * - file-handlers.ts: File system operations
- * - env-handlers.ts: Environment configuration
  * - github-handlers.ts: GitHub integration
  * - autobuild-source-handlers.ts: Source updates
  * - insights-handlers.ts: AI insights chat

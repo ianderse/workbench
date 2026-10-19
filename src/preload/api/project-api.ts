@@ -6,7 +6,6 @@ import type {
   IPCResult,
   InitializationResult,
   AutoBuildVersionInfo,
-  ProjectEnvConfig,
   GitStatus,
   KanbanPreferences,
   GitBranchDetail,
@@ -40,10 +39,6 @@ export interface ProjectAPI {
   // Kanban Preferences (persisted in main process per project)
   getKanbanPreferences: (projectId: string) => Promise<IPCResult<KanbanPreferences | null>>;
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences) => Promise<IPCResult>;
-
-  // Environment Configuration
-  getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
-  updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
 
   // Dialog Operations
   selectDirectory: () => Promise<string | null>;
@@ -105,14 +100,6 @@ export const createProjectAPI = (): ProjectAPI => ({
 
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.KANBAN_PREFS_SAVE, projectId, preferences),
-
-
-  // Environment Configuration
-  getProjectEnv: (projectId: string): Promise<IPCResult<ProjectEnvConfig>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.ENV_GET, projectId),
-
-  updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.ENV_UPDATE, projectId, config),
 
   // Dialog Operations
   selectDirectory: (): Promise<string | null> =>

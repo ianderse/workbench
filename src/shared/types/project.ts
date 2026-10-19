@@ -52,59 +52,12 @@ export interface NotificationSettings {
   sound: boolean;
 }
 
-// Environment Configuration for project .env files
-export interface ProjectEnvConfig {
-  // Model Override
-  autoBuildModel?: string;
-
-  // Git/Worktree Settings
-  defaultBranch?: string; // Base branch for worktree creation (e.g., 'main', 'develop')
-
-  // UI Settings
-  enableFancyUi: boolean;
-
-  // MCP Server Configuration (per-project overrides)
-  mcpServers?: {
-    /** Context7 documentation lookup - default: true */
-    context7Enabled?: boolean;
-    /** Electron desktop automation (QA only) - default: false */
-    electronEnabled?: boolean;
-    /** Puppeteer browser automation (QA only) - default: false */
-    puppeteerEnabled?: boolean;
-  };
-
-  // Per-agent MCP overrides (add/remove MCPs from specific agents)
-  agentMcpOverrides?: AgentMcpOverrides;
-
-  // Custom MCP servers defined by the user
-  customMcpServers?: CustomMcpServer[];
-}
-
-/**
- * Per-agent MCP override configuration.
- * Stored in .workbench/.env as AGENT_MCP_<agent>_ADD and AGENT_MCP_<agent>_REMOVE
- */
-interface AgentMcpOverride {
-  /** MCP servers to add beyond the agent's defaults */
-  add?: string[];
-  /** MCP servers to remove from the agent's defaults */
-  remove?: string[];
-}
-
-/**
- * Map of agent type to their MCP overrides.
- * Agent types match backend AGENT_CONFIGS keys (e.g., 'planner', 'coder', 'qa_reviewer')
- */
-interface AgentMcpOverrides {
-  [agentType: string]: AgentMcpOverride;
-}
-
 /**
  * Custom MCP server configuration.
  * Users can add command-based (npx/npm) or HTTP-based servers.
  */
 export interface CustomMcpServer {
-  /** Unique identifier (used for agent overrides: AGENT_MCP_<agent>_ADD=myserver) */
+  /** Unique identifier */
   id: string;
   /** Display name shown in UI */
   name: string;

@@ -14,7 +14,6 @@ import { promisify } from 'util';
 import { matchesExtensionGlob } from '../../utils/glob-markers';
 import { debugLog, debugError } from '../../../shared/utils/debug-logger';
 import { projectStore } from '../../project-store';
-import { parseEnvFile } from '../utils';
 import { isWindows } from '../../platform';
 import {
   getTerminalWorktreeDir,
@@ -186,27 +185,13 @@ function isValidProjectPath(projectPath: string): boolean {
 // No limit on terminal worktrees - users can create as many as needed
 
 /**
- * Get the default branch from project settings OR env config
+ * Get the default branch from project settings
  */
 function getDefaultBranch(projectPath: string): string {
   const project = projectStore.getProjects().find(p => p.path === projectPath);
   if (project?.settings?.mainBranch) {
     debugLog('[TerminalWorktree] Using mainBranch from project settings:', project.settings.mainBranch);
     return project.settings.mainBranch;
-  }
-
-  const envPath = path.join(projectPath, '.workbench', '.env');
-  if (existsSync(envPath)) {
-    try {
-      const content = readFileSync(envPath, 'utf-8');
-      const vars = parseEnvFile(content);
-      if (vars['DEFAULT_BRANCH']) {
-        debugLog('[TerminalWorktree] Using DEFAULT_BRANCH from env config:', vars['DEFAULT_BRANCH']);
-        return vars['DEFAULT_BRANCH'];
-      }
-    } catch (error) {
-      debugError('[TerminalWorktree] Error reading env file:', error);
-    }
   }
 
   for (const branch of ['main', 'master']) {

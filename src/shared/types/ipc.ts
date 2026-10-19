@@ -24,7 +24,6 @@ import type {
   AutoBuildVersionInfo,
   InitializationResult,
   CreateProjectFolderResult,
-  ProjectEnvConfig,
   GitStatus,
   CustomMcpServer,
   McpHealthCheckResult,
@@ -343,10 +342,6 @@ export interface ElectronAPI {
 
   // App info
   getAppVersion: () => Promise<string>;
-
-  // Environment configuration operations
-  getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
-  updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
 
   // Electron app update operations
   checkAppUpdate: () => Promise<IPCResult<AppUpdateCheckResult>>;

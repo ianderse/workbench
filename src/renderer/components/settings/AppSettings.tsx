@@ -161,7 +161,7 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
   }, []);
 
   const handleProjectHookReady = useCallback((hook: UseProjectSettingsReturn | null) => {
-    setProjectError(hook ? hook.error || hook.envError || null : null);
+    setProjectError(hook ? hook.error : null);
   }, []);
 
   // --- Autosave app settings -------------------------------------------------
