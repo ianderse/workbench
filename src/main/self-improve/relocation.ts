@@ -9,7 +9,8 @@
  *   project reads it, which is why this is a settings file and not a flag on our own runs.
  * - an `@` import of the memory index from the project's CLAUDE.md, so the notes also reach
  *   subagents, which never inherit the main conversation's auto memory.
- * - the capture instruction as a project rule, for the sessions Workbench doesn't start.
+ * - the capture instruction in the project's `.claude/MEMORY.md`, for the sessions Workbench
+ *   doesn't start.
  */
 
 import { execFile } from 'child_process';
@@ -21,12 +22,14 @@ import { getIsolatedGitEnv } from '../utils/git-isolation';
 import { waitForMemoryIndexBuild } from './backfill';
 import { MEMORY_INDEX_STUB } from './memory-writer';
 import { getCompengDir, getMemoryIndexImportPath, getMemoryIndexPath, getStashedCompengDir } from './paths';
-import { SELF_IMPROVE_RULE_FILE, SELF_IMPROVE_RULE_FILENAME } from './nudge';
+import { SELF_IMPROVE_MEMORY_FILE, SELF_IMPROVE_MEMORY_FILENAME } from './nudge';
 
 /** The settings key Claude Code reads before it loads or saves auto memory */
 const AUTO_MEMORY_DIRECTORY_KEY = 'autoMemoryDirectory';
 /** Settings scope that can hold an absolute path: machine-local, not committed */
 const LOCAL_SETTINGS_FILE = path.join('.claude', 'settings.local.json');
+/** The capture instruction's own file in the project, committed with it */
+const PROJECT_MEMORY_FILE = path.join('.claude', SELF_IMPROVE_MEMORY_FILENAME);
 
 /**
  * Markers around the import line in CLAUDE.md. Block-level HTML comments are stripped before
@@ -251,12 +254,12 @@ export async function applyProjectMemory(projectPath: string): Promise<void> {
   // The rest is best effort: without it memories are still saved and loaded, just not by sessions
   // Workbench didn't start, and not inside subagents
   try {
-    const rulesDir = path.join(projectPath, '.claude', 'rules');
-    await mkdir(rulesDir, { recursive: true });
-    await writeFile(path.join(rulesDir, SELF_IMPROVE_RULE_FILENAME), SELF_IMPROVE_RULE_FILE, 'utf-8');
+    const memoryFile = path.join(projectPath, PROJECT_MEMORY_FILE);
+    await mkdir(path.dirname(memoryFile), { recursive: true });
+    await writeFile(memoryFile, SELF_IMPROVE_MEMORY_FILE, 'utf-8');
     await addImport(projectPath);
   } catch (error) {
-    appLog.warn('[SelfImprove] Could not install the project rule or the memory import:', error);
+    appLog.warn('[SelfImprove] Could not install the project memory file or the memory import:', error);
   }
 }
 
@@ -267,10 +270,10 @@ export async function applyProjectMemory(projectPath: string): Promise<void> {
 export async function removeProjectMemory(projectPath: string): Promise<void> {
   await patchSettings(projectPath, AUTO_MEMORY_DIRECTORY_KEY, null);
   try {
-    await rm(path.join(projectPath, '.claude', 'rules', SELF_IMPROVE_RULE_FILENAME), { force: true });
+    await rm(path.join(projectPath, PROJECT_MEMORY_FILE), { force: true });
     await removeImport(projectPath);
   } catch (error) {
-    appLog.warn('[SelfImprove] Could not remove the project rule or the memory import:', error);
+    appLog.warn('[SelfImprove] Could not remove the project memory file or the memory import:', error);
   }
 
   // A build writes into the memory directory, so let it finish before moving the directory away

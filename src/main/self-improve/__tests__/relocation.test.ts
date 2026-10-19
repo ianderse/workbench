@@ -10,7 +10,7 @@ import { applyProjectMemory, ensureWorktreeProjectMemory, removeProjectMemory } 
 const execFileAsync = promisify(execFile);
 import { getCompengDir, getMemoryIndexPath, getStashedCompengDir } from '../paths';
 import { writeMemories } from '../memory-writer';
-import { SELF_IMPROVE_RULE_FILENAME } from '../nudge';
+import { SELF_IMPROVE_MEMORY_FILENAME } from '../nudge';
 
 vi.mock('../../app-logger', () => ({
   appLog: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -37,7 +37,7 @@ describe('applyProjectMemory', () => {
 
     expect((await readJson(localSettings(project))).autoMemoryDirectory).toBe(getCompengDir(project));
     expect(existsSync(getMemoryIndexPath(project))).toBe(true);
-    expect(existsSync(path.join(project, '.claude', 'rules', SELF_IMPROVE_RULE_FILENAME))).toBe(true);
+    expect(existsSync(path.join(project, '.claude', SELF_IMPROVE_MEMORY_FILENAME))).toBe(true);
   });
 
   it('keeps the other keys in an existing settings file', async () => {
@@ -102,7 +102,7 @@ describe('removeProjectMemory', () => {
     await removeProjectMemory(project);
 
     expect(await readJson(localSettings(project))).not.toHaveProperty('autoMemoryDirectory');
-    expect(existsSync(path.join(project, '.claude', 'rules', SELF_IMPROVE_RULE_FILENAME))).toBe(false);
+    expect(existsSync(path.join(project, '.claude', SELF_IMPROVE_MEMORY_FILENAME))).toBe(false);
     expect(await readFile(path.join(project, 'CLAUDE.md'), 'utf-8')).toBe('# Project\n\nSome instructions.\n');
     // The memories themselves are the user's: set aside for the switch coming back, never destroyed
     expect(existsSync(learned)).toBe(false);

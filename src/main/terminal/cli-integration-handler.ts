@@ -302,8 +302,8 @@ function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut'>): strin
 
 /**
  * Claude Code flag telling an agent window's session to save what it learns about the project, when
- * the project's self-improve switch is on. The project's own rule file carries the same text for
- * sessions started outside the app; this covers the window Workbench launches.
+ * the project's self-improve switch is on. The project's own `.claude/MEMORY.md` carries the same
+ * text for sessions started outside the app; this covers the window Workbench launches.
  */
 function selfImproveFlag(terminal: Pick<TerminalProcess, 'selfImprove'>): string {
   if (!terminal.selfImprove) return '';

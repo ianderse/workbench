@@ -4,8 +4,8 @@
  * Claude Code's auto memory already stores and loads the notes; left to itself it decides to write
  * one only rarely, so a session that just got corrected usually forgets the correction. This text
  * states when to save, the bar for saving, and what to do when a new preference contradicts an old
- * one. It is appended to the system prompt of the runs Workbench starts and placed in the project
- * for the sessions it doesn't start.
+ * one. It is appended to the system prompt of the runs Workbench starts and placed in the project's
+ * `.claude/MEMORY.md` for the sessions it doesn't start.
  */
 
 /**
@@ -27,11 +27,11 @@ This project keeps what you learn about it in its own memory directory, loaded i
 export const SELF_IMPROVE_NUDGE_ONE_LINE = SELF_IMPROVE_NUDGE.replace(/\s+/g, ' ').trim();
 
 /**
- * The same instruction as a project rule file, for the sessions Workbench doesn't start (a plain
- * `claude` in the project). A rule file with no `paths` frontmatter loads at launch, at the same
- * priority as the project's CLAUDE.md.
+ * The same instruction as a project memory file, for the sessions Workbench doesn't start (a plain
+ * `claude` in the project). It sits at `.claude/MEMORY.md`, beside the project's other Claude Code
+ * files.
  */
-export const SELF_IMPROVE_RULE_FILE = `${SELF_IMPROVE_NUDGE}\n`;
+export const SELF_IMPROVE_MEMORY_FILE = `${SELF_IMPROVE_NUDGE}\n`;
 
-/** Name of that rule file under `.claude/rules/` */
-export const SELF_IMPROVE_RULE_FILENAME = 'workbench-project-memory.md';
+/** Name of that file inside the project's `.claude` directory */
+export const SELF_IMPROVE_MEMORY_FILENAME = 'MEMORY.md';
