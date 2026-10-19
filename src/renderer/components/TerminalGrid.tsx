@@ -17,7 +17,7 @@ import {
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
 import { TerminalSquare } from 'lucide-react';
-import { AgentsIcon, SettingsIcon as Settings, TerminalPromptIcon } from './icons/app-icons';
+import { AgentNodeIcon, AgentsIcon, SettingsIcon as Settings, TerminalPromptIcon } from './icons/app-icons';
 import { SortableTerminalWrapper } from './SortableTerminalWrapper';
 import { Button } from './ui/button';
 import { useTerminalStore, getActiveProjectTerminalCount, isProjectTerminal } from '../stores/terminal-store';
@@ -265,7 +265,7 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
       <div className="flex h-full flex-col items-center justify-center px-4 pb-[12vh]">
         <div className="flex max-w-[672px] flex-col items-center text-center">
           <h1 className="flex items-center justify-center gap-3 font-heading text-[2.125rem] font-normal! leading-tight tracking-tight text-foreground">
-            <AgentsIcon className="h-9 w-9 shrink-0 text-primary" />
+            <AgentNodeIcon className="h-9 w-9 shrink-0" />
             <span>{t('terminal:grid.emptyTitle')}</span>
           </h1>
           <p className="mt-3 max-w-md text-[0.9375rem] leading-relaxed text-muted-foreground">
