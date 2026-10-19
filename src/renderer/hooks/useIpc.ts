@@ -157,8 +157,10 @@ function isTaskForCurrentProject(eventProjectId?: string): boolean {
   const { activeProjectId, selectedProjectId } = useProjectStore.getState();
   // Keep filtering aligned with App task loading logic (active first, selected fallback)
   const currentProjectId = activeProjectId || selectedProjectId;
-  // If no project selected/active, accept the event
-  if (!currentProjectId) return true;
+  // A window showing no project has no tasks of its own, and the event names a project it
+  // isn't showing: every window gets these, so accepting it here would show another
+  // project's task errors in this one
+  if (!currentProjectId) return false;
   return currentProjectId === eventProjectId;
 }
 

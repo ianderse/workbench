@@ -75,10 +75,12 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
       ipcHandlers[channel] = handler;
     });
 
-    // Mock main window
+    // Mock main window (safeSendToRenderer checks the window and its webContents are alive)
     mockMainWindow = {
+      isDestroyed: () => false,
       webContents: {
-        send: vi.fn()
+        send: vi.fn(),
+        isDestroyed: () => false
       } as any
     };
     getMainWindow = vi.fn(() => mockMainWindow as BrowserWindow);
@@ -510,13 +512,14 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
       const eventHandler = onCall[1];
 
       // Trigger the event
-      eventHandler('001-test-task', mockLogs);
+      eventHandler('001-test-task', mockLogs, 'project-123');
 
-      // Verify it was forwarded to renderer
+      // Verify it was forwarded to renderer with the project it belongs to
       expect(mockMainWindow.webContents?.send).toHaveBeenCalledWith(
         'task:logsChanged',
         '001-test-task',
-        mockLogs
+        mockLogs,
+        'project-123'
       );
     });
 
@@ -539,13 +542,14 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
       const eventHandler = onCall[1];
 
       // Trigger the event
-      eventHandler('001-test-task', mockChunk);
+      eventHandler('001-test-task', mockChunk, 'project-123');
 
-      // Verify it was forwarded to renderer
+      // Verify it was forwarded to renderer with the project it belongs to
       expect(mockMainWindow.webContents?.send).toHaveBeenCalledWith(
         'task:logsStream',
         '001-test-task',
-        mockChunk
+        mockChunk,
+        'project-123'
       );
     });
 

@@ -254,8 +254,11 @@ export function App() {
 
   // Listen for app updates - auto-open settings to 'updates' section when update is ready
   useEffect(() => {
-    // When an update is downloaded and ready to install, open settings to updates section
+    // When an update is downloaded and ready to install, open settings to updates section.
+    // The event reaches every project window, so only the one the user is in opens the
+    // dialog; the others show the update notification like any other window would.
     const cleanupDownloaded = window.electronAPI.onAppUpdateDownloaded(() => {
+      if (!document.hasFocus()) return;
       console.warn('[App] Update downloaded, opening settings to updates section');
       setSettingsInitialSection('updates');
       setIsSettingsDialogOpen(true);

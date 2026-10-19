@@ -8,6 +8,7 @@ import { taskLogService } from '../../task-log-service';
 import { isValidTaskId } from '../../utils/spec-path-helpers';
 import { debugLog } from '../../../shared/utils/debug-logger';
 import { ensureAbsolutePath } from '../../utils/path-helpers';
+import { safeSendToRenderer } from '../utils';
 
 /**
  * Register task logs handlers
@@ -139,17 +140,12 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
   /**
    * Setup task log service event forwarding to renderer
    */
-  taskLogService.on('logs-changed', (specId: string, logs: TaskLogs) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_LOGS_CHANGED, specId, logs);
-    }
+  // Every project window gets these; the project id keeps each window to its own task
+  taskLogService.on('logs-changed', (specId: string, logs: TaskLogs, projectId?: string) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_CHANGED, specId, logs, projectId);
   });
 
-  taskLogService.on('stream-chunk', (specId: string, chunk: TaskLogStreamChunk) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_LOGS_STREAM, specId, chunk);
-    }
+  taskLogService.on('stream-chunk', (specId: string, chunk: TaskLogStreamChunk, projectId?: string) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_STREAM, specId, chunk, projectId);
   });
 }

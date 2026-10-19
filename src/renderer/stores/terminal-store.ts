@@ -121,6 +121,16 @@ export function writeToTerminal(terminalId: string, data: string): void {
   }
 }
 
+/**
+ * Whether this window holds the terminal: its project's, or one of a project it has shown.
+ *
+ * Terminal output reaches every project window, and another window's terminals are never
+ * drawn here, so the output listener drops what isn't ours instead of buffering it twice.
+ */
+export function isWindowTerminal(terminalId: string): boolean {
+  return useTerminalStore.getState().terminals.some((terminal) => terminal.id === terminalId);
+}
+
 export type TerminalStatus = 'idle' | 'running' | 'claude-active' | 'exited';
 
 /** A task's Claude Code session to resume once the agent window's shell is ready */

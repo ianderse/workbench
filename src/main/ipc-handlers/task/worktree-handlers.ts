@@ -543,17 +543,14 @@ export function registerWorktreeHandlers(
           `(source: ${taskBaseBranch ? 'task metadata' : projectMainBranch ? 'project settings' : 'default'})`);
 
         // Emit initial progress event so renderer shows the merge has started
-        const mainWindow = getMainWindow();
         const emitProgress = (stage: string, percent: number, message: string, details: Record<string, unknown> = {}) => {
-          if (mainWindow) {
-            mainWindow.webContents.send(IPC_CHANNELS.TASK_MERGE_PROGRESS, taskId, {
-              type: 'progress',
-              stage,
-              percent,
-              message,
-              details
-            });
-          }
+          safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_PROGRESS, taskId, {
+            type: 'progress',
+            stage,
+            percent,
+            message,
+            details
+          });
         };
 
         emitProgress('analyzing', 0, 'Starting merge engine');

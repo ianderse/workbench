@@ -27,6 +27,7 @@ import { findTaskWorktree } from '../../worktree-paths';
 import { projectStore } from '../../project-store';
 import { getIsolatedGitEnv, detectWorktreeBranch } from '../../utils/git-isolation';
 import { cancelFallbackTimer } from '../agent-events-handlers';
+import { safeSendToRenderer } from '../utils';
 import { readSettingsFile } from '../../settings-utils';
 import { getAPIProfileEnv } from '../../services/profile';
 import { loadClaudeRunInfo } from '../../claude-code/task-runner';
@@ -195,12 +196,9 @@ export function registerTaskExecutionHandlers(
   agentManager: AgentManager,
   getMainWindow: () => BrowserWindow | null
 ): void {
-  /** Send a task error to the renderer (no-op when no window is open). */
-  const sendTaskError = (taskId: string, error: string): void => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_ERROR, taskId, error);
-    }
+  /** Send a task error to the windows; `projectId` keeps it out of other projects' windows */
+  const sendTaskError = (taskId: string, error: string, projectId?: string): void => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_ERROR, taskId, error, projectId);
   };
 
   /** Hand a task to Claude Code and watch its plan file (subtasks, status) */
@@ -222,7 +220,7 @@ export function registerTaskExecutionHandlers(
 
     agentManager.startTask(taskId, { project, task, mode, feedback, feedbackImagePaths }).catch((err) => {
       console.error(`[TASK_START] Failed to start ${taskId}:`, err);
-      sendTaskError(taskId, err instanceof Error ? err.message : String(err));
+      sendTaskError(taskId, err instanceof Error ? err.message : String(err), project.id);
     });
   };
 
@@ -251,14 +249,16 @@ export function registerTaskExecutionHandlers(
     if (!gitStatus.isGitRepo) {
       sendTaskError(
         taskId,
-        'Git repository required. Please run "git init" in your project directory. Workbench uses git worktrees for isolated builds.'
+        'Git repository required. Please run "git init" in your project directory. Workbench uses git worktrees for isolated builds.',
+        project.id
       );
       return;
     }
     if (!gitStatus.hasCommits) {
       sendTaskError(
         taskId,
-        'Git repository has no commits. Please make an initial commit first (git add . && git commit -m "Initial commit").'
+        'Git repository has no commits. Please make an initial commit first (git add . && git commit -m "Initial commit").',
+        project.id
       );
       return;
     }
@@ -266,7 +266,7 @@ export function registerTaskExecutionHandlers(
     const auth = await checkClaudeCodeAuth();
     if (!auth.ok) {
       console.warn('[TASK_START] No usable Claude Code authentication');
-      sendTaskError(taskId, auth.error);
+      sendTaskError(taskId, auth.error, project.id);
       return;
     }
 
@@ -370,13 +370,12 @@ export function registerTaskExecutionHandlers(
 
         const specDir = getMainSpecDir(project, task);
         taskLogService.clearCache(specDir);
-        const mainWindow = getMainWindow();
-        mainWindow?.webContents.send(IPC_CHANNELS.TASK_LOGS_CHANGED, task.specId, emptyTaskLogs(task.specId));
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_CHANGED, task.specId, emptyTaskLogs(task.specId), project.id);
 
         // 3. Start over (or wait in the queue for a free slot)
         if (queue) {
           console.warn(`[TASK_RETRY] Parallel task limit reached; ${taskId} reset and queued`);
-          mainWindow?.webContents.send(IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', project.id);
+          safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', project.id);
           taskHooks.emit('state', { project, task, status: 'queue' });
           return { success: true, data: { action: 'queued' } };
         }
@@ -645,10 +644,7 @@ export function registerTaskExecutionHandlers(
         if (status === 'in_progress' && !agentManager.isRunning(taskId)) {
           console.warn('[TASK_UPDATE_STATUS] Auto-starting task:', taskId);
           launchRun(taskId, task, project, 'start');
-          const mainWindow = getMainWindow();
-          if (mainWindow) {
-            mainWindow.webContents.send(IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'in_progress', project.id);
-          }
+          safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'in_progress', project.id);
         }
 
         // A task moved to the queue (or out of In Progress) may be startable right away
@@ -786,10 +782,7 @@ export function registerTaskExecutionHandlers(
           }
         }
 
-        const mainWindow = getMainWindow();
-        if (mainWindow) {
-          mainWindow.webContents.send(IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, newStatus, project.id);
-        }
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, newStatus, project.id);
 
         return {
           success: true,
