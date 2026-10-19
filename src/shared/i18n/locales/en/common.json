@@ -234,7 +234,7 @@
     "profile": "Profile",
     "notAvailable": "N/A",
     "usageStatusAriaLabel": "Usage status",
-    "usageBreakdown": "Usage Breakdown",
+    "usageBreakdown": "Usage",
     "used": "used",
     "loading": "Loading...",
     "sessionDefault": "Session",
@@ -253,7 +253,14 @@
     "clickToOpenSettings": "Click to open Settings →",
     "sessionShort": "5-hour session usage",
     "weeklyShort": "7-day weekly usage",
-    "swap": "Swap"
+    "swap": "Swap",
+    "weekAllModels": "Week",
+    "compactHours": "{{hours}}h {{minutes}}m",
+    "compactDays": "{{days}}d {{hours}}h",
+    "resetsInLowerHours": "resets in {{hours}}h {{minutes}}m",
+    "resetsInLowerDays": "resets in {{days}}d {{hours}}h",
+    "heartsLeft": "{{percent}}% of the 5-hour limit left",
+    "weekScoped": "{{model}} · Week"
   },
   "oauth": {
     "enterCode": "Manual Code Entry (Fallback)",

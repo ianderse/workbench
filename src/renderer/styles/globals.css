@@ -1280,3 +1280,13 @@ body {
   height: 2rem;
   font-size: 0.875rem;
 }
+
+/* Clouds drifting behind Clawd in the usage breakdown; each one sets its own from/to */
+@keyframes clawd-cloud-drift {
+  from {
+    transform: translateX(var(--clawd-cloud-from));
+  }
+  to {
+    transform: translateX(var(--clawd-cloud-to));
+  }
+}

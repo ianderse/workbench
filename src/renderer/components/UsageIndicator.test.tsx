@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { UsageIndicator } from './UsageIndicator';
 import { useSettingsStore } from '../stores/settings-store';
 
@@ -21,7 +21,7 @@ vi.mock('react-i18next', () => ({
     t: (key: string, params?: Record<string, unknown>) => {
       const translations: Record<string, string> = {
         'common:usage.loading': 'Loading...',
-        'common:usage.usageBreakdown': 'Usage Breakdown',
+        'common:usage.usageBreakdown': 'Usage',
         'common:usage.apiKeyBadge': 'API key',
         'common:usage.invalidKeyBadge': 'Invalid key',
         'common:usage.apiKeyInvalid': '{{provider}} rejected this API key',
@@ -40,14 +40,18 @@ vi.mock('react-i18next', () => ({
         'common:usage.providerAnthropic': 'Anthropic',
         'common:usage.providerOpenAI': 'OpenAI',
         'common:usage.providerGoogle': 'Google AI',
+        'common:usage.weekAllModels': 'Week',
+        'common:usage.weekScoped': '{{model}} · Week',
+        'common:usage.compactHours': '{{hours}}h {{minutes}}m',
+        'common:usage.compactDays': '{{days}}d {{hours}}h',
+        'common:usage.resetsInLowerHours': 'resets in {{hours}}h {{minutes}}m',
+        'common:usage.resetsInLowerDays': 'resets in {{days}}d {{hours}}h',
       };
 
       if (params && Object.keys(params).length > 0) {
         const translated = translations[key] || key;
-        if (translated.includes('{{provider}}')) {
-          return translated.replace('{{provider}}', String(params.provider));
-        }
-        return translated;
+        return translated.replace(/{{(\w+)}}/g, (whole, name) =>
+          name in params ? String(params[name]) : whole);
       }
 
       return translations[key] || key;
@@ -136,17 +140,78 @@ describe('UsageIndicator', () => {
       expect(usageTrigger).toHaveTextContent('55');
     });
 
-    it('lists only the session and weekly windows, without other accounts', async () => {
+    it('leads with the 5-hour limit and lists the week, without other accounts', async () => {
       render(<UsageIndicator />);
       const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
       fireEvent.click(usageTrigger);
 
-      expect(await screen.findByText('Usage Breakdown')).toBeInTheDocument();
-      expect(screen.getByText('45%')).toBeInTheDocument();
+      expect(await screen.findByText('Usage')).toBeInTheDocument();
+      // The 5-hour limit is the big number at the top, with "%" set apart from it
+      const breakdown = within(screen.getByRole('dialog'));
+      expect(breakdown.getByText('45')).toBeInTheDocument();
+      expect(screen.getByText('Week')).toBeInTheDocument();
       expect(screen.getByText('55%')).toBeInTheDocument();
       expect(screen.queryByText('common:usage.otherAccounts')).not.toBeInTheDocument();
       expect(screen.queryByText('OpenAI OAuth')).not.toBeInTheDocument();
       expect(screen.queryByText('Cross-Provider Usage')).not.toBeInTheDocument();
+    });
+
+    it('hides the Fable row when the provider does not report that limit', async () => {
+      render(<UsageIndicator />);
+      const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
+      fireEvent.click(usageTrigger);
+
+      expect(await screen.findByText('Usage')).toBeInTheDocument();
+      expect(screen.queryByText('Fable · Week')).not.toBeInTheDocument();
+    });
+
+    it('shows the Fable weekly limit when it is reported', async () => {
+      (window as any).electronAPI.requestUsageUpdate = vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          profileId: 'account-anthropic',
+          profileName: 'Anthropic',
+          sessionPercent: 45,
+          weeklyPercent: 55,
+          fablePercent: 18,
+          sessionResetTimestamp: '2026-03-04T12:00:00.000Z',
+          weeklyResetTimestamp: '2026-03-11T12:00:00.000Z',
+          fableResetTimestamp: '2026-03-11T12:00:00.000Z',
+          fetchedAt: new Date(),
+          needsReauthentication: false,
+        },
+      });
+
+      render(<UsageIndicator />);
+      const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
+      fireEvent.click(usageTrigger);
+
+      expect(await screen.findByText('Fable · Week')).toBeInTheDocument();
+      expect(screen.getByText('18%')).toBeInTheDocument();
+    });
+
+    it('shows a zero Fable limit rather than hiding the row', async () => {
+      (window as any).electronAPI.requestUsageUpdate = vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          profileId: 'account-anthropic',
+          profileName: 'Anthropic',
+          sessionPercent: 45,
+          weeklyPercent: 55,
+          fablePercent: 0,
+          sessionResetTimestamp: '2026-03-04T12:00:00.000Z',
+          weeklyResetTimestamp: '2026-03-11T12:00:00.000Z',
+          fetchedAt: new Date(),
+          needsReauthentication: false,
+        },
+      });
+
+      render(<UsageIndicator />);
+      const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
+      fireEvent.click(usageTrigger);
+
+      expect(await screen.findByText('Fable · Week')).toBeInTheDocument();
+      expect(screen.getByText('0%')).toBeInTheDocument();
     });
   });
 
