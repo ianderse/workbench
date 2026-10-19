@@ -72,14 +72,15 @@ export const CAMERA = {
 
 // ─── Tool slot placement config ─────────────────────────────────────────────
 
-export const TOOL_SLOT = {
-  /** Rings tried outward from the agent; if every slot is taken, the outermost ring's least crowded one is used */
+export const NODE_SLOT = {
+  /** Rings tried outward from the parent; if every slot is taken, the least crowded one is used */
   maxRings: 12,
   /** How much further out each ring past the first sits */
   ringIncrement: 25,
-  baseSteps: 5,
-  stepsPerRing: 2,
-  /** Minimum space between a tool circle and another tool or agent */
+  /** Angles tried per ring: about one per node width, within these bounds */
+  minSteps: 16,
+  maxSteps: 96,
+  /** Minimum space between a node and another tool or agent */
   gap: 12,
 } as const
 

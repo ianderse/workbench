@@ -1,16 +1,12 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { NODE, type Agent, type ToolCallNode, type GraphEvent } from '../lib/agent-types'
+import { type GraphEvent } from '../lib/agent-types'
 import { MOCK_SCENARIO } from '../lib/mock-scenario'
-import { TOOL_SLOT, ANIM_SPEED, AGENT_DRAW, estimateToolNodeRadius, nodeDistance } from '../lib/canvas-constants'
+import { ANIM_SPEED } from '../lib/canvas-constants'
 
 import type { GraphState, UseGraphStateOptions } from './graph/types'
 import { createEmptyState } from './graph/types'
-import { processEvent, type ProcessEventContext } from './graph/process-event'
+import { processEvent } from './graph/process-event'
 import { computeNextFrame } from './graph/animate'
-
-/** Room an agent node takes for tool placement: its radius plus its glow */
-const agentFootprint = (agent: Agent) =>
-  (agent.isMain ? NODE.radiusMain : NODE.radiusSub) + AGENT_DRAW.glowPadding
 
 export function useGraphState(options: UseGraphStateOptions) {
   const { useMockData, externalEvents, onExternalEventsConsumed } = options
@@ -42,59 +38,6 @@ export function useGraphState(options: UseGraphStateOptions) {
   const animationRef = useRef<number>(0)
   const lastTimeRef = useRef<number>(0)
   const animateRef = useRef<(timestamp: number) => void>(() => {})
-
-  // ─── Tool slot placement ─────────────────────────────────────────────────
-  const findToolSlot = useCallback((
-    agent: Agent, agents: Map<string, Agent>,
-    toolCalls: Map<string, ToolCallNode>, toolName: string,
-  ): { x: number; y: number } => {
-    const radius = estimateToolNodeRadius(toolName)
-    /** How many tools and agents a circle at (cx, cy) would overlap */
-    const clashes = (cx: number, cy: number) => {
-      let count = 0
-      for (const tc of toolCalls.values()) {
-        if (Math.hypot(cx - tc.x, cy - tc.y) < radius + estimateToolNodeRadius(tc.toolName) + TOOL_SLOT.gap) count++
-      }
-      for (const other of agents.values()) {
-        if (Math.hypot(cx - other.x, cy - other.y) < radius + agentFootprint(other) + TOOL_SLOT.gap) count++
-      }
-      return count
-    }
-
-    let outAngle = -Math.PI / 2
-    if (agent.parentId) {
-      const parent = agents.get(agent.parentId)
-      if (parent) {
-        outAngle = Math.atan2(agent.y - parent.y, agent.x - parent.x)
-      }
-    }
-
-    // Try slots on rings sweeping outward from the agent, away from its parent;
-    // the first sits where the edge to it is as long as the agent is wide. If
-    // every slot is taken, use the outermost ring's slot that clashes least
-    const nearest = nodeDistance(agent.isMain ? NODE.radiusMain : NODE.radiusSub, radius)
-    let best: { x: number; y: number } | undefined
-    let bestClashes = Infinity
-    for (let ring = 1; ring <= TOOL_SLOT.maxRings; ring++) {
-      const dist = nearest + (ring - 1) * TOOL_SLOT.ringIncrement
-      const steps = TOOL_SLOT.baseSteps + ring * TOOL_SLOT.stepsPerRing
-      for (let i = 0; i < steps; i++) {
-        const sweep = (i / (steps - 1) - 0.5) * Math.PI
-        const angle = outAngle + sweep
-        const cx = agent.x + Math.cos(angle) * dist
-        const cy = agent.y + Math.sin(angle) * dist
-        const count = clashes(cx, cy)
-        if (count === 0) return { x: cx, y: cy }
-        if (ring === TOOL_SLOT.maxRings && count < bestClashes) { bestClashes = count; best = { x: cx, y: cy } }
-      }
-    }
-    return best! // the outermost ring always sets it
-  }, [])
-
-  const processEventWithContext = useCallback((event: GraphEvent, prev: GraphState): GraphState => {
-    const ctx: ProcessEventContext = { findToolSlot }
-    return processEvent(event, prev, ctx)
-  }, [findToolSlot])
 
   // ─── Animation loop ──────────────────────────────────────────────────────
   // Reads/writes graphRef directly; React state is only touched when the
@@ -134,7 +77,7 @@ export function useGraphState(options: UseGraphStateOptions) {
     if (useMockData) {
       while (newEventIndex < MOCK_SCENARIO.length && MOCK_SCENARIO[newEventIndex].time <= newTime) {
         const evt = MOCK_SCENARIO[newEventIndex]
-        currentState = processEventWithContext(evt, currentState)
+        currentState = processEvent(evt, currentState)
         newEventIndex++
       }
     }
@@ -145,7 +88,7 @@ export function useGraphState(options: UseGraphStateOptions) {
         const eventTime = Math.max(event.time || newTime, newTime)
         const timedEvent = { ...event, time: eventTime }
         currentState = { ...currentState, currentTime: eventTime }
-        currentState = processEventWithContext(timedEvent, currentState)
+        currentState = processEvent(timedEvent, currentState)
       }
       // Sync the graph clock to latest event so active state renders correctly
       newTime = Math.max(newTime, currentState.currentTime)
@@ -165,7 +108,7 @@ export function useGraphState(options: UseGraphStateOptions) {
     if (result.isPlaying !== prev.isPlaying || (result.agents.size > 0) !== hasAgentsRef.current) syncReactState(result)
 
     animationRef.current = requestAnimationFrame(animateRef.current)
-  }, [processEventWithContext, useMockData, externalEvents, onExternalEventsConsumed, syncReactState])
+  }, [useMockData, externalEvents, onExternalEventsConsumed, syncReactState])
 
   animateRef.current = animate
 
