@@ -17,9 +17,7 @@ if (existsSync(buildEnvPath)) process.loadEnvFile(buildEnvPath);
  * The `define` option replaces these values at build time, so they're
  * embedded in the bundle and available at runtime in packaged apps.
  */
-/** Embedded API keys — search works out of the box, no user config needed. */
 const embeddedKeys = {
-  '__SERPER_API_KEY__': JSON.stringify(process.env.SERPER_API_KEY || ''),
   '__UPDATER_GH_TOKEN__': JSON.stringify(encryptToken(process.env.UPDATER_GH_TOKEN)),
 };
 
