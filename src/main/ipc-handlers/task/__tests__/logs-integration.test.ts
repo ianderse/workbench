@@ -35,6 +35,7 @@ vi.mock('../../../task-log-service', () => ({
     loadLogs: vi.fn(),
     startWatching: vi.fn(),
     stopWatching: vi.fn(),
+    stopWatchingSpec: vi.fn(),
     on: vi.fn()
   }
 }));
@@ -314,7 +315,8 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
         '001-test-task',
         path.join('/absolute/path/to/project', '.workbench/tasks', '001-test-task'),
         '/absolute/path/to/project',
-        '.workbench/tasks'
+        '.workbench/tasks',
+        'project-123'
       );
     });
 
@@ -359,7 +361,8 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
         'nonexistent-spec',
         path.join('/absolute/path/to/project', '.workbench/tasks', 'nonexistent-spec'),
         '/absolute/path/to/project',
-        '.workbench/tasks'
+        '.workbench/tasks',
+        'project-123'
       );
     });
 
@@ -389,25 +392,52 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
   });
 
   describe('TASK_LOGS_UNWATCH handler', () => {
-    it('should stop watching spec directory', async () => {
+    const mockProject = {
+      id: 'project-123',
+      path: '/absolute/path/to/project',
+      autoBuildPath: '.workbench'
+    };
+    const specDir = path.join('/absolute/path/to/project', '.workbench/tasks', '001-test-task');
+
+    it('should stop watching the project\'s own spec directory', async () => {
+      const { projectStore } = await import('../../../project-store');
       const { taskLogService } = await import('../../../task-log-service');
 
+      (projectStore.getProject as Mock).mockReturnValue(mockProject);
+
       const handler = ipcHandlers['task:logsUnwatch'];
-      const result = await handler({}, '001-test-task') as IPCResult;
+      const result = await handler({}, 'project-123', '001-test-task') as IPCResult;
 
       expect(result.success).toBe(true);
-      expect(taskLogService.stopWatching).toHaveBeenCalledWith('001-test-task');
+      // Keyed by directory, so another project's watch on the same spec id is left alone
+      expect(taskLogService.stopWatching).toHaveBeenCalledWith(specDir);
+    });
+
+    it('should release the watch when the project is gone', async () => {
+      const { projectStore } = await import('../../../project-store');
+      const { taskLogService } = await import('../../../task-log-service');
+
+      (projectStore.getProject as Mock).mockReturnValue(null);
+
+      const handler = ipcHandlers['task:logsUnwatch'];
+      const result = await handler({}, 'nonexistent-project', '001-test-task') as IPCResult;
+
+      // Its directory can't be worked out any more, so the spec's watch goes by id
+      expect(result.success).toBe(true);
+      expect(taskLogService.stopWatchingSpec).toHaveBeenCalledWith('001-test-task');
     });
 
     it('should handle taskLogService unwatch errors gracefully', async () => {
+      const { projectStore } = await import('../../../project-store');
       const { taskLogService } = await import('../../../task-log-service');
 
+      (projectStore.getProject as Mock).mockReturnValue(mockProject);
       (taskLogService.stopWatching as Mock).mockImplementation(() => {
         throw new Error('Unwatch failed');
       });
 
       const handler = ipcHandlers['task:logsUnwatch'];
-      const result = await handler({}, '001-test-task') as IPCResult;
+      const result = await handler({}, 'project-123', '001-test-task') as IPCResult;
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Unwatch failed');
@@ -585,6 +615,7 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
           loadLogs: vi.fn(),
           startWatching: vi.fn(),
           stopWatching: vi.fn(),
+          stopWatchingSpec: vi.fn(),
           on: mockOn
         }
       }));

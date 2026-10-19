@@ -419,14 +419,14 @@ export interface ElectronAPI {
   // Task logs operations
   getTaskLogs: (projectId: string, specId: string) => Promise<IPCResult<TaskLogs | null>>;
   watchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
-  unwatchTaskLogs: (specId: string) => Promise<IPCResult>;
+  unwatchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
 
   // Task logs event listeners
   onTaskLogsChanged: (
-    callback: (specId: string, logs: TaskLogs) => void
+    callback: (specId: string, logs: TaskLogs, projectId?: string) => void
   ) => () => void;
   onTaskLogsStream: (
-    callback: (specId: string, chunk: TaskLogStreamChunk) => void
+    callback: (specId: string, chunk: TaskLogStreamChunk, projectId?: string) => void
   ) => () => void;
   onMergeProgress: (
     callback: (taskId: string, progress: MergeProgress) => void

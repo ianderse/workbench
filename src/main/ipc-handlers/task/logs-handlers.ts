@@ -102,7 +102,7 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
         // Start watching even if specDir doesn't exist yet — the poll loop
         // in TaskLogService handles missing files gracefully and will pick up
         // task_logs.json once the agent creates it during execution.
-        taskLogService.startWatching(specId, specDir, absoluteProjectPath, specsRelPath);
+        taskLogService.startWatching(specId, specDir, absoluteProjectPath, specsRelPath, projectId);
         return { success: true };
       } catch (error) {
         console.error('[TASK_LOGS_WATCH] Failed to start watching task logs:', error);
@@ -119,13 +119,28 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
    */
   handleIpc(
     IPC_CHANNELS.TASK_LOGS_UNWATCH,
-    async (_, specId: string): Promise<IPCResult> => {
+    async (_, projectId: string, specId: string): Promise<IPCResult> => {
       try {
         if (!isValidTaskId(specId)) {
           return { success: false, error: 'Invalid spec ID' };
         }
 
-        taskLogService.stopWatching(specId);
+        // Watches are counted per spec directory, so one window's unwatch leaves another
+        // window watching the same task alone
+        const project = projectStore.getProject(projectId);
+        if (!project) {
+          // The project is gone (removed while its task was open): nothing can be watching
+          // it any more, and its directory can no longer be worked out
+          taskLogService.stopWatchingSpec(specId);
+          return { success: true };
+        }
+        const specDir = path.join(
+          ensureAbsolutePath(project.path),
+          getSpecsDir(project.autoBuildPath),
+          specId
+        );
+
+        taskLogService.stopWatching(specDir);
         return { success: true };
       } catch (error) {
         console.error('Failed to stop watching task logs:', error);

@@ -192,8 +192,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     window.electronAPI.watchTaskLogs(currentProject.id, task.specId);
 
     // Listen for log changes
-    const unsubscribe = window.electronAPI.onTaskLogsChanged((specId, logs) => {
-      if (specId === task.specId) {
+    const unsubscribe = window.electronAPI.onTaskLogsChanged((specId, logs, projectId) => {
+      // Spec ids repeat across projects, so the project decides whose logs these are
+      if (specId === task.specId && (!projectId || projectId === currentProject.id)) {
         setPhaseLogs(logs);
         // Open the logs when a step newly fails (a collapsed list stays collapsed otherwise)
         const failed = failedPhases(logs);
@@ -206,7 +207,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
 
     return () => {
       unsubscribe();
-      window.electronAPI.unwatchTaskLogs(task.specId);
+      window.electronAPI.unwatchTaskLogs(currentProject.id, task.specId);
     };
   }, [currentProject, task.specId]);
 
