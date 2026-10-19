@@ -234,6 +234,34 @@ describe('AgentManager', () => {
     expect(exits).toEqual([]);
   });
 
+  it('keeps the runs of same-named tasks in two projects apart', async () => {
+    // Each project numbers its tasks from 001, so the same id turns up in both
+    const other = { ...project, id: 'project-2', path: '/other' } as unknown as Project;
+
+    await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
+    const first = await nextRun(1);
+
+    await manager.startTask('001-add-login', {
+      project: other,
+      task: makeTask({ projectId: 'project-2' }),
+      mode: 'start',
+    });
+    const second = await nextRun(2);
+
+    // Starting the second project's task leaves the first project's run alone
+    expect(first.stop).not.toHaveBeenCalled();
+    expect(manager.isRunning('001-add-login', 'project-1')).toBe(true);
+    expect(manager.isRunning('001-add-login', 'project-2')).toBe(true);
+    expect(manager.getRunningTasks()).toEqual(['001-add-login', '001-add-login']);
+
+    // And stopping one stops only that project's run
+    expect(manager.killTask('001-add-login', 'project-2')).toBe(true);
+    expect(second.stop).toHaveBeenCalled();
+    expect(first.stop).not.toHaveBeenCalled();
+    expect(manager.isRunning('001-add-login', 'project-1')).toBe(true);
+    expect(manager.isRunning('001-add-login', 'project-2')).toBe(false);
+  });
+
   it('records a rate limit on the profile the run used and tags the event with it', async () => {
     const taskEvents: Array<Record<string, unknown>> = [];
     manager.on('task-event', (_taskId: string, event: Record<string, unknown>) => taskEvents.push(event));

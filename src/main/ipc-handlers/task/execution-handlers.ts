@@ -607,23 +607,23 @@ export function registerTaskExecutionHandlers(
 
         // Stop the run when the task is moved away from In Progress (e.g., back to backlog)
         // BEFORE the machine transition, so the run's late events can't move it back
-        if (status !== 'in_progress' && agentManager.isRunning(taskId)) {
+        if (status !== 'in_progress' && agentManager.isRunning(taskId, project.id)) {
           console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
-          agentManager.killTask(taskId);
+          agentManager.killTask(taskId, project.id);
           fileWatcher.unwatch(taskId).catch(() => undefined);
         }
 
-        if (status === 'in_progress' && !agentManager.isRunning(taskId)) {
+        if (status === 'in_progress' && !agentManager.isRunning(taskId, project.id)) {
           // Check git status and auth before the card moves
           const gitStatusCheck = checkGitStatus(project.path);
           if (!gitStatusCheck.isGitRepo || !gitStatusCheck.hasCommits) {
             const error = gitStatusCheck.error || 'Git repository with commits required to run tasks.';
-            sendTaskError(taskId, error);
+            sendTaskError(taskId, error, project.id);
             return { success: false, error };
           }
           const auth = await checkClaudeCodeAuth();
           if (!auth.ok) {
-            sendTaskError(taskId, auth.error);
+            sendTaskError(taskId, auth.error, project.id);
             return { success: false, error: auth.error };
           }
           taskStateManager.prepareForRestart(taskId);
@@ -641,7 +641,7 @@ export function registerTaskExecutionHandlers(
         }
 
         // Auto-start the task when it is moved to In Progress and isn't running
-        if (status === 'in_progress' && !agentManager.isRunning(taskId)) {
+        if (status === 'in_progress' && !agentManager.isRunning(taskId, project.id)) {
           console.warn('[TASK_UPDATE_STATUS] Auto-starting task:', taskId);
           launchRun(taskId, task, project, 'start');
           safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'in_progress', project.id);
