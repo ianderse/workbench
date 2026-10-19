@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 import { useTaskStore, loadTasks } from '../stores/task-store';
 import { useAuthFailureStore } from '../stores/auth-failure-store';
-import { useProjectStore } from '../stores/project-store';
+import { loadProjects, useProjectStore } from '../stores/project-store';
 import { setupInsightsListeners } from '../stores/insights-store';
 import type { ImplementationPlan, TaskStatus, ExecutionProgress, AuthFailureInfo } from '../../shared/types';
 
@@ -233,6 +233,11 @@ export function useIpcListeners(): void {
       }
     );
 
+    // A project added or removed, here or in another project window
+    const cleanupProjectList = window.electronAPI.onProjectListChanged(() => {
+      void loadProjects();
+    });
+
     // Tasks created, edited or moved outside the board (the Claude chat's task tools)
     const cleanupTaskList = window.electronAPI.onTaskListChanged((projectId: string) => {
       if (!isTaskForCurrentProject(projectId)) return;
@@ -289,6 +294,7 @@ export function useIpcListeners(): void {
       cleanupRateLimitHold();
       cleanupClaudeRun();
       cleanupTaskList();
+      cleanupProjectList();
       cleanupExecutionProgress();
       cleanupAuthFailure();
       cleanupInsights();

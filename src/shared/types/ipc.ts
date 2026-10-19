@@ -135,6 +135,9 @@ export interface ElectronAPI {
   getTabState: () => Promise<IPCResult<TabState>>;
   saveTabState: (tabState: TabState) => Promise<IPCResult>;
 
+  /** A project was added or removed (in this window or another one) */
+  onProjectListChanged: (callback: () => void) => () => void;
+
   // Kanban preferences (per-project column collapse state)
   getKanbanPreferences: (projectId: string) => Promise<IPCResult<KanbanPreferences | null>>;
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences) => Promise<IPCResult>;

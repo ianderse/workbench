@@ -26,6 +26,7 @@ import {
   initializeGit
 } from '../project-initializer';
 import { getToolPath } from '../cli-tool-manager';
+import { safeSendToRenderer } from './utils';
 import type { BrowserWindow } from 'electron';
 
 const execFileAsync = promisify(execFile);
@@ -212,6 +213,8 @@ export function registerProjectHandlers(
         const project = projectStore.addProject(projectPath);
         // A project used by an older version may still have the old data folder names
         await migrateProjectDataDirs(project.path, project.autoBuildPath);
+        // Every window shows the same project list
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_LIST_CHANGED);
         return { success: true, data: project };
       } catch (error) {
         return {
@@ -238,6 +241,7 @@ export function registerProjectHandlers(
     IPC_CHANNELS.PROJECT_REMOVE,
     async (_, projectId: string): Promise<IPCResult> => {
       const success = projectStore.removeProject(projectId);
+      if (success) safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_LIST_CHANGED);
       return { success };
     }
   );

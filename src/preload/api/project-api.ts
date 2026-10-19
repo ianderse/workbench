@@ -49,6 +49,9 @@ export interface ProjectAPI {
   ) => Promise<IPCResult<import('../../shared/types').CreateProjectFolderResult>>;
   getDefaultProjectLocation: () => Promise<string | null>;
 
+  /** A project was added or removed (in this window or another one) */
+  onProjectListChanged: (callback: () => void) => () => void;
+
   // Git Operations
   /** @deprecated Use getGitBranchesWithInfo for structured branch data with type indicators */
   getGitBranches: (projectPath: string) => Promise<IPCResult<string[]>>;
@@ -114,6 +117,14 @@ export const createProjectAPI = (): ProjectAPI => ({
 
   getDefaultProjectLocation: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_GET_DEFAULT_PROJECT_LOCATION),
+
+  onProjectListChanged: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on(IPC_CHANNELS.PROJECT_LIST_CHANGED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PROJECT_LIST_CHANGED, handler);
+    };
+  },
 
   // Git Operations
   getGitBranches: (projectPath: string): Promise<IPCResult<string[]>> =>
