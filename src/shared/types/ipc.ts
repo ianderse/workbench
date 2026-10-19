@@ -493,6 +493,15 @@ export interface ElectronAPI {
   checkMcpHealth: (server: CustomMcpServer) => Promise<IPCResult<McpHealthCheckResult>>;
   testMcpConnection: (server: CustomMcpServer) => Promise<IPCResult<McpTestConnectionResult>>;
 
+  // Project windows (one project per window)
+  /** Project this window was opened for (null for the first window) */
+  assignedProjectId: string | null;
+  listProjectWindows: () => Promise<IPCResult<import('./window').ProjectWindowInfo[]>>;
+  reportWindowProject: (projectId: string | null) => void;
+  openProjectWindow: (projectId: string) => Promise<IPCResult<{ focused: boolean }>>;
+  closeProjectWindow: (projectId: string) => Promise<IPCResult>;
+  onProjectWindowsChanged: (callback: (windows: import('./window').ProjectWindowInfo[]) => void) => () => void;
+
   // Queue Routing API (rate limit recovery)
   queue: import('../../preload/api/queue-api').QueueAPI;
 }

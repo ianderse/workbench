@@ -5,7 +5,7 @@ vi.mock('../app-language', () => ({ getAppLanguage: () => 'en' }));
 
 import { buildTrayMenuTemplate, formatPlanLabel, allowWindowClose, isWindowCloseAllowed } from '../app-tray';
 
-const actions = { onShowApp: vi.fn(), onQuit: vi.fn() };
+const actions = { onShowApp: vi.fn(), onFocusWindow: vi.fn(), onQuit: vi.fn() };
 const labelsOf = (template: Electron.MenuItemConstructorOptions[]) =>
   template.map((item) => (item.type === 'separator' ? '---' : `${item.label}${item.enabled === false ? ' (disabled)' : ''}`));
 
@@ -29,6 +29,33 @@ describe('buildTrayMenuTemplate', () => {
 
   it('collapses to Show App / Quit when nothing is known', () => {
     expect(labelsOf(buildTrayMenuTemplate({ planName: null, sessionPercent: null }, actions))).toEqual(['Show App', '---', 'Quit']);
+  });
+
+  it('lists the open project windows instead of "Show App"', () => {
+    const windows = [
+      { windowId: 1, projectName: 'proj_1' },
+      { windowId: 2, projectName: 'proj_2' },
+      { windowId: 3, projectName: null },
+    ];
+    expect(labelsOf(buildTrayMenuTemplate({ planName: null, sessionPercent: null }, actions, windows))).toEqual([
+      'proj_1', 'proj_2', 'No project', '---', 'Quit',
+    ]);
+  });
+
+  it('keeps "Show App" while a single window is open', () => {
+    const windows = [{ windowId: 1, projectName: 'proj_1' }];
+    expect(labelsOf(buildTrayMenuTemplate({ planName: null, sessionPercent: null }, actions, windows))).toEqual([
+      'Show App', '---', 'Quit',
+    ]);
+  });
+
+  it('focuses the window a project entry belongs to', () => {
+    const template = buildTrayMenuTemplate({ planName: null, sessionPercent: null }, actions, [
+      { windowId: 7, projectName: 'proj_1' },
+      { windowId: 9, projectName: 'proj_2' },
+    ]);
+    (template[1].click as () => void)();
+    expect(actions.onFocusWindow).toHaveBeenCalledWith(9);
   });
 
   it('wires the actions', () => {

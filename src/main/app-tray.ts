@@ -1,9 +1,12 @@
 /**
  * Background mode: system tray icon with a small menu.
  *
- * While the tray exists, closing the main window only hides it (agents and terminals keep
+ * While the tray exists, closing the last window only hides it (agents and terminals keep
  * running); "Quit" in the tray menu (or quitting from the OS) exits the app. The menu shows
  * the active Claude plan and the current 5-hour session usage when they're known.
+ *
+ * With more than one project window open, "Show App" is replaced by one entry per window,
+ * labelled with the project it shows, which focuses that window.
  */
 
 import { Menu, Tray, nativeImage } from 'electron';
@@ -32,14 +35,25 @@ export interface TrayStatus {
   sessionPercent: number | null;
 }
 
+/** An open project window, as the tray menu lists it */
+export interface TrayProjectWindow {
+  windowId: number;
+  /** Name of the project the window shows (null while it shows none) */
+  projectName: string | null;
+}
+
 export interface AppTrayOptions {
   /** Directory holding tray-icon.png / trayTemplate.png (and their @2x variants) */
   iconsDir: string;
   /** Use the development build's hammer icons (tray-icon-dev.png / trayTemplate-dev.png) */
   devBuild?: boolean;
   onShowApp: () => void;
+  /** Focus one of the open project windows (menu entries, only with more than one window) */
+  onFocusWindow: (windowId: number) => void;
   onQuit: () => void;
   getStatus: () => TrayStatus;
+  /** The open project windows, newest last (empty or single: the menu keeps "Show App") */
+  getWindows: () => TrayProjectWindow[];
 }
 
 function labels(): TrayMenuLabels {
@@ -55,7 +69,8 @@ export function formatPlanLabel(planName: string, template = labels().plan): str
 /** Menu template for the tray (exported for tests) */
 export function buildTrayMenuTemplate(
   status: TrayStatus,
-  actions: { onShowApp: () => void; onQuit: () => void },
+  actions: { onShowApp: () => void; onFocusWindow: (windowId: number) => void; onQuit: () => void },
+  windows: TrayProjectWindow[] = [],
   text: TrayMenuLabels = labels(),
 ): Electron.MenuItemConstructorOptions[] {
   const info: Electron.MenuItemConstructorOptions[] = [];
@@ -64,8 +79,17 @@ export function buildTrayMenuTemplate(
     info.push({ label: text.usage.replace('{{percent}}', String(Math.round(status.sessionPercent))), enabled: false });
   }
 
+  // One entry per window while several projects are open; a single window keeps "Show App"
+  const windowItems: Electron.MenuItemConstructorOptions[] =
+    windows.length > 1
+      ? windows.map((win) => ({
+          label: win.projectName ?? text.noProject,
+          click: () => actions.onFocusWindow(win.windowId),
+        }))
+      : [{ label: text.showApp, click: actions.onShowApp }];
+
   return [
-    { label: text.showApp, click: actions.onShowApp },
+    ...windowItems,
     ...(info.length > 0 ? [{ type: 'separator' as const }, ...info] : []),
     { type: 'separator' },
     { label: text.quit, click: actions.onQuit },
@@ -98,11 +122,15 @@ export class AppTray {
     this.refreshTimer = setInterval(() => this.refresh(), TRAY_REFRESH_INTERVAL_MS);
   }
 
-  /** Rebuild the menu with the latest plan/usage */
+  /** Rebuild the menu with the latest plan/usage and open project windows */
   refresh(): void {
     if (this.tray.isDestroyed()) return;
-    const { onShowApp, onQuit, getStatus } = this.options;
-    this.tray.setContextMenu(Menu.buildFromTemplate(buildTrayMenuTemplate(getStatus(), { onShowApp, onQuit })));
+    const { onShowApp, onFocusWindow, onQuit, getStatus, getWindows } = this.options;
+    this.tray.setContextMenu(
+      Menu.buildFromTemplate(
+        buildTrayMenuTemplate(getStatus(), { onShowApp, onFocusWindow, onQuit }, getWindows()),
+      ),
+    );
   }
 
   destroy(): void {

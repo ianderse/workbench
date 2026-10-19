@@ -125,5 +125,23 @@ export const projectMock = {
   initializeGit: async () => ({
     success: true,
     data: { success: true }
-  })
+  }),
+
+  onProjectListChanged: () => () => {},
+
+  // Project windows (the browser mock always behaves like a single window)
+  assignedProjectId: null,
+
+  listProjectWindows: async () => ({
+    success: true,
+    data: [{ windowId: 1, projectId: mockProjects[0]?.id ?? null }]
+  }),
+
+  reportWindowProject: () => {},
+
+  openProjectWindow: async () => ({ success: true, data: { focused: false } }),
+
+  closeProjectWindow: async () => ({ success: true }),
+
+  onProjectWindowsChanged: () => () => {}
 };

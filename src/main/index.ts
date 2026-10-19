@@ -42,7 +42,7 @@ import { TerminalManager } from './terminal-manager';
 import { getUsageMonitor } from './claude-profile/usage-monitor';
 import { initializeUsageMonitorForwarding } from './ipc-handlers/terminal-handlers';
 import { initializeAppUpdater, stopPeriodicUpdates } from './app-updater';
-import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, ADD_TO_DICTIONARY_LABELS } from '../shared/constants';
+import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, ADD_TO_DICTIONARY_LABELS, WINDOW_PROJECT_ARG } from '../shared/constants';
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
 import { liveAgentRelay } from './live-agent/live-agent-relay';
@@ -54,7 +54,20 @@ import { isProfileAuthenticated, getPlanFromConfigDir } from './claude-profile/p
 import { isLinux, isMacOS, isWindows } from './platform';
 import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
-import { AppTray, isWindowCloseAllowed } from './app-tray';
+import { AppTray, isWindowCloseAllowed, type TrayStatus } from './app-tray';
+import {
+  focusWindowById,
+  getAllWindows,
+  getFocusedWindow,
+  getWindowCount,
+  isClosingForReal,
+  listProjectWindows,
+  onProjectWindowsChanged,
+  registerWindow,
+  showWindow
+} from './window-manager';
+import { notifyProjectWindowsChanged } from './ipc-handlers/window-handlers';
+import { safeSendToRenderer, setRendererWindowsProvider } from './ipc-handlers/utils';
 import type { AppSettings, AuthFailureInfo } from '../shared/types';
 import { projectStore } from './project-store';
 import { migrateProjectDataDirs } from './data-dir-migration';
@@ -155,20 +168,17 @@ function getIconPath(): string {
   return iconPath;
 }
 
-// Keep a global reference of the window object to prevent garbage collection
-let mainWindow: BrowserWindow | null = null;
-// System tray (background mode); while it exists, closing the window only hides it
+// System tray (background mode); while it exists, closing the last window only hides it
 let appTray: AppTray | null = null;
 
-/** Bring the main window back from the tray (recreating it if it was destroyed) */
+/** Bring a window back from the tray (recreating one if every window was closed) */
 function showMainWindow(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) {
+  const window = getFocusedWindow();
+  if (!window) {
     createWindow();
     return;
   }
-  if (mainWindow.isMinimized()) mainWindow.restore();
-  mainWindow.show();
-  mainWindow.focus();
+  showWindow(window);
 }
 let agentManager: AgentManager | null = null;
 let terminalManager: TerminalManager | null = null;
@@ -184,53 +194,56 @@ app.on('child-process-gone', (_event, details) => {
 // Fixes: pty.node SIGABRT crash caused by environment teardown before PTY cleanup (GitHub #1469)
 let isQuitting = false;
 
-// Renderer recovery budget (prevents infinite reload loops on persistent failures)
+// Renderer recovery budget (prevents infinite reload loops on persistent failures).
+// The budget is per window, so one window's crashes don't stop another's recovery.
 const MAX_RENDERER_RECOVERY_ATTEMPTS = 3;
 const RENDERER_RECOVERY_WINDOW_MS = 60_000;
 const RENDERER_RECOVERY_DELAY_MS = 500;
-let rendererRecoveryAttempts = 0;
-let rendererRecoveryWindowStart = 0;
 
-function resetRendererRecoveryState(): void {
-  rendererRecoveryAttempts = 0;
-  rendererRecoveryWindowStart = 0;
+interface RendererRecoveryState {
+  attempts: number;
+  windowStart: number;
 }
 
-function scheduleRendererRecovery(trigger: string): void {
-  if (!mainWindow || mainWindow.isDestroyed() || isQuitting) {
+function scheduleRendererRecovery(window: BrowserWindow, state: RendererRecoveryState, trigger: string): void {
+  if (window.isDestroyed() || isQuitting) {
     return;
   }
 
   const now = Date.now();
-  if (rendererRecoveryWindowStart === 0 || now - rendererRecoveryWindowStart > RENDERER_RECOVERY_WINDOW_MS) {
-    rendererRecoveryWindowStart = now;
-    rendererRecoveryAttempts = 0;
+  if (state.windowStart === 0 || now - state.windowStart > RENDERER_RECOVERY_WINDOW_MS) {
+    state.windowStart = now;
+    state.attempts = 0;
   }
 
-  if (rendererRecoveryAttempts >= MAX_RENDERER_RECOVERY_ATTEMPTS) {
+  if (state.attempts >= MAX_RENDERER_RECOVERY_ATTEMPTS) {
     appLog.error(
-      `[main] Renderer recovery budget exhausted after trigger: ${trigger} (${rendererRecoveryAttempts}/${MAX_RENDERER_RECOVERY_ATTEMPTS})`
+      `[main] Renderer recovery budget exhausted after trigger: ${trigger} (${state.attempts}/${MAX_RENDERER_RECOVERY_ATTEMPTS})`
     );
     return;
   }
 
-  rendererRecoveryAttempts++;
+  state.attempts++;
   appLog.error(
-    `[main] Renderer failure detected (${trigger}). Attempting recovery ${rendererRecoveryAttempts}/${MAX_RENDERER_RECOVERY_ATTEMPTS}`
+    `[main] Renderer failure detected (${trigger}). Attempting recovery ${state.attempts}/${MAX_RENDERER_RECOVERY_ATTEMPTS}`
   );
 
   setTimeout(() => {
-    if (!mainWindow || mainWindow.isDestroyed() || isQuitting) {
+    if (window.isDestroyed() || isQuitting) {
       return;
     }
-    mainWindow.webContents.reload();
-    if (!mainWindow.isVisible()) {
-      mainWindow.show();
+    window.webContents.reload();
+    if (!window.isVisible()) {
+      window.show();
     }
   }, RENDERER_RECOVERY_DELAY_MS);
 }
 
-function createWindow(): void {
+/**
+ * Create an app window. `assignedProjectId` is the project the window opens (the Projects
+ * page's "New window"); the first window passes null and restores the project it showed last.
+ */
+function createWindow(assignedProjectId: string | null = null): BrowserWindow {
   // Get the primary display's work area (accounts for taskbar, dock, etc.)
   // Wrapped in try/catch to handle potential failures with fallback to safe defaults
   let workAreaSize: { width: number; height: number };
@@ -270,7 +283,7 @@ function createWindow(): void {
   const minHeight: number = Math.min(WINDOW_MIN_HEIGHT, height);
 
   // Create the browser window
-  mainWindow = new BrowserWindow({
+  const appWindow = new BrowserWindow({
     width,
     height,
     minWidth,
@@ -292,48 +305,61 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       backgroundThrottling: false, // Prevent terminal lag when window loses focus
-      spellcheck: true // Enable spell check for text inputs
+      spellcheck: true, // Enable spell check for text inputs
+      // The renderer reads the project to open from here, so it never flashes another one
+      additionalArguments: assignedProjectId ? [`${WINDOW_PROJECT_ARG}${assignedProjectId}`] : []
     }
   });
 
-  // Background mode: the close button hides the window to the tray; agents and terminals keep
-  // running. Real quits (tray "Quit", OS quit) set isQuitting first and close normally.
-  mainWindow.on('close', (event) => {
-    if (!isQuitting && appTray && !isWindowCloseAllowed()) {
+  registerWindow(appWindow, assignedProjectId);
+  const recovery: RendererRecoveryState = { attempts: 0, windowStart: 0 };
+
+  // Background mode: closing the last window hides it to the tray; agents and terminals keep
+  // running. With another project window open, the close button closes this window for real,
+  // as does "Quit window" on a project card. Real quits (tray "Quit", OS quit) set isQuitting
+  // first and close normally.
+  appWindow.on('close', (event) => {
+    const hideToTray =
+      !isQuitting &&
+      appTray !== null &&
+      !isWindowCloseAllowed() &&
+      !isClosingForReal(appWindow.id) &&
+      getWindowCount() <= 1;
+    if (hideToTray) {
       event.preventDefault();
-      mainWindow?.hide();
+      appWindow.hide();
     }
   });
-  mainWindow.on('show', () => appTray?.refresh());
-  mainWindow.on('hide', () => appTray?.refresh());
+  appWindow.on('show', () => appTray?.refresh());
+  appWindow.on('hide', () => appTray?.refresh());
 
   // Show window when ready to avoid visual flash
-  mainWindow.on('ready-to-show', () => {
-    mainWindow?.show();
+  appWindow.on('ready-to-show', () => {
+    appWindow.show();
   });
 
   // Capture renderer process crashes/termination reasons for diagnostics.
-  mainWindow.webContents.on('render-process-gone', (_event, details) => {
+  appWindow.webContents.on('render-process-gone', (_event, details) => {
     appLog.error('[main] render-process-gone:', details);
     if (details.reason !== 'clean-exit') {
-      scheduleRendererRecovery(`render-process-gone:${details.reason}`);
+      scheduleRendererRecovery(appWindow, recovery, `render-process-gone:${details.reason}`);
     }
   });
 
   // Recover main-frame load failures (excluding intentional aborted loads, ERR_ABORTED = -3)
-  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+  appWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) {
       return;
     }
     appLog.error(`[main] Main frame failed to load (${errorCode}): ${errorDescription} (${validatedURL})`);
-    scheduleRendererRecovery(`did-fail-load:${errorCode}`);
+    scheduleRendererRecovery(appWindow, recovery, `did-fail-load:${errorCode}`);
   });
 
   // The attempt budget is only reset by its 60s window (not here), so a renderer that
   // crashes right after every load cannot reload forever
-  mainWindow.webContents.on('did-finish-load', () => {
-    if (rendererRecoveryAttempts > 0) {
-      appLog.warn(`[main] Renderer reloaded after ${rendererRecoveryAttempts} recovery attempt(s)`);
+  appWindow.webContents.on('did-finish-load', () => {
+    if (recovery.attempts > 0) {
+      appLog.warn(`[main] Renderer reloaded after ${recovery.attempts} recovery attempt(s)`);
     }
   });
 
@@ -357,7 +383,7 @@ function createWindow(): void {
   }
 
   // Handle context menu with spell check and standard editing options
-  mainWindow.webContents.on('context-menu', (_event, params) => {
+  appWindow.webContents.on('context-menu', (_event, params) => {
     const menu = new Menu();
 
     // Add spelling suggestions if there's a misspelled word
@@ -365,7 +391,7 @@ function createWindow(): void {
       for (const suggestion of params.dictionarySuggestions) {
         menu.append(new MenuItem({
           label: suggestion,
-          click: () => mainWindow?.webContents.replaceMisspelling(suggestion)
+          click: () => appWindow.webContents.replaceMisspelling(suggestion)
         }));
       }
 
@@ -378,7 +404,7 @@ function createWindow(): void {
       const addToDictionaryLabel = ADD_TO_DICTIONARY_LABELS[getAppLanguage()] || ADD_TO_DICTIONARY_LABELS['en'];
       menu.append(new MenuItem({
         label: addToDictionaryLabel,
-        click: () => mainWindow?.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord)
+        click: () => appWindow.webContents.session.addWordToSpellCheckerDictionary(params.misspelledWord)
       }));
 
       menu.append(new MenuItem({ type: 'separator' }));
@@ -422,7 +448,7 @@ function createWindow(): void {
   // Note: Terminal links now use IPC via WebLinksAddon callback, but this handler
   // catches any other window.open() calls (e.g., from third-party libraries)
   const ALLOWED_URL_SCHEMES = ['http:', 'https:', 'mailto:'];
-  mainWindow.webContents.setWindowOpenHandler((details) => {
+  appWindow.webContents.setWindowOpenHandler((details) => {
     try {
       const url = new URL(details.url);
       if (!ALLOWED_URL_SCHEMES.includes(url.protocol)) {
@@ -441,25 +467,44 @@ function createWindow(): void {
 
   // Load the renderer
   if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
+    appWindow.loadURL(process.env['ELECTRON_RENDERER_URL']);
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
+    appWindow.loadFile(join(__dirname, '../renderer/index.html'));
   }
 
-  // Open DevTools in development
-  if (is.dev) {
-    mainWindow.webContents.openDevTools({ mode: 'right' });
+  // Open DevTools in development, for the first window only
+  if (is.dev && getWindowCount() === 1) {
+    appWindow.webContents.openDevTools({ mode: 'right' });
   }
 
-  // Clean up on close
-  mainWindow.on('closed', () => {
-    // Kill all agents when window closes (prevents orphaned processes)
-    agentManager?.killAll?.()?.catch((err: unknown) => {
-      console.warn('[main] Error killing agents on window close:', err);
-    });
-    resetRendererRecoveryState();
-    mainWindow = null;
-  });
+  return appWindow;
+}
+
+/**
+ * Plan and usage for the tray menu, which are only shown while a Claude account is signed
+ * in. Reading them parses the account's settings file, and the menu is now rebuilt whenever
+ * a window opens, closes or switches project, so the answer is held briefly: the periodic
+ * refresh and usage updates keep it current.
+ */
+const TRAY_STATUS_TTL_MS = 5_000;
+let trayStatus: { value: TrayStatus; readAt: number } | null = null;
+
+function readTrayStatus(): TrayStatus {
+  if (trayStatus && Date.now() - trayStatus.readAt < TRAY_STATUS_TTL_MS) return trayStatus.value;
+  let value: TrayStatus = { planName: null, sessionPercent: null };
+  try {
+    const profile = getClaudeProfileManager().getActiveProfile();
+    if (profile && isProfileAuthenticated(profile)) {
+      value = {
+        planName: getPlanFromConfigDir(profile.configDir),
+        sessionPercent: getUsageMonitor().getCurrentUsage()?.sessionPercent ?? null
+      };
+    }
+  } catch {
+    // Profile manager not ready yet
+  }
+  trayStatus = { value, readAt: Date.now() };
+  return value;
 }
 
 // Set app name before ready (for dock tooltip on macOS in dev mode). Development builds get their
@@ -534,10 +579,15 @@ app.whenReady().then(async () => {
 
 
   // Initialize terminal manager
-  terminalManager = new TerminalManager(() => mainWindow);
+  terminalManager = new TerminalManager(() => getFocusedWindow());
+
+  // Events go to every project window; dialogs and lookups use the window in use
+  setRendererWindowsProvider(() => getAllWindows());
 
   // Setup IPC handlers
-  setupIpcHandlers(agentManager, terminalManager, () => mainWindow);
+  setupIpcHandlers(agentManager, terminalManager, () => getFocusedWindow(), {
+    createProjectWindow: (projectId: string) => createWindow(projectId)
+  });
 
   // Live agent: refresh the setup of projects that have it on and start their relay (until the app quits)
   void syncLiveAgentAtStartup().catch((error) => appLog.error('[LiveAgent] Startup failed:', error));
@@ -553,8 +603,8 @@ app.whenReady().then(async () => {
     taskQueue.request();
   });
 
-  // Create window
-  createWindow();
+  // Create the first window (it restores the project it showed last)
+  const firstWindow = createWindow();
 
   // Tray icon for background mode (a desktop without a tray just keeps the old close-to-quit behavior)
   try {
@@ -562,27 +612,32 @@ app.whenReady().then(async () => {
       iconsDir: is.dev ? join(__dirname, '../../resources/tray') : join(process.resourcesPath, 'tray'),
       devBuild: is.dev,
       onShowApp: showMainWindow,
+      onFocusWindow: focusWindowById,
       onQuit: () => app.quit(),
-      getStatus: () => {
-        // Plan and usage are only shown while a Claude account is signed in
-        try {
-          const profile = getClaudeProfileManager().getActiveProfile();
-          if (!profile || !isProfileAuthenticated(profile)) return { planName: null, sessionPercent: null };
-          return {
-            planName: getPlanFromConfigDir(profile.configDir),
-            sessionPercent: getUsageMonitor().getCurrentUsage()?.sessionPercent ?? null
-          };
-        } catch {
-          // Profile manager not ready yet
-          return { planName: null, sessionPercent: null };
-        }
-      }
+      // With more than one window open, the menu lists them by project instead of "Show App"
+      getWindows: () =>
+        listProjectWindows().map(({ windowId, projectId }) => ({
+          windowId,
+          projectName: projectId ? projectStore.getProject(projectId)?.name ?? null : null
+        })),
+      getStatus: readTrayStatus
     });
-    getUsageMonitor().on('usage-updated', () => appTray?.refresh());
+    // New usage means the held status is stale
+    getUsageMonitor().on('usage-updated', () => {
+      trayStatus = null;
+      appTray?.refresh();
+    });
   } catch (error) {
     appLog.warn('[main] System tray unavailable, closing the window will quit the app:', error);
     appTray = null;
   }
+
+  // A window opening, closing or switching project changes the tray's window list and the
+  // project cards' "Quit window" (also without a tray)
+  onProjectWindowsChanged(() => {
+    appTray?.refresh();
+    notifyProjectWindowsChanged();
+  });
 
   // Recolor the Windows/Linux window controls to match the active theme
   const HEX_COLOR = /^#[0-9a-f]{6}$/i;
@@ -609,102 +664,99 @@ app.whenReady().then(async () => {
   // We do this sequentially to ensure profile data (including auto-switch settings)
   // is loaded BEFORE the usage monitor attempts to read settings.
   // This prevents the "UsageMonitor disabled" error due to race condition.
+  // Forwarding is registered once, here: the monitor's events go to every window either way
+  initializeUsageMonitorForwarding(() => getFocusedWindow());
+
   initializeClaudeProfileManager()
     .then(() => {
-      // Only start monitoring if window is still available (app not quitting)
-      if (mainWindow) {
-        // Setup event forwarding from usage monitor to renderer
-        initializeUsageMonitorForwarding(mainWindow);
+      // Quitting during profile load already stopped the monitor; starting it now would
+      // re-arm its timers while the app tears down
+      if (isQuitting) return;
 
-        // Start the usage monitor (uses unified OperationRegistry for proactive restart)
-        const usageMonitor = getUsageMonitor();
-        usageMonitor.start();
-        console.warn('[main] Usage monitor initialized and started (after profile load)');
+      // Start the usage monitor (uses unified OperationRegistry for proactive restart)
+      const usageMonitor = getUsageMonitor();
+      usageMonitor.start();
+      console.warn('[main] Usage monitor initialized and started (after profile load)');
 
-        // Check for migrated profiles that need re-authentication
-        // These profiles were moved from shared ~/.claude to isolated directories
-        // and need new credentials since they now use a different keychain entry
-        const profileManager = getClaudeProfileManager();
-        const migratedProfileIds = profileManager.getMigratedProfileIds();
-        const activeProfile = profileManager.getActiveProfile();
+      // Check for migrated profiles that need re-authentication
+      // These profiles were moved from shared ~/.claude to isolated directories
+      // and need new credentials since they now use a different keychain entry
+      const profileManager = getClaudeProfileManager();
+      const migratedProfileIds = profileManager.getMigratedProfileIds();
+      const activeProfile = profileManager.getActiveProfile();
 
-        if (migratedProfileIds.length > 0) {
-          console.warn('[main] Found migrated profiles that need re-authentication:', migratedProfileIds);
+      if (migratedProfileIds.length > 0) {
+        console.warn('[main] Found migrated profiles that need re-authentication:', migratedProfileIds);
 
-          // Check ALL migrated profiles for valid credentials, not just the active one
-          // This prevents stale migrated flags from triggering unnecessary re-auth prompts
-          // when the user switches to a different profile later
-          for (const profileId of migratedProfileIds) {
-            const profile = profileManager.getProfile(profileId);
-            if (profile && isProfileAuthenticated(profile)) {
-              // Credentials are valid - clear the migrated flag
-              console.warn('[main] Migrated profile has valid credentials via file fallback, clearing migrated flag:', profile.name);
-              profileManager.clearMigratedProfile(profileId);
-            }
+        // Check ALL migrated profiles for valid credentials, not just the active one
+        // This prevents stale migrated flags from triggering unnecessary re-auth prompts
+        // when the user switches to a different profile later
+        for (const profileId of migratedProfileIds) {
+          const profile = profileManager.getProfile(profileId);
+          if (profile && isProfileAuthenticated(profile)) {
+            // Credentials are valid - clear the migrated flag
+            console.warn('[main] Migrated profile has valid credentials via file fallback, clearing migrated flag:', profile.name);
+            profileManager.clearMigratedProfile(profileId);
           }
+        }
 
-          // Re-check if the active profile still needs re-auth after clearing valid ones
-          const remainingMigratedIds = profileManager.getMigratedProfileIds();
-          if (remainingMigratedIds.includes(activeProfile.id)) {
-            // Active profile still needs re-auth - show the modal
-            mainWindow.webContents.once('did-finish-load', () => {
-              // Small delay to ensure stores are initialized
-              setTimeout(() => {
-                const authFailureInfo: AuthFailureInfo = {
-                  profileId: activeProfile.id,
-                  profileName: activeProfile.name,
-                  failureType: 'missing',
-                  message: `Profile "${activeProfile.name}" was migrated to an isolated directory and needs re-authentication.`,
-                  detectedAt: new Date()
-                };
-                console.warn('[main] Sending auth failure for migrated active profile:', activeProfile.name);
-                mainWindow?.webContents.send(IPC_CHANNELS.CLAUDE_AUTH_FAILURE, authFailureInfo);
-              }, 1000);
-            });
-          }
+        // Re-check if the active profile still needs re-auth after clearing valid ones
+        const remainingMigratedIds = profileManager.getMigratedProfileIds();
+        if (remainingMigratedIds.includes(activeProfile.id)) {
+          // Active profile still needs re-auth - show the modal
+          firstWindow.webContents.once('did-finish-load', () => {
+            // Small delay to ensure stores are initialized
+            setTimeout(() => {
+              if (firstWindow.isDestroyed()) return;
+              const authFailureInfo: AuthFailureInfo = {
+                profileId: activeProfile.id,
+                profileName: activeProfile.name,
+                failureType: 'missing',
+                message: `Profile "${activeProfile.name}" was migrated to an isolated directory and needs re-authentication.`,
+                detectedAt: new Date()
+              };
+              console.warn('[main] Sending auth failure for migrated active profile:', activeProfile.name);
+              // Whichever windows are open get it, not just the one the app started with
+              safeSendToRenderer(getFocusedWindow, IPC_CHANNELS.CLAUDE_AUTH_FAILURE, authFailureInfo);
+            }, 1000);
+          });
         }
       }
     })
     .catch((error) => {
       console.warn('[main] Failed to initialize profile manager:', error);
       // Fallback: try starting usage monitor anyway (might use defaults)
-      if (mainWindow) {
-        initializeUsageMonitorForwarding(mainWindow);
-        const usageMonitor = getUsageMonitor();
-        usageMonitor.start();
-      }
+      if (!isQuitting) getUsageMonitor().start();
     });
 
-  if (mainWindow) {
-    // Log debug mode status
-    const isDebugMode = process.env.DEBUG === 'true';
-    if (isDebugMode) {
-      console.warn('[main] ========================================');
-      console.warn('[main] DEBUG MODE ENABLED (DEBUG=true)');
-      console.warn('[main] ========================================');
-    }
+  // Log debug mode status
+  const isDebugMode = process.env.DEBUG === 'true';
+  if (isDebugMode) {
+    console.warn('[main] ========================================');
+    console.warn('[main] DEBUG MODE ENABLED (DEBUG=true)');
+    console.warn('[main] ========================================');
+  }
 
-    // Initialize app auto-updater (only in production, or when DEBUG_UPDATER is set)
-    const forceUpdater = process.env.DEBUG_UPDATER === 'true';
-    if (app.isPackaged || forceUpdater) {
-      // Load settings to get beta updates preference
-      const settings = loadSettingsSync();
-      const betaUpdates = settings.betaUpdates ?? false;
+  // Initialize app auto-updater (only in production, or when DEBUG_UPDATER is set)
+  const forceUpdater = process.env.DEBUG_UPDATER === 'true';
+  if (app.isPackaged || forceUpdater) {
+    // Load settings to get beta updates preference
+    const settings = loadSettingsSync();
+    const betaUpdates = settings.betaUpdates ?? false;
 
-      initializeAppUpdater(mainWindow, betaUpdates);
-      console.warn('[main] App auto-updater initialized');
-      console.warn(`[main] Beta updates: ${betaUpdates ? 'enabled' : 'disabled'}`);
-      if (forceUpdater && !app.isPackaged) {
-        console.warn('[main] Updater forced in dev mode via DEBUG_UPDATER=true');
-        console.warn('[main] Note: Updates won\'t actually work in dev mode');
-      }
-    } else {
-      console.warn('[main] ========================================');
-      console.warn('[main] App auto-updater DISABLED (development mode)');
-      console.warn('[main] To test updater logging, set DEBUG_UPDATER=true');
-      console.warn('[main] Note: Actual updates only work in packaged builds');
-      console.warn('[main] ========================================');
+    initializeAppUpdater(() => getFocusedWindow(), betaUpdates);
+    console.warn('[main] App auto-updater initialized');
+    console.warn(`[main] Beta updates: ${betaUpdates ? 'enabled' : 'disabled'}`);
+    if (forceUpdater && !app.isPackaged) {
+      console.warn('[main] Updater forced in dev mode via DEBUG_UPDATER=true');
+      console.warn('[main] Note: Updates won\'t actually work in dev mode');
     }
+  } else {
+    console.warn('[main] ========================================');
+    console.warn('[main] App auto-updater DISABLED (development mode)');
+    console.warn('[main] To test updater logging, set DEBUG_UPDATER=true');
+    console.warn('[main] Note: Actual updates only work in packaged builds');
+    console.warn('[main] ========================================');
   }
 
   // macOS: clicking the dock icon re-creates the window, or shows it if it was hidden to the tray
@@ -713,9 +765,10 @@ app.whenReady().then(async () => {
   });
 });
 
-// Quit when all windows are closed (except on macOS)
+// Quit when all windows are closed (except on macOS, or while the tray keeps the app in
+// the background: "Show App" then opens a window again)
 app.on('window-all-closed', () => {
-  if (!isMacOS()) {
+  if (!isMacOS() && !appTray) {
     app.quit();
   }
 });

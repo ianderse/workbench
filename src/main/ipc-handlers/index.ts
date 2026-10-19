@@ -24,6 +24,7 @@ import { registerProjectIndexHandlers } from './project-index-handlers';
 import { registerLiveAgentHandlers } from './live-agent-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
+import { registerWindowHandlers, type WindowHandlerDeps } from './window-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
 import { notificationService } from '../notification-service';
 import { setAgentManagerRef } from './utils';
@@ -33,12 +34,14 @@ import { setAgentManagerRef } from './utils';
  *
  * @param agentManager - The agent manager instance
  * @param terminalManager - The terminal manager instance
- * @param getMainWindow - Function to get the main BrowserWindow
+ * @param getMainWindow - Function to get the window in use
+ * @param windowDeps - How to open a project's own window (project windows)
  */
 export function setupIpcHandlers(
   agentManager: AgentManager,
   terminalManager: TerminalManager,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  windowDeps: WindowHandlerDeps
 ): void {
   // Initialize notification service
   notificationService.initialize(getMainWindow);
@@ -48,6 +51,9 @@ export function setupIpcHandlers(
 
   // Project handlers
   registerProjectHandlers(getMainWindow);
+
+  // Project windows (open a project in its own window, focus or close one)
+  registerWindowHandlers(windowDeps);
 
   // Task handlers
   registerTaskHandlers(agentManager, getMainWindow);

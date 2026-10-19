@@ -395,6 +395,8 @@
     "notInitialized": "Not initialized yet",
     "actions": "Actions for {{name}}",
     "remove": "Remove project",
+    "quitWindow": "Quit window",
+    "open": "Open",
     "empty": "No projects yet. Add a project folder to get started.",
     "noResults": "No projects match your search."
   }

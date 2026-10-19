@@ -3,6 +3,7 @@ import type { BrowserWindow } from 'electron';
 import { readSettingsFile } from './settings-utils';
 import { DEFAULT_APP_SETTINGS } from '../shared/constants';
 import type { NotificationSettings } from '../shared/types';
+import { findWindowForProject, showWindow } from './window-manager';
 
 type NotificationType = 'task-complete' | 'task-failed' | 'review-needed';
 
@@ -82,15 +83,12 @@ class NotificationService {
         silent: !settings.sound // Let the OS handle sound if enabled
       });
 
-      // Focus window when notification is clicked
+      // Show the window of the task's project when the notification is clicked (it may be
+      // minimized or hidden to the tray)
       notification.on('click', () => {
-        const window = this.mainWindow?.();
-        if (window) {
-          if (window.isMinimized()) {
-            window.restore();
-          }
-          window.focus();
-        }
+        const window =
+          (options.projectId ? findWindowForProject(options.projectId) : null) ?? this.mainWindow?.();
+        if (window) showWindow(window);
       });
 
       notification.show();

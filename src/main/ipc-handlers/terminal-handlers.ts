@@ -18,6 +18,7 @@ import { isValidConfigDir } from '../utils/config-path-validator';
 import { getToolInfo } from '../cli-tool-manager';
 import { isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { getPathDelimiter, isWindows } from '../platform';
+import { safeSendToRenderer } from './utils';
 import { openTerminalWithCommand } from './claude-code-handlers';
 
 
@@ -732,21 +733,21 @@ export function registerTerminalHandlers(
  * Initialize usage monitor event forwarding to renderer process
  * Call this after mainWindow is created
  */
-export function initializeUsageMonitorForwarding(mainWindow: BrowserWindow): void {
+export function initializeUsageMonitorForwarding(getWindow: () => BrowserWindow | null): void {
   const monitor = getUsageMonitor();
 
-  // Forward usage updates to renderer
+  // Forward usage updates to every project window
   monitor.on('usage-updated', (usage: ClaudeUsageSnapshot) => {
-    mainWindow.webContents.send(IPC_CHANNELS.USAGE_UPDATED, usage);
+    safeSendToRenderer(getWindow, IPC_CHANNELS.USAGE_UPDATED, usage);
   });
 
   // Forward all profiles usage updates to renderer (for multi-profile display)
   monitor.on('all-profiles-usage-updated', (allProfilesUsage: AllProfilesUsage) => {
-    mainWindow.webContents.send(IPC_CHANNELS.ALL_PROFILES_USAGE_UPDATED, allProfilesUsage);
+    safeSendToRenderer(getWindow, IPC_CHANNELS.ALL_PROFILES_USAGE_UPDATED, allProfilesUsage);
   });
 
   // Forward proactive swap notifications to renderer
   monitor.on('show-swap-notification', (notification: unknown) => {
-    mainWindow.webContents.send(IPC_CHANNELS.PROACTIVE_SWAP_NOTIFICATION, notification);
+    safeSendToRenderer(getWindow, IPC_CHANNELS.PROACTIVE_SWAP_NOTIFICATION, notification);
   });
 }

@@ -4,6 +4,43 @@ import type { Project, ProjectSettings, AutoBuildVersionInfo, InitializationResu
 // localStorage keys for persisting project state (legacy - now using IPC)
 const LAST_SELECTED_PROJECT_KEY = 'lastSelectedProjectId';
 
+/** Where a window opened for a project remembers the project it shows (per window, kept across reloads) */
+const WINDOW_PROJECT_KEY = 'windowProjectId';
+
+/**
+ * Project this window was opened for ("New window" on the Projects page).
+ *
+ * Such a window keeps its own project instead of the restored one, and leaves the stored
+ * tab state (and the last-selected key, which every window shares) to the first window.
+ */
+function assignedProjectId(): string | null {
+  return typeof window === 'undefined' ? null : window.electronAPI?.assignedProjectId ?? null;
+}
+
+/** Session storage is per window and survives a reload; it may be blocked, so never required */
+function readWindowProject(): string | null {
+  try {
+    return sessionStorage.getItem(WINDOW_PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeWindowProject(projectId: string | null): void {
+  try {
+    if (projectId) sessionStorage.setItem(WINDOW_PROJECT_KEY, projectId);
+    else sessionStorage.removeItem(WINDOW_PROJECT_KEY);
+  } catch {
+    // Storage blocked: the window still works, it just forgets on reload
+  }
+}
+
+/** The project a window opened for a project should show: what it last switched to, else the one it was opened for */
+function windowProjectId(): string | null {
+  const assigned = assignedProjectId();
+  return assigned ? readWindowProject() ?? assigned : null;
+}
+
 // Debounce timer for saving tab state
 let saveTabStateTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -62,9 +99,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   removeProject: (projectId) =>
     set((state) => {
       const isSelectedProject = state.selectedProjectId === projectId;
-      // Clear localStorage if we're removing the currently selected project
+      // Forget the removed project if it was the selected one
       if (isSelectedProject) {
-        localStorage.removeItem(LAST_SELECTED_PROJECT_KEY);
+        if (assignedProjectId()) writeWindowProject(null);
+        else localStorage.removeItem(LAST_SELECTED_PROJECT_KEY);
       }
       return {
         projects: state.projects.filter((p) => p.id !== projectId),
@@ -80,8 +118,11 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
     })),
 
   selectProject: (projectId) => {
-    // Persist to localStorage for restoration on app reload
-    if (projectId) {
+    // Persist for restoration on app reload: a window opened for a project keeps its own
+    // (session storage), the first window owns the shared last-selected key
+    if (assignedProjectId()) {
+      writeWindowProject(projectId);
+    } else if (projectId) {
       localStorage.setItem(LAST_SELECTED_PROJECT_KEY, projectId);
     } else {
       localStorage.removeItem(LAST_SELECTED_PROJECT_KEY);
@@ -209,6 +250,13 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
  * Save tab state to main process (debounced to avoid excessive IPC calls)
  */
 function saveTabStateToMain(): void {
+  // A window opened for a project keeps its project to itself (so a reload brings back what
+  // it was showing, not what it was opened with) and leaves the shared tab state alone
+  if (assignedProjectId()) {
+    writeWindowProject(useProjectStore.getState().activeProjectId);
+    return;
+  }
+
   // Clear any pending save
   if (saveTabStateTimeout) {
     clearTimeout(saveTabStateTimeout);
@@ -250,6 +298,13 @@ export async function loadProjects(): Promise<void> {
         activeProjectId: tabStateResult.data.activeProjectId || null,
         tabOrder: tabStateResult.data.tabOrder || []
       });
+    }
+
+    // A window opened for one project shows it from the first render (no flash of another)
+    const assigned = windowProjectId();
+    if (assigned) {
+      store.openProjectTab(assigned);
+      store.setActiveProject(assigned);
     }
 
     // Then load projects

@@ -1,4 +1,4 @@
-import { ipcMain, dialog, app, shell, session } from 'electron';
+import { ipcMain, dialog, app, shell, session, BrowserWindow } from 'electron';
 import { existsSync, writeFileSync, mkdirSync, statSync } from 'fs';
 import { execFileSync } from 'node:child_process';
 import path from 'path';
@@ -10,7 +10,6 @@ import type {
   IPCResult
 } from '../../shared/types';
 import { AgentManager } from '../agent';
-import type { BrowserWindow } from 'electron';
 import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { taskQueue } from '../services/task-queue';
@@ -213,11 +212,12 @@ export function registerSettingsHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.DIALOG_SELECT_DIRECTORY,
-    async (): Promise<string | null> => {
-      const mainWindow = getMainWindow();
-      if (!mainWindow) return null;
+    async (event): Promise<string | null> => {
+      // Parent the picker to the window that asked, not to whichever window has focus
+      const window = BrowserWindow.fromWebContents(event.sender) ?? getMainWindow();
+      if (!window) return null;
 
-      const result = await dialog.showOpenDialog(mainWindow, {
+      const result = await dialog.showOpenDialog(window, {
         properties: ['openDirectory'],
         title: 'Select Project Directory'
       });

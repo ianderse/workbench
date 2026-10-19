@@ -13,6 +13,7 @@ import { LiveAgentAPI, createLiveAgentAPI } from './modules/live-agent-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
 import { ProfileAPI, createProfileAPI } from './profile-api';
 import { QueueAPI, createQueueAPI } from './queue-api';
+import { WindowAPI, createWindowAPI } from './modules/window-api';
 
 export interface ElectronAPI extends
   ProjectAPI,
@@ -28,7 +29,8 @@ export interface ElectronAPI extends
   ProjectIndexAPI,
   LiveAgentAPI,
   McpAPI,
-  ProfileAPI {
+  ProfileAPI,
+  WindowAPI {
   /** Queue routing API for rate limit recovery */
   queue: QueueAPI;
 }
@@ -47,6 +49,7 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createLiveAgentAPI(),
   ...createMcpAPI(),
   ...createProfileAPI(),
+  ...createWindowAPI(),
   queue: createQueueAPI()  // Queue routing for rate limit recovery
 });
 

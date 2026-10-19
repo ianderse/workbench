@@ -43,14 +43,26 @@ const projects = [
 ];
 
 describe('ProjectsPage', () => {
-  const handlers = { onSelectProject: vi.fn(), onAddProject: vi.fn(), onRemoveProject: vi.fn() };
+  const handlers = {
+    onSelectProject: vi.fn(),
+    onAddProject: vi.fn(),
+    onRemoveProject: vi.fn(),
+    onQuitProjectWindow: vi.fn()
+  };
 
   beforeEach(() => vi.clearAllMocks());
 
-  function renderPage(list: Project[] = projects) {
+  function renderPage(list: Project[] = projects, windowedProjectIds: string[] = ['b'], canQuitWindow = true) {
+    const windowed = new Set(windowedProjectIds);
     return render(
       <TooltipProvider>
-        <ProjectsPage projects={list} activeProjectId="b" {...handlers} />
+        <ProjectsPage
+          projects={list}
+          activeProjectId="b"
+          windowedProjectIds={windowed}
+          canQuitWindow={canQuitWindow}
+          {...handlers}
+        />
       </TooltipProvider>
     );
   }
@@ -101,5 +113,39 @@ describe('ProjectsPage', () => {
   it('shows an empty state without projects', () => {
     renderPage([]);
     expect(screen.getByText('projectsPage.empty')).toBeInTheDocument();
+  });
+
+  it('marks the projects that have a window', () => {
+    renderPage(projects, ['a', 'b']);
+    expect(screen.getAllByText('projectsPage.open')).toHaveLength(2);
+  });
+
+  it('closes the window of a project that has one', () => {
+    renderPage(projects, ['b']);
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'projectsPage.actions:Bravo' }),
+      { button: 0, ctrlKey: false, pointerType: 'mouse' }
+    );
+    fireEvent.click(screen.getByText('projectsPage.quitWindow'));
+    expect(handlers.onQuitProjectWindow).toHaveBeenCalledWith('b');
+  });
+
+  it('has no "Quit window" while one window is left', () => {
+    renderPage(projects, ['b'], false);
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'projectsPage.actions:Bravo' }),
+      { button: 0, ctrlKey: false, pointerType: 'mouse' }
+    );
+    expect(screen.queryByText('projectsPage.quitWindow')).not.toBeInTheDocument();
+  });
+
+  it('has no "Quit window" for a project without one', () => {
+    renderPage(projects, ['b']);
+    fireEvent.pointerDown(
+      screen.getByRole('button', { name: 'projectsPage.actions:Alpha' }),
+      { button: 0, ctrlKey: false, pointerType: 'mouse' }
+    );
+    expect(screen.getByText('projectsPage.remove')).toBeInTheDocument();
+    expect(screen.queryByText('projectsPage.quitWindow')).not.toBeInTheDocument();
   });
 });

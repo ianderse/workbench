@@ -3,6 +3,12 @@
  * Main process <-> Renderer process communication
  */
 
+/**
+ * Prefix of the Chromium argument that tells a window which project it was opened for
+ * (set as `additionalArguments`, read by the preload script).
+ */
+export const WINDOW_PROJECT_ARG = '--workbench-project=';
+
 export const IPC_CHANNELS = {
   // Project operations
   PROJECT_ADD: 'project:add',
@@ -170,6 +176,14 @@ export const IPC_CHANNELS = {
   // App info
   APP_VERSION: 'app:version',
   WINDOW_SET_TITLE_BAR_COLORS: 'window:setTitleBarColors', // Match the window controls to the theme: ({ color, symbolColor }) (renderer -> main)
+
+  // Project windows (one window per project)
+  WINDOW_LIST_PROJECTS: 'window:listProjects',       // Every open window with the project it shows
+  WINDOW_REPORT_PROJECT: 'window:reportProject',     // The window tells main which project it shows (renderer -> main)
+  WINDOW_OPEN_PROJECT: 'window:openProject',         // Open a project in a new window (or focus the one showing it)
+  WINDOW_CLOSE_PROJECT: 'window:closeProject',       // Close the window showing a project ("Quit window")
+  WINDOW_PROJECTS_CHANGED: 'window:projectsChanged', // Event: the open windows changed (main -> renderer)
+  PROJECT_LIST_CHANGED: 'project:listChanged',       // Event: a project was added or removed (main -> renderer)
 
   // Shell operations
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
