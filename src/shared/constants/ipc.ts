@@ -242,6 +242,11 @@ export const IPC_CHANNELS = {
   GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
 
   // Self-improve: the project's memory index, built from its past sessions
+  // Project index (the project's CLAUDE.md, written by /init)
+  PROJECT_INDEX_GET: 'projectIndex:get',
+  PROJECT_INDEX_BUILD: 'projectIndex:build',
+  PROJECT_INDEX_IS_BUILDING: 'projectIndex:isBuilding',
+
   SELF_IMPROVE_GET_INDEX: 'selfImprove:getIndex',
   SELF_IMPROVE_BUILD_INDEX: 'selfImprove:buildIndex',
   SELF_IMPROVE_IS_BUILDING: 'selfImprove:isBuilding',

@@ -475,6 +475,13 @@
       "budgetPlaceholder": "No limit"
     },
     "context": {
+      "projectIndex": "Project index",
+      "projectIndexDescription": "CLAUDE.md · {{lines}} lines · written {{time}}",
+      "projectIndexNotEnabled": "Turn on Use CLAUDE.md in the Knowledge section to write the CLAUDE.md agent sessions start from",
+      "projectIndexBuilding": "Reading the project and writing its CLAUDE.md",
+      "rebuildProjectIndex": "Rewrite",
+      "projectIndexFailed": "Couldn't write CLAUDE.md",
+      "projectIndexFailedUnknown": "The run stopped without a message",
       "memoryIndex": "Knowledge index",
       "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
       "noMemoryIndex": "Map the project's code into a Graphify graph in .workbench/knowledge",

@@ -20,6 +20,7 @@ import { registerAppUpdateHandlers } from './app-update-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
 import { registerGraphifyHandlers } from './graphify-handlers';
 import { registerSelfImproveHandlers } from './self-improve-handlers';
+import { registerProjectIndexHandlers } from './project-index-handlers';
 import { registerLiveAgentHandlers } from './live-agent-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
@@ -75,6 +76,7 @@ export function setupIpcHandlers(
   // Graphify CLI handlers (version, installation, project memory graph)
   registerGraphifyHandlers();
   registerSelfImproveHandlers();
+  registerProjectIndexHandlers();
 
   // Live agent handlers (relay status, agent windows' graph subscriptions)
   registerLiveAgentHandlers();

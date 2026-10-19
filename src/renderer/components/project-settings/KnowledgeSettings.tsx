@@ -6,6 +6,7 @@ import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { useGraphifyVersion } from '../../hooks/useGraphifyVersion';
 import { useMemoryGraphStore } from '../../stores/memory-graph-store';
 import { useSelfImproveStore } from '../../stores/self-improve-store';
+import { useProjectIndexStore } from '../../stores/project-index-store';
 import { updateProjectSettings } from '../../stores/project-store';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
 
@@ -27,10 +28,32 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
   const refreshGraphify = useMemoryGraphStore((state) => state.refresh);
   const setGraphifyEnabled = useMemoryGraphStore((state) => state.setEnabled);
   const isBuilding = useMemoryGraphStore((state) => !!state.building[projectId]);
+  // Use CLAUDE.md stands for a file the sessions can read, so it follows the project's CLAUDE.md:
+  // undefined until checked, null when the project has none. The Project index row (Project
+  // section) writes the same file, so the switch waits for a build started there too
+  const projectIndex = useProjectIndexStore((state) => state.index[projectId]);
+  const isWritingClaudeMd = useProjectIndexStore((state) => !!state.building[projectId]);
+  const refreshProjectIndex = useProjectIndexStore((state) => state.refresh);
+  const writeProjectIndexIfMissing = useProjectIndexStore((state) => state.buildIfMissing);
   const selfImprove = settings.selfImprove ?? false;
   // The Memory index row (Project section) runs the same build, so the switch waits for it too
   const isIndexing = useSelfImproveStore((state) => !!state.building[projectId]);
   const buildMemoryIndexIfEmpty = useSelfImproveStore((state) => state.buildIfEmpty);
+
+  /**
+   * Switching Use CLAUDE.md on for a project that has none writes one with `/init`, so the switch
+   * only ever stands for a file that is there; the switch waits for that run. Switching it off
+   * stops sessions reading the file and leaves it where it is, to be deleted by hand or not at all.
+   */
+  const toggleClaudeMd = async (enabled: boolean) => {
+    const next = { ...settings, useClaudeMd: enabled };
+    setSettings(next);
+    if (!(await updateProjectSettings(projectId, next))) {
+      setSettings(settings);
+      return;
+    }
+    if (enabled) await writeProjectIndexIfMissing(projectId);
+  };
 
   /**
    * Switching self-improve on relocates the project's Claude Code memory and then, for a project
@@ -55,16 +78,24 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
     if (graphifyEnabled === undefined) void refreshGraphify(projectId);
   }, [graphifyEnabled, projectId, refreshGraphify]);
 
+  // Nothing else reads the project's CLAUDE.md, so check for it once (a small local read)
+  useEffect(() => {
+    if (projectIndex === undefined) void refreshProjectIndex(projectId);
+  }, [projectIndex, projectId, refreshProjectIndex]);
+
   return (
     <SettingsSection title={t('projectSections.knowledge.title')}>
       <SettingsRows>
+        {/* On only while the project has a CLAUDE.md: switching it on for a project without one
+            writes it (Project index), and it waits while that runs */}
         <SettingsRow
           label={t('projectSections.general.useClaudeMd')}
           description={t('projectSections.general.useClaudeMdDescription')}
         >
           <Switch
-            checked={settings.useClaudeMd ?? true}
-            onCheckedChange={(checked) => setSettings({ ...settings, useClaudeMd: checked })}
+            checked={settings.useClaudeMd !== false && (!!projectIndex || isWritingClaudeMd)}
+            onCheckedChange={(checked) => void toggleClaudeMd(checked)}
+            disabled={isWritingClaudeMd}
             aria-label={t('projectSections.general.useClaudeMd')}
           />
         </SettingsRow>

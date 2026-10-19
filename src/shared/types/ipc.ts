@@ -460,6 +460,12 @@ export interface ElectronAPI {
   installGraphify: () => Promise<IPCResult<{ command: string }>>;
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo | null>>;
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
+  /** The project's CLAUDE.md stats, or null when it has none */
+  getProjectIndex: (projectId: string) => Promise<IPCResult<import('./cli').ProjectIndexInfo | null>>;
+  /** Write (or rewrite) the project's CLAUDE.md with a short `/init` run */
+  buildProjectIndex: (projectId: string) => Promise<IPCResult<import('./cli').ProjectIndexInfo>>;
+  /** Whether a project index build is running for the project */
+  isProjectIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
   /** The project's memory index stats, or null when it has never been built */
   getMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo | null>>;
   /** Build (or rebuild) the project's memories from its past Claude Code sessions */
