@@ -189,16 +189,18 @@ describe('relay', () => {
   async function appendAndRead(lines: object[]): Promise<string[]> {
     fs.appendFileSync(transcript, lines.map((line) => JSON.stringify(line)).join('\n') + '\n');
     sent.length = 0;
-    // A hook reads the transcript's new lines first
+    // A hook reads the transcript's new lines first (one the hook server passes
+    // on, so this doesn't wait for fs.watch, which is slow on macOS)
     const { port } = JSON.parse(fs.readFileSync(path.join(flowDir, discoveryFiles()[0]), 'utf-8'));
     await fetch(`http://127.0.0.1:${port}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: SESSION_ID, hook_event_name: 'Notification', notification_type: 'idle_prompt', cwd: workspace }),
+      body: JSON.stringify({ session_id: SESSION_ID, hook_event_name: 'Notification', notification_type: 'permission_prompt', cwd: workspace }),
     });
     return sent
       .filter((entry) => entry.message.type === 'agent-event')
-      .map((entry) => (entry.message.event as { type: string }).type);
+      .map((entry) => (entry.message.event as { type: string }).type)
+      .filter((type) => type !== 'permission_requested');
   }
 
   const reply = { type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'text', text: 'The sleeper finished.' }] } };
