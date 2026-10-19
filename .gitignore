@@ -52,6 +52,7 @@ npm-debug.log*
 .workbench/*
 # The compounding-engineering memory is shared knowledge: commit it and it becomes team memory
 !.workbench/compeng/
+!.workbench/settings.json
 .workbench-security.json
 .workbench-status
 .claude_settings.json
