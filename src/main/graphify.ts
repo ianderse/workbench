@@ -19,7 +19,7 @@ import { isWindows, requiresShell } from './platform';
 import { appLog } from './app-logger';
 import { getClaudeProfileManager } from './claude-profile-manager';
 import { expandHomePath } from './claude-profile/profile-utils';
-import { getGraphifyGraphPath, getGraphifyMemoryDir, hasGraphifyGraph, isGraphifyEnabled } from './graphify-paths';
+import { getGraphifyGraphPath, getGraphifyMemoryDir, getGraphifyOutDir, hasGraphifyGraph, isGraphifyEnabled } from './graphify-paths';
 import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../shared/types/cli';
 import { formatDateTime } from '../shared/utils/format-date-time';
 
@@ -251,6 +251,10 @@ async function build(projectPath: string, signal: AbortSignal): Promise<Graphify
   if (!(await isGraphifyEnabled(projectPath))) throw new Error('Use Graphify is off for this project');
 
   const memoryDir = getGraphifyMemoryDir(projectPath);
+  // graphify takes GRAPHIFY_OUT over --out (and over cluster-only's directory), so an inherited
+  // one would write every project's graph into whichever project that variable names. Workbench
+  // sets it for the terminals and sessions it starts, so an app started from one of those has it.
+  const outEnv = { GRAPHIFY_OUT: getGraphifyOutDir(projectPath) };
 
   // Code-only extraction parses the code locally (tree-sitter), so no API key is needed.
   // The graph mirrors the current code, so a rebuild may shrink it (graphify refuses that by default)
@@ -259,7 +263,7 @@ async function build(projectPath: string, signal: AbortSignal): Promise<Graphify
     ['extract', projectPath, '--code-only', '--allow-dedup-shrink', '--out', memoryDir],
     projectPath,
     BUILD_TIMEOUT_MS,
-    {},
+    outEnv,
     signal
   );
   const output = `${stdout}\n${stderr}`;
@@ -267,7 +271,7 @@ async function build(projectPath: string, signal: AbortSignal): Promise<Graphify
 
   // A readable summary for agents (GRAPH_REPORT.md), without naming communities through an LLM
   try {
-    await runGraphify(installation.path, ['cluster-only', memoryDir, '--no-label', '--no-viz'], projectPath, BUILD_TIMEOUT_MS, {}, signal);
+    await runGraphify(installation.path, ['cluster-only', memoryDir, '--no-label', '--no-viz'], projectPath, BUILD_TIMEOUT_MS, outEnv, signal);
   } catch (error) {
     appLog.warn('[Graphify] Could not write the graph report:', error);
   }
