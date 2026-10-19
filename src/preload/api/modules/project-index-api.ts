@@ -14,10 +14,13 @@ export interface ProjectIndexAPI {
   buildProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndexInfo>>;
   /** Whether a project index build is running for the project */
   isProjectIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
+  /** Remove the project's CLAUDE.md, which is what switching Use CLAUDE.md off does */
+  deleteProjectIndex: (projectId: string) => Promise<IPCResult>;
 }
 
 export const createProjectIndexAPI = (): ProjectIndexAPI => ({
   getProjectIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_GET, projectId),
   buildProjectIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_BUILD, projectId),
   isProjectIndexBuilding: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_IS_BUILDING, projectId),
+  deleteProjectIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_DELETE, projectId),
 });

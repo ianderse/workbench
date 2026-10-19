@@ -14,12 +14,14 @@ interface ProjectIndexState {
   build: (projectId: string) => Promise<void>;
   /** Write it only when the project has none, which is what switching Use CLAUDE.md on does */
   buildIfMissing: (projectId: string) => Promise<void>;
+  /** Remove the project's CLAUDE.md, which is what switching Use CLAUDE.md off does */
+  remove: (projectId: string) => Promise<void>;
 }
 
 /**
  * The project index (Settings > Project): the project's CLAUDE.md, written by a short Claude Code
- * run of `/init`. The run reads the whole codebase, so it takes a while and the Use CLAUDE.md
- * switch waits for it.
+ * run of `/init` and removed when the project stops using it. The run reads the whole codebase, so
+ * it takes a while and the Use CLAUDE.md switch waits for it.
  */
 export const useProjectIndexStore = create<ProjectIndexState>((set, get) => {
   const runBuild = async (projectId: string) => {
@@ -81,6 +83,19 @@ export const useProjectIndexStore = create<ProjectIndexState>((set, get) => {
         return;
       }
       await runBuild(projectId);
+    },
+
+    remove: async (projectId) => {
+      const result = await window.electronAPI.deleteProjectIndex(projectId).catch(() => null);
+      if (!result?.success) {
+        // The file is still there, so say so rather than showing the switch as off
+        await get().refresh(projectId);
+        return;
+      }
+      set((state) => ({
+        index: { ...state.index, [projectId]: null },
+        buildError: { ...state.buildError, [projectId]: null },
+      }));
     },
   };
 });

@@ -7,7 +7,7 @@
  * It is re-runnable, which is how a project folds in what changed since the last one.
  */
 
-import { readFile, stat } from 'fs/promises';
+import { readFile, rm, stat } from 'fs/promises';
 import path from 'path';
 import type { ProjectIndexInfo } from '../shared/types/cli';
 import type { AppSettings } from '../shared/types/settings';
@@ -71,6 +71,16 @@ async function run(projectPath: string, profileId?: string): Promise<ProjectInde
   if (!info) throw new Error(`The run finished without writing ${CLAUDE_MD}`);
   appLog.info(`[ProjectIndex] Wrote ${CLAUDE_MD} for ${projectPath}: ${info.lines} line(s)`);
   return info;
+}
+
+/**
+ * Switch the project index off: remove the project's CLAUDE.md, stopping a build that is writing
+ * it first. The file is the switch, so leaving it behind would switch itself back on.
+ */
+export async function deleteProjectIndex(projectPath: string): Promise<void> {
+  await inFlight.get(path.resolve(projectPath))?.catch(() => undefined);
+  await rm(claudeMdPath(projectPath), { force: true });
+  appLog.info(`[ProjectIndex] Removed ${CLAUDE_MD} from ${projectPath}`);
 }
 
 /**

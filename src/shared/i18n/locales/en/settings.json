@@ -294,7 +294,7 @@
       "title": "General",
       "description": "Auto-Build and agent config",
       "useClaudeMd": "Use CLAUDE.md",
-      "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context",
+      "useClaudeMdDescription": "Give agents the project's CLAUDE.md, written under Project index above",
       "selfImprove": "Self-improve",
       "selfImproveDescription": "Enable compounding engineering mode that autodetects and saves user preferences for later sessions",
       "useGraphify": "Use Graphify",
@@ -477,7 +477,7 @@
     "context": {
       "projectIndex": "Project index",
       "projectIndexDescription": "CLAUDE.md · {{lines}} lines · written {{time}}",
-      "projectIndexNotEnabled": "Turn on Use CLAUDE.md in the Knowledge section to write the CLAUDE.md agent sessions start from",
+      "projectIndexNotEnabled": "Turn on Use CLAUDE.md in the Knowledge section to generate CLAUDE.md",
       "projectIndexBuilding": "Reading the project and writing its CLAUDE.md",
       "rebuildProjectIndex": "Rewrite",
       "projectIndexFailed": "Couldn't write CLAUDE.md",

@@ -35,15 +35,16 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
   const isWritingClaudeMd = useProjectIndexStore((state) => !!state.building[projectId]);
   const refreshProjectIndex = useProjectIndexStore((state) => state.refresh);
   const writeProjectIndexIfMissing = useProjectIndexStore((state) => state.buildIfMissing);
+  const removeProjectIndex = useProjectIndexStore((state) => state.remove);
   const selfImprove = settings.selfImprove ?? false;
   // The Memory index row (Project section) runs the same build, so the switch waits for it too
   const isIndexing = useSelfImproveStore((state) => !!state.building[projectId]);
   const buildMemoryIndexIfEmpty = useSelfImproveStore((state) => state.buildIfEmpty);
 
   /**
-   * Switching Use CLAUDE.md on for a project that has none writes one with `/init`, so the switch
-   * only ever stands for a file that is there; the switch waits for that run. Switching it off
-   * stops sessions reading the file and leaves it where it is, to be deleted by hand or not at all.
+   * The switch is the project's CLAUDE.md: switching it on for a project that has none writes one
+   * with `/init` (the switch waits for that run), and switching it off deletes the file, the way
+   * Use Graphify removes the project's knowledge folder.
    */
   const toggleClaudeMd = async (enabled: boolean) => {
     const next = { ...settings, useClaudeMd: enabled };
@@ -53,6 +54,7 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
       return;
     }
     if (enabled) await writeProjectIndexIfMissing(projectId);
+    else await removeProjectIndex(projectId);
   };
 
   /**
@@ -87,7 +89,7 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
     <SettingsSection title={t('projectSections.knowledge.title')}>
       <SettingsRows>
         {/* On only while the project has a CLAUDE.md: switching it on for a project without one
-            writes it (Project index), and it waits while that runs */}
+            writes it (Project index) and waits while that runs, switching it off deletes it */}
         <SettingsRow
           label={t('projectSections.general.useClaudeMd')}
           description={t('projectSections.general.useClaudeMdDescription')}

@@ -466,6 +466,8 @@ export interface ElectronAPI {
   buildProjectIndex: (projectId: string) => Promise<IPCResult<import('./cli').ProjectIndexInfo>>;
   /** Whether a project index build is running for the project */
   isProjectIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
+  /** Remove the project's CLAUDE.md, which is what switching Use CLAUDE.md off does */
+  deleteProjectIndex: (projectId: string) => Promise<IPCResult>;
   /** The project's memory index stats, or null when it has never been built */
   getMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo | null>>;
   /** Build (or rebuild) the project's memories from its past Claude Code sessions */
