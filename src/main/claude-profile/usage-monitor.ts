@@ -1727,8 +1727,15 @@ export class UsageMonitor extends EventEmitter {
    *   "seven_day": {
    *     "utilization": 45,  // integer 0-100
    *     "resets_at": "2025-01-20T12:00:00Z"
+   *   },
+   *   "seven_day_opus": {    // premium-model weekly limit; newer responses may name it "seven_day_fable"
+   *     "utilization": 0,    // integer 0-100
+   *     "resets_at": "2025-01-20T12:00:00Z"
    *   }
    * }
+   *
+   * The premium-model bucket may be absent entirely - that means "no data", not 0,
+   * so fablePercent/fableResetTimestamp stay undefined in that case.
    */
   private normalizeAnthropicResponse(
     data: any,
@@ -1745,6 +1752,10 @@ export class UsageMonitor extends EventEmitter {
     let sevenDayUtil: number;
     let sessionResetTimestamp: string | undefined;
     let weeklyResetTimestamp: string | undefined;
+    // Weekly limit scoped to one model (today: Fable) - stays undefined when the API omits it
+    let fablePercent: number | undefined;
+    let fableResetTimestamp: string | undefined;
+    let fableModelName: string | undefined;
 
     // Check for new nested format first
     if (data.five_hour !== undefined || data.seven_day !== undefined) {
@@ -1753,6 +1764,24 @@ export class UsageMonitor extends EventEmitter {
       sevenDayUtil = data.seven_day?.utilization ?? 0;
       sessionResetTimestamp = data.five_hour?.resets_at;
       weeklyResetTimestamp = data.seven_day?.resets_at;
+
+      // The model-scoped weekly limit is the "weekly_scoped" entry of the limits array, which
+      // names the model itself ("Fable"); the per-model top-level buckets next to seven_day
+      // (seven_day_opus and friends) are all null nowadays, so they are only a fallback.
+      const scoped = Array.isArray(data.limits)
+        ? data.limits.find((limit: any) => limit?.kind === 'weekly_scoped')
+        : undefined;
+      if (scoped) {
+        fablePercent = scoped.percent;
+        fableResetTimestamp = scoped.resets_at;
+        fableModelName = scoped.scope?.model?.display_name;
+      } else {
+        const bucket = data.seven_day_opus ?? data.seven_day_fable;
+        if (bucket) {
+          fablePercent = bucket.utilization;
+          fableResetTimestamp = bucket.resets_at;
+        }
+      }
     } else {
       // Legacy flat format - utilization is 0-1 float, needs *100
       const rawFiveHour = data.five_hour_utilization ?? 0;
@@ -1762,6 +1791,12 @@ export class UsageMonitor extends EventEmitter {
       sevenDayUtil = Math.round(rawSevenDay * 100);
       sessionResetTimestamp = data.five_hour_reset_at;
       weeklyResetTimestamp = data.seven_day_reset_at;
+      // Premium-model weekly bucket (flat keys, 0-1 float) - a missing value must stay undefined, not 0
+      const rawFable = data.seven_day_opus_utilization ?? data.seven_day_fable_utilization;
+      if (rawFable !== undefined && rawFable !== null) {
+        fablePercent = Math.round(rawFable * 100);
+      }
+      fableResetTimestamp = data.seven_day_opus_reset_at ?? data.seven_day_fable_reset_at;
     }
 
     return {
@@ -1772,10 +1807,14 @@ export class UsageMonitor extends EventEmitter {
       weeklyResetTime: undefined,
       sessionResetTimestamp,
       weeklyResetTimestamp,
+      fablePercent,
+      fableResetTimestamp,
+      fableModelName,
       profileId,
       profileName,
       profileEmail,
       fetchedAt: new Date(),
+      // limitType only ranks session vs weekly - the Fable bucket is informational
       limitType: sevenDayUtil > fiveHourUtil ? 'weekly' : 'session',
       usageWindows: {
         sessionWindowLabel: 'common:usage.window5Hour',

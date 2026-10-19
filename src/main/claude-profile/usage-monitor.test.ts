@@ -1226,6 +1226,160 @@ describe('usage-monitor', () => {
       });
     });
 
+    describe('Fable (premium model) weekly bucket', () => {
+      it('should read the model-scoped entry of the limits array', () => {
+        const monitor = getUsageMonitor();
+
+        // The shape the live API returns: the per-model top-level buckets are null and the
+        // scoped weekly limit, with the model's own name on it, lives in `limits`
+        const rawData = {
+          five_hour: { utilization: 9, resets_at: '2026-10-19T15:30:00Z' },
+          seven_day: { utilization: 10, resets_at: '2026-10-25T13:00:00Z' },
+          seven_day_opus: null,
+          seven_day_sonnet: null,
+          limits: [
+            { kind: 'session', group: 'session', percent: 9, resets_at: '2026-10-19T15:30:00Z', scope: null },
+            { kind: 'weekly_all', group: 'weekly', percent: 10, resets_at: '2026-10-25T13:00:00Z', scope: null },
+            {
+              kind: 'weekly_scoped',
+              group: 'weekly',
+              percent: 18,
+              resets_at: '2026-10-25T13:00:00Z',
+              scope: { model: { id: null, display_name: 'Fable' }, surface: null }
+            }
+          ]
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](rawData, 'test-profile-1', 'Scoped Profile');
+
+        expect(usage.fablePercent).toBe(18);
+        expect(usage.fableResetTimestamp).toBe('2026-10-25T13:00:00Z');
+        expect(usage.fableModelName).toBe('Fable');
+        // The scoped limit must not disturb the two it sits beside
+        expect(usage.sessionPercent).toBe(9);
+        expect(usage.weeklyPercent).toBe(10);
+        expect(usage.limitType).toBe('weekly');
+      });
+
+      it('should keep a zero scoped limit rather than dropping the row', () => {
+        const monitor = getUsageMonitor();
+
+        const rawData = {
+          five_hour: { utilization: 9, resets_at: '2026-10-19T15:30:00Z' },
+          seven_day: { utilization: 10, resets_at: '2026-10-25T13:00:00Z' },
+          limits: [
+            {
+              kind: 'weekly_scoped',
+              percent: 0,
+              resets_at: '2026-10-25T13:00:00Z',
+              scope: { model: { display_name: 'Fable' } }
+            }
+          ]
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](rawData, 'test-profile-1', 'Scoped Profile');
+
+        expect(usage.fablePercent).toBe(0);
+        expect(usage.fableModelName).toBe('Fable');
+      });
+
+      it('should report nothing when limits carries no scoped weekly entry', () => {
+        const monitor = getUsageMonitor();
+
+        const rawData = {
+          five_hour: { utilization: 9, resets_at: '2026-10-19T15:30:00Z' },
+          seven_day: { utilization: 10, resets_at: '2026-10-25T13:00:00Z' },
+          seven_day_opus: null,
+          limits: [
+            { kind: 'session', percent: 9, resets_at: '2026-10-19T15:30:00Z', scope: null },
+            { kind: 'weekly_all', percent: 10, resets_at: '2026-10-25T13:00:00Z', scope: null }
+          ]
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](rawData, 'test-profile-1', 'Scoped Profile');
+
+        expect(usage.fablePercent).toBeUndefined();
+        expect(usage.fableResetTimestamp).toBeUndefined();
+        expect(usage.fableModelName).toBeUndefined();
+      });
+
+      it('should fall back to the nested seven_day_opus bucket', () => {
+        const monitor = getUsageMonitor();
+
+        const rawData = {
+          five_hour: { utilization: 6, resets_at: '2025-01-17T15:00:00Z' },
+          seven_day: { utilization: 9, resets_at: '2025-01-20T12:00:00Z' },
+          seven_day_opus: { utilization: 12, resets_at: '2025-01-20T12:00:00Z' }
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](rawData, 'test-profile-1', 'Fable Profile');
+
+        expect(usage.fablePercent).toBe(12);
+        expect(usage.fableResetTimestamp).toBe('2025-01-20T12:00:00Z');
+        // limitType still only ranks session vs weekly
+        expect(usage.limitType).toBe('weekly');
+      });
+
+      it('should read the nested seven_day_fable bucket (newer key)', () => {
+        const monitor = getUsageMonitor();
+
+        const rawData = {
+          five_hour: { utilization: 6, resets_at: '2025-01-17T15:00:00Z' },
+          seven_day: { utilization: 9, resets_at: '2025-01-20T12:00:00Z' },
+          seven_day_fable: { utilization: 0, resets_at: '2025-01-25T17:00:00Z' }
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](rawData, 'test-profile-1', 'Fable Profile');
+
+        expect(usage.fablePercent).toBe(0);
+        expect(usage.fableResetTimestamp).toBe('2025-01-25T17:00:00Z');
+      });
+
+      it('should leave both fields undefined when the bucket is absent (not 0)', () => {
+        const monitor = getUsageMonitor();
+
+        const rawData = {
+          five_hour: { utilization: 6, resets_at: '2025-01-17T15:00:00Z' },
+          seven_day: { utilization: 9, resets_at: '2025-01-20T12:00:00Z' }
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](rawData, 'test-profile-1', 'No Fable Profile');
+
+        expect(usage.fablePercent).toBeUndefined();
+        expect(usage.fableResetTimestamp).toBeUndefined();
+      });
+
+      it('should convert the legacy flat seven_day_opus_utilization float', () => {
+        const monitor = getUsageMonitor();
+
+        const legacyData = {
+          five_hour_utilization: 0.60,
+          seven_day_utilization: 0.40,
+          seven_day_opus_utilization: 0.18,
+          seven_day_opus_reset_at: '2025-01-20T12:00:00Z'
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](legacyData, 'test-profile-1', 'Legacy Fable Profile');
+
+        expect(usage.fablePercent).toBe(18);
+        expect(usage.fableResetTimestamp).toBe('2025-01-20T12:00:00Z');
+      });
+
+      it('should leave both fields undefined for a legacy response without the bucket', () => {
+        const monitor = getUsageMonitor();
+
+        const legacyData = {
+          five_hour_utilization: 0.60,
+          seven_day_utilization: 0.40
+        };
+
+        const usage = monitor['normalizeAnthropicResponse'](legacyData, 'test-profile-1', 'Legacy Profile');
+
+        expect(usage.fablePercent).toBeUndefined();
+        expect(usage.fableResetTimestamp).toBeUndefined();
+      });
+    });
+
     describe('Provider detection backward compatibility', () => {
       it('should handle Anthropic OAuth profiles (no baseUrl in OAuth profiles)', async () => {
         // OAuth profiles don't have baseUrl - they should default to Anthropic provider

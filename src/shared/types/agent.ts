@@ -52,6 +52,20 @@ export interface ClaudeUsageSnapshot {
   sessionResetTimestamp?: string;
   /** ISO timestamp of when the weekly limit resets (for dynamic countdown calculation) */
   weeklyResetTimestamp?: string;
+  /**
+   * Weekly usage percentage (0-100) for the Fable (premium model) limit
+   *
+   * NOTE: Undefined when the provider does not report a premium-model bucket -
+   * undefined means "no data", never 0.
+   */
+  fablePercent?: number;
+  /** ISO timestamp of when the Fable weekly limit resets (for dynamic countdown calculation) */
+  fableResetTimestamp?: string;
+  /**
+   * Name of the model that weekly limit is scoped to, as the provider spells it ('Fable').
+   * The UI labels the row with it, so a renamed model needs no change here.
+   */
+  fableModelName?: string;
   /** Profile ID this snapshot belongs to */
   profileId: string;
   /** Profile name for display */
