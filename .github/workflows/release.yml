@@ -86,7 +86,7 @@ jobs:
           ls -l assets
 
       - name: Upload to the release
-        run: gh release upload "$TAG" assets/* --clobber
+        run: gh release upload "$TAG" assets/* --clobber --repo "$GITHUB_REPOSITORY"
         env:
           TAG: ${{ github.event.release.tag_name }}
           GH_TOKEN: ${{ github.token }}
