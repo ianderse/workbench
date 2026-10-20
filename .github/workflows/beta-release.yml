@@ -1,78 +1,49 @@
 name: Beta Release
 
-# Manual trigger for beta releases from develop branch
+# Builds a pre-release that was published by hand and uploads the installers to it.
+# Regular releases are built by release.yml instead.
+
 on:
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Beta version (e.g., 1.0.0-beta or 1.0.0-beta.1)'
-        required: true
-        type: string
-      dry_run:
-        description: 'Test build without creating release'
-        required: false
-        default: false
-        type: boolean
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event.release.tag_name }}
 
 jobs:
-  validate-version:
-    name: Validate beta version format
+  # Single guard for the whole workflow: every other job needs this one, so a
+  # regular release skips all of them
+  version:
+    if: ${{ github.event.release.prerelease }}
     runs-on: ubuntu-latest
-    steps:
-      - name: Validate version format
-        run: |
-          VERSION="${{ github.event.inputs.version }}"
-
-          # Check if version matches beta semver pattern
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-(beta|alpha|rc)(\.[0-9]+)?$ ]]; then
-            echo "::error::Invalid version format: $VERSION"
-            echo "Version must match pattern: X.Y.Z-beta or X.Y.Z-beta.N (e.g., 1.0.0-beta, 1.0.0-beta.1)"
-            exit 1
-          fi
-
-          echo "Valid beta version: $VERSION"
-
-  create-tag:
-    name: Create beta tag
-    needs: validate-version
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
-      version: ${{ github.event.inputs.version }}
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: develop
-
-      - name: Create and push tag
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+      - name: Resolve beta version from the release tag
+        id: version
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v$VERSION" -m "Beta release v$VERSION"
-          git push origin "v$VERSION"
-          echo "Created tag v$VERSION"
-
-      - name: Create tag only (dry run)
-        if: ${{ github.event.inputs.dry_run == 'true' }}
-        run: |
-          VERSION="${{ github.event.inputs.version }}"
-          echo "DRY RUN: Would create tag v$VERSION"
+          VERSION="${TAG#v}"
+          # package.json keeps the plain version; the pre-release suffix comes from the release
+          case "$VERSION" in
+            *-*) ;;
+            *) VERSION="$VERSION-beta" ;;
+          esac
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building beta $VERSION from $TAG"
 
   # Intel build on Intel runner for native compilation
+  # Note: macos-15-intel is the last Intel runner, supported until Fall 2027
   build-macos-intel:
-    needs: create-tag
+    needs: version
     runs-on: macos-15-intel
     outputs:
       notarization_id: ${{ steps.notarize.outputs.notarization-id }}
       dmg_file: ${{ steps.notarize.outputs.dmg-file }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Use tag for real releases, develop branch for dry runs
-          ref: ${{ github.event.inputs.dry_run == 'true' && 'develop' || format('v{0}', needs.create-tag.outputs.version) }}
 
       - name: Setup Node.js and install dependencies
         uses: ./.github/actions/setup-node-frontend
@@ -84,12 +55,11 @@ jobs:
 
       - name: Package macOS (Intel)
         run: |
-          VERSION="${{ needs.create-tag.outputs.version }}"
           # Without a certificate secret CSC_LINK is empty, which electron-builder reads as a path: build unsigned
           if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
-          npm run package:mac -- --x64 --config.extraMetadata.version="$VERSION"
+          npm run package:mac -- --x64 --publish never --config.extraMetadata.version="$VERSION"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
           CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
 
@@ -109,19 +79,17 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.yml
+            dist/*.blockmap
 
   # Apple Silicon build on ARM64 runner for native compilation
   build-macos-arm64:
-    needs: create-tag
+    needs: version
     runs-on: macos-15
     outputs:
       notarization_id: ${{ steps.notarize.outputs.notarization-id }}
       dmg_file: ${{ steps.notarize.outputs.dmg-file }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Use tag for real releases, develop branch for dry runs
-          ref: ${{ github.event.inputs.dry_run == 'true' && 'develop' || format('v{0}', needs.create-tag.outputs.version) }}
 
       - name: Setup Node.js and install dependencies
         uses: ./.github/actions/setup-node-frontend
@@ -133,12 +101,11 @@ jobs:
 
       - name: Package macOS (Apple Silicon)
         run: |
-          VERSION="${{ needs.create-tag.outputs.version }}"
           # Without a certificate secret CSC_LINK is empty, which electron-builder reads as a path: build unsigned
           if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
-          npm run package:mac -- --arm64 --config.extraMetadata.version="$VERSION"
+          npm run package:mac -- --arm64 --publish never --config.extraMetadata.version="$VERSION"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
           CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
 
@@ -158,9 +125,10 @@ jobs:
             dist/*.dmg
             dist/*.zip
             dist/*.yml
+            dist/*.blockmap
 
   build-windows:
-    needs: create-tag
+    needs: version
     runs-on: windows-latest
     permissions:
       id-token: write  # Required for OIDC authentication with Azure
@@ -170,9 +138,6 @@ jobs:
       AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Use tag for real releases, develop branch for dry runs
-          ref: ${{ github.event.inputs.dry_run == 'true' && 'develop' || format('v{0}', needs.create-tag.outputs.version) }}
 
       - name: Setup Node.js and install dependencies
         uses: ./.github/actions/setup-node-frontend
@@ -184,11 +149,9 @@ jobs:
 
       - name: Package Windows
         shell: bash
-        run: |
-          VERSION="${{ needs.create-tag.outputs.version }}"
-          npm run package:win -- --config.extraMetadata.version="$VERSION"
+        run: npm run package:win -- --publish never --config.extraMetadata.version="$VERSION"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
           # Disable electron-builder's built-in signing (we use Azure Trusted Signing instead)
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
@@ -213,46 +176,32 @@ jobs:
           timestamp-rfc3161: http://timestamp.acs.microsoft.com
           timestamp-digest: SHA256
 
-      - name: Verify Windows executable is signed
-        if: env.AZURE_CLIENT_ID != ''
-        shell: pwsh
-        run: |
-          cd dist
-          $exeFile = Get-ChildItem -Filter "*.exe" | Select-Object -First 1
-          if ($exeFile) {
-            Write-Host "Verifying signature on $($exeFile.Name)..."
-            $sig = Get-AuthenticodeSignature -FilePath $exeFile.FullName
-            if ($sig.Status -ne 'Valid') {
-              Write-Host "::error::Signature verification failed: $($sig.Status)"
-              Write-Host "::error::Status Message: $($sig.StatusMessage)"
-              exit 1
-            }
-            Write-Host "Signature verified successfully"
-            Write-Host "  Subject: $($sig.SignerCertificate.Subject)"
-            Write-Host "  Issuer: $($sig.SignerCertificate.Issuer)"
-            Write-Host "  Thumbprint: $($sig.SignerCertificate.Thumbprint)"
-          } else {
-            Write-Host "::error::No .exe file found to verify"
-            exit 1
-          }
-
-      - name: Regenerate checksums after signing
+      - name: Verify signature and regenerate checksums
         if: env.AZURE_CLIENT_ID != ''
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
           cd dist
 
-          # Find the installer exe (electron-builder names it with "Setup" or just the app name)
           # electron-builder produces one installer exe per build
-          $exeFiles = Get-ChildItem -Filter "*.exe"
-          if ($exeFiles.Count -eq 0) {
-            Write-Host "::error::No .exe files found in dist folder"
+          $exeFile = Get-ChildItem -Filter "*.exe" | Select-Object -First 1
+          if (-not $exeFile) {
+            Write-Host "::error::No .exe file found in dist folder"
             exit 1
           }
 
-          Write-Host "Found $($exeFiles.Count) exe file(s): $($exeFiles.Name -join ', ')"
+          Write-Host "Verifying signature on $($exeFile.Name)..."
+          $sig = Get-AuthenticodeSignature -FilePath $exeFile.FullName
+          if ($sig.Status -ne 'Valid') {
+            Write-Host "::error::Signature verification failed: $($sig.Status)"
+            Write-Host "::error::Status Message: $($sig.StatusMessage)"
+            exit 1
+          }
+          Write-Host "Signature verified successfully"
+          Write-Host "  Subject: $($sig.SignerCertificate.Subject)"
+          Write-Host "  Thumbprint: $($sig.SignerCertificate.Thumbprint)"
 
+          # Signing changed the exe, so latest.yml's hash and size are stale
           $ymlFile = "latest.yml"
           if (-not (Test-Path $ymlFile)) {
             Write-Host "::error::$ymlFile not found - cannot update checksums"
@@ -262,33 +211,14 @@ jobs:
           $content = Get-Content $ymlFile -Raw
           $originalContent = $content
 
-          # Process each exe file and update its hash in latest.yml
-          foreach ($exeFile in $exeFiles) {
-            Write-Host "Processing $($exeFile.Name)..."
-
-            # Compute SHA512 hash and convert to base64 (electron-builder format)
-            $bytes = [System.IO.File]::ReadAllBytes($exeFile.FullName)
-            $sha512 = [System.Security.Cryptography.SHA512]::Create()
-            $hashBytes = $sha512.ComputeHash($bytes)
-            $hash = [System.Convert]::ToBase64String($hashBytes)
-            $size = $exeFile.Length
-
-            Write-Host "  Hash: $hash"
-            Write-Host "  Size: $size"
-          }
-
-          # For electron-builder, latest.yml has a single file entry for the installer
-          # Update the sha512 and size for the primary exe (first one, typically the installer)
-          $primaryExe = $exeFiles | Select-Object -First 1
-          $bytes = [System.IO.File]::ReadAllBytes($primaryExe.FullName)
-          $sha512 = [System.Security.Cryptography.SHA512]::Create()
-          $hashBytes = $sha512.ComputeHash($bytes)
+          # Compute SHA512 hash and convert to base64 (electron-builder format)
+          $bytes = [System.IO.File]::ReadAllBytes($exeFile.FullName)
+          $hashBytes = [System.Security.Cryptography.SHA512]::Create().ComputeHash($bytes)
           $hash = [System.Convert]::ToBase64String($hashBytes)
-          $size = $primaryExe.Length
+          $size = $exeFile.Length
 
-          # Update sha512 hash (base64 pattern: alphanumeric, +, /, =)
+          # Update sha512 hash (base64 pattern: alphanumeric, +, /, =) and size
           $content = $content -replace 'sha512: [A-Za-z0-9+/=]+', "sha512: $hash"
-          # Update size
           $content = $content -replace 'size: \d+', "size: $size"
 
           if ($content -eq $originalContent) {
@@ -297,7 +227,7 @@ jobs:
           }
 
           Set-Content -Path $ymlFile -Value $content -NoNewline
-          Write-Host "Updated $ymlFile with new base64 hash and size for $($primaryExe.Name)"
+          Write-Host "Updated $ymlFile for $($exeFile.Name) (size $size)"
 
       - name: Skip signing notice
         if: env.AZURE_CLIENT_ID == ''
@@ -310,15 +240,13 @@ jobs:
           path: |
             dist/*.exe
             dist/*.yml
+            dist/*.blockmap
 
   build-linux:
-    needs: create-tag
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Use tag for real releases, develop branch for dry runs
-          ref: ${{ github.event.inputs.dry_run == 'true' && 'develop' || format('v{0}', needs.create-tag.outputs.version) }}
 
       - name: Setup Node.js and install dependencies
         uses: ./.github/actions/setup-node-frontend
@@ -329,14 +257,9 @@ jobs:
           UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
 
       - name: Package Linux
-        run: |
-          VERSION="${{ needs.create-tag.outputs.version }}"
-          npm run package:linux -- --config.extraMetadata.version="$VERSION"
+        run: npm run package:linux -- --publish never --config.extraMetadata.version="$VERSION"
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify Linux packages
-        run: npm run verify:linux
+          VERSION: ${{ needs.version.outputs.version }}
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -345,6 +268,7 @@ jobs:
           path: |
             dist/*.deb
             dist/*.yml
+            dist/*.blockmap
 
   # Finalize macOS notarization (runs in parallel with Windows/Linux builds)
   finalize-notarization:
@@ -388,17 +312,13 @@ jobs:
           name: macos-arm64-stapled
           path: arm64/*.dmg
 
-  create-release:
-    needs: [create-tag, finalize-notarization, build-windows, build-linux]
+  upload-assets:
+    needs: [finalize-notarization, build-windows, build-linux]
     runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.dry_run != 'true' }}
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: v${{ needs.create-tag.outputs.version }}
-          fetch-depth: 0
 
       - name: Download all artifacts
         uses: actions/download-artifact@v7
@@ -450,15 +370,13 @@ jobs:
           # Keep electron-builder's latest*.yml names: the app reads releases from a private repo through
           # electron-updater's private GitHub provider, which only looks for latest*.yml. Beta builds are
           # told apart by the release's pre-release flag (allowPrerelease)
-          missing_manifests=""
+          missing=""
           for manifest in latest.yml latest-mac.yml latest-linux.yml; do
-            if [ ! -f "$manifest" ]; then
-              missing_manifests="$missing_manifests $manifest"
-            fi
+            [ ! -f "$manifest" ] && missing="$missing $manifest"
           done
 
-          if [ -n "$missing_manifests" ]; then
-            echo "::error::Missing required update manifests:$missing_manifests"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required update manifests:$missing"
             echo "::error::Auto-update will fail on affected platforms without these files!"
             exit 1
           fi
@@ -472,117 +390,7 @@ jobs:
           sha256sum ./* > checksums.sha256
           cat checksums.sha256
 
-      - name: Create Beta Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ needs.create-tag.outputs.version }}
-          name: v${{ needs.create-tag.outputs.version }} (Beta)
-          body: |
-            ## Beta Release v${{ needs.create-tag.outputs.version }}
-
-            This is a **beta release** for testing new features. It may contain bugs or incomplete functionality.
-
-            ### How to opt-in to beta updates
-            1. Open Workbench
-            2. Go to Settings > Updates
-            3. Enable "Beta Updates" toggle
-
-            ### Reporting Issues
-            Please report any issues at https://github.com/proactive-agent/workbench/issues
-
-            ---
-
-            **Full Changelog**: https://github.com/${{ github.repository }}/compare/main...v${{ needs.create-tag.outputs.version }}
-          files: release-assets/*
-          draft: false
-          prerelease: true
+      - name: Upload assets to the pre-release
+        run: gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  dry-run-summary:
-    needs: [create-tag, finalize-notarization, build-windows, build-linux]
-    runs-on: ubuntu-latest
-    if: ${{ github.event.inputs.dry_run == 'true' }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
-        with:
-          path: dist
-
-      - name: Flatten binary artifacts
-        run: |
-          mkdir -p release-assets
-
-          # Copy stapled macOS DMGs (from finalize-notarization job)
-          find dist/macos-intel-stapled dist/macos-arm64-stapled -type f -name "*.dmg" -exec cp {} release-assets/ \; 2>/dev/null || true
-
-          # Copy other macOS artifacts (zip, yml, blockmap for delta updates) from original build
-          find dist/macos-intel-builds dist/macos-arm64-builds -type f \( -name "*.zip" -o -name "*.yml" -o -name "*.blockmap" \) -exec cp {} release-assets/ \; 2>/dev/null || true
-
-          # Copy Windows and Linux artifacts (including blockmap for delta updates)
-          find dist/windows-builds dist/linux-builds -type f \( -name "*.exe" -o -name "*.deb" -o -name "*.yml" -o -name "*.blockmap" \) -exec cp {} release-assets/ \; 2>/dev/null || true
-
-      # Merge macOS manifests (same logic as real release)
-      - name: Merge macOS manifests
-        uses: ./.github/actions/merge-macos-manifests
-        with:
-          dist-path: dist
-          output-path: release-assets
-          copy-other-manifests: 'true'
-
-      - name: Validate and rename beta manifests
-        run: |
-          cd release-assets
-
-          # Rename latest*.yml to beta*.yml
-          [ -f "latest.yml" ] && mv latest.yml beta.yml
-          [ -f "latest-mac.yml" ] && mv latest-mac.yml beta-mac.yml
-          [ -f "latest-linux.yml" ] && mv latest-linux.yml beta-linux.yml
-          [ -f "latest-linux-arm64.yml" ] && mv latest-linux-arm64.yml beta-linux-arm64.yml
-
-          # Validate required manifests
-          missing=""
-          [ ! -f "beta-mac.yml" ] && missing="$missing beta-mac.yml"
-          [ ! -f "beta.yml" ] && missing="$missing beta.yml"
-          [ ! -f "beta-linux.yml" ] && missing="$missing beta-linux.yml"
-
-          if [ -n "$missing" ]; then
-            echo "::warning::DRY RUN: Missing required beta manifests:$missing"
-            echo "MANIFEST_STATUS=FAILED" >> $GITHUB_ENV
-          else
-            echo "MANIFEST_STATUS=PASSED" >> $GITHUB_ENV
-
-            # Show merged manifest content for verification
-            echo ""
-            echo "=== beta-mac.yml content (should have both architectures) ==="
-            cat beta-mac.yml
-          fi
-
-      - name: Dry run summary
-        run: |
-          echo "## Beta Release Dry Run Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Version:** ${{ needs.create-tag.outputs.version }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### Build Artifacts" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          find dist -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.deb" \) >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "### Update Manifests (Required for Auto-Update)" >> $GITHUB_STEP_SUMMARY
-          if [ "$MANIFEST_STATUS" = "PASSED" ]; then
-            echo "All required beta manifests present:" >> $GITHUB_STEP_SUMMARY
-            echo "- beta-mac.yml (macOS)" >> $GITHUB_STEP_SUMMARY
-            echo "- beta.yml (Windows)" >> $GITHUB_STEP_SUMMARY
-            echo "- beta-linux.yml (Linux)" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "**WARNING: Missing required manifests! Auto-update will fail.**" >> $GITHUB_STEP_SUMMARY
-            echo "Check build logs for details." >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          echo "To create a real release, run this workflow again with dry_run unchecked." >> $GITHUB_STEP_SUMMARY
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

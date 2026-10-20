@@ -9,7 +9,7 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - 'src/**'
       - 'resources/**'
@@ -20,7 +20,7 @@ on:
       - 'tsconfig*.json'
       - '.github/workflows/ci.yml'
   pull_request:
-    branches: [main, develop]
+    branches: [main]
     paths:
       - 'src/**'
       - 'resources/**'
