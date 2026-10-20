@@ -56,7 +56,6 @@ jobs:
             dist/*.exe
             dist/*.deb
             dist/latest*.yml
-            dist/*.blockmap
 
   upload:
     needs: build
