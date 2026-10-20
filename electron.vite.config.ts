@@ -1,5 +1,6 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/postcss';
 import { resolve } from 'path';
 import { existsSync } from 'fs';
 import { createCipheriv, randomBytes } from 'crypto';
@@ -89,6 +90,12 @@ export default defineConfig({
       }
     },
     plugins: [react()],
+    // Inlined instead of a postcss.config file: Tailwind is only needed by the renderer
+    css: {
+      postcss: {
+        plugins: [tailwindcss()]
+      }
+    },
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src/renderer'),
