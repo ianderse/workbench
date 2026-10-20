@@ -832,10 +832,7 @@ export function App() {
         <Dialog open={!!projectToOpen} onOpenChange={(open) => !open && setProjectToOpen(null)}>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>{t('openProject.title')}</DialogTitle>
-              <DialogDescription>
-                {t('openProject.description', { projectName: projectToOpen?.name || '' })}
-              </DialogDescription>
+              <DialogTitle>{t('openProject.title', { projectName: projectToOpen?.name || '' })}</DialogTitle>
             </DialogHeader>
             <DialogFooter>
               <Button variant="ghost" size="sm" onClick={handleOpenProjectHere}>

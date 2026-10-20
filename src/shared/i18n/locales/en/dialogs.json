@@ -85,8 +85,7 @@
     "error": "Failed to remove project"
   },
   "openProject": {
-    "title": "Open project",
-    "description": "Open \"{{projectName}}\" as...",
+    "title": "Open \"{{projectName}}\" in...",
     "thisWindow": "This window",
     "newWindow": "New window"
   },
