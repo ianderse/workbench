@@ -54,7 +54,7 @@ only.
 
 **No time estimates** — Provide priority-based ordering instead of duration predictions.
 
-**PR target** — Always target the `develop` branch for PRs, not `main`. Main is reserved for releases.
+**PR target** — Always target the `main` branch for PRs; it is the only long-lived branch.
 
 **Never block the main process** — IPC handlers reachable from the UI must not run synchronous child processes
 (`execFileSync`/`execSync`) or network calls; use async `execFile` (promisified). A sync `git fetch` used to freeze the
@@ -108,34 +108,27 @@ remains about what the user wants.
 ## Commands
 
 ```bash
-npm install            # Install dependencies (postinstall rebuilds native modules for Electron)
-npm run dev            # Development mode with HMR
-npm run dev:debug      # Development mode with verbose debug output
-npm run dev:mcp        # Development mode with remote debugging on port 9222 (Electron MCP)
-npm start              # Production build + run
-npm run typecheck      # TypeScript type check (strict)
-npm test               # Unit + integration tests (Vitest)
+npm install            # Install dependencies (postinstall rebuilds native modules; on Linux it also fixes chrome-sandbox)
+npm run dev            # Development mode with HMR and remote debugging on port 9222 (Electron MCP)
+npm test               # Type check (strict) + all tests (Vitest)
 ```
 
 ### Packaging
 
 | Command                 | Output                                           |
 |-------------------------|--------------------------------------------------|
-| `npm run package`       | Package for the current platform                 |
 | `npm run package:mac`   | macOS `.dmg` + `.zip`                            |
 | `npm run package:win`   | Windows `.exe` (NSIS installer)                  |
-| `npm run package:linux` | Linux `.deb` (check with `npm run verify:linux`) |
+| `npm run package:linux` | Linux `.deb`                                     |
 
 Packages are written to `dist/`.
 
 ### Releases
 
-```bash
-node .github/scripts/bump-version.js patch|minor|major  # Bump version, then open a PR to main
-```
-
-Merging to `main` runs `prepare-release.yml`, which tags the version and triggers `release.yml`. Beta releases run
-manually via `beta-release.yml`.
+Releases are created by hand on GitHub, never by a workflow. Publishing a release runs `release.yml`; publishing a
+pre-release runs `beta-release.yml`. Both build every platform from the release's tag, take the version from the tag
+name (`package.json` keeps the plain base version, and the beta workflow adds `-beta` when the tag has no pre-release
+suffix) and upload the installers, update manifests and checksums to that release.
 
 ## Project Structure
 
@@ -157,7 +150,7 @@ workbench/
 │   ├── renderer/            # React UI (components, stores, contexts, hooks, styles)
 │   └── shared/              # Shared types, i18n, constants, utils
 ├── resources/               # App and tray icons, macOS entitlements
-└── .github/                 # Workflows and scripts (postinstall, prebuilds, deb check, bump-version)
+└── .github/                 # Workflows and the postinstall script
 ```
 
 ## Claude Code Layer (`src/main/claude-code/`)
@@ -225,7 +218,7 @@ get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at 
 
 ### Electron MCP (testing the app from a task)
 
-Run `npm run dev:mcp` and switch on Electron in Settings > Connectors (or in the task's connectors). Claude Code can
+Run `npm run dev` and switch on Electron in Settings > Connectors (or in the task's connectors). Claude Code can
 then drive the running app over the Chrome DevTools Protocol with `get_electron_window_info`, `take_screenshot`,
 `send_command_to_electron`, and `read_electron_logs`.
 
