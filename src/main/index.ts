@@ -315,17 +315,16 @@ function createWindow(assignedProjectId: string | null = null): BrowserWindow {
   registerWindow(appWindow, assignedProjectId);
   const recovery: RendererRecoveryState = { attempts: 0, windowStart: 0 };
 
-  // Background mode: closing the last window hides it to the tray; agents and terminals keep
-  // running. With another project window open, the close button closes this window for real,
-  // as does "Quit window" on a project card. Real quits (tray "Quit", OS quit) set isQuitting
-  // first and close normally.
+  // Background mode: closing a window hides it to the tray; agents and terminals keep running
+  // and its project stays open, so the tray still lists it and selecting it brings the window
+  // back. Only "Quit window" on a project card closes a window for real, and real quits (tray
+  // "Quit", OS quit) set isQuitting first and close normally.
   appWindow.on('close', (event) => {
     const hideToTray =
       !isQuitting &&
       appTray !== null &&
       !isWindowCloseAllowed() &&
-      !isClosingForReal(appWindow.id) &&
-      getWindowCount() <= 1;
+      !isClosingForReal(appWindow.id);
     if (hideToTray) {
       event.preventDefault();
       appWindow.hide();

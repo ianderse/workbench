@@ -1,9 +1,10 @@
 /**
  * Background mode: system tray icon with a small menu.
  *
- * While the tray exists, closing the last window only hides it (agents and terminals keep
- * running); "Quit" in the tray menu (or quitting from the OS) exits the app. The menu shows
- * the active Claude plan and the current 5-hour session usage when they're known.
+ * While the tray exists, closing a window only hides it (agents and terminals keep running,
+ * and the window stays listed below); "Quit" in the tray menu (or quitting from the OS) exits
+ * the app. The menu shows the active Claude plan and the current 5-hour session usage when
+ * they're known.
  *
  * With more than one project window open, "Show App" is replaced by one entry per window,
  * labelled with the project it shows, which focuses that window.
