@@ -119,6 +119,8 @@ export function App() {
 
   // Project picked on the Projects page while it has no window yet: this window or a new one
   const [projectToOpen, setProjectToOpen] = useState<Project | null>(null);
+  // A just-added project still to be set up: its initialize prompt waits for that answer
+  const [projectToInitialize, setProjectToInitialize] = useState<Project | null>(null);
 
   // Remove project confirmation state
   const [showRemoveProjectDialog, setShowRemoveProjectDialog] = useState(false);
@@ -502,14 +504,28 @@ export function App() {
     }
   };
 
+  // Offer to create the project's .workbench folder (the project has none yet)
+  const askToInitialize = useCallback((project: Project) => {
+    setPendingProject(project);
+    setInitError(null);
+    setInitSuccess(false);
+    setShowInitDialog(true);
+  }, []);
+
+  /**
+   * A project the user just added or created opens like any project card: a window showing no
+   * project takes it, otherwise the dialog asks for this window or a new one. The initialize
+   * prompt waits for that answer, and a project opened in a new window is set up from there
+   * (its project menu and Settings > Project both offer it) rather than from this window.
+   */
   const handleProjectAdded = (project: Project, needsInit: boolean) => {
-    openProjectTab(project.id);
-    if (needsInit) {
-      setPendingProject(project);
-      setInitError(null);
-      setInitSuccess(false);
-      setShowInitDialog(true);
+    if (!activeProjectId && !selectedProjectId) {
+      openProjectTab(project.id);
+      if (needsInit) askToInitialize(project);
+      return;
     }
+    setProjectToOpen(project);
+    setProjectToInitialize(needsInit ? project : null);
   };
 
   // Show a project in this window; leaving the Projects page for its board
@@ -544,14 +560,18 @@ export function App() {
   const handleOpenProjectHere = useCallback(() => {
     if (!projectToOpen) return;
     handleSelectProject(projectToOpen.id);
+    const initialize = projectToInitialize?.id === projectToOpen.id ? projectToInitialize : null;
     setProjectToOpen(null);
-  }, [projectToOpen, handleSelectProject]);
+    setProjectToInitialize(null);
+    if (initialize) askToInitialize(initialize);
+  }, [projectToOpen, projectToInitialize, handleSelectProject, askToInitialize]);
 
   // "New window" in the open dialog
   const handleOpenProjectInNewWindow = useCallback(() => {
     if (!projectToOpen) return;
     void openProjectWindow(projectToOpen.id);
     setProjectToOpen(null);
+    setProjectToInitialize(null);
   }, [projectToOpen]);
 
   // "Quit window" on an open project's card: close that project's window
@@ -829,7 +849,14 @@ export function App() {
         </Dialog>
 
         {/* Open a project: this window or a new one */}
-        <Dialog open={!!projectToOpen} onOpenChange={(open) => !open && setProjectToOpen(null)}>
+        <Dialog
+          open={!!projectToOpen}
+          onOpenChange={(open) => {
+            if (open) return;
+            setProjectToOpen(null);
+            setProjectToInitialize(null);
+          }}
+        >
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{t('openProject.title', { projectName: projectToOpen?.name || '' })}</DialogTitle>
