@@ -19,9 +19,11 @@ export default defineConfig({
         statements: 22
       }
     },
-    // Mock Electron modules for unit tests
+    // Mock Electron modules for unit tests. electron-log's main entry requires the real
+    // electron package (the installed binary), which CI doesn't install, so it is stubbed too.
     alias: {
-      electron: resolve(__dirname, 'src/__mocks__/electron.ts')
+      electron: resolve(__dirname, 'src/__mocks__/electron.ts'),
+      'electron-log/main.js': resolve(__dirname, 'src/__mocks__/electron-log.ts')
     },
     // Setup files for test environment
     setupFiles: ['src/__tests__/setup.ts']
