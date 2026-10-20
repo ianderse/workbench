@@ -90,6 +90,7 @@ vi.mock('../pty-manager', () => ({
 // Mock settings-utils so invokeCLIAsync defaults to claude-code in tests
 vi.mock('../../settings-utils', () => ({
   readSettingsFileAsync: vi.fn(async () => undefined),
+  readSettingsFile: vi.fn(() => undefined),
 }));
 
 vi.mock('os', async (importOriginal) => {

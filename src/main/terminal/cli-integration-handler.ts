@@ -31,6 +31,7 @@ import type {
   OAuthTokenEvent
 } from './types';
 import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
+import { claudeThemeFlag } from '../claude-cli-theme';
 
 // ============================================================================
 // CLI DISPATCH UTILITIES
@@ -344,7 +345,7 @@ export function buildResumeSessionFlag(sessionId: string): string {
 
 /**
  * Extra flags for an agent window's `claude` command: the resumed session (if any), YOLO mode,
- * and the Graphify hint
+ * the Graphify hint and the theme matching the app's
  */
 function buildClaudeExtraFlags(
   terminal: Pick<TerminalProcess, 'graphifyOut' | 'selfImprove'>,
@@ -354,7 +355,7 @@ function buildClaudeExtraFlags(
   const flags =
     `${resumeSessionId ? buildResumeSessionFlag(resumeSessionId) : ''}` +
     `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` +
-    `${selfImproveFlag(terminal)}`;
+    `${selfImproveFlag(terminal)}${claudeThemeFlag()}`;
   return flags || undefined;
 }
 
@@ -1128,7 +1129,7 @@ export function invokeClaude(
   debugLog('[ClaudeIntegration:invokeClaude] Dangerously skip permissions:', dangerouslySkipPermissions);
 
   // Compute extra flags for YOLO mode
-  const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` || undefined;
+  const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag()}` || undefined;
 
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
@@ -1245,7 +1246,7 @@ export function resumeClaude(
       : buildPathPrefix(claudeEnv.PATH || '');
 
     // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
+    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag()}`;
 
     // Go to the project directory, then pick up its latest Claude session
     const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);
@@ -1308,7 +1309,7 @@ export async function invokeCLIAsync(
 
     debugLog('[ClaudeIntegration:invokeCLIAsync] Resume session:', resumeSessionId);
 
-    // Extra flags: the resumed session, YOLO mode and the Graphify hint
+    // Extra flags: the resumed session, YOLO mode, the Graphify hint and the matching theme
     const extraFlags = buildClaudeExtraFlags(terminal, dangerouslySkipPermissions, resumeSessionId);
 
     terminal.isCLIMode = true;
@@ -1489,7 +1490,7 @@ export async function resumeClaudeAsync(
       : buildPathPrefix(claudeEnv.PATH || '');
 
     // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
+    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag()}`;
 
     // Go to the project directory, then pick up its latest Claude session
     const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);

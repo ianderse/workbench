@@ -55,6 +55,7 @@ import { isLinux, isMacOS, isWindows } from './platform';
 import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
 import { AppTray, isWindowCloseAllowed, type TrayStatus } from './app-tray';
+import { writeClaudeThemeSettings } from './claude-cli-theme';
 import {
   focusWindowById,
   getAllWindows,
@@ -561,6 +562,9 @@ app.whenReady().then(async () => {
       console.warn('Could not set dock icon:', e);
     }
   }
+
+  // Settings files that give a Claude Code session the app's own light/dark theme
+  writeClaudeThemeSettings();
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.

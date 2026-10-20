@@ -265,6 +265,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     dispose,
     cols,
     rows,
+    themeBackground,
   } = useXterm({
     terminalId: id,
     onResize: (cols, rows) => {
@@ -742,7 +743,7 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
       <div className="flex flex-1" style={{ minHeight: 0 }}>
         {/* Padding lives on the wrapper: xterm's fit addon sizes rows from its container's height,
             which would include the container's own padding and cut off the last line */}
-        <div className="min-w-0 flex-1 px-2 py-1.5">
+        <div className="min-w-0 flex-1 px-2 py-1.5" style={{ backgroundColor: themeBackground }}>
           <div ref={terminalRef} className="h-full w-full" />
         </div>
         {showGraph && effectiveCwd && graphProjectPath && (
