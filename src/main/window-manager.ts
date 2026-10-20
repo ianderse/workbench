@@ -156,7 +156,10 @@ export function isClosingForReal(windowId: number): boolean {
   return closingForReal.has(windowId);
 }
 
-/** Forget every window (tests only) */
+/**
+ * Forget every window
+ * @internal Test hook
+ */
 export function resetWindowRegistry(): void {
   entries.clear();
   closingForReal.clear();

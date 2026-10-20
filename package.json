@@ -166,5 +166,46 @@
         }
       }
     }
+  },
+  "knip": {
+    "entry": [
+      ".github/scripts/*.{js,cjs,mjs}"
+    ],
+    "project": [
+      "src/**/*.{ts,tsx,css}!",
+      ".github/scripts/**/*.{js,cjs,mjs}"
+    ],
+    "ignore": [
+      "src/__tests__/setup.ts"
+    ],
+    "ignoreDependencies": [
+      "@electron/rebuild"
+    ],
+    "ignoreBinaries": [
+      "icacls",
+      "osascript",
+      "kitty",
+      "wezterm",
+      "gnome-terminal",
+      "konsole",
+      "xfce4-terminal",
+      "lxterminal",
+      "mate-terminal",
+      "tilix",
+      "terminator",
+      "guake",
+      "yakuake",
+      "alacritty",
+      "hyper",
+      "tabby",
+      "xterm",
+      "urxvt",
+      "st",
+      "foot"
+    ],
+    "ignoreExportsUsedInFile": true,
+    "tags": [
+      "-internal"
+    ]
   }
 }
