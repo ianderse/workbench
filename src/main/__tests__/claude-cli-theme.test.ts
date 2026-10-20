@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import path from 'path';
 
 const mocks = vi.hoisted(() => ({
   /** App settings on disk; undefined stands for "no settings file" */
@@ -28,8 +29,10 @@ vi.mock('../app-logger', () => ({ appLog: { warn: vi.fn(), error: vi.fn(), info:
 
 import { claudeThemeFlag, writeClaudeThemeSettings } from '../claude-cli-theme';
 
-const LIGHT_FILE = '/data/claude-theme-light.json';
-const DARK_FILE = '/data/claude-theme-dark.json';
+// Built with path.join, like the code under test: on Windows these are \data\claude-theme-*.json,
+// and comparing them against POSIX spellings would fail there
+const LIGHT_FILE = path.join('/data', 'claude-theme-light.json');
+const DARK_FILE = path.join('/data', 'claude-theme-dark.json');
 
 beforeEach(() => {
   mocks.settings = undefined;
