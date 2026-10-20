@@ -126,9 +126,13 @@ Packages are written to `dist/`.
 ### Releases
 
 Releases are created by hand on GitHub, never by a workflow. Publishing a release runs `release.yml`; publishing a
-pre-release runs `beta-release.yml`. Both build every platform from the release's tag, take the version from the tag
-name (`package.json` keeps the plain base version, and the beta workflow adds `-beta` when the tag has no pre-release
-suffix) and upload the installers, update manifests and checksums to that release.
+pre-release runs `beta-release.yml`. Each one builds the four platforms in a matrix (`npm ci`, `npm run build`,
+`npm run package:*`), takes the version from the release tag (`package.json` keeps the plain base version, and the beta
+workflow adds `-beta` when the tag has no pre-release suffix) and uploads the installers and update manifests to that
+release with `gh release upload`.
+
+Builds are unsigned and not notarized: the repo holds no signing secrets. Auto-update against a private release repo
+also needs `UPDATER_GH_TOKEN` passed to `npm run build`, which no workflow does today.
 
 ## Project Structure
 

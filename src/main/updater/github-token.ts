@@ -1,8 +1,9 @@
 /**
  * GitHub token for update checks against the private release repository.
  *
- * CI encrypts the UPDATER_GH_TOKEN secret with AES-256-GCM at build time (electron.vite.config.ts)
- * so the plain value never appears in the bundle. In dev, set UPDATER_GH_TOKEN in .env.
+ * The build encrypts UPDATER_GH_TOKEN with AES-256-GCM when it is set (electron.vite.config.ts)
+ * so the plain value never appears in the bundle. Set it in .env, or pass it to `npm run build`
+ * in a workflow; without it the updater has no token.
  */
 
 import { createDecipheriv } from 'crypto';

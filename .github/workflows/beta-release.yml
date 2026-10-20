@@ -1,7 +1,4 @@
-name: Beta Release
-
-# Builds a pre-release that was published by hand and uploads the installers to it.
-# Regular releases are built by release.yml instead.
+name: beta-release
 
 on:
   release:
@@ -10,387 +7,90 @@ on:
 permissions:
   contents: read
 
-env:
-  TAG: ${{ github.event.release.tag_name }}
-
 jobs:
-  # Single guard for the whole workflow: every other job needs this one, so a
-  # regular release skips all of them
-  version:
+  # This job's `if` guards the workflow: upload needs it, so a regular release skips both
+  build:
     if: ${{ github.event.release.prerelease }}
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          # macos-15-intel is the last Intel runner, supported until Fall 2027
+          - { os: macos-15-intel, script: 'package:mac', arch: '--x64', artifact: mac-x64 }
+          - { os: macos-15, script: 'package:mac', arch: '--arm64', artifact: mac-arm64 }
+          - { os: windows-latest, script: 'package:win', arch: '', artifact: windows }
+          - { os: ubuntu-latest, script: 'package:linux', arch: '', artifact: linux }
     steps:
-      - name: Resolve beta version from the release tag
-        id: version
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Package
+        shell: bash
+        # The release tag carries the version; package.json only holds the base version, so the
+        # beta suffix comes from the release when the tag itself has none
         run: |
           VERSION="${TAG#v}"
-          # package.json keeps the plain version; the pre-release suffix comes from the release
-          case "$VERSION" in
-            *-*) ;;
-            *) VERSION="$VERSION-beta" ;;
-          esac
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building beta $VERSION from $TAG"
-
-  # Intel build on Intel runner for native compilation
-  # Note: macos-15-intel is the last Intel runner, supported until Fall 2027
-  build-macos-intel:
-    needs: version
-    runs-on: macos-15-intel
-    outputs:
-      notarization_id: ${{ steps.notarize.outputs.notarization-id }}
-      dmg_file: ${{ steps.notarize.outputs.dmg-file }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js and install dependencies
-        uses: ./.github/actions/setup-node-frontend
-
-      - name: Build application
-        run: npm run build
+          case "$VERSION" in *-*) ;; *) VERSION="$VERSION-beta" ;; esac
+          npm run ${{ matrix.script }} -- ${{ matrix.arch }} --publish never --config.extraMetadata.version="$VERSION"
         env:
-          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
-
-      - name: Package macOS (Intel)
-        run: |
-          # Without a certificate secret CSC_LINK is empty, which electron-builder reads as a path: build unsigned
-          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
-          npm run package:mac -- --x64 --publish never --config.extraMetadata.version="$VERSION"
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-
-      - name: Submit notarization (async)
-        id: notarize
-        uses: ./.github/actions/submit-macos-notarization
-        with:
-          apple-id: ${{ secrets.APPLE_ID }}
-          apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-intel-builds
-          path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/*.yml
-            dist/*.blockmap
-
-  # Apple Silicon build on ARM64 runner for native compilation
-  build-macos-arm64:
-    needs: version
-    runs-on: macos-15
-    outputs:
-      notarization_id: ${{ steps.notarize.outputs.notarization-id }}
-      dmg_file: ${{ steps.notarize.outputs.dmg-file }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js and install dependencies
-        uses: ./.github/actions/setup-node-frontend
-
-      - name: Build application
-        run: npm run build
-        env:
-          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
-
-      - name: Package macOS (Apple Silicon)
-        run: |
-          # Without a certificate secret CSC_LINK is empty, which electron-builder reads as a path: build unsigned
-          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; export CSC_IDENTITY_AUTO_DISCOVERY=false; fi
-          npm run package:mac -- --arm64 --publish never --config.extraMetadata.version="$VERSION"
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          CSC_LINK: ${{ secrets.MAC_CERTIFICATE }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTIFICATE_PASSWORD }}
-
-      - name: Submit notarization (async)
-        id: notarize
-        uses: ./.github/actions/submit-macos-notarization
-        with:
-          apple-id: ${{ secrets.APPLE_ID }}
-          apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-arm64-builds
-          path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/*.yml
-            dist/*.blockmap
-
-  build-windows:
-    needs: version
-    runs-on: windows-latest
-    permissions:
-      id-token: write  # Required for OIDC authentication with Azure
-      contents: read
-    env:
-      # Job-level env so AZURE_CLIENT_ID is available for step-level if conditions
-      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js and install dependencies
-        uses: ./.github/actions/setup-node-frontend
-
-      - name: Build application
-        run: npm run build
-        env:
-          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
-
-      - name: Package Windows
-        shell: bash
-        run: npm run package:win -- --publish never --config.extraMetadata.version="$VERSION"
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-          # Disable electron-builder's built-in signing (we use Azure Trusted Signing instead)
+          TAG: ${{ github.event.release.tag_name }}
+          # This repo holds no signing certificates, so build unsigned rather than
+          # letting electron-builder hunt for an identity
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
-      - name: Azure Login (OIDC)
-        if: env.AZURE_CLIENT_ID != ''
-        uses: azure/login@v2
+      - uses: actions/upload-artifact@v4
         with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Sign Windows executable with Azure Trusted Signing
-        if: env.AZURE_CLIENT_ID != ''
-        uses: azure/trusted-signing-action@v0.5.11
-        with:
-          endpoint: https://neu.codesigning.azure.net/
-          trusted-signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE }}
-          files-folder: dist
-          files-folder-filter: exe
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
-
-      - name: Verify signature and regenerate checksums
-        if: env.AZURE_CLIENT_ID != ''
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = "Stop"
-          cd dist
-
-          # electron-builder produces one installer exe per build
-          $exeFile = Get-ChildItem -Filter "*.exe" | Select-Object -First 1
-          if (-not $exeFile) {
-            Write-Host "::error::No .exe file found in dist folder"
-            exit 1
-          }
-
-          Write-Host "Verifying signature on $($exeFile.Name)..."
-          $sig = Get-AuthenticodeSignature -FilePath $exeFile.FullName
-          if ($sig.Status -ne 'Valid') {
-            Write-Host "::error::Signature verification failed: $($sig.Status)"
-            Write-Host "::error::Status Message: $($sig.StatusMessage)"
-            exit 1
-          }
-          Write-Host "Signature verified successfully"
-          Write-Host "  Subject: $($sig.SignerCertificate.Subject)"
-          Write-Host "  Thumbprint: $($sig.SignerCertificate.Thumbprint)"
-
-          # Signing changed the exe, so latest.yml's hash and size are stale
-          $ymlFile = "latest.yml"
-          if (-not (Test-Path $ymlFile)) {
-            Write-Host "::error::$ymlFile not found - cannot update checksums"
-            exit 1
-          }
-
-          $content = Get-Content $ymlFile -Raw
-          $originalContent = $content
-
-          # Compute SHA512 hash and convert to base64 (electron-builder format)
-          $bytes = [System.IO.File]::ReadAllBytes($exeFile.FullName)
-          $hashBytes = [System.Security.Cryptography.SHA512]::Create().ComputeHash($bytes)
-          $hash = [System.Convert]::ToBase64String($hashBytes)
-          $size = $exeFile.Length
-
-          # Update sha512 hash (base64 pattern: alphanumeric, +, /, =) and size
-          $content = $content -replace 'sha512: [A-Za-z0-9+/=]+', "sha512: $hash"
-          $content = $content -replace 'size: \d+', "size: $size"
-
-          if ($content -eq $originalContent) {
-            Write-Host "::error::Checksum replacement failed - content unchanged. Check if latest.yml format has changed."
-            exit 1
-          }
-
-          Set-Content -Path $ymlFile -Value $content -NoNewline
-          Write-Host "Updated $ymlFile for $($exeFile.Name) (size $size)"
-
-      - name: Skip signing notice
-        if: env.AZURE_CLIENT_ID == ''
-        run: echo "::warning::Windows signing skipped - AZURE_CLIENT_ID not configured. The .exe will be unsigned."
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-builds
+          name: ${{ matrix.artifact }}
+          if-no-files-found: ignore
           path: |
+            dist/*.dmg
+            dist/*.zip
             dist/*.exe
-            dist/*.yml
-            dist/*.blockmap
-
-  build-linux:
-    needs: version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node.js and install dependencies
-        uses: ./.github/actions/setup-node-frontend
-
-      - name: Build application
-        run: npm run build
-        env:
-          UPDATER_GH_TOKEN: ${{ secrets.UPDATER_GH_TOKEN }}
-
-      - name: Package Linux
-        run: npm run package:linux -- --publish never --config.extraMetadata.version="$VERSION"
-        env:
-          VERSION: ${{ needs.version.outputs.version }}
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-builds
-          path: |
             dist/*.deb
-            dist/*.yml
+            dist/latest*.yml
             dist/*.blockmap
 
-  # Finalize macOS notarization (runs in parallel with Windows/Linux builds)
-  finalize-notarization:
-    needs: [build-macos-intel, build-macos-arm64]
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download Intel DMG
-        uses: actions/download-artifact@v7
-        with:
-          name: macos-intel-builds
-          path: intel
-
-      - name: Download ARM64 DMG
-        uses: actions/download-artifact@v7
-        with:
-          name: macos-arm64-builds
-          path: arm64
-
-      - name: Wait for notarization and staple
-        uses: ./.github/actions/finalize-macos-notarization
-        with:
-          apple-id: ${{ secrets.APPLE_ID }}
-          apple-app-specific-password: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          apple-team-id: ${{ secrets.APPLE_TEAM_ID }}
-          intel-notarization-id: ${{ needs.build-macos-intel.outputs.notarization_id }}
-          arm64-notarization-id: ${{ needs.build-macos-arm64.outputs.notarization_id }}
-          intel-dmg-file: ${{ needs.build-macos-intel.outputs.dmg_file }}
-          arm64-dmg-file: ${{ needs.build-macos-arm64.outputs.dmg_file }}
-
-      - name: Upload stapled Intel DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-intel-stapled
-          path: intel/*.dmg
-
-      - name: Upload stapled ARM64 DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-arm64-stapled
-          path: arm64/*.dmg
-
-  upload-assets:
-    needs: [finalize-notarization, build-windows, build-linux]
+  upload:
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v7
+      - uses: actions/download-artifact@v7
         with:
-          path: dist
+          path: artifacts
 
-      - name: Flatten binary artifacts
+      - name: Collect the assets
         run: |
-          mkdir -p release-assets
+          mkdir -p assets
+          # Every file but latest-mac.yml is unique to one platform
+          find artifacts -type f ! -name latest-mac.yml -exec cp {} assets/ \;
 
-          # Copy stapled macOS DMGs (from finalize-notarization job)
-          # Validate that stapled DMGs exist before copying
-          if ! find dist/macos-intel-stapled dist/macos-arm64-stapled -type f -name "*.dmg" 2>/dev/null | grep -q .; then
-            echo "::warning::No stapled DMGs found. Using un-stapled DMGs from build artifacts."
-            find dist/macos-intel-builds dist/macos-arm64-builds -type f -name "*.dmg" -exec cp {} release-assets/ \; 2>/dev/null || true
-          else
-            find dist/macos-intel-stapled dist/macos-arm64-stapled -type f -name "*.dmg" -exec cp {} release-assets/ \; 2>/dev/null || true
-          fi
+          # electron-updater only ever fetches latest-mac.yml, so the Intel and Apple Silicon
+          # builds have to share one, or an update offers the other architecture's download
+          python3 -c 'import yaml' 2>/dev/null || pip install --quiet pyyaml
+          python3 -c '
+          import pathlib, yaml
+          # Intel first: the top-level path it leaves behind is the legacy fallback, and an
+          # x64 build runs on both architectures
+          manifests = sorted(pathlib.Path("artifacts").rglob("latest-mac.yml"), key=lambda p: "x64" not in p.parent.name)
+          merged = yaml.safe_load(manifests[0].read_text())
+          for extra in manifests[1:]:
+              merged["files"] += yaml.safe_load(extra.read_text())["files"]
+          pathlib.Path("assets/latest-mac.yml").write_text(yaml.safe_dump(merged, sort_keys=False))
+          '
+          ls -l assets
 
-          # Copy other macOS artifacts (zip, yml, blockmap for delta updates) from original build
-          find dist/macos-intel-builds dist/macos-arm64-builds -type f \( -name "*.zip" -o -name "*.yml" -o -name "*.blockmap" \) -exec cp {} release-assets/ \; 2>/dev/null || true
-
-          # Copy Windows and Linux artifacts (including blockmap for delta updates)
-          find dist/windows-builds dist/linux-builds -type f \( -name "*.exe" -o -name "*.deb" -o -name "*.yml" -o -name "*.blockmap" \) -exec cp {} release-assets/ \; 2>/dev/null || true
-
-          # Validate that at least one artifact was copied
-          artifact_count=$(find release-assets -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.deb" \) | wc -l)
-          if [ "$artifact_count" -eq 0 ]; then
-            echo "::error::No build artifacts found! Expected .dmg, .zip, .exe, or .deb files."
-            exit 1
-          fi
-
-          echo "Found $artifact_count binary artifact(s):"
-          ls -la release-assets/
-
-      # Merge macOS manifests from Intel and ARM64 builds
-      # See: https://github.com/electron-userland/electron-builder/issues/5592
-      - name: Merge macOS manifests
-        uses: ./.github/actions/merge-macos-manifests
-        with:
-          dist-path: dist
-          output-path: release-assets
-          copy-other-manifests: 'true'
-
-      - name: Validate update manifests
-        run: |
-          cd release-assets
-
-          # Keep electron-builder's latest*.yml names: the app reads releases from a private repo through
-          # electron-updater's private GitHub provider, which only looks for latest*.yml. Beta builds are
-          # told apart by the release's pre-release flag (allowPrerelease)
-          missing=""
-          for manifest in latest.yml latest-mac.yml latest-linux.yml; do
-            [ ! -f "$manifest" ] && missing="$missing $manifest"
-          done
-
-          if [ -n "$missing" ]; then
-            echo "::error::Missing required update manifests:$missing"
-            echo "::error::Auto-update will fail on affected platforms without these files!"
-            exit 1
-          fi
-
-          echo "All required update manifests present:"
-          ls -la *.yml
-
-      - name: Generate checksums
-        run: |
-          cd release-assets
-          sha256sum ./* > checksums.sha256
-          cat checksums.sha256
-
-      - name: Upload assets to the pre-release
-        run: gh release upload "$TAG" release-assets/* --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Upload to the release
+        run: gh release upload "$TAG" assets/* --clobber
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+          GH_TOKEN: ${{ github.token }}
