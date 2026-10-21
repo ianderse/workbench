@@ -129,6 +129,9 @@ export interface ElectronAPI {
   removeProject: (projectId: string) => Promise<IPCResult>;
   getProjects: () => Promise<IPCResult<Project[]>>;
   getProjectCostMetrics: () => Promise<IPCResult<import('./project').ProjectCostMetrics[]>>;
+  watchProjectCostMetrics: () => Promise<IPCResult>;
+  unwatchProjectCostMetrics: () => Promise<IPCResult>;
+  onProjectCostMetricsChanged: (callback: () => void) => () => void;
   updateProjectSettings: (projectId: string, settings: Partial<ProjectSettings>) => Promise<IPCResult>;
   initializeProject: (projectId: string) => Promise<IPCResult<InitializationResult>>;
   checkProjectVersion: (projectId: string) => Promise<IPCResult<AutoBuildVersionInfo>>;

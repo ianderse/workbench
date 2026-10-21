@@ -25,6 +25,9 @@ export interface ProjectAPI {
   removeProject: (projectId: string) => Promise<IPCResult>;
   getProjects: () => Promise<IPCResult<Project[]>>;
   getProjectCostMetrics: () => Promise<IPCResult<ProjectCostMetrics[]>>;
+  watchProjectCostMetrics: () => Promise<IPCResult>;
+  unwatchProjectCostMetrics: () => Promise<IPCResult>;
+  onProjectCostMetricsChanged: (callback: () => void) => () => void;
   updateProjectSettings: (
     projectId: string,
     settings: Partial<ProjectSettings>
@@ -77,6 +80,23 @@ export const createProjectAPI = (): ProjectAPI => ({
 
   getProjectCostMetrics: (): Promise<IPCResult<ProjectCostMetrics[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.PROJECT_COST_METRICS),
+
+  // Only while the Metrics page is open: it reads the projects again on every change reported
+  watchProjectCostMetrics: (): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_METRICS_WATCH),
+
+  unwatchProjectCostMetrics: (): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_METRICS_UNWATCH),
+
+  onProjectCostMetricsChanged: (callback: () => void): (() => void) => {
+    const handler = (): void => {
+      callback();
+    };
+    ipcRenderer.on(IPC_CHANNELS.PROJECT_METRICS_CHANGED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PROJECT_METRICS_CHANGED, handler);
+    };
+  },
 
   updateProjectSettings: (
     projectId: string,

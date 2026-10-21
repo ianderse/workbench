@@ -15,6 +15,9 @@ export const IPC_CHANNELS = {
   PROJECT_REMOVE: 'project:remove',
   PROJECT_LIST: 'project:list',
   PROJECT_COST_METRICS: 'project:costMetrics',  // Task count and total run cost per initialized project
+  PROJECT_METRICS_WATCH: 'project:metricsWatch',  // Report changes while the Metrics page is open
+  PROJECT_METRICS_UNWATCH: 'project:metricsUnwatch',
+  PROJECT_METRICS_CHANGED: 'project:metricsChanged',  // A window spent something, or a session was recorded
   PROJECT_UPDATE_SETTINGS: 'project:updateSettings',
   PROJECT_INITIALIZE: 'project:initialize',
   PROJECT_CHECK_VERSION: 'project:checkVersion',

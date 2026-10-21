@@ -16,7 +16,8 @@ import type {
 import { appLog } from '../app-logger';
 import { projectStore } from '../project-store';
 import { applyProjectMemory, removeProjectMemory } from '../self-improve';
-import { getProjectCostMetrics } from '../project-metrics';
+import { getProjectCostMetrics, warmProjectMetrics } from '../project-metrics';
+import { stopWatchingProjectMetrics, watchProjectMetrics } from '../project-metrics-watcher';
 import { migrateProjectDataDirs } from '../data-dir-migration';
 import {
   initializeProject,
@@ -225,6 +226,17 @@ export function registerProjectHandlers(
     }
   );
 
+  /**
+   * The first time a project is open in a window, read what its Claude Code sessions spent in the
+   * background, so Metrics has the figures ready when it is opened.
+   */
+  const warmOpenProjects = (projectIds: string[]): void => {
+    const open = projectStore.getProjects().filter((project) => projectIds.includes(project.id));
+    warmProjectMetrics(open, () => {
+      safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_METRICS_CHANGED);
+    });
+  };
+
   // Spending per initialized project (Settings > Accounts > Metrics)
   ipcMain.handle(
     IPC_CHANNELS.PROJECT_COST_METRICS,
@@ -236,6 +248,22 @@ export function registerProjectHandlers(
       }
     }
   );
+
+  // While the Metrics page is open, tell it when an agent window's session spends something
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECT_METRICS_WATCH,
+    async (): Promise<IPCResult> => {
+      await watchProjectMetrics(projectStore.getProjects(), () => {
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_METRICS_CHANGED);
+      });
+      return { success: true };
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_METRICS_UNWATCH, (): IPCResult => {
+    stopWatchingProjectMetrics();
+    return { success: true };
+  });
 
   ipcMain.handle(
     IPC_CHANNELS.PROJECT_REMOVE,
@@ -305,6 +333,7 @@ export function registerProjectHandlers(
     async (): Promise<IPCResult<{ openProjectIds: string[]; activeProjectId: string | null; tabOrder: string[] }>> => {
       const tabState = projectStore.getTabState();
       console.log('[IPC] TAB_STATE_GET returning:', tabState);
+      warmOpenProjects(tabState.openProjectIds);
       return { success: true, data: tabState };
     }
   );
@@ -317,6 +346,7 @@ export function registerProjectHandlers(
     ): Promise<IPCResult> => {
       console.log('[IPC] TAB_STATE_SAVE called with:', tabState);
       projectStore.saveTabState(tabState);
+      warmOpenProjects(tabState.openProjectIds);
       return { success: true };
     }
   );

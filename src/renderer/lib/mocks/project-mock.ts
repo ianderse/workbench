@@ -38,6 +38,11 @@ export const projectMock = {
     }))
   }),
 
+  // Nothing spends in the browser, so there is never a change to report
+  watchProjectCostMetrics: async () => ({ success: true }),
+  unwatchProjectCostMetrics: async () => ({ success: true }),
+  onProjectCostMetricsChanged: () => () => {},
+
   updateProjectSettings: async () => ({ success: true }),
 
   initializeProject: async () => ({
