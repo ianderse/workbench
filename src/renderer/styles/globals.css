@@ -354,6 +354,8 @@
   --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
   --review-highlight-border: var(--card-border);
   --review-highlight-bg: var(--muted);
+  /* Faint grid behind the live agent graph */
+  --grid-line: rgba(11, 11, 11, 0.05);
 }
 
 /* ============================================
@@ -500,6 +502,8 @@
   --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.2);
   --review-highlight-border: var(--card-border);
   --review-highlight-bg: var(--muted);
+  /* Faint grid behind the live agent graph */
+  --grid-line: rgba(255, 255, 255, 0.035);
 }
 
 /* Default theme: serif display headings use a lighter weight, like Claude Desktop */
@@ -1289,4 +1293,18 @@ body {
   to {
     transform: translateX(var(--clawd-cloud-to));
   }
+}
+
+/* ============================================
+   Live agent grid (the website's hero stage)
+   A faint grid behind the graph, so the nodes read as sitting in a space; it
+   fades out from the middle, so the panel keeps no frame of its own.
+   ============================================ */
+.live-agent-grid {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: radial-gradient(50% 50% at 50% 50%, #000 12%, transparent 100%);
+  -webkit-mask-image: radial-gradient(50% 50% at 50% 50%, #000 12%, transparent 100%);
 }
