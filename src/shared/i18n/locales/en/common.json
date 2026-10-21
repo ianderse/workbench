@@ -380,7 +380,8 @@
     },
     "branchType": {
       "local": "Local",
-      "remote": "Remote"
+      "remote": "Remote",
+      "missing": "Not in the project"
     }
   },
   "projectsPage": {

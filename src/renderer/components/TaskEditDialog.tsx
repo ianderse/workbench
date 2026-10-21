@@ -1,8 +1,13 @@
 /**
  * TaskEditDialog - Dialog for editing task details
  *
- * Edits the task's description, reference images and MCP connectors (the title is kept). Model,
- * effort and planning are decided by the Claude Code triage run when the task starts.
+ * Edits the task's description, reference images, MCP connectors and git options - the base
+ * branch and whether its branch is pushed (the title is kept). Model, effort and planning are
+ * decided by the Claude Code triage run when the task starts.
+ *
+ * The base branch is the one the task's next run starts from, and the branch its changes are
+ * counted and merged against, so a task created with a branch that no longer exists can be
+ * pointed at one that does.
  *
  * Uses the shared TaskModalLayout and TaskFormFields (same look as the creation dialog) and
  * saves via persistUpdateTask (updates store + spec files). Closes without saving when nothing
@@ -14,6 +19,7 @@ import { Loader2 } from 'lucide-react';
 import { Button } from './ui/button';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
+import { PROJECT_DEFAULT_BRANCH, TaskGitOptionsSection, useTaskGitOptions } from './task-form/TaskGitOptions';
 import { persistUpdateTask } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
 import type { Task, TaskMetadata, ImageAttachment } from '../../shared/types';
@@ -58,15 +64,25 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   const taskConnectors = task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors);
   const [mcpConnectors, setMcpConnectors] = useState<string[]>(taskConnectors);
 
+  // Git options: the task's own base branch, listed even when the project no longer has it, and
+  // whether its branch is pushed (unset follows the project's own setting)
+  const taskBaseBranch = task.metadata?.baseBranch || PROJECT_DEFAULT_BRANCH;
+  const gitOptions = useTaskGitOptions(task.projectId, taskBaseBranch);
+  const taskPushNewBranches = task.metadata?.pushNewBranches ?? gitOptions.projectPushNewBranches;
+  const [baseBranch, setBaseBranch] = useState(taskBaseBranch);
+  const [pushNewBranches, setPushNewBranches] = useState(taskPushNewBranches);
+
   // Reset form when task changes or dialog opens
   useEffect(() => {
     if (open) {
       setDescription(task.description);
       setImages(task.metadata?.attachedImages || []);
       setMcpConnectors(task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors));
+      setBaseBranch(task.metadata?.baseBranch || PROJECT_DEFAULT_BRANCH);
+      setPushNewBranches(task.metadata?.pushNewBranches ?? gitOptions.projectPushNewBranches);
       setError(null);
     }
-  }, [open, task, settings.mcpConnectors]);
+  }, [open, task, settings.mcpConnectors, gitOptions.projectPushNewBranches]);
 
   const handleSave = async () => {
     // Validate input
@@ -80,6 +96,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     const hasChanges =
       trimmedDescription !== task.description ||
       [...mcpConnectors].sort().join(',') !== [...taskConnectors].sort().join(',') ||
+      baseBranch !== taskBaseBranch ||
+      pushNewBranches !== taskPushNewBranches ||
       JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []);
 
     if (!hasChanges) {
@@ -90,10 +108,26 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     setIsSaving(true);
     setError(null);
 
+    // The project default is stored as the branch it stands for, like the creation dialog does,
+    // so every later run and diff reads one branch name. `undefined` clears the stored field.
+    const resolvedBaseBranch = baseBranch === PROJECT_DEFAULT_BRANCH
+      ? gitOptions.projectDefaultBranch || undefined
+      : baseBranch || undefined;
+    // A local branch is started from as it is, which keeps gitignored files (.env, configs) out
+    // of harm's way. Read again only when the branch changed, so the task's own flag survives a
+    // save made before the branch list is there
+    const useLocalBranch = baseBranch === taskBaseBranch
+      ? task.metadata?.useLocalBranch
+      : (!!resolvedBaseBranch && gitOptions.isLocalBranch(resolvedBaseBranch)) || undefined;
+
     const metadataUpdates: Partial<TaskMetadata> = {
       // Always set attachedImages to persist removal when all images are deleted
       attachedImages: images,
-      mcpConnectors
+      mcpConnectors,
+      baseBranch: resolvedBaseBranch,
+      useLocalBranch,
+      // Unset again when it matches the project's own setting, so the task follows it
+      pushNewBranches: pushNewBranches === gitOptions.projectPushNewBranches ? undefined : pushNewBranches
     };
 
     const success = await persistUpdateTask(task.id, {
@@ -151,6 +185,17 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         error={error}
         onError={setError}
         idPrefix="edit"
+        extraSections={
+          <TaskGitOptionsSection
+            options={gitOptions}
+            baseBranch={baseBranch}
+            onBaseBranchChange={setBaseBranch}
+            pushNewBranches={pushNewBranches}
+            onPushNewBranchesChange={setPushNewBranches}
+            disabled={isSaving}
+            idPrefix="edit"
+          />
+        }
       />
     </TaskModalLayout>
   );

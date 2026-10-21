@@ -13,18 +13,12 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, RotateCcw } from 'lucide-react';
 import { Button } from './ui/button';
-import { Switch } from './ui/switch';
-import { SettingsRow, SettingsRows } from './settings/SettingsRow';
-import { SettingsSection } from './settings/SettingsSection';
-import { Combobox } from './ui/combobox';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
+import { PROJECT_DEFAULT_BRANCH, TaskGitOptionsSection, useTaskGitOptions } from './task-form/TaskGitOptions';
 import { createTask, saveDraft, loadDraft, clearDraft, isDraftEmpty, type TaskCreationDraft } from '../stores/task-store';
-import { useProjectStore } from '../stores/project-store';
-import { buildBranchOptions } from '../lib/branch-utils';
 import type { TaskMetadata, ImageAttachment } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
-import { useProjectBranches } from '../hooks/useProjectBranches';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 
 interface TaskCreationWizardProps {
@@ -33,8 +27,6 @@ interface TaskCreationWizardProps {
   onOpenChange: (open: boolean) => void;
 }
 
-// Special value for "use project default" branch
-const PROJECT_DEFAULT_BRANCH = '__project_default__';
 
 export function TaskCreationWizard({
   projectId,
@@ -55,59 +47,13 @@ export function TaskCreationWizard({
   const [useWorktree, setUseWorktree] = useState(true);
   const [pushNewBranches, setPushNewBranches] = useState(true);
 
-  // Get project path from project store
-  const projects = useProjectStore((state) => state.projects);
-  const projectPath = useMemo(() => {
-    const project = projects.find((p) => p.id === projectId);
-    return project?.path ?? null;
-  }, [projects, projectId]);
-  // Saved branch list shared with the other branch pickers (no git calls when the dialog opens);
-  // the default is the project settings' branch, otherwise the repository's default
-  const { branches, detectedBranch, isLoading: isLoadingBranches } = useProjectBranches(projectPath);
-  const projectDefaultBranch = useMemo(() => {
-    const project = projects.find((p) => p.id === projectId);
-    return project?.settings?.mainBranch || detectedBranch;
-  }, [projects, projectId, detectedBranch]);
-  const projectPushNewBranches = useMemo(() => {
-    const project = projects.find((p) => p.id === projectId);
-    return project?.settings?.pushNewBranches !== false;
-  }, [projects, projectId]);
-
-  // Build branch options using shared utility - groups by local/remote with type indicators
-  const branchOptions = useMemo(() => {
-    const options = buildBranchOptions(branches, {
-      t,
-      includeProjectDefault: {
-        value: PROJECT_DEFAULT_BRANCH,
-        branchName: projectDefaultBranch,
-        labelKey: projectDefaultBranch
-          ? 'tasks:wizard.gitOptions.useProjectDefaultWithBranch'
-          : 'tasks:wizard.gitOptions.useProjectDefault',
-      },
-    });
-    // Show the branch type ("Local" / "Remote") as plain muted text instead of a colored badge
-    return options.map((option) => {
-      if (!option.badge) return option;
-      const branchName = option.value === PROJECT_DEFAULT_BRANCH ? projectDefaultBranch : option.value;
-      const branchType = branches.find((b) => b.name === branchName)?.type;
-      if (!branchType) return option;
-      return {
-        ...option,
-        badge: (
-          <span className="text-xs text-(--nav-label-color)">
-            {t(branchType === 'local' ? 'common:git.branchType.local' : 'common:git.branchType.remote')}
-          </span>
-        ),
-      };
-    });
-  }, [branches, projectDefaultBranch, t]);
+  // The project's branches (the shared list, no git calls when the dialog opens) and its own
+  // git defaults, shared with the edit dialog
+  const gitOptions = useTaskGitOptions(projectId);
+  const { projectDefaultBranch, projectPushNewBranches } = gitOptions;
 
   // Determine if the selected branch is local (for useLocalBranch flag)
-  const isSelectedBranchLocal = useMemo(() => {
-    if (baseBranch === PROJECT_DEFAULT_BRANCH) return false;
-    const selectedGitBranchDetail = branches.find((b) => b.name === baseBranch);
-    return selectedGitBranchDetail?.type === 'local';
-  }, [baseBranch, branches]);
+  const isSelectedBranchLocal = baseBranch !== PROJECT_DEFAULT_BRANCH && gitOptions.isLocalBranch(baseBranch);
 
   // Images
   const [images, setImages] = useState<ImageAttachment[]>([]);
@@ -231,44 +177,16 @@ export function TaskCreationWizard({
     setError(null);
   };
 
-  // Git options - unique to creation; rendered as the last section of the form
+  // Git options, rendered as the last section of the form (the edit dialog has them too)
   const gitOptionsSection = (
-    <SettingsSection title={t('tasks:wizard.gitOptions.title')}>
-      <SettingsRows>
-        <SettingsRow
-          label={t('tasks:wizard.gitOptions.baseBranchLabel')}
-          description={t('tasks:wizard.gitOptions.helpText')}
-          htmlFor="base-branch"
-        >
-          <Combobox
-            id="base-branch"
-            value={baseBranch}
-            onValueChange={setBaseBranch}
-            options={branchOptions}
-            placeholder={projectDefaultBranch
-              ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
-              : t('tasks:wizard.gitOptions.useProjectDefault')
-            }
-            searchPlaceholder={t('tasks:wizard.gitOptions.searchBranches')}
-            emptyMessage={t('tasks:wizard.gitOptions.noBranchesFound')}
-            disabled={isCreating || isLoadingBranches}
-            className="h-8 w-auto max-w-[18rem] gap-1.5 border-transparent bg-transparent px-2 hover:bg-nav-hover focus:border-transparent focus:ring-0 focus-visible:shadow-(--shadow-focus) data-[state=open]:bg-nav-hover"
-          />
-        </SettingsRow>
-        <SettingsRow
-          label={t('tasks:wizard.gitOptions.pushNewBranchesLabel')}
-          description={t('tasks:wizard.gitOptions.pushNewBranchesDescription')}
-          htmlFor="push-new-branches"
-        >
-          <Switch
-            id="push-new-branches"
-            checked={pushNewBranches}
-            onCheckedChange={setPushNewBranches}
-            disabled={isCreating}
-          />
-        </SettingsRow>
-      </SettingsRows>
-    </SettingsSection>
+    <TaskGitOptionsSection
+      options={gitOptions}
+      baseBranch={baseBranch}
+      onBaseBranchChange={setBaseBranch}
+      pushNewBranches={pushNewBranches}
+      onPushNewBranchesChange={setPushNewBranches}
+      disabled={isCreating}
+    />
   );
 
   return (

@@ -220,7 +220,7 @@
   },
   "edit": {
     "title": "Edit task",
-    "description": "Update the title, description, reference images and connectors. Changes are saved to the task files.",
+    "description": "Update the description, reference images, connectors and git options. Changes are saved to the task files.",
     "saveChanges": "Save",
     "errors": {
       "updateFailed": "Failed to update task. Please try again."
