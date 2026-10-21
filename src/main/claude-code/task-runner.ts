@@ -240,6 +240,21 @@ function taskBlock(config: TaskRunConfig): string {
   return `<task title="${config.title.replace(/"/g, "'")}">\n${config.description}\n</task>`;
 }
 
+/**
+ * What a discarded attempt got wrong, for a run started over from "Request changes" with
+ * "Start over" ticked. Empty for a normal start and for a revision (which quotes the feedback
+ * as the change to apply).
+ */
+function restartNotes(config: TaskRunConfig): string {
+  const feedback = config.mode === 'start' ? config.feedback?.trim() : '';
+  if (!feedback) return '';
+  return `\n\nAn earlier attempt at this task was discarded and you are starting it over. The reviewer's notes on that attempt:
+
+<feedback>
+${feedback}
+</feedback>`;
+}
+
 function verificationHint(triage: TaskTriage | undefined): string {
   if (triage?.verification.length) {
     return `the checks that apply to the code you changed (for example: ${triage.verification.map((v) => `\`${v}\``).join(', ')})`;
@@ -383,7 +398,7 @@ export class ClaudeTaskRun {
         ({ triage, costUsd: triageCost } = await triageTask({
           description: revision
             ? `${this.config.description}\n\nThis task was already implemented. Assess only the follow-up change the reviewer requested:\n${this.config.feedback ?? ''}`
-            : this.config.description,
+            : `${this.config.description}${restartNotes(this.config)}`,
           cwd: this.config.worktreePath,
           attachmentNames: (revision ? this.config.feedbackAttachments ?? [] : this.config.attachments).map((a) => a.filename),
           settings,
@@ -544,7 +559,7 @@ export class ClaudeTaskRun {
 
     switch (name) {
       case 'plan':
-        text = `${taskBlock(this.config)}
+        text = `${taskBlock(this.config)}${restartNotes(this.config)}
 
 Explore the codebase as needed and produce an implementation plan for this task. Don't change any files yet.
 The plan should name the files to change, the approach and why, edge cases, and how to verify the result (${verificationHint(triage)}).`;
@@ -555,7 +570,7 @@ The plan should name the files to change, the approach and why, edge cases, and 
         } else if (this.info.plan) {
           text = `The plan is approved. Implement it now, verify it with ${verificationHint(triage)}, and commit the result.`;
         } else {
-          text = `${taskBlock(this.config)}
+          text = `${taskBlock(this.config)}${restartNotes(this.config)}
 
 Implement this task. Verify it with ${verificationHint(triage)}, then commit the result.`;
         }
@@ -583,7 +598,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
     // Like the Claude chat: images as images, PDFs as documents, text files inlined
     const attachments = name === 'revise'
       ? [...(resume ? [] : this.config.attachments), ...(this.config.feedbackAttachments ?? [])]
-      : resume ? [] : this.config.attachments;
+      : resume ? [] : [...this.config.attachments, ...(this.config.feedbackAttachments ?? [])];
     const files: ImageAttachment[] = [];
     for (const attachment of attachments) {
       try {

@@ -159,6 +159,7 @@ describe('IPC Bridge Integration', () => {
           'task-id',
           false,
           'Needs more work',
+          undefined,
           undefined
         );
       });

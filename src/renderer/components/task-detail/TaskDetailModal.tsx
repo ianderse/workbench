@@ -142,10 +142,11 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
       return;
     }
     state.setIsSubmitting(true);
-    await submitReview(task.id, false, state.feedback, state.feedbackImages);
+    await submitReview(task.id, false, state.feedback, state.feedbackImages, { startOver: state.startOver });
     state.setIsSubmitting(false);
     state.setFeedback('');
     state.setFeedbackImages([]);
+    state.setStartOver(false);
   };
 
   const handleDelete = async () => {
@@ -375,6 +376,8 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                           onReject={handleReject}
                           images={state.feedbackImages}
                           onImagesChange={state.setFeedbackImages}
+                          startOver={state.startOver}
+                          onStartOverChange={state.setStartOver}
                         />
                       )}
 

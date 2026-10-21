@@ -414,7 +414,9 @@ export class AgentManager extends EventEmitter {
       maxBudgetUsd: project.settings?.maxBudgetUsd,
       changelogPath: project.autoBuildPath ? getTaskChangelogPath(project.path, project.autoBuildPath) : undefined,
       mode,
-      ...(mode === 'revise' ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
+      // revise: the change to apply. start: what a discarded attempt got wrong, when the
+      // reviewer asked for the task to be started over
+      ...(mode === 'revise' || options.feedback ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
       profileId: options.profileId,
     };
 

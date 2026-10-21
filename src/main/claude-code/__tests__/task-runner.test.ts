@@ -237,6 +237,23 @@ describe('ClaudeTaskRun', () => {
     expect(loadClaudeRunInfo(specDir)!.phases.slice(-3).map((p) => p.name)).toEqual(['triage', 'revise', 'validate']);
   });
 
+  it('tells a run started over what the discarded attempt got wrong', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push(
+      { messages: [result('s8')] },
+      { messages: [result('s8', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+    );
+    const outcome = await makeRun({ mode: 'start', feedback: 'It edited the wrong module' }).run();
+    expect(outcome.status).toBe('completed');
+
+    // A fresh session (no --resume) that quotes the reviewer's notes, and triage sees them too
+    const input = (spawned[0].input as Array<{ text?: string }>)[0].text;
+    expect(input).toContain('starting it over');
+    expect(input).toContain('It edited the wrong module');
+    expect(spawned[0].args).not.toContain('--resume');
+    expect(triageMock.mock.calls[0][0].description).toContain('It edited the wrong module');
+  });
+
   it('resumes on the profile that holds the session and copies the transcript when the profile changes', async () => {
     const { resolveClaudeEnv } = await import('../env');
     const envMock = vi.mocked(resolveClaudeEnv);

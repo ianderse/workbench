@@ -503,3 +503,12 @@ export interface TaskStartOptions {
   model?: string;
   baseBranch?: string; // Override base branch for worktree creation
 }
+
+/** Options of a "request changes" review */
+export interface TaskReviewOptions {
+  /**
+   * Discard the task's worktree, branch and run history and redo it from scratch, instead of
+   * applying the feedback to what the session already built. Off by default.
+   */
+  startOver?: boolean;
+}

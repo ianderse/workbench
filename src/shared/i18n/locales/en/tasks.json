@@ -213,6 +213,8 @@
     "placeholder": "Describe what to change",
     "submitting": "Submitting...",
     "addImages": "Add images",
+    "startOver": "Start over",
+    "startOverHint": "Discard the worktree and the run history and redo the task from scratch, using the feedback as notes on the discarded attempt",
     "dropImages": "Drop images to attach",
     "send": "Request changes"
   },

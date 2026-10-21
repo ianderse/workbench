@@ -58,6 +58,8 @@ function failedPhases(logs: TaskLogs): Set<TaskLogPhase> {
 export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [feedback, setFeedback] = useState('');
   const [feedbackImages, setFeedbackImages] = useState<ImageAttachment[]>([]);
+  // "Start over" in Request changes: off by default, so a revision keeps what the task built
+  const [startOver, setStartOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStuck, setIsStuck] = useState(false);
   const [hasCheckedRunning, setHasCheckedRunning] = useState(false);
@@ -312,6 +314,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     // State
     feedback,
     feedbackImages,
+    startOver,
     isSubmitting,
     isStuck,
     hasCheckedRunning,
@@ -340,6 +343,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     // Setters
     setFeedback,
     setFeedbackImages,
+    setStartOver,
     setIsSubmitting,
     setIsStuck,
     setHasCheckedRunning,

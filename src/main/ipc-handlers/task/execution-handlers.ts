@@ -1,7 +1,7 @@
 import { handleIpc, onIpc } from '../ipc-registry';
 import { BrowserWindow } from 'electron';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir, resolveMaxParallelTasks } from '../../../shared/constants';
-import type { IPCResult, TaskStartOptions, TaskStatus, ImageAttachment, Task, Project, TaskLogs, TaskLogPhase, TaskPhaseLog } from '../../../shared/types';
+import type { IPCResult, TaskStartOptions, TaskStatus, TaskReviewOptions, ImageAttachment, Task, Project, TaskLogs, TaskLogPhase, TaskPhaseLog } from '../../../shared/types';
 import path from 'path';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
@@ -39,6 +39,12 @@ import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Feedback typed in "Request changes" with "Start over" ticked, held until the task that was
+ * reset actually starts (it may first wait in the queue for a free slot).
+ */
+const pendingRestartFeedback = new Map<string, { feedback?: string; feedbackImagePaths?: string[] }>();
 
 const AUTH_REQUIRED_MESSAGE = 'Authentication required. Sign in to a Claude account or activate an API profile in Settings > Accounts before starting tasks.';
 
@@ -291,7 +297,10 @@ export function registerTaskExecutionHandlers(
     console.warn('[TASK_START] XState:', currentXState, '| task status:', task.status, '->', event);
     taskStateManager.handleUiEvent(taskId, { type: event }, task, project);
 
-    launchRun(taskId, task, project, 'start');
+    // A task reset by "Start over" carries the reviewer's feedback into its fresh run
+    const restart = pendingRestartFeedback.get(taskId);
+    pendingRestartFeedback.delete(taskId);
+    launchRun(taskId, task, project, 'start', restart?.feedback, restart?.feedbackImagePaths);
   };
 
   /**
@@ -319,74 +328,93 @@ export function registerTaskExecutionHandlers(
   };
 
   /**
-   * Retry a task from a clean slate: discard its worktree and branch (all commits and
+   * Start a task over from a clean slate: discard its worktree and branch (all commits and
    * uncommitted changes), reset its spec dir to what TASK_CREATE wrote (task_metadata.json,
    * attachments/, a fresh implementation_plan.json), forget its state machine, then start
    * it like TASK_START does, or queue it when the parallel task limit is reached.
+   *
+   * Used by Retry and by "Request changes" with "Start over" ticked; in the latter case the
+   * reviewer's feedback and images are kept for the fresh run.
    */
+  const restartTaskFromScratch = async (
+    taskId: string,
+    options?: { feedback?: string; images?: ImageAttachment[] }
+  ): Promise<IPCResult<{ action: 'started' | 'queued' }>> => {
+    pendingRestartFeedback.delete(taskId);
+    const { task, project: foundProject } = findTaskAndProject(taskId);
+    if (!task || !foundProject) {
+      return { success: false, error: 'Task not found' };
+    }
+    const project = (task.projectId && task.projectId !== foundProject.id)
+      ? (projectStore.getProject(task.projectId) ?? foundProject)
+      : foundProject;
+
+    if (agentManager.isRunning(taskId)) {
+      return { success: false, error: 'The task is still running. Stop it before retrying.' };
+    }
+
+    // Check that the task can start before throwing its work away
+    const gitStatus = checkGitStatus(project.path);
+    if (!gitStatus.isGitRepo || !gitStatus.hasCommits) {
+      return { success: false, error: gitStatus.error || 'Git repository with commits required to run tasks.' };
+    }
+    const auth = await checkClaudeCodeAuth();
+    if (!auth.ok) {
+      return { success: false, error: auth.error };
+    }
+
+    try {
+      cancelFallbackTimer(taskId);
+      await fileWatcher.unwatch(taskId).catch(() => undefined);
+      clearRateLimitHold(project, task, getMainWindow);
+
+      // 1. Revert the code: remove the worktree and its branch. Tasks that run in the
+      //    project folder itself (useWorktree: false) keep their changes there.
+      if (task.metadata?.useWorktree !== false) {
+        const removed = await discardTaskWorktree(project.path, task.specId, '[TASK_RESTART]');
+        if (!removed.success) {
+          return { success: false, error: `Failed to remove the task's worktree: ${removed.warnings.join('; ')}` };
+        }
+      }
+
+      // 2. Forget the run: the state machine is rebuilt from the reset plan file
+      taskStateManager.clearTask(taskId);
+      const queue = isAtParallelLimit(project, taskId);
+      await resetTaskToInitialState(project, task, { status: queue ? 'queue' : 'backlog' });
+
+      const specDir = getMainSpecDir(project, task);
+      taskLogService.clearCache(specDir);
+      safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_CHANGED, task.specId, emptyTaskLogs(task.specId), project.id);
+
+      // 3. Tell the fresh run what the discarded attempt got wrong. Images are saved after
+      //    the reset, which empties the spec dir of everything a run produced
+      const feedback = options?.feedback?.trim();
+      if (feedback || options?.images?.length) {
+        pendingRestartFeedback.set(taskId, {
+          feedback,
+          feedbackImagePaths: saveFeedbackImages(specDir, options?.images)
+        });
+      }
+
+      // 4. Start over (or wait in the queue for a free slot)
+      if (queue) {
+        console.warn(`[TASK_RESTART] Parallel task limit reached; ${taskId} reset and queued`);
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', project.id);
+        taskHooks.emit('state', { project, task, status: 'queue' });
+        return { success: true, data: { action: 'queued' } };
+      }
+      console.warn(`[TASK_RESTART] ${taskId} reset; starting it again`);
+      await startTask(taskId);
+      return { success: true, data: { action: 'started' } };
+    } catch (error) {
+      console.error('[TASK_RESTART] Failed to retry task:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Failed to retry task' };
+    }
+  };
+
   handleIpc(
     IPC_CHANNELS.TASK_RETRY,
-    async (_, taskId: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> => {
-      const { task, project: foundProject } = findTaskAndProject(taskId);
-      if (!task || !foundProject) {
-        return { success: false, error: 'Task not found' };
-      }
-      const project = (task.projectId && task.projectId !== foundProject.id)
-        ? (projectStore.getProject(task.projectId) ?? foundProject)
-        : foundProject;
-
-      if (agentManager.isRunning(taskId)) {
-        return { success: false, error: 'The task is still running. Stop it before retrying.' };
-      }
-
-      // Check that the task can start before throwing its work away
-      const gitStatus = checkGitStatus(project.path);
-      if (!gitStatus.isGitRepo || !gitStatus.hasCommits) {
-        return { success: false, error: gitStatus.error || 'Git repository with commits required to run tasks.' };
-      }
-      const auth = await checkClaudeCodeAuth();
-      if (!auth.ok) {
-        return { success: false, error: auth.error };
-      }
-
-      try {
-        cancelFallbackTimer(taskId);
-        await fileWatcher.unwatch(taskId).catch(() => undefined);
-        clearRateLimitHold(project, task, getMainWindow);
-
-        // 1. Revert the code: remove the worktree and its branch. Tasks that run in the
-        //    project folder itself (useWorktree: false) keep their changes there.
-        if (task.metadata?.useWorktree !== false) {
-          const removed = await discardTaskWorktree(project.path, task.specId, '[TASK_RETRY]');
-          if (!removed.success) {
-            return { success: false, error: `Failed to remove the task's worktree: ${removed.warnings.join('; ')}` };
-          }
-        }
-
-        // 2. Forget the run: the state machine is rebuilt from the reset plan file
-        taskStateManager.clearTask(taskId);
-        const queue = isAtParallelLimit(project, taskId);
-        await resetTaskToInitialState(project, task, { status: queue ? 'queue' : 'backlog' });
-
-        const specDir = getMainSpecDir(project, task);
-        taskLogService.clearCache(specDir);
-        safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_CHANGED, task.specId, emptyTaskLogs(task.specId), project.id);
-
-        // 3. Start over (or wait in the queue for a free slot)
-        if (queue) {
-          console.warn(`[TASK_RETRY] Parallel task limit reached; ${taskId} reset and queued`);
-          safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', project.id);
-          taskHooks.emit('state', { project, task, status: 'queue' });
-          return { success: true, data: { action: 'queued' } };
-        }
-        console.warn(`[TASK_RETRY] ${taskId} reset; starting it again`);
-        await startTask(taskId);
-        return { success: true, data: { action: 'started' } };
-      } catch (error) {
-        console.error('[TASK_RETRY] Failed to retry task:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to retry task' };
-      }
-    }
+    (_, taskId: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> => restartTaskFromScratch(taskId)
   );
 
   /**
@@ -462,7 +490,8 @@ export function registerTaskExecutionHandlers(
 
   /**
    * Review a task: approve (done) or request changes, which Claude Code applies in the
-   * task's session before validating again
+   * task's session before validating again. With `startOver` the worktree is discarded
+   * instead and the task is redone from scratch, told what the attempt got wrong.
    */
   handleIpc(
     IPC_CHANNELS.TASK_REVIEW,
@@ -471,7 +500,8 @@ export function registerTaskExecutionHandlers(
       taskId: string,
       approved: boolean,
       feedback?: string,
-      images?: ImageAttachment[]
+      images?: ImageAttachment[],
+      options?: TaskReviewOptions
     ): Promise<IPCResult> => {
       const { task, project } = findTaskAndProject(taskId);
       if (!task || !project) {
@@ -492,8 +522,8 @@ export function registerTaskExecutionHandlers(
         return { success: false, error: auth.error };
       }
 
-      // Changes staged in the main project (stage-only merge) are discarded: the
-      // worktree still has all of them, and the revision continues there
+      // Changes staged in the main project (stage-only merge) are discarded: the work
+      // continues in the task's worktree (a fresh one with "Start over")
       const worktreePath = findTaskWorktree(project.path, task.specId);
       if (worktreePath && task.stagedInMainProject) {
         const git = getToolPath('git');
@@ -507,6 +537,13 @@ export function registerTaskExecutionHandlers(
         } catch (error) {
           console.warn('[TASK_REVIEW] Could not discard staged changes in the main project:', error);
         }
+      }
+
+      // "Start over": throw the attempt away (worktree, branch and run history) and redo the
+      // task from scratch, with the feedback as the reviewer's notes on the discarded attempt
+      if (options?.startOver) {
+        const restarted = await restartTaskFromScratch(taskId, { feedback, images });
+        return restarted.success ? { success: true } : { success: false, error: restarted.error };
       }
 
       const feedbackImagePaths = saveFeedbackImages(getMainSpecDir(project, task), images);
