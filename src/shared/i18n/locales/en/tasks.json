@@ -209,7 +209,7 @@
     "removeImage": "Remove image",
     "processingError": "Failed to process image",
     "requestChanges": "Request changes",
-    "description": "Claude Code applies them in the same session, then validates again",
+    "description": "Apply the same session and validate again",
     "placeholder": "Describe what to change",
     "submitting": "Submitting...",
     "addImages": "Add images",
