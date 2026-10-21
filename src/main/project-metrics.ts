@@ -3,12 +3,15 @@
  *
  * Spending per project for Settings > Accounts: the sum of every task's Claude Code run cost
  * (`totalCostUsd` in `<specDir>/claude_run.json`) in projects whose `.workbench` directory is
- * initialized. All file access is async so the main process stays responsive.
+ * initialized. A task that was started over has also spent what its earlier runs cost, so the
+ * runs kept under `previous_runs/` count too. All file access is async so the main process
+ * stays responsive.
  */
 import path from 'path';
 import { promises as fsp } from 'fs';
 import { getSpecsDir } from '../shared/constants';
 import { CLAUDE_RUN_FILE } from './claude-code/task-runner';
+import { PREVIOUS_RUNS_DIR } from './task-run-archive';
 import type { Project, ProjectCostMetrics } from '../shared/types';
 
 async function isDirectory(dir: string): Promise<boolean> {
@@ -19,14 +22,35 @@ async function isDirectory(dir: string): Promise<boolean> {
   }
 }
 
-/** Run cost of one task (0 when it never ran or its run file is unreadable) */
-async function readTaskCost(specDir: string): Promise<number> {
+/** Cost of one run (0 when it never ran or its run file is unreadable) */
+async function readRunCost(runFile: string): Promise<number> {
   try {
-    const info = JSON.parse(await fsp.readFile(path.join(specDir, CLAUDE_RUN_FILE), 'utf-8')) as { totalCostUsd?: unknown };
+    const info = JSON.parse(await fsp.readFile(runFile, 'utf-8')) as { totalCostUsd?: unknown };
     return typeof info.totalCostUsd === 'number' && Number.isFinite(info.totalCostUsd) ? info.totalCostUsd : 0;
   } catch {
     return 0;
   }
+}
+
+/** Run files of the runs a task was started over from */
+async function previousRunFiles(specDir: string): Promise<string[]> {
+  const archive = path.join(specDir, PREVIOUS_RUNS_DIR);
+  try {
+    const entries = await fsp.readdir(archive, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => path.join(archive, entry.name, CLAUDE_RUN_FILE));
+  } catch {
+    // Never started over
+    return [];
+  }
+}
+
+/** What one task has cost: its current run plus every run it was started over from */
+async function readTaskCost(specDir: string): Promise<number> {
+  const runFiles = [path.join(specDir, CLAUDE_RUN_FILE), ...(await previousRunFiles(specDir))];
+  const costs = await Promise.all(runFiles.map(readRunCost));
+  return costs.reduce((sum, cost) => sum + cost, 0);
 }
 
 /** Task count and total run cost of each initialized project */

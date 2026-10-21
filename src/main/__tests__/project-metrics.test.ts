@@ -52,4 +52,30 @@ describe('getProjectCostMetrics', () => {
       { projectId: 'b', name: 'b', path: empty, taskCount: 0, totalCostUsd: 0 },
     ]);
   });
+
+  it('counts what the runs a task was started over from cost', async () => {
+    const dir = path.join(root, 'a');
+    const specDir = path.join(dir, '.workbench', 'tasks', '001-one');
+    mkdirSync(path.join(specDir, 'previous_runs', '001'), { recursive: true });
+    mkdirSync(path.join(specDir, 'previous_runs', '002'), { recursive: true });
+    writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify({ totalCostUsd: 0.25 }));
+    writeFileSync(path.join(specDir, 'previous_runs', '001', 'claude_run.json'), JSON.stringify({ totalCostUsd: 1 }));
+    writeFileSync(path.join(specDir, 'previous_runs', '002', 'claude_run.json'), JSON.stringify({ totalCostUsd: 0.5 }));
+
+    const [metrics] = await getProjectCostMetrics([project('a', dir)]);
+
+    expect(metrics.totalCostUsd).toBe(1.75);
+    expect(metrics.taskCount).toBe(1);
+  });
+
+  it('counts an archived run of a task whose current run was reset', async () => {
+    const dir = path.join(root, 'a');
+    const specDir = path.join(dir, '.workbench', 'tasks', '001-one');
+    mkdirSync(path.join(specDir, 'previous_runs', '001'), { recursive: true });
+    writeFileSync(path.join(specDir, 'previous_runs', '001', 'claude_run.json'), JSON.stringify({ totalCostUsd: 2 }));
+
+    const [metrics] = await getProjectCostMetrics([project('a', dir)]);
+
+    expect(metrics.totalCostUsd).toBe(2);
+  });
 });
