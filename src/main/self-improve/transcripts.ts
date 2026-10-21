@@ -10,12 +10,9 @@
 
 import { createReadStream } from 'fs';
 import { readdir, stat } from 'fs/promises';
-import os from 'os';
 import path from 'path';
 import { createInterface } from 'readline';
-import { getClaudeProfileManager } from '../claude-profile-manager';
-import { getDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
-import { appLog } from '../app-logger';
+import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
 
 /** One transcript that belongs to the project */
 export interface ProjectTranscript {
@@ -27,21 +24,6 @@ export interface ProjectTranscript {
 
 /** How many lines to read before giving up on finding the session's cwd */
 const CWD_PROBE_LINES = 40;
-
-/** Config dirs to search: the default one plus every account's own */
-function configDirs(): string[] {
-  const dirs = [getDefaultClaudeConfigDir(), process.env.CLAUDE_CONFIG_DIR];
-  try {
-    dirs.push(...getClaudeProfileManager().getProfileConfigDirs());
-  } catch (error) {
-    // Profiles are unavailable in some contexts (tests, early startup); the default dir still works
-    appLog.warn('[SelfImprove] Could not list the Claude account config dirs:', error);
-  }
-  const expanded = dirs
-    .filter((dir): dir is string => !!dir)
-    .map((dir) => path.resolve(dir.startsWith('~') ? path.join(os.homedir(), dir.slice(1)) : dir));
-  return [...new Set(expanded)];
-}
 
 /**
  * Whether the session's `cwd` places it in this project: the project itself or anywhere inside it,
@@ -60,7 +42,7 @@ export function belongsToProject(cwd: string, projectPath: string): boolean {
 }
 
 /** The `cwd` the transcript recorded, read from its opening lines */
-async function readTranscriptCwd(file: string): Promise<string | null> {
+export async function readTranscriptCwd(file: string): Promise<string | null> {
   const reader = createInterface({ input: createReadStream(file, { encoding: 'utf-8' }), crlfDelay: Infinity });
   try {
     let seen = 0;
@@ -92,7 +74,7 @@ export async function findProjectTranscripts(
 ): Promise<ProjectTranscript[]> {
   const found: ProjectTranscript[] = [];
 
-  for (const configDir of configDirs()) {
+  for (const configDir of claudeConfigDirs()) {
     const root = path.join(configDir, 'projects');
     let encodedDirs: string[];
     try {

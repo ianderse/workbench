@@ -34,7 +34,7 @@ function cwdToProjectPath(cwd: string): string {
  * @param sessionId - The session UUID
  * @returns Full path to the session .jsonl file
  */
-function getSessionFilePath(configDir: string, cwd: string, sessionId: string): string {
+export function getSessionFilePath(configDir: string, cwd: string, sessionId: string): string {
   const expandedConfigDir = configDir.startsWith('~')
     ? configDir.replace(/^~/, homedir())
     : configDir;
