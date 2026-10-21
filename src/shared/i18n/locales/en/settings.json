@@ -349,7 +349,17 @@
       "notUpdated": "Spending of all tasks",
       "refresh": "Refresh",
       "empty": "No initialized projects",
-      "error": "Could not read the projects' spending"
+      "error": "Could not read the projects' spending",
+      "chart": {
+        "label": "Daily usage cost of {{name}}",
+        "emptyRange": "No usage in this range",
+        "rangeLabel": "Usage range",
+        "ranges": {
+          "all": "All",
+          "recent": "30d",
+          "week": "Week"
+        }
+      }
     },
     "toast": {
       "settingsUpdateFailed": "Failed to Update Settings",

@@ -1,25 +1,74 @@
 /**
  * Metrics (Settings > Accounts): spending per project, the sum of every task's Claude Code run
- * cost in each registered project with an initialized `.workbench` directory. Shows the last
- * result (refresh cache) and only reads the projects again on Refresh, or once when nothing was
- * read before.
+ * cost in each registered project with an initialized `.workbench` directory, with a bar chart of
+ * what a project spent per day under its row (projects that have never spent anything get none).
+ * Shows the last result (refresh cache) and only reads the projects again on Refresh, or once when
+ * nothing was read before.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
+import { UsageCostChart, buildRangeDays, formatDay, type UsageCostRange } from './UsageCostChart';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import { formatRelativeTime } from '../../lib/utils';
 import { formatCostUsd } from '../../../shared/utils/claude-run';
-import type { ProjectCostMetrics } from '../../../shared/types';
+import type { ProjectCostMetrics, ProjectDailyCost } from '../../../shared/types';
 
 const CACHE_KEY = 'project-cost-metrics';
 
 interface CachedMetrics {
   projects: ProjectCostMetrics[];
   checkedAt: string;
+}
+
+/**
+ * One project: its name, how many tasks it has and what the chart's range cost (the day under
+ * the pointer while the chart is hovered), with its total spending on the right and the chart
+ * underneath. A project that has never spent anything gets no chart.
+ */
+function ProjectRow({ project }: { project: ProjectCostMetrics }) {
+  const { t } = useTranslation('settings');
+  const [range, setRange] = useState<UsageCostRange>('week');
+  const [hovered, setHovered] = useState<ProjectDailyCost | null>(null);
+
+  // Metrics cached before the chart existed have no days
+  const daily = project.daily ?? [];
+  const days = useMemo(() => buildRangeDays(daily, range), [daily, range]);
+  const rangeCost = days.reduce((sum, day) => sum + day.costUsd, 0);
+
+  return (
+    <SettingsRow
+      label={
+        <span className="flex flex-wrap items-baseline gap-x-1.5">
+          <span>{project.name}</span>
+          <span className="text-(--nav-label-color)">
+            · {t('accounts.metrics.tasks', { count: project.taskCount })}
+          </span>
+          {daily.length > 0 && (
+            <span className="tabular-nums text-(--nav-label-color)">
+              · {hovered ? `${formatDay(hovered.date)} · ${formatCostUsd(hovered.costUsd)}` : formatCostUsd(rangeCost)}
+            </span>
+          )}
+        </span>
+      }
+      footer={
+        daily.length > 0 ? (
+          <UsageCostChart
+            days={days}
+            range={range}
+            onRangeChange={setRange}
+            onHoverDay={setHovered}
+            label={project.name}
+          />
+        ) : undefined
+      }
+    >
+      <span className="text-sm tabular-nums text-foreground">{formatCostUsd(project.totalCostUsd)}</span>
+    </SettingsRow>
+  );
 }
 
 export function ProjectMetricsSection() {
@@ -59,17 +108,7 @@ export function ProjectMetricsSection() {
     <SettingsSection title={t('accounts.metrics.title')}>
       <SettingsRows>
         {projects.map((project) => (
-          <SettingsRow
-            key={project.projectId}
-            label={project.name}
-            description={
-              <span className="break-all" title={project.path}>
-                {project.path} · {t('accounts.metrics.tasks', { count: project.taskCount })}
-              </span>
-            }
-          >
-            <span className="text-sm tabular-nums text-foreground">{formatCostUsd(project.totalCostUsd)}</span>
-          </SettingsRow>
+          <ProjectRow key={project.projectId} project={project} />
         ))}
 
         <SettingsRow
