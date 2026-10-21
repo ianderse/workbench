@@ -12,6 +12,13 @@ export interface Project {
   updatedAt: Date;
 }
 
+/** What a project spent on one calendar day */
+export interface ProjectDailyCost {
+  /** Local calendar day, `YYYY-MM-DD` */
+  date: string;
+  costUsd: number;
+}
+
 /** Spending of one initialized project (Settings > Accounts > Metrics) */
 export interface ProjectCostMetrics {
   projectId: string;
@@ -21,6 +28,8 @@ export interface ProjectCostMetrics {
   taskCount: number;
   /** Sum of the tasks' Claude Code run costs (USD) */
   totalCostUsd: number;
+  /** Spending per day, oldest first; days without spending are left out */
+  daily: ProjectDailyCost[];
 }
 
 export interface ProjectSettings {

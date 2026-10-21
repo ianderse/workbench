@@ -33,7 +33,8 @@ export const projectMock = {
       name: project.name,
       path: project.path,
       taskCount: 0,
-      totalCostUsd: 0
+      totalCostUsd: 0,
+      daily: []
     }))
   }),
 
