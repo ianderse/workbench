@@ -360,19 +360,21 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         worktreeAction={(task.claudeRun?.sessionId || task.metadata?.prUrl || (state.needsReview && state.worktreeStatus?.exists)) ? (
                           <>
                             <TaskOpenAgentButton task={task} />
-                            {/* Merge the task branch into its base branch with git, in the project */}
+                            {/* Merge the task branch into its base branch with git, in the project.
+                                A disabled button gets no pointer events, so its reason sits on a wrapper */}
                             {state.needsReview && state.worktreeStatus?.exists && (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="gap-1.5"
-                                onClick={() => state.setShowLocalMergeDialog(true)}
-                                disabled={baseBranchMissing}
-                                title={baseBranchMissingTitle}
-                              >
-                                <GitMerge className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
-                                {t('common:buttons.localMerge')}
-                              </Button>
+                              <span title={baseBranchMissingTitle} className="inline-flex">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1.5"
+                                  onClick={() => state.setShowLocalMergeDialog(true)}
+                                  disabled={baseBranchMissing}
+                                >
+                                  <GitMerge className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                  {t('common:buttons.localMerge')}
+                                </Button>
+                              </span>
                             )}
                             {/* A PR that exists opens in the browser; otherwise create one (primary action) */}
                             {task.metadata?.prUrl ? (
@@ -394,20 +396,21 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                                 )}
                               </>
                             ) : state.needsReview && state.worktreeStatus?.exists && (
-                              <Button
-                                size="sm"
-                                className="gap-1.5"
-                                onClick={() => state.setShowPRDialog(true)}
-                                disabled={state.isCreatingPR || baseBranchMissing}
-                                title={baseBranchMissingTitle}
-                              >
-                                {state.isCreatingPR ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <GitPullRequestCreate className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
-                                )}
-                                {state.isCreatingPR ? t('taskReview:pr.actions.creating') : t('common:buttons.createPR')}
-                              </Button>
+                              <span title={baseBranchMissingTitle} className="inline-flex">
+                                <Button
+                                  size="sm"
+                                  className="gap-1.5"
+                                  onClick={() => state.setShowPRDialog(true)}
+                                  disabled={state.isCreatingPR || baseBranchMissing}
+                                >
+                                  {state.isCreatingPR ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <GitPullRequestCreate className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                  )}
+                                  {state.isCreatingPR ? t('taskReview:pr.actions.creating') : t('common:buttons.createPR')}
+                                </Button>
+                              </span>
                             )}
                           </>
                         ) : undefined}
