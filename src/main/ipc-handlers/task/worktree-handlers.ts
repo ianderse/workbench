@@ -2,7 +2,7 @@ import { handleIpc } from '../ipc-registry';
 import { BrowserWindow } from 'electron';
 import type { ConflictSeverity } from '../../../shared/types/task';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, PullRequestState, Project, Task } from '../../../shared/types';
+import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, WorktreeLocalMergeResult, PullRequestState, Project, Task } from '../../../shared/types';
 import path from 'path';
 import { matchesExtensionGlob } from '../../utils/glob-markers';
 import { existsSync, readdirSync, statSync, readFileSync, promises as fsPromises } from 'fs';
@@ -13,6 +13,7 @@ import { MergeOrchestrator } from '../../ai/merge/orchestrator';
 import { createMergeResolverFn } from '../../ai/runners/merge-resolver';
 import { createPR } from '../../ai/runners/github/pr-creator';
 import { mergePR } from '../../ai/runners/github/pr-merger';
+import { localMerge } from '../../worktree/local-merge';
 import { taskHooks } from '../../task-hooks';
 import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
@@ -1566,10 +1567,51 @@ export function registerWorktreeHandlers(
       }
     }
   );
+
+  /**
+   * Merge a task's branch into its base branch with plain git, in the project itself.
+   * Nothing is pushed and no pull request is involved; a merged task moves to Done.
+   */
+  handleIpc(
+    IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL,
+    async (_, taskId: string): Promise<IPCResult<WorktreeLocalMergeResult>> => {
+      const { task, project } = findTaskAndProject(taskId);
+      if (!task || !project) return { success: false, error: 'Task not found' };
+      if (task.status === 'in_progress' || task.status === 'ai_review') {
+        return { success: false, error: 'Stop the task before merging its branch' };
+      }
+      const worktreePath = findTaskWorktree(project.path, task.specId);
+      if (!worktreePath) return { success: false, error: 'No worktree found for this task' };
+      const targetBranch = getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+      if (!GIT_BRANCH_REGEX.test(targetBranch)) return { success: false, error: `Invalid base branch name: ${targetBranch}` };
+      if (localMerges.has(taskId)) return { success: false, error: "This task's branch is already being merged" };
+
+      localMerges.add(taskId);
+      try {
+        const result = await localMerge({
+          projectDir: project.path,
+          worktreePath,
+          targetBranch,
+          gitPath: getToolPath('git'),
+          dataDir: project.autoBuildPath,
+        });
+        if (result.success) await markTaskDone(task, project, worktreePath);
+        return { success: true, data: result };
+      } catch (error) {
+        console.error('[MERGE_LOCAL] Exception in handler:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to merge the task branch' };
+      } finally {
+        localMerges.delete(taskId);
+      }
+    }
+  );
 }
 
 /** Tasks whose pull request is being merged */
 const mergingPRs = new Set<string>();
+
+/** Tasks whose branch is being merged locally */
+const localMerges = new Set<string>();
 
 /** Set fields of a task's metadata in the main project and its worktree */
 function writeTaskMetadataFields(project: Project, task: Task, worktreePath: string | null, fields: Record<string, unknown>): void {
@@ -1578,9 +1620,14 @@ function writeTaskMetadataFields(project: Project, task: Task, worktreePath: str
   if (worktreePath) updateTaskMetadataFields(path.join(worktreePath, specsBaseDir, task.specId, 'task_metadata.json'), fields);
 }
 
-/** A merged PR: remember it and move the task to Done (state machine, else the plan files) */
+/** A merged PR: remember it and move the task to Done */
 async function recordPRMerged(task: Task, project: Project, worktreePath: string): Promise<void> {
   writeTaskMetadataFields(project, task, worktreePath, { prState: 'merged' });
+  await markTaskDone(task, project, worktreePath);
+}
+
+/** Move a merged task to Done (state machine, else the plan files) */
+async function markTaskDone(task: Task, project: Project, worktreePath: string): Promise<void> {
   taskStateManager.handleUiEvent(task.id, { type: 'MARK_DONE' }, task, project);
   if (taskStateManager.getCurrentState(task.id) !== 'done') {
     const specsBaseDir = getSpecsDir(project.autoBuildPath);

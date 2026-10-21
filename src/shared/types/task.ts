@@ -464,6 +464,20 @@ export interface WorktreeMergePRResult {
   error?: string;
 }
 
+/** Result of merging a task's branch into its base branch with git, locally */
+export interface WorktreeLocalMergeResult {
+  success: boolean;
+  /** Branch the task branch was merged into */
+  targetBranch?: string;
+  /** The task branch */
+  sourceBranch?: string;
+  /** The base branch already had the task's commits, so nothing was merged */
+  alreadyMerged?: boolean;
+  /** Files git could not merge on its own (the merge was undone) */
+  conflictedFiles?: string[];
+  error?: string;
+}
+
 /**
  * Result of creating a PR from a worktree
  */

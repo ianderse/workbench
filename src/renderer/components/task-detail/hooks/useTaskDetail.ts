@@ -83,6 +83,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [isCreatingPR, setIsCreatingPR] = useState(false);
   const [showMergePRDialog, setShowMergePRDialog] = useState(false);
+  const [showLocalMergeDialog, setShowLocalMergeDialog] = useState(false);
 
   const currentProject = useProjectStore((state) => {
     const currentProjectId = state.activeProjectId || state.selectedProjectId;
@@ -363,6 +364,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     showPRDialog,
     isCreatingPR,
     showMergePRDialog,
+    showLocalMergeDialog,
     isLoadingPlan,
 
     // Setters
@@ -384,6 +386,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setShowPRDialog,
     setIsCreatingPR,
     setShowMergePRDialog,
+    setShowLocalMergeDialog,
 
     // Handlers
     toggleLogs,

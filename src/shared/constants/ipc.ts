@@ -53,6 +53,7 @@ export const IPC_CHANNELS = {
   TASK_WORKTREE_DISCARD: 'task:worktreeDiscard',
   TASK_WORKTREE_CREATE_PR: 'task:worktreeCreatePR',
   TASK_WORKTREE_MERGE_PR: 'task:worktreeMergePR',  // Pull the target into the task branch (Claude Code resolves conflicts), push, merge the PR
+  TASK_WORKTREE_MERGE_LOCAL: 'task:worktreeMergeLocal',  // Merge the task branch into its base branch with git, locally (no push)
   TASK_WORKTREE_PR_STATE: 'task:worktreePRState',  // Read a task's PR state from GitHub and store it in the task metadata
   TASK_MERGE_PR_PROGRESS: 'task:mergePRProgress',  // Event: merging a task's PR moved to another step (main -> renderer)
   TASK_LIST_WORKTREES: 'task:listWorktrees',

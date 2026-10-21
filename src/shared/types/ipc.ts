@@ -46,6 +46,7 @@ import type {
   WorktreeCreatePRResult,
   WorktreeMergePROptions,
   WorktreeMergePRResult,
+  WorktreeLocalMergeResult,
   MergePRProgress,
   PullRequestState,
   TaskRecoveryResult,
@@ -173,6 +174,7 @@ export interface ElectronAPI {
   mergeWorktreePreview: (taskId: string) => Promise<IPCResult<WorktreeMergeResult>>;
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
   mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
+  mergeWorktreeLocal: (taskId: string) => Promise<IPCResult<WorktreeLocalMergeResult>>;
   getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
   discardWorktree: (taskId: string, skipStatusChange?: boolean) => Promise<IPCResult<WorktreeDiscardResult>>;
   clearStagedState: (taskId: string) => Promise<IPCResult<{ cleared: boolean }>>;

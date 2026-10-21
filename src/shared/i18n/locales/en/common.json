@@ -61,7 +61,8 @@
     "deleting": "Deleting...",
     "openPR": "Open PR",
     "mergePR": "Merge PR",
-    "createPR": "Create PR"
+    "createPR": "Create PR",
+    "localMerge": "Local merge"
   },
   "actions": {
     "save": "Save",

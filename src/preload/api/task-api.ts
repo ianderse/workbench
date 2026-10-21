@@ -77,6 +77,7 @@ export interface TaskAPI {
   unarchiveTasks: (projectId: string, taskIds: string[]) => Promise<IPCResult<boolean>>;
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
   mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
+  mergeWorktreeLocal: (taskId: string) => Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>>;
   getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
   onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void) => () => void;
   onTaskListChanged: (callback: (projectId: string) => void) => () => void;
@@ -200,6 +201,9 @@ export const createTaskAPI = (): TaskAPI => ({
 
   mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions): Promise<IPCResult<WorktreeMergePRResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, taskId, options),
+
+  mergeWorktreeLocal: (taskId: string): Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL, taskId),
 
   getWorktreePRState: (taskId: string): Promise<IPCResult<PullRequestState>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_PR_STATE, taskId),

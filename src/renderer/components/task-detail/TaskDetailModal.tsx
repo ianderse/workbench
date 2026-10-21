@@ -24,6 +24,7 @@ import {
   GitPullRequest,
   GitPullRequestArrow,
   GitPullRequestCreate,
+  GitMerge,
   Play,
   RotateCcw
 } from 'lucide-react';
@@ -52,7 +53,8 @@ import { TaskAttachments } from './TaskAttachments';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
 import { MergePRDialog } from './task-review/MergePRDialog';
-import type { Task, WorktreeCreatePROptions, WorktreeMergePROptions, WorktreeMergePRResult } from '../../../shared/types';
+import { LocalMergeDialog } from './task-review/LocalMergeDialog';
+import type { Task, WorktreeCreatePROptions, WorktreeLocalMergeResult, WorktreeMergePROptions, WorktreeMergePRResult } from '../../../shared/types';
 
 // Status label colors: the top line color of each Kanban column (globals.css `--column-*`)
 const STATUS_BADGE_CLASSES: Record<TaskStatusColumn, string> = {
@@ -202,6 +204,16 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     return result.data;
   };
 
+  // A local merge (plain git, nothing pushed) moves the task to Done
+  const handleLocalMerge = async (): Promise<WorktreeLocalMergeResult> => {
+    const result = await window.electronAPI.mergeWorktreeLocal(task.id);
+    if (!result.success || !result.data) return { success: false, error: result.error };
+    if (result.data.success) {
+      useTaskStore.getState().updateTask(task.id, { status: 'done' });
+    }
+    return result.data;
+  };
+
   // The PR's state is stored with the task; read it from GitHub once when it never was
   const prStateRequested = useRef(false);
   const prUrl = task.metadata?.prUrl;
@@ -334,6 +346,18 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         worktreeAction={(task.claudeRun?.sessionId || task.metadata?.prUrl || (state.needsReview && state.worktreeStatus?.exists)) ? (
                           <>
                             <TaskOpenAgentButton task={task} />
+                            {/* Merge the task branch into its base branch with git, in the project */}
+                            {state.needsReview && state.worktreeStatus?.exists && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="gap-1.5"
+                                onClick={() => state.setShowLocalMergeDialog(true)}
+                              >
+                                <GitMerge className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                {t('common:buttons.localMerge')}
+                              </Button>
+                            )}
                             {/* A PR that exists opens in the browser; otherwise create one (primary action) */}
                             {task.metadata?.prUrl ? (
                               <>
@@ -409,6 +433,15 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         worktreeStatus={state.worktreeStatus}
                         onOpenChange={state.setShowMergePRDialog}
                         onMergePR={handleMergePR}
+                      />
+
+                      {/* Opened by the Local merge button next to Open agent */}
+                      <LocalMergeDialog
+                        open={state.showLocalMergeDialog}
+                        task={task}
+                        worktreeStatus={state.worktreeStatus}
+                        onOpenChange={state.setShowLocalMergeDialog}
+                        onMerge={handleLocalMerge}
                       />
 
                       {/* The description's attachments and the logs of all steps, under Request changes;
