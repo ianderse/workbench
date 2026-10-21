@@ -28,6 +28,7 @@ import { getAPIProfileEnv } from '../services/profile';
 import { getSpecsDir } from '../../shared/constants';
 import type { AppSettings } from '../../shared/types/settings';
 import { appLog } from '../app-logger';
+import { resolveBaseBranch } from '../utils/base-branch';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 
@@ -346,7 +347,20 @@ export class AgentManager extends EventEmitter {
   private async buildRunConfig(taskId: string, options: StartTaskOptions): Promise<TaskRunConfig> {
     const { project, task, mode } = options;
     const specDir = path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId);
-    const baseBranch = task.metadata?.baseBranch || project.settings?.mainBranch || 'main';
+
+    // The base branch a task was created with may have been deleted or renamed since; stand in
+    // for it with a branch that still exists, so the task can still be started
+    const wantedBaseBranch = task.metadata?.baseBranch || project.settings?.mainBranch || 'main';
+    const { branch: baseBranch, missing } = await resolveBaseBranch(project.path, wantedBaseBranch, [
+      project.settings?.mainBranch,
+      'main',
+      await this.getCurrentBranch(project.path),
+    ]);
+    if (missing) {
+      const message = `Base branch "${missing}" no longer exists; starting from "${baseBranch}" instead.`;
+      appLog.warn(`[AgentManager] ${message}`);
+      this.emit('log', taskId, `${message}\n`, project.id);
+    }
 
     let worktreePath: string;
     let branch: string;

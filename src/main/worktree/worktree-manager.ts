@@ -169,32 +169,33 @@ export async function createOrGetWorktree(
       projectPath,
     );
   } else {
-    // Determine the start point
-    let startPoint = baseBranch;
+    // Determine the start point: the local branch when asked for, the remote ref otherwise,
+    // falling back to the other form so a base branch that exists on only one side still
+    // works instead of failing with git's "invalid reference"
+    const remoteRef = `origin/${baseBranch}`;
+    const candidates = useLocalBranch ? [baseBranch, remoteRef] : [remoteRef, baseBranch];
 
-    if (useLocalBranch) {
-      console.warn(
-        `[WorktreeManager] Creating worktree from local branch: ${baseBranch}`,
-      );
-    } else {
-      const remoteRef = `origin/${baseBranch}`;
-      const remoteExists = await git(
-        ['rev-parse', '--verify', remoteRef],
+    let startPoint: string | undefined;
+    for (const candidate of candidates) {
+      const resolved = await git(
+        ['rev-parse', '--verify', '--quiet', candidate],
         projectPath,
         /* allowFailure */ true,
       );
-
-      if (remoteExists) {
-        startPoint = remoteRef;
-        console.warn(
-          `[WorktreeManager] Creating worktree from remote: ${remoteRef}`,
-        );
-      } else {
-        console.warn(
-          `[WorktreeManager] Remote ref ${remoteRef} not found, using local branch: ${baseBranch}`,
-        );
+      if (resolved) {
+        startPoint = candidate;
+        break;
       }
     }
+
+    if (!startPoint) {
+      throw new Error(
+        `Base branch "${baseBranch}" does not exist in this repository (looked for ${baseBranch} and ${remoteRef}). ` +
+          'Create it, or give the task a base branch that exists.',
+      );
+    }
+
+    console.warn(`[WorktreeManager] Creating worktree from ${startPoint}`);
 
     await git(
       ['worktree', 'add', '-b', branchName, '--no-track', worktreePath, startPoint],
