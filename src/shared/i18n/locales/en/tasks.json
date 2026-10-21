@@ -278,8 +278,19 @@
     "incompleteDescription": "This task stopped before Claude Code finished it ({{completed}}/{{total}} task list items done). The process likely exited early. Resume to continue the same session.",
     "resume": "Resume task"
   },
+  "previousRuns": {
+    "title": "Previous runs",
+    "description": "Execution history of the previous task runs"
+  },
+  "currentRun": {
+    "runningTitle": "Currently running",
+    "runningDescription": "What the task is doing right now",
+    "title": "Current run",
+    "description": "What the task did in its latest run"
+  },
   "logs": {
     "title": "Logs",
+    "previousRunTitle": "Logs {{time}}",
     "stopped": "Stopped",
     "entries_one": "{{count}} entry",
     "entries_other": "{{count}} entries",

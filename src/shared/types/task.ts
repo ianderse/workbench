@@ -4,7 +4,7 @@
 
 import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
-import type { ClaudeRunInfo } from './claude-code';
+import type { ClaudeRunInfo, ClaudeRunPhase } from './claude-code';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -103,6 +103,21 @@ export interface TaskLogs {
     coding: TaskPhaseLog;
     validation: TaskPhaseLog;
   };
+}
+
+/**
+ * A run of a task that was thrown away when the task was started over. Its logs and the steps
+ * of its Claude Code run are kept so the task dialog can still show what happened.
+ */
+export interface ArchivedTaskRun {
+  /** Position in the task's history, oldest first, starting at 1 */
+  index: number;
+  /** When the run was put aside (ISO) */
+  archivedAt: string;
+  logs: TaskLogs | null;
+  /** The run's steps (triage, plan, implement, revise, validate) with their time and cost */
+  phases: ClaudeRunPhase[];
+  totalCostUsd?: number;
 }
 
 // Streaming markers from Python (similar to InsightsStreamChunk)

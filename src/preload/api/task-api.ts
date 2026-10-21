@@ -5,6 +5,7 @@ import type {
   IPCResult,
   TaskStartOptions,
   TaskReviewOptions,
+  ArchivedTaskRun,
   TaskStatus,
   TaskRecoveryResult,
   ImplementationPlan,
@@ -95,6 +96,7 @@ export interface TaskAPI {
 
   // Task Phase Logs
   getTaskLogs: (projectId: string, specId: string) => Promise<IPCResult<TaskLogs | null>>;
+  getPreviousTaskRuns: (projectId: string, specId: string) => Promise<IPCResult<ArchivedTaskRun[]>>;
   watchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
   unwatchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
   onTaskLogsChanged: (callback: (specId: string, logs: TaskLogs, projectId?: string) => void) => () => void;
@@ -349,6 +351,9 @@ export const createTaskAPI = (): TaskAPI => ({
   // Task Phase Logs
   getTaskLogs: (projectId: string, specId: string): Promise<IPCResult<TaskLogs | null>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LOGS_GET, projectId, specId),
+
+  getPreviousTaskRuns: (projectId: string, specId: string): Promise<IPCResult<ArchivedTaskRun[]>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PREVIOUS_RUNS_GET, projectId, specId),
 
   watchTaskLogs: (projectId: string, specId: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LOGS_WATCH, projectId, specId),

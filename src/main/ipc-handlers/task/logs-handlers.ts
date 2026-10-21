@@ -1,10 +1,11 @@
 import { handleIpc } from '../ipc-registry';
 import { BrowserWindow } from 'electron';
 import { IPC_CHANNELS, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, TaskLogs, TaskLogStreamChunk } from '../../../shared/types';
+import type { ArchivedTaskRun, IPCResult, TaskLogs, TaskLogStreamChunk } from '../../../shared/types';
 import path from 'path';
 import { projectStore } from '../../project-store';
 import { taskLogService } from '../../task-log-service';
+import { listPreviousRuns } from '../../task-run-archive';
 import { isValidTaskId } from '../../utils/spec-path-helpers';
 import { debugLog } from '../../../shared/utils/debug-logger';
 import { ensureAbsolutePath } from '../../utils/path-helpers';
@@ -14,6 +15,30 @@ import { safeSendToRenderer } from '../utils';
  * Register task logs handlers
  */
 export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | null): void {
+  /**
+   * The runs this task was started over from: their logs and the steps of their Claude Code
+   * run, oldest first. Empty for a task that was never started over.
+   */
+  handleIpc(
+    IPC_CHANNELS.TASK_PREVIOUS_RUNS_GET,
+    async (_, projectId: string, specId: string): Promise<IPCResult<ArchivedTaskRun[]>> => {
+      if (!isValidTaskId(specId)) {
+        return { success: false, error: 'Invalid spec ID' };
+      }
+      const project = projectStore.getProject(projectId);
+      if (!project) {
+        return { success: false, error: 'Project not found' };
+      }
+      try {
+        const specDir = path.join(ensureAbsolutePath(project.path), getSpecsDir(project.autoBuildPath), specId);
+        return { success: true, data: listPreviousRuns(specDir) };
+      } catch (error) {
+        console.error('[TASK_PREVIOUS_RUNS_GET] Failed to read the previous runs:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to read the previous runs' };
+      }
+    }
+  );
+
   /**
    * Get task logs from spec directory
    * Returns logs organized by phase (planning, coding, validation)

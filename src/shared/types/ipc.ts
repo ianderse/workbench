@@ -35,6 +35,7 @@ import type {
   RateLimitHold,
   TaskStartOptions,
   TaskReviewOptions,
+  ArchivedTaskRun,
   ImplementationPlan,
   ExecutionProgress,
   WorktreeStatus,
@@ -422,6 +423,7 @@ export interface ElectronAPI {
 
   // Task logs operations
   getTaskLogs: (projectId: string, specId: string) => Promise<IPCResult<TaskLogs | null>>;
+  getPreviousTaskRuns: (projectId: string, specId: string) => Promise<IPCResult<ArchivedTaskRun[]>>;
   watchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
   unwatchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
 

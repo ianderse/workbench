@@ -22,6 +22,7 @@ import {
 } from './plan-file-utils';
 import { discardTaskWorktree } from '../../utils/worktree-cleanup';
 import { taskLogService } from '../../task-log-service';
+import { archiveCurrentRun } from '../../task-run-archive';
 import { writeFileAtomicSync } from '../../utils/atomic-file';
 import { findTaskWorktree } from '../../worktree-paths';
 import { projectStore } from '../../project-store';
@@ -377,12 +378,14 @@ export function registerTaskExecutionHandlers(
         }
       }
 
-      // 2. Forget the run: the state machine is rebuilt from the reset plan file
+      // 2. Keep the run that is being thrown away, so the task dialog can still show what
+      //    happened in it, then forget it: the state machine is rebuilt from the reset plan file
+      const specDir = getMainSpecDir(project, task);
+      archiveCurrentRun(specDir);
       taskStateManager.clearTask(taskId);
       const queue = isAtParallelLimit(project, taskId);
       await resetTaskToInitialState(project, task, { status: queue ? 'queue' : 'backlog' });
 
-      const specDir = getMainSpecDir(project, task);
       taskLogService.clearCache(specDir);
       safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_CHANGED, task.specId, emptyTaskLogs(task.specId), project.id);
 

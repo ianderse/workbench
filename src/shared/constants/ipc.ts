@@ -70,6 +70,7 @@ export const IPC_CHANNELS = {
 
   // Task phase logs (persistent, collapsible logs by phase)
   TASK_LOGS_GET: 'task:logsGet',           // Load logs from spec dir
+  TASK_PREVIOUS_RUNS_GET: 'task:previousRunsGet', // Load the runs the task was started over from
   TASK_LOGS_WATCH: 'task:logsWatch',       // Start watching for log changes
   TASK_LOGS_UNWATCH: 'task:logsUnwatch',   // Stop watching for log changes
   TASK_LOGS_CHANGED: 'task:logsChanged',   // Event: logs changed (main -> renderer)

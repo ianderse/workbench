@@ -45,7 +45,9 @@ import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
 import { TaskWarnings } from './TaskWarnings';
-import { TaskLogs } from './TaskLogs';
+import { TaskLogs, isTaskRunSettled } from './TaskLogs';
+import { PreviousRuns } from './PreviousRuns';
+import { isTaskSessionActive } from '../../../shared/utils/claude-run';
 import { TaskAttachments } from './TaskAttachments';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
@@ -131,6 +133,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     if (result.success) {
       state.setIsStuck(false);
       state.setHasCheckedRunning(false);
+      void state.reloadPreviousRuns();
     } else {
       setActionError(result.error || t('tasks:wizard.errors.startFailed'));
     }
@@ -142,8 +145,10 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
       return;
     }
     state.setIsSubmitting(true);
-    await submitReview(task.id, false, state.feedback, state.feedbackImages, { startOver: state.startOver });
+    const wasStartOver = state.startOver;
+    await submitReview(task.id, false, state.feedback, state.feedbackImages, { startOver: wasStartOver });
     state.setIsSubmitting(false);
+    if (wasStartOver) void state.reloadPreviousRuns();
     state.setFeedback('');
     state.setFeedbackImages([]);
     state.setStartOver(false);
@@ -367,6 +372,13 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         ) : undefined}
                       />
 
+                      {/* Runs the task was started over from, above the change request */}
+                      <PreviousRuns
+                        runs={state.previousRuns}
+                        openRuns={state.openPreviousRuns}
+                        onToggleRun={state.togglePreviousRun}
+                      />
+
                       {/* Human Review: request changes (Claude Code continues the same session) */}
                       {state.needsReview && (
                         <QAFeedbackSection
@@ -405,9 +417,17 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         {task.metadata?.attachedImages && task.metadata.attachedImages.length > 0 && (
                           <TaskAttachments task={task} attachments={task.metadata.attachedImages} />
                         )}
+                        {/* Without the Request changes section above it, the current run's logs
+                            need a heading of their own to stand apart from the previous runs */}
                         <TaskLogs
-                          task={task}
                           phaseLogs={state.phaseLogs}
+                          runPhases={task.claudeRun?.phases}
+                          legacyLogs={task.logs}
+                          isSettled={isTaskRunSettled(task.status)}
+                          heading={state.needsReview ? undefined : {
+                            title: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningTitle' : 'tasks:currentRun.title'),
+                            description: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningDescription' : 'tasks:currentRun.description')
+                          }}
                           isLoadingLogs={state.isLoadingLogs}
                           isExpanded={state.isLogsExpanded}
                           onToggle={state.toggleLogs}

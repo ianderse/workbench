@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useProjectStore } from '../../../stores/project-store';
 import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, hasRecentActivity } from '../../../stores/task-store';
-import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, ImageAttachment } from '../../../../shared/types';
+import type { ArchivedTaskRun, Task, TaskLogs, TaskLogPhase, WorktreeStatus, ImageAttachment } from '../../../../shared/types';
 
 /**
  * Validates task subtasks structure to prevent infinite loops during resume.
@@ -72,6 +72,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [worktreeStatus, setWorktreeStatus] = useState<WorktreeStatus | null>(null);
   const [phaseLogs, setPhaseLogs] = useState<TaskLogs | null>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  // The runs the task was started over from, oldest first, and which of them are open
+  const [previousRuns, setPreviousRuns] = useState<ArchivedTaskRun[]>([]);
+  const [openPreviousRuns, setOpenPreviousRuns] = useState<number[]>([]);
   // The Logs section (all steps in one list) opens by itself when a step runs or fails
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
   const failedPhasesRef = useRef<Set<TaskLogPhase>>(new Set());
@@ -163,6 +166,26 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
       setWorktreeStatus(null);
     }
   }, [task.id, needsReview]);
+
+  // The task's earlier runs. Loaded once; starting the task over adds one, so the dialog
+  // reloads them after a retry (reloadPreviousRuns) rather than polling
+  const reloadPreviousRuns = useCallback(async () => {
+    if (!currentProject) return;
+    try {
+      const result = await window.electronAPI.getPreviousTaskRuns(currentProject.id, task.specId);
+      if (result.success && result.data) setPreviousRuns(result.data);
+    } catch (err) {
+      console.error('Failed to load the previous runs:', err);
+    }
+  }, [currentProject, task.specId]);
+
+  useEffect(() => {
+    void reloadPreviousRuns();
+  }, [reloadPreviousRuns]);
+
+  const togglePreviousRun = useCallback((index: number) => {
+    setOpenPreviousRuns((open) => (open.includes(index) ? open.filter((i) => i !== index) : [...open, index]));
+  }, []);
 
   // Load and watch phase logs
   useEffect(() => {
@@ -327,6 +350,8 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     worktreeStatus,
     phaseLogs,
     isLoadingLogs,
+    previousRuns,
+    openPreviousRuns,
     isLogsExpanded,
     selectedProject: currentProject,
     isRunning,
@@ -362,6 +387,8 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
 
     // Handlers
     toggleLogs,
+    togglePreviousRun,
+    reloadPreviousRuns,
     addFeedbackImage,
     addFeedbackImages,
     removeFeedbackImage,
