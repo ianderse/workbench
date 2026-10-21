@@ -31,6 +31,10 @@ import type {
   OAuthTokenEvent
 } from './types';
 import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
+import { lastAgentSession, readAgentSessions, recordAgentSessionAsync } from '../agent-session-store';
+import { findSessionTranscript, latestTranscript } from '../claude-code/session-spending';
+import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
+import { appLog } from '../app-logger';
 import { claudeThemeFlag } from '../claude-cli-theme';
 
 // ============================================================================
@@ -344,16 +348,95 @@ export function buildResumeSessionFlag(sessionId: string): string {
 }
 
 /**
- * Extra flags for an agent window's `claude` command: the resumed session (if any), YOLO mode,
- * the Graphify hint and the theme matching the app's
+ * Flags that start a new session under an id Workbench picked (` --session-id <uuid>`), so what
+ * the window spends can be read back from that session's transcript. Throws for ids that are not
+ * plain session ids.
+ */
+export function buildNewSessionFlag(sessionId: string): string {
+  if (!isValidClaudeSessionId(sessionId)) {
+    throw new Error(`Invalid Claude Code session id: ${sessionId}`);
+  }
+  return ` --session-id ${sessionId}`;
+}
+
+/**
+ * Keep the session an agent window is starting, so Settings > Accounts > Metrics can read what the
+ * window spent from Claude Code's transcript: a window runs Claude Code itself, so its cost
+ * reaches no task's run file. Windows without a project have nowhere to keep it.
+ */
+function trackAgentWindowSession(
+  terminal: Pick<TerminalProcess, 'id' | 'projectPath' | 'cwd'>,
+  sessionId: string,
+  configDir: string | undefined,
+  cwd: string | undefined
+): void {
+  if (!terminal.projectPath) return;
+  recordAgentSessionAsync(terminal.projectPath, {
+    sessionId,
+    configDir: resolveSessionConfigDir(configDir),
+    // Claude Code names the transcript's folder after the directory it runs in
+    cwd: cwd || terminal.cwd,
+    terminalId: terminal.id,
+    startedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * How a restored window picks Claude Code up again, and what that costs the project.
+ *
+ * Its own last session comes first, by id, so a window always continues its own conversation
+ * rather than whatever session in the directory was written to last. When it has none - the window
+ * was there before Workbench recorded sessions, or its session's transcript is gone - it picks up
+ * the session `claude --continue` would have picked, the directory's newest, and records it as the
+ * window's own. From then on that conversation's spending reaches Metrics, including what it had
+ * already spent on earlier days.
+ */
+async function resumeOwnSessionFlag(
+  terminal: Pick<TerminalProcess, 'id' | 'projectPath' | 'cwd'>
+): Promise<string> {
+  if (!terminal.projectPath) return ' --continue';
+  try {
+    const own = await lastAgentSession(terminal.projectPath, terminal.id);
+    if (own) {
+      const transcript = await findSessionTranscript(
+        own.sessionId,
+        claudeConfigDirs([own.configDir]),
+        own.cwd
+      );
+      if (transcript) return buildResumeSessionFlag(own.sessionId);
+    }
+
+    // The window has no session of its own: adopt the one it would have continued anyway,
+    // leaving the conversations the project's other windows are in to those windows
+    const taken = new Set(
+      (await readAgentSessions(terminal.projectPath))
+        .filter((session) => session.terminalId && session.terminalId !== terminal.id)
+        .map((session) => session.sessionId)
+    );
+    const cwd = terminal.projectPath || terminal.cwd;
+    const latest = await latestTranscript(claudeConfigDirs([own?.configDir]), cwd, taken);
+    if (!latest || !isValidClaudeSessionId(latest.sessionId)) return ' --continue';
+    trackAgentWindowSession(terminal, latest.sessionId, latest.configDir, cwd);
+    return buildResumeSessionFlag(latest.sessionId);
+  } catch (error) {
+    appLog.warn('[ClaudeIntegration] Could not look up the window\'s own session:', error);
+    return ' --continue';
+  }
+}
+
+/**
+ * Extra flags for an agent window's `claude` command: the session it resumes or the id its new
+ * session gets, YOLO mode, the Graphify hint and the theme matching the app's
  */
 function buildClaudeExtraFlags(
   terminal: Pick<TerminalProcess, 'graphifyOut' | 'selfImprove'>,
   dangerouslySkipPermissions: boolean | undefined,
-  resumeSessionId?: string
+  resumeSessionId?: string,
+  newSessionId?: string
 ): string | undefined {
   const flags =
     `${resumeSessionId ? buildResumeSessionFlag(resumeSessionId) : ''}` +
+    `${!resumeSessionId && newSessionId ? buildNewSessionFlag(newSessionId) : ''}` +
     `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` +
     `${selfImproveFlag(terminal)}${claudeThemeFlag()}`;
   return flags || undefined;
@@ -1128,8 +1211,13 @@ export function invokeClaude(
   debugLog('[ClaudeIntegration:invokeClaude] CWD:', cwd);
   debugLog('[ClaudeIntegration:invokeClaude] Dangerously skip permissions:', dangerouslySkipPermissions);
 
-  // Compute extra flags for YOLO mode
-  const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag()}` || undefined;
+  // A new session gets an id of Workbench's own, so its spending can be read back later
+  const newSessionId = crypto.randomUUID();
+
+  // Compute extra flags for the new session and YOLO mode
+  const extraFlags =
+    `${buildNewSessionFlag(newSessionId)}${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}` +
+    `${graphifyHintFlag(terminal)}${claudeThemeFlag()}`;
 
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
@@ -1149,6 +1237,7 @@ export function invokeClaude(
       : profileManager.getActiveProfile();
 
     terminal.claudeProfileId = activeProfile?.id;
+    trackAgentWindowSession(terminal, newSessionId, activeProfile?.configDir, cwd);
 
     debugLog('[ClaudeIntegration:invokeClaude] Profile resolution:', {
       previousProfileId,
@@ -1309,8 +1398,11 @@ export async function invokeCLIAsync(
 
     debugLog('[ClaudeIntegration:invokeCLIAsync] Resume session:', resumeSessionId);
 
-    // Extra flags: the resumed session, YOLO mode, the Graphify hint and the matching theme
-    const extraFlags = buildClaudeExtraFlags(terminal, dangerouslySkipPermissions, resumeSessionId);
+    // A new session gets an id of Workbench's own, so its spending can be read back later
+    const newSessionId = resumeSessionId ? undefined : crypto.randomUUID();
+
+    // Extra flags: the session, YOLO mode, the Graphify hint and the matching theme
+    const extraFlags = buildClaudeExtraFlags(terminal, dangerouslySkipPermissions, resumeSessionId, newSessionId);
 
     terminal.isCLIMode = true;
     // Store YOLO mode setting so it persists across profile switches
@@ -1343,6 +1435,7 @@ export async function invokeCLIAsync(
       : profileManager.getActiveProfile();
 
     terminal.claudeProfileId = activeProfile?.id;
+    if (newSessionId) trackAgentWindowSession(terminal, newSessionId, activeProfile?.configDir, cwd);
 
     debugLog('[ClaudeIntegration:invokeCLIAsync] Profile resolution:', {
       previousProfileId,
@@ -1459,7 +1552,8 @@ export async function invokeCLIAsync(
  *
  * Safe to call from Electron main process without blocking the event loop.
  * Uses async CLI detection which doesn't block on subprocess calls.
- * Changes to the project directory and runs `claude --continue` (its latest Claude session).
+ * Changes to the project directory and picks the window's own Claude Code session up again,
+ * falling back to `claude --continue` (the directory's latest session) when it has none.
  */
 export async function resumeClaudeAsync(
   terminal: TerminalProcess,
@@ -1492,9 +1586,10 @@ export async function resumeClaudeAsync(
     // Preserve YOLO mode flag from terminal's stored state
     const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag()}`;
 
-    // Go to the project directory, then pick up its latest Claude session
+    // Go to the project directory, then pick the window's own session up again
     const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);
-    const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
+    const sessionFlag = await resumeOwnSessionFlag(terminal);
+    const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd}${sessionFlag}${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
     writeCliCommand(terminal, command);

@@ -79,6 +79,28 @@ vi.mock('fs', async (importOriginal) => {
 
 vi.mock('../session-handler', () => ({
   persistSession: mockPersistSession,
+  persistSessionAsync: mockPersistSession,
+}));
+
+// Mock the store of the sessions agent windows start, so tests write nothing to disk
+const mockRecordAgentSession = vi.fn();
+const mockLastAgentSession: ReturnType<typeof vi.fn> = vi.fn(async () => undefined);
+const mockReadAgentSessions: ReturnType<typeof vi.fn> = vi.fn(async () => []);
+vi.mock('../../agent-session-store', () => ({
+  recordAgentSessionAsync: mockRecordAgentSession,
+  lastAgentSession: mockLastAgentSession,
+  readAgentSessions: mockReadAgentSessions,
+}));
+
+// Mock the transcript lookups a restored window uses: its own session, and the directory's latest
+const mockFindSessionTranscript: ReturnType<typeof vi.fn> = vi.fn(async () => null);
+const mockLatestTranscript: ReturnType<typeof vi.fn> = vi.fn(async () => null);
+vi.mock('../../claude-code/session-spending', () => ({
+  findSessionTranscript: mockFindSessionTranscript,
+  latestTranscript: mockLatestTranscript,
+}));
+vi.mock('../../claude-profile/profile-config-dirs', () => ({
+  claudeConfigDirs: () => ['/home/user/.claude'],
 }));
 
 // Mock PtyManager.writeToPty - the implementation now uses this instead of terminal.pty.write
@@ -1171,5 +1193,186 @@ describe('cli-integration-handler - Helper Functions', () => {
       // Tab instead of space doesn't match
       expect(shouldAutoRenameTerminal('Terminal\t1')).toBe(false);
     });
+  });
+});
+
+describe('agent window sessions', () => {
+  beforeEach(() => {
+    mockWriteToPty.mockClear();
+    mockRecordAgentSession.mockClear();
+    mockPlatform('linux');
+  });
+
+  it('builds the new session flag only for plain session ids', async () => {
+    const { buildNewSessionFlag } = await import('../cli-integration-handler');
+    expect(buildNewSessionFlag('0b7c6c1e-1234-4abc-9def-001122334455')).toBe(
+      ' --session-id 0b7c6c1e-1234-4abc-9def-001122334455'
+    );
+    expect(() => buildNewSessionFlag('$(id)')).toThrow();
+  });
+
+  it('starts a window session under an id of its own and remembers it for the project', async () => {
+    mockGetClaudeCliInvocation.mockReturnValue({ command: 'claude', env: { PATH: '/usr/bin' } });
+    mockGetClaudeProfileManager.mockReturnValue({
+      getActiveProfile: vi.fn(() => ({
+        id: 'work',
+        name: 'Work',
+        isDefault: false,
+        configDir: '~/.claude-profiles/work',
+      })),
+      getProfile: vi.fn(),
+      getProfileToken: vi.fn(() => null),
+      markProfileUsed: vi.fn(),
+    });
+
+    const terminal = createMockTerminal({ projectPath: '/tmp/project' });
+    const { invokeClaude } = await import('../cli-integration-handler');
+    invokeClaude(terminal, '/tmp/project', undefined, () => null);
+
+    const written = mockWriteToPty.mock.calls[0][1] as string;
+    const sessionId = /--session-id ([0-9a-f-]{36})/.exec(written)?.[1];
+    expect(sessionId).toBeTruthy();
+    expect(mockRecordAgentSession).toHaveBeenCalledWith(
+      '/tmp/project',
+      expect.objectContaining({ sessionId, terminalId: terminal.id, configDir: expect.stringContaining('.claude-profiles') })
+    );
+  });
+
+  it('leaves a resumed task session its own id, and does not count it as a window session', async () => {
+    mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: '/usr/bin' } });
+    mockInitializeClaudeProfileManager.mockResolvedValue({
+      getActiveProfile: vi.fn(() => ({ id: 'default', name: 'Default', isDefault: true })),
+      getProfile: vi.fn(),
+      getProfileToken: vi.fn(() => null),
+      markProfileUsed: vi.fn(),
+    });
+
+    const terminal = createMockTerminal({ projectPath: '/tmp/project' });
+    const { invokeCLIAsync } = await import('../cli-integration-handler');
+    await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null, false, {
+      resumeSessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      configDir: '~/.claude-profiles/work',
+    });
+
+    const written = mockWriteToPty.mock.calls[0][1] as string;
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+    expect(written).not.toContain('--session-id');
+    expect(mockRecordAgentSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('restoring an agent window', () => {
+  beforeEach(() => {
+    mockWriteToPty.mockClear();
+    mockLastAgentSession.mockReset();
+    mockFindSessionTranscript.mockReset();
+    mockLatestTranscript.mockReset();
+    mockRecordAgentSession.mockClear();
+    mockReadAgentSessions.mockReset();
+    mockReadAgentSessions.mockResolvedValue([]);
+    mockPlatform('linux');
+    mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: '/usr/bin' } });
+  });
+
+  const resume = async (terminal: TerminalProcess) => {
+    const { resumeClaudeAsync } = await import('../cli-integration-handler');
+    await resumeClaudeAsync(terminal, () => null);
+    return mockWriteToPty.mock.calls[0][1] as string;
+  };
+
+  it('picks the window\'s own session up again instead of the directory\'s latest', async () => {
+    mockLastAgentSession.mockResolvedValue({
+      sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      startedAt: '2026-10-21T09:00:00.000Z',
+      cwd: '/tmp/project',
+    });
+    mockFindSessionTranscript.mockResolvedValue({ file: '/t.jsonl', size: 10, modifiedMs: 1 });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+    expect(written).not.toContain('--continue');
+  });
+
+  it('adopts the session it would have continued when the window has none of its own', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockLatestTranscript.mockResolvedValue({
+      sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      configDir: '/home/user/.claude-profiles/work',
+      file: '/t.jsonl',
+      size: 10,
+      modifiedMs: 1,
+    });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+    expect(written).not.toContain('--continue');
+    // Recorded for the project, so what the conversation spends from here on reaches Metrics
+    expect(mockRecordAgentSession).toHaveBeenCalledWith(
+      '/tmp/project',
+      expect.objectContaining({
+        sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+        configDir: '/home/user/.claude-profiles/work',
+        cwd: '/tmp/project',
+      })
+    );
+  });
+
+  it('adopts the directory\'s latest session when its own session transcript is gone', async () => {
+    mockLastAgentSession.mockResolvedValue({
+      sessionId: 'c0ffee00-1234-4abc-9def-001122334455',
+      startedAt: '2026-10-21T09:00:00.000Z',
+    });
+    mockFindSessionTranscript.mockResolvedValue(null);
+    mockLatestTranscript.mockResolvedValue({
+      sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      configDir: '/home/user/.claude',
+      file: '/t.jsonl',
+      size: 10,
+      modifiedMs: 1,
+    });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+  });
+
+  it('leaves the conversation another window is in to that window', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockReadAgentSessions.mockResolvedValue([
+      { sessionId: 'owned-by-another', terminalId: 'other-window', startedAt: '2026-10-21T09:00:00.000Z' },
+    ]);
+    mockLatestTranscript.mockResolvedValue(null);
+
+    await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(mockLatestTranscript).toHaveBeenCalledWith(expect.anything(), '/tmp/project', new Set(['owned-by-another']));
+  });
+
+  it('continues when the directory holds no session at all', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockLatestTranscript.mockResolvedValue(null);
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--continue');
+    expect(mockRecordAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('continues without adopting a transcript whose name is not a session id', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockLatestTranscript.mockResolvedValue({
+      sessionId: '../../escape',
+      configDir: '/home/user/.claude',
+      file: '/t.jsonl',
+      size: 10,
+      modifiedMs: 1,
+    });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--continue');
+    expect(mockRecordAgentSession).not.toHaveBeenCalled();
   });
 });
