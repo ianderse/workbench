@@ -354,6 +354,11 @@
         "label": "Daily usage cost of {{name}}",
         "emptyRange": "No usage in this range",
         "rangeLabel": "Usage range",
+        "rangeTotal": {
+          "all": "All-time total",
+          "days30": "30d total",
+          "days7": "7d total"
+        },
         "ranges": {
           "all": "All",
           "days30": "30d",

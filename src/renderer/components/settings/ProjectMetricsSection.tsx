@@ -27,10 +27,17 @@ interface CachedMetrics {
   checkedAt: string;
 }
 
+/** The translation key naming each range's total */
+const RANGE_TOTAL: Record<UsageCostRange, string> = {
+  all: 'accounts.metrics.chart.rangeTotal.all',
+  '30d': 'accounts.metrics.chart.rangeTotal.days30',
+  '7d': 'accounts.metrics.chart.rangeTotal.days7'
+};
+
 /**
- * One project: its name, how many tasks it has and what the chart's range cost (the day under
- * the pointer while the chart is hovered), with its total spending on the right and the chart
- * underneath. A project that has never spent anything gets no chart.
+ * One project: its name and how many tasks it has, with what the chart's range cost on the right -
+ * the day under the pointer while the chart is hovered - and the chart underneath. A project that
+ * has never spent anything gets no chart.
  */
 function ProjectRow({ project }: { project: ProjectCostMetrics }) {
   const { t } = useTranslation('settings');
@@ -50,11 +57,6 @@ function ProjectRow({ project }: { project: ProjectCostMetrics }) {
           <span className="text-(--nav-label-color)">
             · {t('accounts.metrics.tasks', { count: project.taskCount })}
           </span>
-          {daily.length > 0 && (
-            <span className="tabular-nums text-(--nav-label-color)">
-              · {hovered ? `${formatDay(hovered.date)} · ${formatCostUsd(hovered.costUsd)}` : formatCostUsd(rangeCost)}
-            </span>
-          )}
         </span>
       }
       footer={
@@ -69,7 +71,11 @@ function ProjectRow({ project }: { project: ProjectCostMetrics }) {
         ) : undefined
       }
     >
-      <span className="text-sm tabular-nums text-foreground">{formatCostUsd(project.totalCostUsd)}</span>
+      <span className="text-sm tabular-nums text-foreground">
+        {hovered
+          ? `${formatDay(hovered.date)} · ${formatCostUsd(hovered.costUsd)}`
+          : `${t(RANGE_TOTAL[range])} · ${formatCostUsd(rangeCost)}`}
+      </span>
     </SettingsRow>
   );
 }
