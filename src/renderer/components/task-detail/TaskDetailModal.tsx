@@ -450,17 +450,17 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         {task.metadata?.attachedImages && task.metadata.attachedImages.length > 0 && (
                           <TaskAttachments task={task} attachments={task.metadata.attachedImages} />
                         )}
-                        {/* Without the Request changes section above it, the current run's logs
-                            need a heading of their own to stand apart from the previous runs */}
+                        {/* With the Request changes section and the previous runs above them, the
+                            current run's logs need a heading of their own to stand apart */}
                         <TaskLogs
                           phaseLogs={state.phaseLogs}
                           runPhases={task.claudeRun?.phases}
                           legacyLogs={task.logs}
                           isSettled={isTaskRunSettled(task.status)}
-                          heading={state.needsReview ? undefined : {
+                          heading={state.needsReview && state.previousRuns.length > 0 ? {
                             title: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningTitle' : 'tasks:currentRun.title'),
                             description: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningDescription' : 'tasks:currentRun.description')
-                          }}
+                          } : undefined}
                           isLoadingLogs={state.isLoadingLogs}
                           isExpanded={state.isLogsExpanded}
                           onToggle={state.toggleLogs}
