@@ -345,8 +345,8 @@
       "tasks_one": "{{count}} task",
       "tasks_other": "{{count}} tasks",
       "total": "Total",
-      "updated": "Spending of all tasks · updated {{time}}",
-      "notUpdated": "Spending of all tasks",
+      "updated": "Spending of tasks and Claude Code sessions · updated {{time}}",
+      "notUpdated": "Spending of tasks and Claude Code sessions",
       "refresh": "Refresh",
       "empty": "No initialized projects",
       "error": "Could not read the projects' spending",
@@ -356,8 +356,8 @@
         "rangeLabel": "Usage range",
         "ranges": {
           "all": "All",
-          "recent": "30d",
-          "week": "Week"
+          "days30": "30d",
+          "days7": "7d"
         }
       }
     },

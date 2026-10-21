@@ -6,23 +6,30 @@
  * plot and its filter.
  * The days always fit: every day gets an equal share of the plot and its bar is centred in that
  * share, capped at 24px (`max-w-6`) so a new project with two days of usage doesn't draw two
- * chart-wide blocks. Nothing scrolls.
+ * chart-wide blocks. The date under the axis is centred in the same share, so it reads under its
+ * own bar; a label of a day at either end may reach past the plot, where there is only margin.
+ * The axis holds as many dates as the plot is wide enough for, quiet days included, and thins them
+ * out evenly when it is not. Nothing scrolls.
  */
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { SegmentedControl } from './SettingsRow';
-import { cn } from '../../lib/utils';
 import { formatCostUsd } from '../../../shared/utils/claude-run';
 import type { ProjectDailyCost } from '../../../shared/types';
 
 /** Which days the chart shows */
-export type UsageCostRange = 'all' | '30d' | 'week';
+export type UsageCostRange = 'all' | '30d' | '7d';
 
 /** Days in the "30d" range, today included */
 const RECENT_DAYS = 30;
+/** Days in the "7d" range, today included */
+const SHORT_DAYS = 7;
 /** Shortest visible bar for a day that did cost something (px) */
 const MIN_BAR_HEIGHT = 2;
-/** At most this many days get a label under the axis */
-const MAX_X_LABELS = 5;
+/** Width a day label needs to read without touching the next one (px) */
+const LABEL_WIDTH = 46;
+/** How many labels fit before the plot has been measured (it is measured on the first paint) */
+const UNMEASURED_LABELS = 7;
 
 /** Local calendar day of a date (`YYYY-MM-DD`) */
 function dayKey(date: Date): string {
@@ -43,20 +50,12 @@ function addDays(date: Date, days: number): Date {
   return next;
 }
 
-/** The Monday of the week a day belongs to (weeks start on Monday) */
-function weekStart(date: Date): Date {
-  const monday = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-  // getDay(): 0 = Sunday, so Sunday is 6 days into its week
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
-  return monday;
-}
-
 /** First day a range covers, or null when the project has no usage to show */
 function rangeStart(range: UsageCostRange, today: Date, firstSpending: string | undefined): Date | null {
   if (!firstSpending) return null;
   const first = dayStart(firstSpending);
   if (range === 'all') return first;
-  const start = range === 'week' ? weekStart(today) : addDays(today, -(RECENT_DAYS - 1));
+  const start = addDays(today, -((range === '7d' ? SHORT_DAYS : RECENT_DAYS) - 1));
   // No empty days before the project ever spent anything, which would make "All" the shortest range
   return start < first ? first : start;
 }
@@ -111,12 +110,20 @@ export function formatDay(date: string): string {
   return dayStart(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-/** Which days get a label: the first, the last and evenly spaced ones in between */
-function labelledDays(count: number): Set<number> {
+/**
+ * Which days get a label: every one of them when they fit, and otherwise every second, third and
+ * so on, counted back from the last day so the most recent one always reads. Days the project
+ * spent nothing on are labelled like any other - the axis is a calendar, and a gap in it is as
+ * much a part of the chart as a bar.
+ */
+export function labelledDays(count: number, plotWidth: number): Set<number> {
   if (count <= 1) return new Set([0]);
-  const labels = Math.min(MAX_X_LABELS, count);
-  const step = (count - 1) / (labels - 1);
-  return new Set(Array.from({ length: labels }, (_, index) => Math.round(index * step)));
+  const fit = plotWidth > 0 ? Math.max(1, Math.floor(plotWidth / LABEL_WIDTH)) : UNMEASURED_LABELS;
+  const step = Math.max(1, Math.ceil(count / fit));
+
+  const labels = new Set<number>();
+  for (let index = count - 1; index >= 0; index -= step) labels.add(index);
+  return labels;
 }
 
 interface UsageCostChartProps {
@@ -132,15 +139,27 @@ interface UsageCostChartProps {
 
 export function UsageCostChart({ days, range, onRangeChange, onHoverDay, label }: UsageCostChartProps) {
   const { t } = useTranslation('settings');
+  const plot = useRef<HTMLDivElement>(null);
+  const [plotWidth, setPlotWidth] = useState(0);
+
+  // How many dates fit depends on how wide the plot is, which the window's size decides
+  useLayoutEffect(() => {
+    setPlotWidth(plot.current?.clientWidth ?? 0);
+  }, [days.length]);
+  useEffect(() => {
+    const measure = () => setPlotWidth(plot.current?.clientWidth ?? 0);
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, []);
 
   const total = days.reduce((sum, day) => sum + day.costUsd, 0);
   const top = niceCeil(Math.max(0, ...days.map((day) => day.costUsd)));
-  const labels = labelledDays(days.length);
+  const labels = labelledDays(days.length, plotWidth);
 
   const ranges = [
     { value: 'all' as const, label: t('accounts.metrics.chart.ranges.all') },
-    { value: '30d' as const, label: t('accounts.metrics.chart.ranges.recent') },
-    { value: 'week' as const, label: t('accounts.metrics.chart.ranges.week') }
+    { value: '30d' as const, label: t('accounts.metrics.chart.ranges.days30') },
+    { value: '7d' as const, label: t('accounts.metrics.chart.ranges.days7') }
   ];
 
   return (
@@ -159,7 +178,7 @@ export function UsageCostChart({ days, range, onRangeChange, onHoverDay, label }
         </div>
 
         {/* Plot: one equal share per day, bar centred in it */}
-        <div className="relative min-w-0 flex-1">
+        <div ref={plot} className="relative min-w-0 flex-1">
           <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-24">
             <div className="absolute inset-x-0 top-0 border-t border-settings-divider" />
             <div className="absolute inset-x-0 top-1/2 border-t border-settings-divider" />
@@ -194,19 +213,21 @@ export function UsageCostChart({ days, range, onRangeChange, onHoverDay, label }
           )}
 
           {/* Day labels: never every day, so they can't collide */}
-          <div className="mt-1.5 flex text-[0.6875rem] leading-none text-(--nav-label-color)">
-            {(total === 0 ? [] : days).map((day, index) => (
-              <div
-                key={day.date}
-                // The first and last labels sit flush, so they can't hang off the plot
-                className={cn(
-                  'min-w-0 flex-1',
-                  index === 0 ? 'text-left' : index === days.length - 1 ? 'text-right' : 'text-center'
-                )}
-              >
-                {labels.has(index) && <span className="whitespace-nowrap">{formatDay(day.date)}</span>}
-              </div>
-            ))}
+          <div className="relative mt-1.5 h-3 text-[0.6875rem] leading-none text-(--nav-label-color)">
+            {(total === 0 ? [] : days).map((day, index) =>
+              labels.has(index) ? (
+                // On the middle of its day's share of the width, which is where its bar is. A
+                // label of a narrow day is wider than that share and reaches over its neighbours,
+                // which are days without a label, or past the plot, where there is only margin.
+                <span
+                  key={day.date}
+                  className="absolute -translate-x-1/2 whitespace-nowrap"
+                  style={{ left: `${((index + 0.5) / days.length) * 100}%` }}
+                >
+                  {formatDay(day.date)}
+                </span>
+              ) : null
+            )}
           </div>
         </div>
       </div>

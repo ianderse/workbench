@@ -1,9 +1,12 @@
 /**
- * Metrics (Settings > Accounts): spending per project, the sum of every task's Claude Code run
- * cost in each registered project with an initialized `.workbench` directory, with a bar chart of
- * what a project spent per day under its row (projects that have never spent anything get none).
- * Shows the last result (refresh cache) and only reads the projects again on Refresh, or once when
- * nothing was read before.
+ * Metrics (Settings > Accounts): spending per project in each registered project with an
+ * initialized `.workbench` directory - what its tasks' Claude Code runs cost plus every other
+ * Claude Code session that ran in the project (agent windows, Insights, `claude` in a terminal) -
+ * with a bar chart of what a project spent per day under its row (projects that have never spent
+ * anything get none).
+ * Shows the last result (refresh cache) straight away and reads the projects behind it, so the
+ * figures are never stale while the page is open: the main process watches what they are read from
+ * and reports every change, so what a session spends on its next answer shows up by itself.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -31,7 +34,7 @@ interface CachedMetrics {
  */
 function ProjectRow({ project }: { project: ProjectCostMetrics }) {
   const { t } = useTranslation('settings');
-  const [range, setRange] = useState<UsageCostRange>('week');
+  const [range, setRange] = useState<UsageCostRange>('7d');
   const [hovered, setHovered] = useState<ProjectDailyCost | null>(null);
 
   // Metrics cached before the chart existed have no days
@@ -77,28 +80,38 @@ export function ProjectMetricsSection() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  // A refresh the page asked for shows the spinner; one a window's spending triggered is quiet
+  const refresh = useCallback(async (quiet = false) => {
+    if (!quiet) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const result = await window.electronAPI.getProjectCostMetrics();
       if (result.success && result.data) {
         const next = { projects: result.data, checkedAt: new Date().toISOString() };
         setMetrics(next);
         writeRefreshCache(CACHE_KEY, next);
-      } else {
+      } else if (!quiet) {
         setError(result.error || t('accounts.metrics.error'));
       }
     } catch {
-      setError(t('accounts.metrics.error'));
+      if (!quiet) setError(t('accounts.metrics.error'));
     } finally {
-      setIsLoading(false);
+      if (!quiet) setIsLoading(false);
     }
   }, [t]);
 
-  // Read once when nothing was read before; afterwards only on Refresh
+  // The stored figures show at once; what the project's sessions have spent since is read behind
+  // them (quietly, unless there is nothing to show yet), and again whenever a session spends more
   useEffect(() => {
-    if (!readRefreshCache<CachedMetrics>(CACHE_KEY)) void refresh();
+    void refresh(!!readRefreshCache<CachedMetrics>(CACHE_KEY));
+    void window.electronAPI.watchProjectCostMetrics();
+    const stopListening = window.electronAPI.onProjectCostMetricsChanged(() => void refresh(true));
+    return () => {
+      stopListening();
+      void window.electronAPI.unwatchProjectCostMetrics();
+    };
   }, [refresh]);
 
   const projects = metrics?.projects ?? [];
