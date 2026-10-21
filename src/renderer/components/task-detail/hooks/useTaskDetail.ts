@@ -153,7 +153,10 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setFeedbackImages([]);
   }, []);
 
-  // Load worktree status when task is in review (change summary, Create PR and Merge PR)
+  // Load worktree status when task is in review (change summary, Create PR and Merge PR).
+  // Its stats and branches are read against the task's base branch, so editing that branch
+  // reads the status again instead of leaving the dialog on the branch it opened with
+  const taskBaseBranch = task.metadata?.baseBranch;
   useEffect(() => {
     if (needsReview) {
       window.electronAPI.getWorktreeStatus(task.id).then((statusResult) => {
@@ -166,7 +169,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     } else {
       setWorktreeStatus(null);
     }
-  }, [task.id, needsReview]);
+  }, [task.id, needsReview, taskBaseBranch]);
 
   // The task's earlier runs. Loaded once; starting the task over adds one, so the dialog
   // reloads them after a retry (reloadPreviousRuns) rather than polling

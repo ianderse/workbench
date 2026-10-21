@@ -88,6 +88,7 @@
     "fileCount_other": "{{count}} files",
     "commitCount_one": "{{count}} commit",
     "commitCount_other": "{{count}} commits",
-    "targetBranch": "Branch the changes merge into"
+    "targetBranch": "Base branch: what the task branched from and merges into",
+    "baseBranchMissing": "The project has no branch \"{{branch}}\". Choose a base branch that exists in the task's Git options."
   }
 }

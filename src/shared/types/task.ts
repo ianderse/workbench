@@ -305,7 +305,6 @@ export interface WorktreeStatus {
   worktreePath?: string;
   branch?: string;
   baseBranch?: string;
-  currentProjectBranch?: string; // User's current checked-out branch in main project (merge target)
   commitCount?: number;
   filesChanged?: number;
   additions?: number;

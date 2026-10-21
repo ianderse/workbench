@@ -419,17 +419,6 @@ export function registerWorktreeHandlers(
           // 1. Task metadata baseBranch, 2. Project settings mainBranch, 3. main/master detection
           const baseBranch = getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
 
-          // Get user's current branch in main project (this is where changes will merge INTO)
-          let currentProjectBranch: string | undefined;
-          try {
-            currentProjectBranch = execFileSync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
-              cwd: project.path,
-              encoding: 'utf-8'
-            }).trim();
-          } catch {
-            // Ignore - might be in detached HEAD or git error
-          }
-
           // Get commit count (cross-platform - no shell syntax)
           let commitCount = 0;
           try {
@@ -476,7 +465,6 @@ export function registerWorktreeHandlers(
               worktreePath,
               branch,
               baseBranch,
-              currentProjectBranch,
               commitCount,
               filesChanged,
               additions,

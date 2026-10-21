@@ -45,6 +45,7 @@ import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
+import { useTaskGitOptions } from '../task-form/TaskGitOptions';
 import { TaskWarnings } from './TaskWarnings';
 import { TaskLogs, isTaskRunSettled } from './TaskLogs';
 import { PreviousRuns } from './PreviousRuns';
@@ -230,6 +231,15 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   // Only an open PR can be merged, and not while the task runs
   const canMergePR = !!prUrl && prState === 'open' && task.status !== 'in_progress' && task.status !== 'ai_review';
 
+  // Merging into the base branch, and opening a pull request against it, both need the project
+  // to still have it: the branch the task's Git options label "Not in the project"
+  const baseBranch = state.worktreeStatus?.baseBranch;
+  const { isMissingBranch } = useTaskGitOptions(task.projectId, baseBranch);
+  const baseBranchMissing = isMissingBranch(baseBranch);
+  const baseBranchMissingTitle = baseBranchMissing
+    ? t('taskReview:workspace.baseBranchMissing', { branch: baseBranch })
+    : undefined;
+
   return (
     <TooltipProvider delayDuration={300}>
       <DialogPrimitive.Root open={open} onOpenChange={onOpenChange}>
@@ -261,16 +271,20 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       <Badge variant="outline" className="text-xs font-mono">
                         {task.specId}
                       </Badge>
-                      {/* Branch the task's worktree merges into */}
+                      {/* The task's base branch: what it was branched from, and what it merges into */}
                       {state.worktreeStatus?.exists && (
                         <>
                           <span className="text-xs text-muted-foreground" aria-hidden="true">→</span>
                           <Badge
                             variant="outline"
                             className="text-xs font-mono"
-                            title={t('taskReview:workspace.targetBranch')}
+                            title={baseBranchMissingTitle ?? t('taskReview:workspace.targetBranch')}
                           >
-                            {state.worktreeStatus.currentProjectBranch || state.worktreeStatus.baseBranch || 'main'}
+                            {/* A branch the project no longer has reads as disabled, like the
+                                buttons that cannot use it; the tag itself keeps its look */}
+                            <span className={cn(baseBranchMissing && 'opacity-50')}>
+                              {state.worktreeStatus.baseBranch || 'main'}
+                            </span>
                           </Badge>
                         </>
                       )}
@@ -353,6 +367,8 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                                 size="sm"
                                 className="gap-1.5"
                                 onClick={() => state.setShowLocalMergeDialog(true)}
+                                disabled={baseBranchMissing}
+                                title={baseBranchMissingTitle}
                               >
                                 <GitMerge className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
                                 {t('common:buttons.localMerge')}
@@ -382,7 +398,8 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                                 size="sm"
                                 className="gap-1.5"
                                 onClick={() => state.setShowPRDialog(true)}
-                                disabled={state.isCreatingPR}
+                                disabled={state.isCreatingPR || baseBranchMissing}
+                                title={baseBranchMissingTitle}
                               >
                                 {state.isCreatingPR ? (
                                   <Loader2 className="h-4 w-4 animate-spin" />
