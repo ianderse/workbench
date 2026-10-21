@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { type GraphState, agentsAwaitingSubagents, displayedState } from '../hooks/graph/types'
 import { getStateColor } from '../lib/colors'
 import { ANIM_SPEED } from '../lib/canvas-constants'
-import { BloomRenderer } from './bloom-renderer'
+import { BLOOM_INTENSITY, BloomRenderer } from './bloom-renderer'
 import { drawBackground } from './background-layer'
 import {
   type VisualEffect,
@@ -15,6 +15,11 @@ import {
 } from './canvas/index'
 import { useCanvasCamera } from '../hooks/use-canvas-camera'
 import type { FaceState } from './canvas/draw-face'
+
+/** The bloom for the app's current light/dark mode (the `dark` class on <html>) */
+function themeBloom(): number {
+  return document.documentElement.classList.contains('dark') ? BLOOM_INTENSITY.dark : BLOOM_INTENSITY.light
+}
 
 interface CanvasProps {
   /** Ref to the graph state — read every frame without React re-renders */
@@ -79,14 +84,22 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
   // ─── Setup ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const bloom = new BloomRenderer(0.5)
+    const bloom = new BloomRenderer(themeBloom())
     // Sized now if the canvas already is (e.g. this effect re-ran after a hot
     // reload): the draw loop resizes it only on its first frame and when the
     // canvas size changes
     const canvas = mainCanvasRef.current
     if (canvas) bloom.resize(canvas.width, canvas.height)
     bloomRef.current = bloom
-    return () => { bloomRef.current = null }
+
+    // The nodes keep their own colors in either mode; only the bloom comes
+    // down over a light window. The draw loop picks it up on its next frame.
+    const observer = new MutationObserver(() => bloom.setIntensity(themeBloom()))
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => {
+      observer.disconnect()
+      bloomRef.current = null
+    }
   }, [])
 
   useEffect(() => {

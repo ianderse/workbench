@@ -4,6 +4,11 @@
  * with additive blending (the dark background adds next to nothing).
  */
 
+/** The bloom over each surface: full against a dark window, turned down over a
+ *  light one, where the additive glow would only wash the nodes out and leave
+ *  them with a halo of their own */
+export const BLOOM_INTENSITY = { dark: 0.5, light: 0.1 } as const
+
 export class BloomRenderer {
   private bloomCanvas: HTMLCanvasElement
   private bloomCtx: CanvasRenderingContext2D
@@ -22,6 +27,11 @@ export class BloomRenderer {
     this.enabled = !!(bCtx && tCtx)
     this.bloomCtx = bCtx!
     this.tempCtx = tCtx!
+  }
+
+  /** Follow the app's light/dark mode */
+  setIntensity(intensity: number): void {
+    this.intensity = intensity
   }
 
   /** Size to the main canvas's pixel size */
