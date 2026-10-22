@@ -51,7 +51,7 @@ import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
 import { isProfileAuthenticated, getPlanFromConfigDir } from './claude-profile/profile-utils';
-import { isLinux, isMacOS, isWindows } from './platform';
+import { isLinux, isMacOS, isWindows, isWSL } from './platform';
 import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
 import { AppTray, isWindowCloseAllowed, type TrayStatus } from './app-tray';
@@ -532,6 +532,12 @@ if (isWindows()) {
   app.commandLine.appendSwitch('disable-gpu-shader-disk-cache');
   app.commandLine.appendSwitch('disable-gpu-program-cache');
   console.log('[main] Applied Windows GPU cache fixes');
+}
+
+// WSL's graphics (WSLg) lose Chromium's GPU process shortly after startup, and the window then
+// stops repainting (it keeps its first frame while the page goes on). Draw in software there.
+if (isWSL()) {
+  app.disableHardwareAcceleration();
 }
 
 // Initialize the application

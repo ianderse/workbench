@@ -28,6 +28,14 @@ export function isLinux(): boolean {
 }
 
 /**
+ * Check if running on Linux inside WSL (Windows Subsystem for Linux), which sets
+ * WSL_DISTRO_NAME in every process it starts
+ */
+export function isWSL(): boolean {
+  return isLinux() && !!process.env.WSL_DISTRO_NAME;
+}
+
+/**
  * Check if running on a Unix-like system (macOS or Linux)
  */
 export function isUnix(): boolean {
