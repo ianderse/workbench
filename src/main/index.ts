@@ -30,7 +30,7 @@ for (const envPath of possibleEnvPaths) {
   }
 }
 
-import { app, BrowserWindow, ipcMain, shell, nativeImage, session, screen, Menu, MenuItem } from 'electron';
+import { app, BrowserWindow, ipcMain, shell, nativeImage, session, screen, Menu, MenuItem, type Rectangle } from 'electron';
 import { join } from 'path';
 import { writeFileSync, rmSync, cpSync } from 'fs';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
@@ -250,6 +250,69 @@ function scheduleRendererRecovery(window: BrowserWindow, state: RendererRecovery
   }, RENDERER_RECOVERY_DELAY_MS);
 }
 
+/** Run `done` once the window stops moving and resizing (window managers apply a size in steps) */
+function whenBoundsSettle(window: BrowserWindow, done: () => void): void {
+  let timer: NodeJS.Timeout | undefined;
+  const wait = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      window.off('resize', wait);
+      window.off('move', wait);
+      if (!window.isDestroyed()) done();
+    }, 200);
+  };
+  window.on('resize', wait);
+  window.on('move', wait);
+  wait();
+}
+
+/**
+ * WSL's window manager (WSLg) shows a maximized frameless window as if it still had its frame
+ * (shadow and title bar), so it hangs off the right and bottom of the screen and the close button
+ * is out of reach. There, a maximized window is turned into a normal window of the same size and
+ * place, and maximizing again (the button or a double click on the title bar) brings back the
+ * earlier size.
+ */
+function fillScreenOnMaximize(window: BrowserWindow): void {
+  // The earlier size, and the size the window was given in its place, while it fills the screen
+  let filled: { restore: Rectangle; fill: Rectangle } | null = null;
+
+  // The window manager applies maximize, restore and resize in steps (and resizing while the
+  // window still counts as maximized fires 'maximize' again), so each step waits for the window
+  // to settle, and events are ignored until the switch is done
+  let switching = false;
+  window.on('maximize', () => {
+    if (switching) return;
+    switching = true;
+    const restore = filled ? filled.restore : window.getNormalBounds();
+    whenBoundsSettle(window, () => {
+      // The maximized size leaves out the Windows taskbar, which Electron's work area under
+      // WSL doesn't know about
+      const target = filled ? restore : window.getBounds();
+      filled = filled ? null : { restore, fill: target };
+      window.unmaximize();
+      whenBoundsSettle(window, () => {
+        window.setBounds(target);
+        whenBoundsSettle(window, () => {
+          switching = false;
+        });
+      });
+    });
+  });
+
+  // Moving or resizing the filled window by hand makes that its new size
+  const forgetFilled = (): void => {
+    if (switching || !filled) return;
+    const bounds = window.getBounds();
+    const { fill } = filled;
+    if (bounds.x !== fill.x || bounds.y !== fill.y || bounds.width !== fill.width || bounds.height !== fill.height) {
+      filled = null;
+    }
+  };
+  window.on('move', forgetFilled);
+  window.on('resize', forgetFilled);
+}
+
 /**
  * Create an app window. `assignedProjectId` is the project the window opens (the Projects
  * page's "New window"); the first window passes null and restores the project it showed last.
@@ -323,6 +386,9 @@ function createWindow(assignedProjectId: string | null = null): BrowserWindow {
   });
 
   registerWindow(appWindow, assignedProjectId);
+  if (isWSL()) {
+    fillScreenOnMaximize(appWindow);
+  }
   const recovery: RendererRecoveryState = { attempts: 0, windowStart: 0 };
 
   // Background mode: closing a window hides it to the tray; agents and terminals keep running
