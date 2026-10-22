@@ -5,13 +5,38 @@
    OS color scheme: otherwise light mode on a dark OS got dark-mode text, e.g. white code in Markdown */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Bundled UI font (shipped with the build, no network needed). Only the Regular cut is bundled,
-   so it is declared as weight 400 and the browser synthesizes bold for semibold/bold text.
-   Dank Mono, the terminal font, is registered from main.tsx before terminals open. */
+/* Bundled UI font (shipped with the build, no network needed). Each weight the UI uses (regular,
+   medium, semibold, bold) has its own cut: a synthesized bold smears the regular letters, which
+   looks blurry on Windows. Dank Mono, the terminal font, is registered from main.tsx before
+   terminals open. */
 @font-face {
   font-family: 'Anthropic Sans';
   src: url('../assets/fonts/AnthropicSans-Text-Regular-Static.otf') format('opentype');
   font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('../assets/fonts/AnthropicSans-Text-Medium-Static.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('../assets/fonts/AnthropicSans-Text-Semibold-Static.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('../assets/fonts/AnthropicSans-Text-Bold-Static.otf') format('opentype');
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -21,6 +46,30 @@
   font-family: 'Inter';
   src: url('../assets/fonts/Inter-Regular.otf') format('opentype');
   font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/Inter-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/Inter-SemiBold.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/Inter-Bold.otf') format('opentype');
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
