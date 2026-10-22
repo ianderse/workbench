@@ -97,12 +97,12 @@ describe('ProjectMetricsSection', () => {
     expect(projectRow()).toHaveTextContent('7d total · $3.00');
   });
 
-  it('still totals the projects under the list', async () => {
+  it('has no total row under the list, just the refresh button in the heading', async () => {
     render(<ProjectMetricsSection />);
 
     await waitFor(() => expect(screen.getByText('workbench')).toBeInTheDocument());
-    const totalRow = screen.getByText('Total').closest('div.py-3') as HTMLElement;
 
-    expect(totalRow).toHaveTextContent('$99.50');
+    expect(screen.queryByText('Total')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Refresh/ })).toBeInTheDocument();
   });
 });

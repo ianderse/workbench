@@ -16,7 +16,6 @@ import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
 import { UsageCostChart, buildRangeDays, formatDay, type UsageCostRange } from './UsageCostChart';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
-import { formatRelativeTime } from '../../lib/utils';
 import { formatCostUsd } from '../../../shared/utils/claude-run';
 import type { ProjectCostMetrics, ProjectDailyCost } from '../../../shared/types';
 
@@ -121,38 +120,28 @@ export function ProjectMetricsSection() {
   }, [refresh]);
 
   const projects = metrics?.projects ?? [];
-  const total = projects.reduce((sum, project) => sum + project.totalCostUsd, 0);
 
   return (
-    <SettingsSection title={t('accounts.metrics.title')}>
+    <SettingsSection
+      title={t('accounts.metrics.title')}
+      action={
+        <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={isLoading}>
+          <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} strokeWidth={1.75} />
+          {t('accounts.metrics.refresh')}
+        </Button>
+      }
+    >
       <SettingsRows>
         {projects.map((project) => (
           <ProjectRow key={project.projectId} project={project} />
         ))}
 
-        <SettingsRow
-          // "No initialized projects" only after a successful read found none
-          label={metrics && !error && projects.length === 0 ? t('accounts.metrics.empty') : t('accounts.metrics.total')}
-          description={
-            error ? (
-              <span className="text-destructive">{error}</span>
-            ) : metrics ? (
-              t('accounts.metrics.updated', { time: formatRelativeTime(new Date(metrics.checkedAt)) })
-            ) : (
-              t('accounts.metrics.notUpdated')
-            )
-          }
-        >
-          <div className="flex items-center gap-3">
-            {projects.length > 0 && (
-              <span className="text-sm font-medium tabular-nums text-foreground">{formatCostUsd(total)}</span>
-            )}
-            <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={isLoading}>
-              <RefreshCw className={`mr-1.5 h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} strokeWidth={1.75} />
-              {t('accounts.metrics.refresh')}
-            </Button>
-          </div>
-        </SettingsRow>
+        {/* "No initialized projects" only after a successful read found none */}
+        {error ? (
+          <SettingsRow label={<span className="text-destructive">{error}</span>} />
+        ) : metrics && projects.length === 0 ? (
+          <SettingsRow label={t('accounts.metrics.empty')} />
+        ) : null}
       </SettingsRows>
     </SettingsSection>
   );
