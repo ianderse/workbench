@@ -81,7 +81,10 @@ describe('claudeThemeFlag', () => {
     expect(claudeThemeFlag()).toBe(` --settings '${DARK_FILE}'`);
   });
 
-  it('uses the dark default when there are no settings yet', () => {
+  it('follows the OS (the "system" default) when there are no settings yet', () => {
+    expect(claudeThemeFlag()).toBe(` --settings '${LIGHT_FILE}'`);
+
+    mocks.systemDark = true;
     expect(claudeThemeFlag()).toBe(` --settings '${DARK_FILE}'`);
   });
 

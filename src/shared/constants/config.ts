@@ -37,7 +37,7 @@ export const MIN_TERMINALS = 1;
 export const MAX_TERMINALS_LIMIT = 24;
 
 export const DEFAULT_APP_SETTINGS = {
-  theme: 'dark' as const,
+  theme: 'system' as const,
   colorTheme: 'default' as const,
   pythonPath: undefined as string | undefined,
   gitPath: undefined as string | undefined,
