@@ -102,7 +102,7 @@
     "appId": "com.workbench.app",
     "productName": "Workbench",
     "npmRebuild": false,
-    "artifactName": "Workbench-${version}-${platform}-${arch}.${ext}",
+    "artifactName": "Workbench-${version}-${os}-${arch}.${ext}",
     "detectUpdateChannel": false,
     "publish": [
       {
