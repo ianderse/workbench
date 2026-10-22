@@ -74,6 +74,16 @@ import { projectStore } from './project-store';
 import { migrateProjectDataDirs } from './data-dir-migration';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Single instance: launching the installed app again (Start menu, taskbar, shortcut) shows the
+// running one instead of starting a second app with its own tray icon. Development builds skip
+// the lock, since they share userData (which the lock is keyed on) with the installed app.
+// ─────────────────────────────────────────────────────────────────────────────
+const hasInstanceLock = !app.isPackaged || app.requestSingleInstanceLock();
+if (!hasInstanceLock) {
+  app.exit(0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Migrate userData from the previous app name (aperant)
 // Must run before any code accesses app.getPath('userData')
 // ─────────────────────────────────────────────────────────────────────────────
@@ -526,6 +536,9 @@ if (isWindows()) {
 
 // Initialize the application
 app.whenReady().then(async () => {
+  // A second instance is exiting; it hands its launch to the running app ('second-instance')
+  if (!hasInstanceLock) return;
+
   // Set app user model id for Windows
   electronApp.setAppUserModelId(is.dev ? 'com.workbench.app.dev' : 'com.workbench.app');
 
@@ -764,6 +777,11 @@ app.whenReady().then(async () => {
 
   // macOS: clicking the dock icon re-creates the window, or shows it if it was hidden to the tray
   app.on('activate', () => {
+    showMainWindow();
+  });
+
+  // Windows/Linux: launching the app while it runs shows its window, or brings one back from the tray
+  app.on('second-instance', () => {
     showMainWindow();
   });
 });
