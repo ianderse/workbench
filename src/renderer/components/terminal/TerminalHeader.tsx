@@ -136,7 +136,7 @@ export function TerminalHeader({
             e.stopPropagation();
             onClose();
           }}
-          title={t('common:close')}
+          title={t('common:buttons.close')}
         >
           <X className="h-4 w-4" />
         </Button>
