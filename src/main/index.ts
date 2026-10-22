@@ -696,6 +696,9 @@ app.whenReady().then(async () => {
 
   // Tray icon for background mode (a desktop without a tray just keeps the old close-to-quit behavior)
   try {
+    // WSL has no tray to show the icon in (WSLg forwards only windows), yet creating one doesn't
+    // fail, so a closed window would hide to a tray icon nobody can see
+    if (isWSL()) throw new Error('WSL has no system tray');
     appTray = new AppTray({
       iconsDir: is.dev ? join(__dirname, '../../resources/tray') : join(process.resourcesPath, 'tray'),
       devBuild: is.dev,
