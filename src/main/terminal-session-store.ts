@@ -1,5 +1,6 @@
 import { app } from 'electron';
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, promises as fsPromises } from 'fs';
 import type { TerminalWorktreeConfig } from '../shared/types';
 import { debugLog } from '../shared/utils/debug-logger';
@@ -20,6 +21,22 @@ export interface TerminalSession {
   worktreeConfig?: TerminalWorktreeConfig;
   /** UI display position for ordering terminals after drag-drop */
   displayOrder?: number;
+  /** The run of the app that has this window open (absent in files written before this) */
+  owner?: SessionOwner;
+}
+
+/**
+ * The run of the app a window belongs to.
+ *
+ * Two copies of the app (a packaged one and a dev build, say) can have the same project open, and
+ * both write that project's file. Every window says which run opened it, so a starting run takes
+ * over only the windows whose run has ended and leaves a running copy its own, instead of showing
+ * the user windows that are already open in the other copy, or putting back what they closed there.
+ */
+export interface SessionOwner {
+  /** Identifies one run of the app; a pid on its own can be reused by a later process */
+  instanceId: string;
+  pid: number;
 }
 
 /**
@@ -32,6 +49,24 @@ export interface TerminalSession {
 interface SessionData {
   version: number;
   windows: TerminalSession[];
+}
+
+/** This run of the app, stamped on every window it saves */
+const THIS_INSTANCE: SessionOwner = { instanceId: randomUUID(), pid: process.pid };
+
+/** Whether another copy of the app, still running, has this window open */
+function isOwnedByRunningInstance(owner: SessionOwner | undefined): boolean {
+  // No owner (written before windows recorded one) or our own: nothing else holds it
+  if (!owner || owner.instanceId === THIS_INSTANCE.instanceId) return false;
+  // Our pid under another id: an earlier run of the app whose process number we now have
+  if (owner.pid === THIS_INSTANCE.pid) return false;
+  try {
+    process.kill(owner.pid, 0);  // Signal 0 only asks whether the process is there
+    return true;
+  } catch (error) {
+    // EPERM means the process exists but belongs to someone else
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
 }
 
 const STORE_VERSION = 4;  // Bumped for the flat window list
@@ -57,11 +92,19 @@ export class TerminalSessionStore {
    */
   private pendingDeleteTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
   /**
-   * Write serialization state - prevents concurrent async writes from
-   * interleaving and potentially losing data.
+   * The windows this run closed. A write keeps every entry another copy of the app put in the
+   * file, so closed windows are named here instead: that way they go, and a window belonging to a
+   * copy that was killed stays until that copy starts again and takes it back.
+   */
+  private closedHere: Set<string> = new Set();
+  /**
+   * Writes run one at a time. A save asked for while one is running is folded into a single
+   * follow-up write of the data as it stands when that write starts, and `flush()` waits for both,
+   * so a window closed just before the app quits reaches disk before the process goes away.
    */
   private writeInProgress = false;
-  private writePending = false;
+  private writeQueued = false;
+  private writeChain: Promise<void> = Promise.resolve();
   /**
    * Failure tracking for async writes - helps detect persistent write issues
    * that might otherwise go unnoticed in fire-and-forget scenarios.
@@ -72,7 +115,9 @@ export class TerminalSessionStore {
   constructor(private readonly projectPath: string) {
     const sessionsDir = join(projectPath, '.workbench');
     this.storePath = join(sessionsDir, 'terminals.json');
-    this.tempPath = join(sessionsDir, 'terminals.json.tmp');
+    // One temp file per run: two copies of the app writing the same project must not take each
+    // other's temp file away mid-write
+    this.tempPath = join(sessionsDir, `terminals.json.${process.pid}.tmp`);
     this.backupPath = join(sessionsDir, 'terminals.json.backup');
 
     // `.workbench` existing is what marks a project as initialized, so this never creates it: an
@@ -81,8 +126,15 @@ export class TerminalSessionStore {
       console.warn(`[TerminalSessionStore] ${projectPath} is not initialized, so sessions are not persisted`);
     }
 
-    // Load existing data or initialize
-    this.data = this.load();
+    // Load existing data or initialize. The windows another running copy of the app has open stay
+    // in the file, out of this run's hands: it neither shows them nor writes over them.
+    const loaded = this.load();
+    this.data = {
+      ...loaded,
+      windows: loaded.windows
+        .filter(w => !isOwnedByRunningInstance(w.owner))
+        .map(w => ({ ...w, owner: THIS_INSTANCE })),
+    };
   }
 
   /**
@@ -176,26 +228,52 @@ export class TerminalSessionStore {
   }
 
   /**
+   * This run's windows on top of the windows another running copy of the app has in the file.
+   *
+   * Every write starts from what is on disk, so a second copy of the app opening the same project
+   * keeps its windows: neither copy writes the other's away, and a window closed here stays closed.
+   */
+  private mergeWithOtherInstances(onDisk: TerminalSession[]): SessionData {
+    const ours = new Set(this.data.windows.map(w => w.id));
+    const others = onDisk.filter(w => !ours.has(w.id) && !this.closedHere.has(w.id));
+    return { version: STORE_VERSION, windows: [...others, ...this.data.windows] };
+  }
+
+  /** What to write, reading the file first so another copy's windows survive (synchronous) */
+  private dataToWrite(): SessionData {
+    return this.mergeWithOtherInstances(this.tryLoadFile(this.storePath).data?.windows ?? []);
+  }
+
+  /** What to write, reading the file first so another copy's windows survive (asynchronous) */
+  private async dataToWriteAsync(): Promise<SessionData> {
+    let onDisk: TerminalSession[] = [];
+    try {
+      const parsed = JSON.parse(await fsPromises.readFile(this.storePath, 'utf-8')) as SessionData;
+      if (parsed.version === STORE_VERSION) onDisk = parsed.windows ?? [];
+    } catch {
+      // No file yet, or one this version can't read: this run's windows are all there is to write
+    }
+    return this.mergeWithOtherInstances(onDisk);
+  }
+
+  /**
    * Save sessions to disk using atomic write pattern:
    * 1. Write to temp file
    * 2. Rotate current file to backup
    * 3. Rename temp to target (atomic on most filesystems)
    *
-   * If an async write is in progress, defers to the async writer to avoid
-   * both operations competing for the same temp file (ENOENT race condition).
+   * If an async write is in progress, queues one instead of writing here: both share the same temp
+   * file (ENOENT race condition), and a queued write is one the app can wait for before it quits.
    */
   private save(): void {
-    // If an async write is in progress, don't write synchronously — the async
-    // writer shares the same temp file path. Instead, mark a pending write so
-    // saveAsync() will re-save with the latest in-memory data when it finishes.
-    if (this.writeInProgress) {
-      this.writePending = true;
-      debugLog('[TerminalSessionStore] Deferring sync save — async write in progress');
+    if (this.writeInProgress || this.writeQueued) {
+      void this.queueWrite();
+      debugLog('[TerminalSessionStore] Queued a write — another write is in progress');
       return;
     }
 
     try {
-      const content = JSON.stringify(this.data, null, 2);
+      const content = JSON.stringify(this.dataToWrite(), null, 2);
 
       // Step 1: Write to temp file
       writeFileSync(this.tempPath, content, 'utf-8');
@@ -246,22 +324,45 @@ export class TerminalSessionStore {
   }
 
   /**
+   * Queue an asynchronous write and return when the data has reached disk.
+   *
+   * Saves asked for while a write is running collapse into one follow-up write, so a burst of
+   * saves costs two writes instead of one per save, and every caller can await the result.
+   */
+  private queueWrite(): Promise<void> {
+    if (!this.writeQueued) {
+      this.writeQueued = true;
+      this.writeChain = this.writeChain
+        .catch(() => { /* a failed write is logged below; the next one still runs */ })
+        .then(() => {
+          this.writeQueued = false;
+          return this.saveAsync();
+        });
+    }
+    return this.writeChain;
+  }
+
+  /**
+   * Everything saved so far is on disk.
+   *
+   * The app waits for this before it quits, so the last close or title change is not left in a
+   * write that never ran.
+   */
+  flush(): Promise<void> {
+    return this.writeChain.catch(() => { /* failures are already logged */ });
+  }
+
+  /**
    * Save sessions to disk asynchronously (non-blocking) using atomic write pattern
    *
    * Safe to call from Electron main process without blocking the event loop.
-   * Uses write serialization to prevent concurrent writes from losing data.
+   * Called through queueWrite(), which keeps writes from overlapping.
    * Tracks consecutive failures and logs warnings for persistent issues.
    */
   private async saveAsync(): Promise<void> {
-    // If a write is in progress, mark that another write is needed
-    if (this.writeInProgress) {
-      this.writePending = true;
-      return;
-    }
-
     this.writeInProgress = true;
     try {
-      const content = JSON.stringify(this.data, null, 2);
+      const content = JSON.stringify(await this.dataToWriteAsync(), null, 2);
 
       // Step 1: Write to temp file
       await fsPromises.writeFile(this.tempPath, content, 'utf-8');
@@ -310,13 +411,6 @@ export class TerminalSessionStore {
       }
     } finally {
       this.writeInProgress = false;
-
-      // If another write was requested while we were writing, do it now
-      if (this.writePending) {
-        this.writePending = false;
-        // Use setImmediate to avoid stack overflow with many rapid calls
-        setImmediate(() => this.saveAsync());
-      }
     }
   }
 
@@ -368,6 +462,8 @@ export class TerminalSessionStore {
         lastActiveAt: new Date().toISOString(),
         // Preserve existing displayOrder if incoming session doesn't have it
         displayOrder: session.displayOrder ?? existingSession.displayOrder,
+        // This run has the window open now, whichever run opened it
+        owner: THIS_INSTANCE,
       };
     } else {
       const truncatedLen = session.outputBuffer.slice(-MAX_OUTPUT_BUFFER).length;
@@ -378,7 +474,8 @@ export class TerminalSessionStore {
         ...session,
         outputBuffer: session.outputBuffer.slice(-MAX_OUTPUT_BUFFER),
         createdAt: new Date().toISOString(),
-        lastActiveAt: new Date().toISOString()
+        lastActiveAt: new Date().toISOString(),
+        owner: THIS_INSTANCE,
       });
     }
 
@@ -465,6 +562,8 @@ export class TerminalSessionStore {
       'pendingDelete size:', this.pendingDelete.size,
       'all pending IDs:', [...this.pendingDelete].join(', '));
 
+    this.closedHere.add(sessionId);
+
     const kept = this.data.windows.filter(s => s.id !== sessionId);
     if (kept.length !== this.data.windows.length) {
       this.data.windows = kept;
@@ -493,6 +592,7 @@ export class TerminalSessionStore {
    * Forget every window of this project
    */
   clearProjectSessions(): void {
+    for (const window of this.data.windows) this.closedHere.add(window.id);
     this.data.windows = [];
     this.save();
   }
@@ -559,7 +659,7 @@ export class TerminalSessionStore {
    */
   async saveSessionAsync(session: TerminalSession): Promise<void> {
     if (this.updateSessionInMemory(session)) {
-      await this.saveAsync();
+      await this.queueWrite();
     }
   }
 
@@ -573,6 +673,11 @@ export class TerminalSessionStore {
 
 // One store per project, each backed by that project's own file
 const instances = new Map<string, TerminalSessionStore>();
+
+/** Every project's windows are on disk: the app waits for this before it quits */
+export async function flushTerminalSessionStores(): Promise<void> {
+  await Promise.all([...instances.values()].map(store => store.flush()));
+}
 
 export function getTerminalSessionStore(projectPath: string): TerminalSessionStore {
   let instance = instances.get(projectPath);

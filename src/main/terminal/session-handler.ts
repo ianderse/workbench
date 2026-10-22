@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { TerminalProcess } from './types';
-import { getTerminalSessionStore, type TerminalSession } from '../terminal-session-store';
+import { getTerminalSessionStore, flushTerminalSessionStores, type TerminalSession } from '../terminal-session-store';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 
 /**
@@ -116,6 +116,16 @@ export async function persistAllSessionsAsync(terminals: Map<string, TerminalPro
   });
 
   await Promise.all(savePromises);
+}
+
+/**
+ * Wait until every session saved so far is on disk.
+ *
+ * Saves are queued, so the app quitting has to wait for the queue: without this the last window a
+ * user closed can stay in the file and come back on the next start.
+ */
+export async function flushSessions(): Promise<void> {
+  await flushTerminalSessionStores();
 }
 
 /**

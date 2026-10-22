@@ -343,6 +343,8 @@ export async function destroyAllTerminals(
   PtyManager.setShuttingDown(true);
 
   await SessionHandler.persistAllSessionsAsync(terminals);
+  // Queued writes (a window closed moments ago) have to land before the process goes away
+  await SessionHandler.flushSessions();
 
   if (saveTimer) {
     clearInterval(saveTimer);

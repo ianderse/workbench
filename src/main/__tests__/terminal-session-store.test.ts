@@ -25,7 +25,8 @@ function initTestPaths(): void {
   // One file per project, kept in that project's own .workbench
   SESSIONS_DIR = path.join(TEST_PROJECT_PATH, '.workbench');
   STORE_PATH = path.join(SESSIONS_DIR, 'terminals.json');
-  TEMP_PATH = path.join(SESSIONS_DIR, 'terminals.json.tmp');
+  // The store gives each run of the app its own temp file
+  TEMP_PATH = path.join(SESSIONS_DIR, `terminals.json.${process.pid}.tmp`);
   BACKUP_PATH = path.join(SESSIONS_DIR, 'terminals.json.backup');
 }
 
@@ -362,6 +363,102 @@ describe('TerminalSessionStore', () => {
       // All sessions should be saved
       const sessions = store.getSessions();
       expect(sessions).toHaveLength(10);
+
+      vi.useFakeTimers();
+    });
+  });
+
+  describe('windows another copy of the app has open', () => {
+    // Above the process id range of every platform, so no process can be running under it
+    const ENDED_RUN_PID = 4294967;
+
+    it('leaves a running copy of the app its windows and does not restore them', async () => {
+      writeFileSync(STORE_PATH, createValidStoreData([
+        { ...createTestSession({ id: 'theirs' }), owner: { instanceId: 'another-run', pid: process.ppid } }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      // The other copy still has it open, so this one neither shows it...
+      expect(store.getSessions()).toHaveLength(0);
+
+      store.saveSession(createTestSession({ id: 'ours' }));
+
+      // ...nor writes it out of the file
+      const written = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+      expect(written.windows.map((w: { id: string }) => w.id).sort()).toEqual(['ours', 'theirs']);
+    });
+
+    it('takes over the windows of a copy of the app that has ended', async () => {
+      writeFileSync(STORE_PATH, createValidStoreData([
+        { ...createTestSession({ id: 'left-behind' }), owner: { instanceId: 'ended-run', pid: ENDED_RUN_PID } }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      expect(store.getSessions().map(s => s.id)).toEqual(['left-behind']);
+    });
+
+    it('restores windows saved before windows recorded an owner', async () => {
+      writeFileSync(STORE_PATH, createValidStoreData([createTestSession({ id: 'no-owner' })]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      expect(store.getSessions().map(s => s.id)).toEqual(['no-owner']);
+    });
+
+    it('keeps a window a copy of the app left behind when it was killed', async () => {
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      // The other copy wrote this after this run started, so this run never took it over: it is
+      // that copy's to restore when it runs again, not this one's to write away
+      writeFileSync(STORE_PATH, createValidStoreData([
+        { ...createTestSession({ id: 'left-behind' }), owner: { instanceId: 'killed-run', pid: ENDED_RUN_PID } }
+      ]));
+
+      store.saveSession(createTestSession({ id: 'ours' }));
+
+      const written = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+      expect(written.windows.map((w: { id: string }) => w.id).sort()).toEqual(['left-behind', 'ours']);
+    });
+
+    it('closing a window takes it out of the file and leaves the other copy its own', async () => {
+      writeFileSync(STORE_PATH, createValidStoreData([
+        { ...createTestSession({ id: 'theirs' }), owner: { instanceId: 'another-run', pid: process.ppid } }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      store.saveSession(createTestSession({ id: 'ours' }));
+      store.removeSession('ours');
+
+      const written = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+      expect(written.windows.map((w: { id: string }) => w.id)).toEqual(['theirs']);
+    });
+  });
+
+  describe('flush', () => {
+    it('waits for a write queued behind one already running', async () => {
+      // Real timers: the queued write runs on promise callbacks, not on a timer
+      vi.useRealTimers();
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      // The window is saved, then closed while that save is still being written — what the app
+      // quitting right after a close does
+      const saving = store.saveSessionAsync(createTestSession({ id: 'closed-before-quit' }));
+      store.removeSession('closed-before-quit');
+      await saving;
+      await store.flush();
+
+      const written = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+      expect(written.windows).toHaveLength(0);
 
       vi.useFakeTimers();
     });
