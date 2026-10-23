@@ -14,10 +14,15 @@ vi.mock('../claude-profile/profile-config-dirs', () => ({
   claudeConfigDirs: () => [configRoot],
 }));
 
-/** Waits for the watcher to settle and report (its own delay is 1.5s) */
-const reported = async (onChange: Mock<() => void>): Promise<boolean> => {
+/**
+ * Makes the change and waits for the watcher to settle and report (its own delay is 1.5s). The
+ * change is made again every half second: on macOS a watcher may start a moment after fs.watch
+ * returns and miss a write made right away.
+ */
+const reported = async (onChange: Mock<() => void>, change: () => void): Promise<boolean> => {
   for (let waited = 0; waited < 4000; waited += 100) {
     if (onChange.mock.calls.length > 0) return true;
+    if (waited % 500 === 0 && waited <= 2000) change();
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   return false;
@@ -46,7 +51,7 @@ describe('watching a project\'s metrics', () => {
       })
     );
 
-    const sessions = path.join(configRoot, 'projects', projectPath.replace(/\//g, '-'));
+    const sessions = path.join(configRoot, 'projects', projectPath.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, '').replace(/\//g, '-'));
     mkdirSync(sessions, { recursive: true });
     transcript = path.join(sessions, 'abc.jsonl');
     writeFileSync(transcript, '{"type":"user"}\n');
@@ -60,26 +65,22 @@ describe('watching a project\'s metrics', () => {
   it('reports a change when a window\'s session writes another answer', async () => {
     await watchProjectMetrics([project], onChange);
 
-    appendFileSync(transcript, '{"type":"assistant"}\n');
-
-    expect(await reported(onChange)).toBe(true);
+    expect(await reported(onChange, () => appendFileSync(transcript, '{"type":"assistant"}\n'))).toBe(true);
   });
 
   it('reports a change when a window records a session it just started', async () => {
     await watchProjectMetrics([project], onChange);
 
-    writeFileSync(path.join(project.path, '.workbench', 'agent-sessions.json'), '{"version":1,"sessions":[]}');
-
-    expect(await reported(onChange)).toBe(true);
+    const recordSession = () =>
+      writeFileSync(path.join(project.path, '.workbench', 'agent-sessions.json'), '{"version":1,"sessions":[]}');
+    expect(await reported(onChange, recordSession)).toBe(true);
   });
 
   it('reports nothing once the page that asked for the watch is gone', async () => {
     await watchProjectMetrics([project], onChange);
     stopWatchingProjectMetrics();
 
-    appendFileSync(transcript, '{"type":"assistant"}\n');
-
-    expect(await reported(onChange)).toBe(false);
+    expect(await reported(onChange, () => appendFileSync(transcript, '{"type":"assistant"}\n'))).toBe(false);
   });
 
   it('watches a project that has no sessions yet without failing', async () => {
@@ -88,7 +89,7 @@ describe('watching a project\'s metrics', () => {
 
     await watchProjectMetrics([{ id: 'p2', name: 'Empty', path: empty } as Project], onChange);
 
-    writeFileSync(path.join(empty, '.workbench', 'agent-sessions.json'), '{"version":1,"sessions":[]}');
-    expect(await reported(onChange)).toBe(true);
+    const recordSession = () => writeFileSync(path.join(empty, '.workbench', 'agent-sessions.json'), '{"version":1,"sessions":[]}');
+    expect(await reported(onChange, recordSession)).toBe(true);
   });
 });
