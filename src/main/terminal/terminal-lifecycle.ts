@@ -19,7 +19,6 @@ import { isWindows } from '../platform';
 import { whenShellRuntimeReady } from '../platform/shell-runtime';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
-import { getClaudeCodeEnv } from '../claude-code-settings';
 import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
 import { isSelfImproveEnabledForPath } from '../self-improve/setting';
 import { LIVE_AGENT_TERMINAL_ENV } from '../live-agent/project-setup';
@@ -68,17 +67,13 @@ export async function createTerminal(
     // For auth terminals, don't inject existing OAuth token - we want a fresh login
     const profileEnv = skipOAuthToken ? {} : PtyManager.getActiveProfileEnv();
 
-    // Read env vars from Claude Code CLI settings files (.claude/settings.json hierarchy)
-    const claudeCodeEnv = getClaudeCodeEnv(projectPath);
-    if (Object.keys(claudeCodeEnv).length > 0) {
-      debugLog('[TerminalLifecycle] Injecting Claude Code settings env vars:', Object.keys(claudeCodeEnv));
-    }
-
     // Merge environment variables (lowest to highest precedence):
-    // 1. Claude Code settings env (from settings.json hierarchy)
-    // 2. Profile env (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN)
-    // 3. Custom env from TerminalCreateOptions
-    const mergedEnv: Record<string, string> = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
+    // 1. Profile env (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN)
+    // 2. Custom env from TerminalCreateOptions
+    // The `env` of Claude Code's settings files isn't copied in: Claude Code applies it itself, from
+    // the config dir it runs with. Copying ~/.claude's in overrode the account in use when that
+    // account has its own dir (a Bedrock ~/.claude turned a subscription window into Bedrock).
+    const mergedEnv: Record<string, string> = { ...profileEnv, ...(customEnv || {}) };
 
     // Point Claude Code's /graphify command at the project's memory graph (.workbench/knowledge)
     // instead of graphify-out in the working directory
