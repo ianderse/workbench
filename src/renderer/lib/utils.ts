@@ -27,6 +27,27 @@ export function formatRelativeTime(date: Date): string {
   return new Date(date).toLocaleDateString();
 }
 
+const SHORT_UNITS: Array<{ limit: number; per: number; unit: string }> = [
+  { limit: 60, per: 1, unit: 'sec' },
+  { limit: 3600, per: 60, unit: 'min' },
+  { limit: 86400, per: 3600, unit: 'h' },
+  { limit: 2592000, per: 86400, unit: 'd' },
+  { limit: 31536000, per: 2592000, unit: 'mo' },
+];
+
+/**
+ * How long ago something happened, in short units: "42 sec ago", "7 min ago", "3 h ago",
+ * "5 d ago", "2 mo ago", "1 y ago". Unlike {@link formatRelativeTime} it never falls back to a
+ * date, so an old entry still reads as an age.
+ */
+export function formatShortRelativeTime(date: Date | string | number): string {
+  const seconds = Math.max(1, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
+  for (const { limit, per, unit } of SHORT_UNITS) {
+    if (seconds < limit) return `${Math.floor(seconds / per)} ${unit} ago`;
+  }
+  return `${Math.floor(seconds / 31536000)} y ago`;
+}
+
 /**
  * Sanitize and extract plain text from markdown content.
  * Strips markdown formatting and collapses whitespace for clean display in UI.

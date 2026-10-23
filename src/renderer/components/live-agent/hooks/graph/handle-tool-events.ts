@@ -1,5 +1,7 @@
-import type { Agent } from '../../lib/agent-types'
-import type { ProcessEventContext, MutableEventState } from './process-event'
+import { NODE, type Agent } from '../../lib/agent-types'
+import { estimateToolNodeRadius } from '../../lib/canvas-constants'
+import type { MutableEventState } from './process-event'
+import { findFreeSlot } from './find-slot'
 import { asString, asBoolean, isLive } from './types'
 
 /** Whether the agent shows a permission prompt that is still open: the call
@@ -10,11 +12,16 @@ function promptOpen(agent: Agent, state: MutableEventState): boolean {
     && state.toolCalls.get(agent.waitingToolId)?.state === 'running'
 }
 
+/** A tool call grows away from the agent's own parent, so branches spread out */
+function awayFromParent(agent: Agent, agents: Map<string, Agent>): number {
+  const parent = agent.parentId ? agents.get(agent.parentId) : undefined
+  return parent ? Math.atan2(agent.y - parent.y, agent.x - parent.x) : -Math.PI / 2
+}
+
 export function handleToolCallStart(
   payload: Record<string, unknown>,
   eventTime: number,
   state: MutableEventState,
-  ctx: ProcessEventContext,
 ): void {
   const agentName = asString(payload.agent)
   const toolName = asString(payload.tool)
@@ -30,7 +37,13 @@ export function handleToolCallStart(
     state.agents.set(agentName, { ...agent, state: 'tool_calling' })
   }
 
-  const pos = ctx.findToolSlot(agent, state.agents, state.toolCalls, toolName)
+  const pos = findFreeSlot({
+    parent: { id: agent.id, x: agent.x, y: agent.y, radius: agent.isMain ? NODE.radiusMain : NODE.radiusSub },
+    radius: estimateToolNodeRadius(toolName),
+    preferredAngle: awayFromParent(agent, state.agents),
+    agents: state.agents,
+    toolCalls: state.toolCalls,
+  })
 
   state.toolCalls.set(toolId, {
     agentId: agentName, toolName,

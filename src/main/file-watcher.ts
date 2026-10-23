@@ -4,6 +4,7 @@ import path from 'path';
 import { EventEmitter } from 'events';
 import type { ImplementationPlan } from '../shared/types';
 import { safeParseJson } from './utils/json-repair';
+import { isWslUncPath } from './platform/wsl-paths';
 
 interface WatcherInfo {
   taskId: string;
@@ -70,10 +71,12 @@ export class FileWatcher extends EventEmitter {
         return;
       }
 
-      // Create watcher with settings to handle frequent writes
+      // Create watcher with settings to handle frequent writes. A plan inside WSL
+      // (\\wsl.localhost\...) is polled: file system events don't work there
       const watcher = chokidar.watch(planPath, {
         persistent: true,
         ignoreInitial: true,
+        ...(isWslUncPath(planPath) ? { usePolling: true, interval: 1000 } : {}),
         awaitWriteFinish: {
           stabilityThreshold: 300,
           pollInterval: 100

@@ -29,6 +29,11 @@ process.stdin.on('end', () => {
     graphifyOut: process.env.GRAPHIFY_OUT ?? null,
     mcpConfig: args.includes('--mcp-config') ? JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')) : null,
     mcpToolTimeout: process.env.MCP_TOOL_TIMEOUT ?? null,
+    bridgeSource: (() => {
+      if (!args.includes('--mcp-config')) return null;
+      const server = JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.workbench;
+      return server && server.type === 'stdio' ? fs.readFileSync(server.args[0], 'utf8') : null;
+    })(),
   }));
   for (const event of JSON.parse(process.env.FAKE_EVENTS || '[]')) process.stdout.write(JSON.stringify(event) + '\\n');
   if (process.env.FAKE_STDERR) process.stderr.write(process.env.FAKE_STDERR);
@@ -49,7 +54,7 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 vi.mock('../../cli-tool-manager', () => ({
-  getToolInfo: () => (cliFound ? { found: true, path: '/usr/bin/claude' } : { found: false, message: 'Claude CLI not found' }),
+  getToolInfoAsync: async () => (cliFound ? { found: true, path: '/usr/bin/claude' } : { found: false, message: 'Claude CLI not found' }),
 }));
 vi.mock('../../claude-code/env', () => ({
   resolveClaudeEnv: async () => ({
@@ -61,6 +66,24 @@ vi.mock('../../claude-code/env', () => ({
 vi.mock('../../env-utils', () => ({
   getSpawnCommand: (command: string) => command,
   getSpawnOptions: (_command: string, options: Record<string, unknown>) => ({ ...options, shell: false }),
+  shouldUseShell: () => false,
+}));
+
+/**
+ * Claude Code in WSL, as far as the Insights runner decides (task tools, claude lookup). The fake
+ * CLI itself still runs natively: spawning stays native (isWslRuntime false)
+ */
+const wslRef = vi.hoisted(() => ({
+  info: null as null | { distro: string; networkingMode: string | null; interop?: boolean; tools: { claude: { path: string | null } } },
+  version: 2,
+}));
+vi.mock('../../platform/shell-runtime', () => ({
+  whenShellRuntimeReady: async () => ({}),
+  isWslRuntime: () => false,
+  getWslInfo: () => wslRef.info,
+  getShellRuntimeStatus: () => ({ wsl: wslRef.info ? { version: wslRef.version } : null }),
+  toRuntimePath: (p: string) => (wslRef.info ? `/runtime${p.replace(/\\/g, '/')}` : p),
+  toHostPath: (p: string) => p,
 }));
 
 import {
@@ -68,6 +91,7 @@ import {
   INSIGHTS_READ_ONLY_TOOLS,
   INSIGHTS_GRAPHIFY_COMMANDS,
   INSIGHTS_TASK_TOOLS_RULE,
+  resetTaskToolsBridgeForTests,
   toClaudeModel,
   type InsightsStreamEvent,
 } from '../claude-code-runner';
@@ -114,6 +138,9 @@ async function run(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   cliFound = true;
+  wslRef.info = null;
+  wslRef.version = 2;
+  resetTaskToolsBridgeForTests();
 });
 
 afterAll(() => rmSync(workDir, { recursive: true, force: true }));
@@ -253,6 +280,81 @@ describe('runInsights', () => {
     const { promise } = await run();
     const error = await promise.catch((e: Error) => e);
     expect(parseInsightsError((error as Error).message).code).toBe(INSIGHTS_ERROR_CODES.claudeCodeMissing);
+  });
+
+  describe('with Claude Code in WSL', () => {
+    const mcpServer = { type: 'http' as const, url: 'http://127.0.0.1:4567/mcp', headers: { Authorization: 'Bearer secret' } };
+
+    it("reaches the task tools through the stdio bridge under NAT networking, where the app's 127.0.0.1 is out of reach", async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: 'nat', tools: { claude: { path: '/home/me/.local/bin/claude' } } };
+      setRun(conversation);
+      await (await run({ taskTools: mcpServer })).promise;
+      const { args, mcpConfig, systemPrompt, bridgeSource } = record();
+      const server = mcpConfig.mcpServers.workbench;
+      // Workbench's own executable by its Linux path, the script by its Windows path
+      expect(server).toEqual({
+        type: 'stdio',
+        command: `/runtime${process.execPath.replace(/\\/g, '/')}`,
+        args: [expect.stringMatching(/task-tools-bridge.cjs$/)],
+        env: {
+          ELECTRON_RUN_AS_NODE: '1',
+          WORKBENCH_TASK_TOOLS_URL: 'http://127.0.0.1:4567/mcp',
+          WORKBENCH_TASK_TOOLS_TOKEN: 'secret',
+          WSLENV: 'ELECTRON_RUN_AS_NODE:WORKBENCH_TASK_TOOLS_URL:WORKBENCH_TASK_TOOLS_TOKEN',
+        },
+      });
+      expect(server.args[0].startsWith('/runtime')).toBe(false);
+      // The script exists while the turn runs
+      expect(bridgeSource).toContain('WORKBENCH_TASK_TOOLS_TOKEN');
+      expect(JSON.stringify(args)).not.toContain('secret');
+      expect(args).toContain(INSIGHTS_TASK_TOOLS_RULE);
+      expect(systemPrompt).toContain('mcp__workbench__');
+    });
+
+    it('turns the task tools off after the bridge failed to start', async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: 'nat', tools: { claude: { path: '/home/me/.local/bin/claude' } } };
+      setRun([{ type: 'system', subtype: 'init', tools: [], mcp_servers: [{ name: 'workbench', status: 'failed' }] }, ...conversation.slice(1)]);
+      await (await run({ taskTools: mcpServer })).promise;
+      expect(record().mcpConfig.mcpServers.workbench.type).toBe('stdio');
+
+      setRun(conversation);
+      await (await run({ taskTools: mcpServer })).promise;
+      const { args, mcpConfig, systemPrompt } = record();
+      expect(mcpConfig).toBeNull();
+      expect(args).not.toContain(INSIGHTS_TASK_TOOLS_RULE);
+      expect(systemPrompt).not.toContain('mcp__workbench__');
+    });
+
+    it('offers no task tools from the first turn when the distribution has WSL interop off', async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: 'nat', interop: false, tools: { claude: { path: '/home/me/.local/bin/claude' } } };
+      setRun(conversation);
+      await (await run({ taskTools: mcpServer })).promise;
+      const { args, mcpConfig } = record();
+      expect(mcpConfig).toBeNull();
+      expect(args).not.toContain(INSIGHTS_TASK_TOOLS_RULE);
+    });
+
+    it('keeps the direct HTTP entry in WSL1, which shares the host network', async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: null, tools: { claude: { path: '/home/me/.local/bin/claude' } } };
+      wslRef.version = 1;
+      setRun(conversation);
+      await (await run({ taskTools: mcpServer })).promise;
+      expect(record().mcpConfig).toEqual({ mcpServers: { 'workbench': mcpServer } });
+    });
+
+    it('keeps the task tools with mirrored networking', async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: 'mirrored', tools: { claude: { path: '/home/me/.local/bin/claude' } } };
+      setRun(conversation);
+      await (await run({ taskTools: mcpServer })).promise;
+      expect(record().mcpConfig).toEqual({ mcpServers: { 'workbench': mcpServer } });
+    });
+
+    it("reports a missing Claude Code CLI when the distribution has none", async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: 'nat', tools: { claude: { path: null } } };
+      const { promise } = await run();
+      const error = await promise.catch((e: Error) => e);
+      expect(parseInsightsError((error as Error).message).code).toBe(INSIGHTS_ERROR_CODES.claudeCodeMissing);
+    });
   });
 });
 

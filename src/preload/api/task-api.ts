@@ -4,6 +4,8 @@ import type {
   Task,
   IPCResult,
   TaskStartOptions,
+  TaskReviewOptions,
+  ArchivedTaskRun,
   TaskStatus,
   TaskRecoveryResult,
   ImplementationPlan,
@@ -44,7 +46,8 @@ export interface TaskAPI {
     taskId: string,
     approved: boolean,
     feedback?: string,
-    images?: ImageAttachment[]
+    images?: ImageAttachment[],
+    options?: TaskReviewOptions
   ) => Promise<IPCResult>;
   updateTaskStatus: (
     taskId: string,
@@ -74,6 +77,7 @@ export interface TaskAPI {
   unarchiveTasks: (projectId: string, taskIds: string[]) => Promise<IPCResult<boolean>>;
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
   mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
+  mergeWorktreeLocal: (taskId: string) => Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>>;
   getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
   onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void) => () => void;
   onTaskListChanged: (callback: (projectId: string) => void) => () => void;
@@ -93,10 +97,11 @@ export interface TaskAPI {
 
   // Task Phase Logs
   getTaskLogs: (projectId: string, specId: string) => Promise<IPCResult<TaskLogs | null>>;
+  getPreviousTaskRuns: (projectId: string, specId: string) => Promise<IPCResult<ArchivedTaskRun[]>>;
   watchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
-  unwatchTaskLogs: (specId: string) => Promise<IPCResult>;
-  onTaskLogsChanged: (callback: (specId: string, logs: TaskLogs) => void) => () => void;
-  onTaskLogsStream: (callback: (specId: string, chunk: TaskLogStreamChunk) => void) => () => void;
+  unwatchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
+  onTaskLogsChanged: (callback: (specId: string, logs: TaskLogs, projectId?: string) => void) => () => void;
+  onTaskLogsStream: (callback: (specId: string, chunk: TaskLogStreamChunk, projectId?: string) => void) => () => void;
 
   // Merge Progress Events
   onMergeProgress: (callback: (taskId: string, progress: MergeProgress) => void) => () => void;
@@ -137,9 +142,10 @@ export const createTaskAPI = (): TaskAPI => ({
     taskId: string,
     approved: boolean,
     feedback?: string,
-    images?: ImageAttachment[]
+    images?: ImageAttachment[],
+    options?: TaskReviewOptions
   ): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_REVIEW, taskId, approved, feedback, images),
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_REVIEW, taskId, approved, feedback, images, options),
 
   updateTaskStatus: (
     taskId: string,
@@ -195,6 +201,9 @@ export const createTaskAPI = (): TaskAPI => ({
 
   mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions): Promise<IPCResult<WorktreeMergePRResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, taskId, options),
+
+  mergeWorktreeLocal: (taskId: string): Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL, taskId),
 
   getWorktreePRState: (taskId: string): Promise<IPCResult<PullRequestState>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_PR_STATE, taskId),
@@ -347,21 +356,25 @@ export const createTaskAPI = (): TaskAPI => ({
   getTaskLogs: (projectId: string, specId: string): Promise<IPCResult<TaskLogs | null>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LOGS_GET, projectId, specId),
 
+  getPreviousTaskRuns: (projectId: string, specId: string): Promise<IPCResult<ArchivedTaskRun[]>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_PREVIOUS_RUNS_GET, projectId, specId),
+
   watchTaskLogs: (projectId: string, specId: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LOGS_WATCH, projectId, specId),
 
-  unwatchTaskLogs: (specId: string): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_LOGS_UNWATCH, specId),
+  unwatchTaskLogs: (projectId: string, specId: string): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_LOGS_UNWATCH, projectId, specId),
 
   onTaskLogsChanged: (
-    callback: (specId: string, logs: TaskLogs) => void
+    callback: (specId: string, logs: TaskLogs, projectId?: string) => void
   ): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       specId: string,
-      logs: TaskLogs
+      logs: TaskLogs,
+      projectId?: string
     ): void => {
-      callback(specId, logs);
+      callback(specId, logs, projectId);
     };
     ipcRenderer.on(IPC_CHANNELS.TASK_LOGS_CHANGED, handler);
     return () => {
@@ -370,14 +383,15 @@ export const createTaskAPI = (): TaskAPI => ({
   },
 
   onTaskLogsStream: (
-    callback: (specId: string, chunk: TaskLogStreamChunk) => void
+    callback: (specId: string, chunk: TaskLogStreamChunk, projectId?: string) => void
   ): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
       specId: string,
-      chunk: TaskLogStreamChunk
+      chunk: TaskLogStreamChunk,
+      projectId?: string
     ): void => {
-      callback(specId, chunk);
+      callback(specId, chunk, projectId);
     };
     ipcRenderer.on(IPC_CHANNELS.TASK_LOGS_STREAM, handler);
     return () => {

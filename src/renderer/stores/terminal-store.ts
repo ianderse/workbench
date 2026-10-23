@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import { v4 as uuid } from 'uuid';
 import { arrayMove } from '@dnd-kit/sortable';
 import type { Task, TerminalSession, TerminalTaskSessionOptions, TerminalWorktreeConfig } from '../../shared/types';
 import { getTaskWorktreeBranch } from '../../shared/utils/claude-run';
@@ -122,6 +121,16 @@ export function writeToTerminal(terminalId: string, data: string): void {
   }
 }
 
+/**
+ * Whether this window holds the terminal: its project's, or one of a project it has shown.
+ *
+ * Terminal output reaches every project window, and another window's terminals are never
+ * drawn here, so the output listener drops what isn't ours instead of buffering it twice.
+ */
+export function isWindowTerminal(terminalId: string): boolean {
+  return useTerminalStore.getState().terminals.some((terminal) => terminal.id === terminalId);
+}
+
 export type TerminalStatus = 'idle' | 'running' | 'claude-active' | 'exited';
 
 /** A task's Claude Code session to resume once the agent window's shell is ready */
@@ -227,7 +236,7 @@ interface TerminalState {
 
   // Actions
   addTerminal: (cwd?: string, projectPath?: string, options?: { launchCLI?: boolean }) => Terminal | null;
-  addRestoredTerminal: (session: TerminalSession) => Terminal;
+  addRestoredTerminal: (session: TerminalSession) => Terminal | null;
   // Add a terminal with a specific ID (for terminals created in main process, like OAuth login terminals)
   addExternalTerminal: (id: string, title: string, cwd?: string, projectPath?: string) => Terminal | null;
   removeTerminal: (id: string) => void;
@@ -262,6 +271,16 @@ interface TerminalState {
 }
 
 /**
+ * Whether a window belongs to a project.
+ *
+ * Strictly its own project: a window with no project used to match every project's grid, which both
+ * showed it where it did not belong and hid it from that project's limit.
+ */
+export function isProjectTerminal(terminal: Terminal, projectPath?: string): boolean {
+  return terminal.projectPath === projectPath;
+}
+
+/**
  * Helper function to count active (non-exited) terminals for a specific project.
  * Extracted to avoid duplicating the counting logic across multiple methods.
  *
@@ -269,8 +288,8 @@ interface TerminalState {
  * @param projectPath - The project path to filter by
  * @returns The count of active terminals for the given project
  */
-function getActiveProjectTerminalCount(terminals: Terminal[], projectPath?: string): number {
-  return terminals.filter(t => t.status !== 'exited' && t.projectPath === projectPath).length;
+export function getActiveProjectTerminalCount(terminals: Terminal[], projectPath?: string): number {
+  return terminals.filter(t => t.status !== 'exited' && isProjectTerminal(t, projectPath)).length;
 }
 
 export const useTerminalStore = create<TerminalState>((set, get) => ({
@@ -293,7 +312,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
     }
 
     const newTerminal: Terminal = {
-      id: uuid(),
+      id: crypto.randomUUID(),
       title: `Terminal ${state.terminals.length + 1}`,
       status: 'idle',
       cwd: cwd || process.env.HOME || '~',
@@ -348,10 +367,14 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       return existingTerminal;
     }
 
-    // NOTE: Restored terminals are intentionally exempt from the per-project limit.
-    // This preserves user state from previous sessions - if a user had 12 terminals
-    // before closing the app, they should get all 12 back on restore.
-    // The limit only applies to newly created terminals.
+    // Restored windows count against the limit like any other: a project whose file holds more
+    // sessions than the limit allows gets the first ones back, in display order, and the rest stay
+    // on disk rather than opening a grid the user cannot create by hand.
+    const activeCount = getActiveProjectTerminalCount(state.terminals, session.projectPath);
+    if (activeCount >= state.maxTerminals) {
+      debugLog(`[TerminalStore] Not restoring ${session.id}: limit of ${state.maxTerminals} reached for project ${session.projectPath}`);
+      return null;
+    }
 
     const restoredTerminal: Terminal = {
       id: session.id,
@@ -671,7 +694,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
   },
 
   getTerminalsForProject: (projectPath: string) => {
-    return get().terminals.filter(t => t.projectPath === projectPath);
+    return get().terminals.filter(t => isProjectTerminal(t, projectPath));
   },
 
   getWorktreeCount: () => {

@@ -118,8 +118,14 @@ function describeTask(task: TaskChangelogTask): string {
 /**
  * Prompt section about the project's other tasks: what they are changing right now and where
  * to look for newer entries. `specsDir` (the project's tasks folder) drops deleted tasks.
+ * `promptPath` is the changelog's path as the session sees it (its WSL path when Claude Code runs there).
  */
-export async function buildParallelTasksPrompt(changelogPath: string, specId: string, specsDir: string): Promise<string> {
+export async function buildParallelTasksPrompt(
+  changelogPath: string,
+  specId: string,
+  specsDir: string,
+  promptPath: string = changelogPath
+): Promise<string> {
   const others = [...foldTaskChangelog(await readTaskChangelog(changelogPath)).values()].filter(
     (task) =>
       task.task !== specId &&
@@ -131,7 +137,7 @@ export async function buildParallelTasksPrompt(changelogPath: string, specId: st
     ? `Other tasks whose changes are not merged yet, as of now:\n${others.map(describeTask).join('\n')}`
     : 'No other task has unmerged changes right now.';
   return `## Parallel tasks
-Other tasks of this project run in parallel in their own worktrees, and their branches are merged into the same base branch, so editing the same files causes merge conflicts. Workbench logs every task's states and the files it changes in \`${changelogPath}\` (JSON Lines, newest last; don't modify it).
+Other tasks of this project run in parallel in their own worktrees, and their branches are merged into the same base branch, so editing the same files causes merge conflicts. Workbench logs every task's states and the files it changes in \`${promptPath}\` (JSON Lines, newest last; don't modify it).
 ${list}
 Before editing a file, check whether another task is changing it (re-read the changelog for newer entries during long work). Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.`;
 }

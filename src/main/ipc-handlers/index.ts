@@ -15,15 +15,17 @@ import { registerTaskHandlers } from './task-handlers';
 import { registerTerminalHandlers } from './terminal-handlers';
 import { registerAgenteventsHandlers } from './agent-events-handlers';
 import { registerSettingsHandlers } from './settings-handlers';
-import { registerContextHandlers } from './context-handlers';
-import { registerEnvHandlers } from './env-handlers';
 import { registerInsightsHandlers } from './insights-handlers';
 import { registerAppUpdateHandlers } from './app-update-handlers';
 import { registerClaudeCodeHandlers } from './claude-code-handlers';
 import { registerGraphifyHandlers } from './graphify-handlers';
+import { registerSelfImproveHandlers } from './self-improve-handlers';
+import { registerProjectIndexHandlers } from './project-index-handlers';
 import { registerLiveAgentHandlers } from './live-agent-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
+import { registerShellRuntimeHandlers } from './shell-runtime-handlers';
+import { registerWindowHandlers, type WindowHandlerDeps } from './window-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
 import { notificationService } from '../notification-service';
 import { setAgentManagerRef } from './utils';
@@ -33,12 +35,14 @@ import { setAgentManagerRef } from './utils';
  *
  * @param agentManager - The agent manager instance
  * @param terminalManager - The terminal manager instance
- * @param getMainWindow - Function to get the main BrowserWindow
+ * @param getMainWindow - Function to get the window in use
+ * @param windowDeps - How to open a project's own window (project windows)
  */
 export function setupIpcHandlers(
   agentManager: AgentManager,
   terminalManager: TerminalManager,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  windowDeps: WindowHandlerDeps
 ): void {
   // Initialize notification service
   notificationService.initialize(getMainWindow);
@@ -48,6 +52,9 @@ export function setupIpcHandlers(
 
   // Project handlers
   registerProjectHandlers(getMainWindow);
+
+  // Project windows (open a project in its own window, focus or close one)
+  registerWindowHandlers(windowDeps);
 
   // Task handlers
   registerTaskHandlers(agentManager, getMainWindow);
@@ -64,12 +71,6 @@ export function setupIpcHandlers(
   // Settings and dialog handlers
   registerSettingsHandlers(agentManager, getMainWindow);
 
-  // Project context handlers (project index)
-  registerContextHandlers(getMainWindow);
-
-  // Environment configuration handlers
-  registerEnvHandlers(getMainWindow);
-
   // Insights handlers
   registerInsightsHandlers(getMainWindow);
 
@@ -81,6 +82,8 @@ export function setupIpcHandlers(
 
   // Graphify CLI handlers (version, installation, project memory graph)
   registerGraphifyHandlers();
+  registerSelfImproveHandlers();
+  registerProjectIndexHandlers();
 
   // Live agent handlers (relay status, agent windows' graph subscriptions)
   registerLiveAgentHandlers();
@@ -90,6 +93,9 @@ export function setupIpcHandlers(
 
   // API Profile handlers (custom Anthropic-compatible endpoints)
   registerProfileHandlers();
+
+  // Windows shell setting (runtime status, WSL availability, relaunch to apply)
+  registerShellRuntimeHandlers();
 
   console.warn('[IPC] All handler modules registered successfully');
 }

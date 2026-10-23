@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 import { useTaskStore, loadTasks } from '../stores/task-store';
 import { useAuthFailureStore } from '../stores/auth-failure-store';
-import { useProjectStore } from '../stores/project-store';
+import { loadProjects, useProjectStore } from '../stores/project-store';
 import { setupInsightsListeners } from '../stores/insights-store';
 import type { ImplementationPlan, TaskStatus, ExecutionProgress, AuthFailureInfo } from '../../shared/types';
 
@@ -157,8 +157,10 @@ function isTaskForCurrentProject(eventProjectId?: string): boolean {
   const { activeProjectId, selectedProjectId } = useProjectStore.getState();
   // Keep filtering aligned with App task loading logic (active first, selected fallback)
   const currentProjectId = activeProjectId || selectedProjectId;
-  // If no project selected/active, accept the event
-  if (!currentProjectId) return true;
+  // A window showing no project has no tasks of its own, and the event names a project it
+  // isn't showing: every window gets these, so accepting it here would show another
+  // project's task errors in this one
+  if (!currentProjectId) return false;
   return currentProjectId === eventProjectId;
 }
 
@@ -231,6 +233,11 @@ export function useIpcListeners(): void {
       }
     );
 
+    // A project added or removed, here or in another project window
+    const cleanupProjectList = window.electronAPI.onProjectListChanged(() => {
+      void loadProjects();
+    });
+
     // Tasks created, edited or moved outside the board (the Claude chat's task tools)
     const cleanupTaskList = window.electronAPI.onTaskListChanged((projectId: string) => {
       if (!isTaskForCurrentProject(projectId)) return;
@@ -287,6 +294,7 @@ export function useIpcListeners(): void {
       cleanupRateLimitHold();
       cleanupClaudeRun();
       cleanupTaskList();
+      cleanupProjectList();
       cleanupExecutionProgress();
       cleanupAuthFailure();
       cleanupInsights();

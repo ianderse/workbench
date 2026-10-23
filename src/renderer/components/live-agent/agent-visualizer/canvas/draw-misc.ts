@@ -1,8 +1,9 @@
 /** A regular polygon path with a point at the top */
-export function drawPolygon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, sides: number) {
+/** `rotation` turns the shape (0 puts a vertex at the top) */
+export function drawPolygon(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, sides: number, rotation = 0) {
   ctx.beginPath()
   for (let i = 0; i < sides; i++) {
-    const angle = ((Math.PI * 2) / sides) * i - Math.PI / 2
+    const angle = ((Math.PI * 2) / sides) * i - Math.PI / 2 + rotation
     const px = x + radius * Math.cos(angle)
     const py = y + radius * Math.sin(angle)
     if (i === 0) ctx.moveTo(px, py)

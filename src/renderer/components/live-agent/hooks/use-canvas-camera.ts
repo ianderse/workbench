@@ -2,8 +2,8 @@ import { useRef, useCallback, type MutableRefObject } from 'react'
 import { Agent, ToolCallNode, ANIM, NODE } from '../lib/agent-types'
 import { CAMERA, AGENT_DRAW, TOOL_DRAW, estimateToolNodeRadius } from '../lib/canvas-constants'
 
-/** World-space room kept around a node for its pulse rings */
-const AGENT_PADDING = AGENT_DRAW.rippleInnerOffset + AGENT_DRAW.rippleMaxExpand
+/** World-space room kept around a node for its glow */
+const AGENT_PADDING = AGENT_DRAW.glowPadding
 const TOOL_PADDING = TOOL_DRAW.rippleInnerOffset + TOOL_DRAW.rippleMaxExpand
 
 interface Transform {

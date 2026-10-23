@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { writeToTerminal } from '../stores/terminal-store';
+import { isWindowTerminal, writeToTerminal } from '../stores/terminal-store';
 import { terminalBufferManager } from '../lib/terminal-buffer-manager';
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
 
@@ -47,6 +47,9 @@ export function useGlobalTerminalListeners(): void {
     // Register global terminal output listener
     // This listener runs for ALL terminals, regardless of which project is active
     globalCleanup = window.electronAPI.onTerminalOutput((terminalId: string, data: string) => {
+      // Every project window receives every terminal's output; the others' are not ours to keep
+      if (!isWindowTerminal(terminalId)) return;
+
       // Use writeToTerminal which:
       // 1. Always buffers to terminalBufferManager for persistence
       // 2. Writes to xterm immediately if terminal has a registered callback (visible)

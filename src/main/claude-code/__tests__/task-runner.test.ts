@@ -36,6 +36,15 @@ vi.mock('../process', () => ({
   }),
 }));
 
+/** Claude Code inside WSL: the session sees the worktree as /mnt/wt (mapped back to the real one) */
+const runtimeRef = vi.hoisted(() => ({ wsl: false, worktree: '' }));
+vi.mock('../../platform/shell-runtime', () => ({
+  whenShellRuntimeReady: async () => ({}),
+  getWslInfo: () => (runtimeRef.wsl ? { distro: 'Ubuntu', home: '/home/me', loginPath: '/usr/bin', mountRoot: '/mnt/', tools: {} } : null),
+  toHostPath: (p: string) => (runtimeRef.wsl ? p.replace(/^\/mnt\/wt(?=\/|$)/, runtimeRef.worktree) : p),
+  toRuntimePath: (p: string) => (runtimeRef.wsl ? `/mnt/host${p}` : p),
+}));
+
 const triageMock = vi.fn();
 vi.mock('../triage', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../triage')>();
@@ -43,6 +52,7 @@ vi.mock('../triage', async (importOriginal) => {
 });
 
 import { ClaudeTaskRun, loadClaudeRunInfo } from '../task-runner';
+import { SELF_IMPROVE_NUDGE } from '../../self-improve/nudge';
 
 function result(sessionId: string, fields: Record<string, unknown> = {}): ClaudeStreamMessage {
   return {
@@ -87,6 +97,8 @@ describe('ClaudeTaskRun', () => {
     triageMock.mockReset();
     specDir = mkdtempSync(path.join(tmpdir(), 'spec-'));
     worktree = mkdtempSync(path.join(tmpdir(), 'wt-'));
+    runtimeRef.wsl = false;
+    runtimeRef.worktree = worktree;
   });
 
   afterEach(() => {
@@ -236,6 +248,23 @@ describe('ClaudeTaskRun', () => {
     expect(loadClaudeRunInfo(specDir)!.phases.slice(-3).map((p) => p.name)).toEqual(['triage', 'revise', 'validate']);
   });
 
+  it('tells a run started over what the discarded attempt got wrong', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push(
+      { messages: [result('s8')] },
+      { messages: [result('s8', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+    );
+    const outcome = await makeRun({ mode: 'start', feedback: 'It edited the wrong module' }).run();
+    expect(outcome.status).toBe('completed');
+
+    // A fresh session (no --resume) that quotes the reviewer's notes, and triage sees them too
+    const input = (spawned[0].input as Array<{ text?: string }>)[0].text;
+    expect(input).toContain('starting it over');
+    expect(input).toContain('It edited the wrong module');
+    expect(spawned[0].args).not.toContain('--resume');
+    expect(triageMock.mock.calls[0][0].description).toContain('It edited the wrong module');
+  });
+
   it('resumes on the profile that holds the session and copies the transcript when the profile changes', async () => {
     const { resolveClaudeEnv } = await import('../env');
     const envMock = vi.mocked(resolveClaudeEnv);
@@ -325,6 +354,27 @@ describe('ClaudeTaskRun', () => {
     expect(edited).toEqual([['src/a.ts'], ['docs/notes.md']]);
   });
 
+  it('says nothing about project memory while the self-improve switch is off', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push({ messages: [result('s12')] });
+    await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+    const prompt = argValue(spawned[0].args, '--append-system-prompt') ?? '';
+    expect(prompt).not.toContain('## Project memory');
+    expect(prompt).not.toContain('type: feedback');
+  });
+
+  it("tells the session to save what it learns once the project's switch is on", async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push({ messages: [result('s13')] });
+    await makeRun({
+      settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false },
+      selfImprovePrompt: SELF_IMPROVE_NUDGE,
+    }).run();
+    const prompt = argValue(spawned[0].args, '--append-system-prompt') ?? '';
+    expect(prompt).toContain('## Project memory');
+    expect(prompt).toContain('type: feedback');
+  });
+
   it("lists the other tasks' unmerged changes in each phase's system prompt", async () => {
     triageMock.mockResolvedValue({ triage: triage() });
     const tasksDir = path.dirname(specDir);
@@ -344,5 +394,79 @@ describe('ClaudeTaskRun', () => {
     } finally {
       rmSync(otherSpec, { recursive: true, force: true });
     }
+  });
+  describe('in WSL', () => {
+    it('reports edited files and the session cwd as host paths', async () => {
+      runtimeRef.wsl = true;
+      triageMock.mockResolvedValue({ triage: triage() });
+      const edit = (id: string, input: Record<string, unknown>) =>
+        ({ type: 'assistant', session_id: 's20', parent_tool_use_id: null, message: { content: [{ type: 'tool_use', id, name: 'Edit', input }] } }) as ClaudeStreamMessage;
+      scripts.push({ messages: [
+        { type: 'system', subtype: 'init', session_id: 's20', cwd: '/mnt/wt', tools: [], plugins: [] } as unknown as ClaudeStreamMessage,
+        edit('e1', { file_path: '/mnt/wt/src/a.ts' }),
+        edit('e2', { file_path: '/home/me/elsewhere.ts' }),
+        result('s20'),
+      ] });
+      const edited: string[][] = [];
+      await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }, { onFilesEdited: (files: string[]) => edited.push(files) }).run();
+
+      expect(edited).toEqual([['src/a.ts']]);
+      const info = loadClaudeRunInfo(specDir);
+      expect(info?.init?.cwd).toBe(worktree);
+      expect(info?.runtime).toBe('wsl');
+    });
+
+    it('names the changelog by its WSL path and the task folder with forward slashes', async () => {
+      runtimeRef.wsl = true;
+      triageMock.mockResolvedValue({ triage: triage() });
+      const changelogPath = path.join(worktree, 'changelog.jsonl');
+      writeFileSync(changelogPath, '');
+      scripts.push({ messages: [result('s21')] });
+      await makeRun({ changelogPath, settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+      const prompt = argValue(spawned[0].args, '--append-system-prompt') ?? '';
+      expect(prompt).toContain(`\`/mnt/host${changelogPath}\``);
+      expect(prompt).toContain('`.workbench/tasks/001-task`');
+    });
+
+    it('starts a new session, with the task and plan, when the session ran in the other runtime', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      // Planned and started natively, then stopped by a crash
+      scripts.push(
+        { messages: [result('s22', { structured_output: { plan: '# The plan' } })] },
+        { messages: [result('s22', { is_error: true, subtype: 'error_during_execution', errors: ['crash'] })] },
+      );
+      const first = await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+      expect(first.status).toBe('failed');
+      expect(loadClaudeRunInfo(specDir)?.runtime).toBe('native');
+
+      // Now Claude Code runs in WSL: the native session can't be resumed there
+      runtimeRef.wsl = true;
+      scripts.push({ messages: [result('s23')] });
+      const logs: string[] = [];
+      const second = await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }, { onLog: (line: string) => logs.push(line) }).run();
+
+      expect(second.status).toBe('completed');
+      const args = spawned[2].args;
+      expect(args).not.toContain('--resume');
+      expect(argValue(args, '--session-id')).not.toBe('s22');
+      const text = (spawned[2].input as Array<{ type: string; text?: string }>)[0].text ?? '';
+      expect(text).toContain('<task title="Task">');
+      expect(text).toContain('# The plan');
+      expect(text).toContain('An earlier session already worked on this task');
+      expect(logs.some((line) => line.includes('starts a new session'))).toBe(true);
+      const info = loadClaudeRunInfo(specDir);
+      expect(info?.runtime).toBe('wsl');
+      expect(info?.sessionId).toBe('s23');
+    });
+
+    it('resumes a session that ran in the same runtime', async () => {
+      runtimeRef.wsl = true;
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('s24', { is_error: true, subtype: 'error_during_execution', errors: ['crash'] })] });
+      await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+      scripts.push({ messages: [result('s24')] });
+      await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+      expect(argValue(spawned[1].args, '--resume')).toBe('s24');
+    });
   });
 });

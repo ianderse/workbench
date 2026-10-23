@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import { readFileSync, existsSync, mkdirSync, readdirSync, Dirent } from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import type { Project, ProjectSettings, Task, TaskStatus, TaskMetadata, ImplementationPlan, ReviewReason, PlanSubtask, KanbanPreferences, ExecutionPhase } from '../shared/types';
 import { DEFAULT_PROJECT_SETTINGS, AUTO_BUILD_PATHS, getSpecsDir, JSON_ERROR_PREFIX, JSON_ERROR_TITLE_SUFFIX, TASK_STATUS_PRIORITY } from '../shared/constants';
 import { getAutoBuildPath, isInitialized } from './project-initializer';
@@ -18,7 +18,7 @@ import { appLog } from './app-logger';
  * Project settings kept in the project's own `.workbench/settings.json` (next to its tasks)
  * instead of the app's project list
  */
-const PROJECT_FILE_SETTING_KEYS = ['useClaudeMd', 'maxBudgetUsd', 'claudeProfileId'] as const;
+const PROJECT_FILE_SETTING_KEYS = ['useClaudeMd', 'maxBudgetUsd', 'claudeProfileId', 'selfImprove'] as const;
 const PROJECT_SETTINGS_FILE = 'settings.json';
 
 /** The project's settings file, or null while the project isn't initialized (no `.workbench`) */
@@ -168,7 +168,7 @@ export class ProjectStore {
     const autoBuildPath = getAutoBuildPath(absolutePath) || '';
 
     const project: Project = {
-      id: uuidv4(),
+      id: randomUUID(),
       name: projectName,
       path: absolutePath, // Store absolute path
       autoBuildPath,

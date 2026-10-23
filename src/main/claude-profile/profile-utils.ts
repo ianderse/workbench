@@ -3,7 +3,7 @@
  * Helper functions for profile operations
  */
 
-import { homedir } from 'os';
+import { expandClaudeHome, joinClaudeHome } from '../platform/claude-home';
 import { join } from 'path';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
 import type { ClaudeProfile } from '../../shared/types';
@@ -15,9 +15,11 @@ import { getClaudeGlobalConfigPath } from './config-dir-paths';
 const warnedStaleProfiles = new Set<string>();
 
 /**
- * Default profiles directory for additional accounts
+ * Default profiles directory for additional accounts (in the Linux home when Claude Code runs in WSL)
  */
-export const CLAUDE_PROFILES_DIR = join(homedir(), '.claude-profiles');
+export function getClaudeProfilesDir(): string {
+  return joinClaudeHome('.claude-profiles');
+}
 
 /**
  * Generate a unique ID for a new profile
@@ -41,11 +43,12 @@ export function generateProfileId(name: string, existingProfiles: ClaudeProfile[
 export async function createProfileDirectory(profileName: string): Promise<string> {
   // Create profiles directory - mkdirSync with recursive:true is idempotent
   // and won't throw if the directory already exists, so no existsSync check needed
-  mkdirSync(CLAUDE_PROFILES_DIR, { recursive: true });
+  const profilesDir = getClaudeProfilesDir();
+  mkdirSync(profilesDir, { recursive: true });
 
   // Create directory for this profile
   const sanitizedName = profileName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-  const profileDir = join(CLAUDE_PROFILES_DIR, sanitizedName);
+  const profileDir = join(profilesDir, sanitizedName);
 
   // mkdirSync with recursive:true is idempotent and won't throw if directory exists
   // No existsSync check needed - avoids TOCTOU race condition
@@ -92,9 +95,7 @@ export function isProfileAuthenticated(profile: ClaudeProfile): boolean {
         // - Linux: Secret Service or .credentials.json file
         // We need to verify that the credential store actually has the tokens
         // Expand ~ in configDir before checking credentials
-        const expandedConfigDir = configDir.startsWith('~')
-          ? configDir.replace(/^~/, homedir())
-          : configDir;
+        const expandedConfigDir = expandClaudeHome(configDir);
         const platformCreds = getCredentialsFromKeychain(expandedConfigDir);
         if (!platformCreds.token) {
           // .claude.json exists but credential store is missing tokens - NOT authenticated
@@ -172,7 +173,7 @@ export function isProfileAuthenticated(profile: ClaudeProfile): boolean {
 
   // Last resort: a token in the platform credential store for this config dir
   try {
-    const expandedConfigDir = configDir.startsWith('~') ? configDir.replace(/^~/, homedir()) : configDir;
+    const expandedConfigDir = expandClaudeHome(configDir);
     if (getCredentialsFromKeychain(expandedConfigDir).token) {
       return true;
     }
@@ -215,11 +216,7 @@ export function hasValidToken(profile: ClaudeProfile): boolean {
  * Expand ~ in path to home directory
  */
 export function expandHomePath(path: string): string {
-  if (path?.startsWith('~')) {
-    const home = homedir();
-    return path.replace(/^~/, home);
-  }
-  return path;
+  return expandClaudeHome(path);
 }
 
 /**

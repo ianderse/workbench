@@ -1,11 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
   RefreshCw,
   PanelLeft
 } from 'lucide-react';
-import { AgentsIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
+import { AgentNodeIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
 import { useMemoryGraphStore } from '../stores/memory-graph-store';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
@@ -29,7 +29,6 @@ import {
   initializeProject
 } from '../stores/project-store';
 import { useSettingsStore, saveSettings } from '../stores/settings-store';
-import { loadProjectEnvConfig, clearProjectEnvConfig } from '../stores/project-env-store';
 import { AddProjectModal } from './AddProjectModal';
 import { GitSetupModal } from './GitSetupModal';
 
@@ -54,7 +53,7 @@ interface NavItem {
 // Main nav items
 const navItems: NavItem[] = [
   { id: 'kanban', labelKey: 'navigation:items.kanban', icon: KanbanIcon },
-  { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentsIcon },
+  { id: 'terminals', labelKey: 'navigation:items.terminals', icon: AgentNodeIcon },
   { id: 'insights', labelKey: 'navigation:items.insights', icon: InsightsIcon },
   // Only shown when the project has a memory graph (.workbench/knowledge)
   { id: 'memory', labelKey: 'navigation:items.memory', icon: GraphIcon },
@@ -96,37 +95,6 @@ export function Sidebar({
   const toggleSidebar = () => {
     saveSettings({ sidebarCollapsed: !isCollapsed });
   };
-
-  // Track the last loaded project ID to avoid redundant loads
-  const lastLoadedProjectIdRef = useRef<string | null>(null);
-
-  // Load envConfig when project changes to ensure store is populated
-  useEffect(() => {
-    // Track whether this effect is still current (for race condition handling)
-    let isCurrent = true;
-
-    const initializeEnvConfig = async () => {
-      if (selectedProject?.id && selectedProject?.autoBuildPath) {
-        // Only reload if the project ID differs from what we last loaded
-        if (selectedProject.id !== lastLoadedProjectIdRef.current) {
-          lastLoadedProjectIdRef.current = selectedProject.id;
-          await loadProjectEnvConfig(selectedProject.id);
-          // Check if this effect was cancelled while loading
-          if (!isCurrent) return;
-        }
-      } else {
-        // Clear the store if no project is selected or has no autoBuildPath
-        lastLoadedProjectIdRef.current = null;
-        clearProjectEnvConfig();
-      }
-    };
-    initializeEnvConfig();
-
-    // Cleanup function to mark this effect as stale
-    return () => {
-      isCurrent = false;
-    };
-  }, [selectedProject?.id, selectedProject?.autoBuildPath]);
 
   // Check git status when project changes
   useEffect(() => {

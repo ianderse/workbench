@@ -10,35 +10,31 @@ import { StatusIndicator } from '../settings/common/StatusIndicator';
 import { cn } from '../../lib/utils';
 import { buildBranchOptions } from '../../lib/branch-utils';
 import { useProjectBranches } from '../../hooks/useProjectBranches';
-import type { ProjectEnvConfig, ProjectSettings } from '../../../shared/types';
+import type { ProjectSettings } from '../../../shared/types';
 
 interface BranchSettingsProps {
   projectPath: string;
   settings: ProjectSettings;
   setSettings: React.Dispatch<React.SetStateAction<ProjectSettings>>;
-  envConfig: ProjectEnvConfig | null;
-  updateEnvConfig: (updates: Partial<ProjectEnvConfig>) => void;
 }
 
 /**
  * Project branch settings: the base branch for task and terminal worktrees, and whether new
  * task branches are pushed to origin by default.
  */
-export function BranchSettings({ projectPath, settings, setSettings, envConfig, updateEnvConfig }: BranchSettingsProps) {
+export function BranchSettings({ projectPath, settings, setSettings }: BranchSettingsProps) {
   const { t } = useTranslation('settings');
   // Shared, saved branch list: shown right away; Refresh fetches remote refs and lists again
   const { branches, detectedBranch, isLoading: isLoadingBranches, error, refresh } = useProjectBranches(projectPath);
   const branchesError = error === null ? null : error || t('projectPages.general.branches.loadFailed');
 
-  // Saved in project settings (used by the app) and the project .env (DEFAULT_BRANCH)
   const handleBranchChange = (branch: string) => {
     setSettings((prev) => ({ ...prev, mainBranch: branch }));
-    updateEnvConfig({ defaultBranch: branch });
   };
 
   // No branch chosen yet: pick the repository's default branch once it is known
   useEffect(() => {
-    if (detectedBranch && !settings.mainBranch && !envConfig?.defaultBranch) {
+    if (detectedBranch && !settings.mainBranch) {
       handleBranchChange(detectedBranch);
     }
   }, [detectedBranch]);
@@ -61,7 +57,7 @@ export function BranchSettings({ projectPath, settings, setSettings, envConfig, 
     [branches, detectedBranch, t]
   );
 
-  const selectedBranch = settings.mainBranch || envConfig?.defaultBranch || '';
+  const selectedBranch = settings.mainBranch || '';
 
   return (
     <SettingsSection title={t('projectPages.general.branches.title')}>

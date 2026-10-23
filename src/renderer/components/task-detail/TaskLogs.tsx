@@ -19,30 +19,58 @@ import { cn } from '../../lib/utils';
 import { formatDateTime } from '../../../shared/utils/format-date-time';
 import { useSettingsStore } from '../../stores/settings-store';
 import { summarizeLogPhase, formatCostUsd, formatDurationMs } from '../../../shared/utils/claude-run';
-import type { Task, TaskLogs, TaskLogPhase, TaskPhaseLog, TaskLogEntry } from '../../../shared/types';
+import type { TaskLogs, TaskLogPhase, TaskPhaseLog, TaskLogEntry, TaskStatus } from '../../../shared/types';
+import type { ClaudeRunPhase } from '../../../shared/types/claude-code';
 
 // Neutral chip for tool activity (no per-tool colors)
 const TOOL_CHIP_CLASS = 'text-muted-foreground bg-segment-track';
 
 interface TaskLogsProps {
-  task: Task;
+  /** The run's step logs */
   phaseLogs: TaskLogs | null;
-  isLoadingLogs: boolean;
+  /** The run's steps, for the time and cost in the header */
+  runPhases?: ClaudeRunPhase[];
+  /** Lines of a task that ran before step logs existed */
+  legacyLogs?: string[];
+  /** The run is over, so a step still marked active simply never got its end entry */
+  isSettled: boolean;
+  /** Header label; the current run uses the default "Logs" */
+  title?: string;
+  /**
+   * Section heading above the dropdown, for when this run needs separating from the others.
+   * It hides with the rest when the run has nothing to show.
+   */
+  heading?: { title: string; description: string };
+  isLoadingLogs?: boolean;
   isExpanded: boolean;
   onToggle: () => void;
 }
 
 const LOG_PHASES: TaskLogPhase[] = ['planning', 'coding', 'validation'];
 
+/** A run whose task is in one of these states is over, however its last step was left */
+export function isTaskRunSettled(status: TaskStatus): boolean {
+  return status === 'human_review' || status === 'done' || status === 'pr_created' || status === 'error';
+}
+
 /**
- * The task's logs as one collapsible "Logs" section: every step's entries (triage and plan,
+ * One run's logs as a collapsible section: every step's entries (triage and plan,
  * implementation, validation) in one list, with the steps' total time and cost in the header.
+ * Used for the task's current run ("Logs") and for each run it was started over from.
  */
-export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle }: TaskLogsProps) {
+export function TaskLogs({
+  phaseLogs,
+  runPhases,
+  legacyLogs: legacyTaskLogs,
+  isSettled: isTaskSettled,
+  title,
+  heading,
+  isLoadingLogs,
+  isExpanded,
+  onToggle
+}: TaskLogsProps) {
   const { t } = useTranslation(['tasks']);
   const logOrder = useSettingsStore((s) => s.settings.logOrder);
-  // In a settled task an "active" step was never ended by the log writer: it is not running
-  const isTaskSettled = task.status === 'human_review' || task.status === 'done' || task.status === 'pr_created' || task.status === 'error';
 
   const { items, entryCount, status } = useMemo(() => {
     const all: LogItem[] = [];
@@ -79,14 +107,14 @@ export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle 
     let duration: number | undefined;
     let cost: number | undefined;
     for (const phase of LOG_PHASES) {
-      const summary = summarizeLogPhase(task.claudeRun?.phases, phase);
+      const summary = summarizeLogPhase(runPhases, phase);
       if (summary.durationMs !== undefined) duration = (duration ?? 0) + summary.durationMs;
       if (summary.costUsd !== undefined) cost = (cost ?? 0) + summary.costUsd;
     }
     return { durationMs: duration, costUsd: cost };
-  }, [task.claudeRun?.phases]);
+  }, [runPhases]);
 
-  const legacyLogs = !phaseLogs && task.logs && task.logs.length > 0 ? task.logs : null;
+  const legacyLogs = !phaseLogs && legacyTaskLogs && legacyTaskLogs.length > 0 ? legacyTaskLogs : null;
   const summaryParts = [
     entryCount > 0 ? t('tasks:logs.entries', { count: entryCount }) : null,
     durationMs !== undefined ? formatDurationMs(durationMs) : null,
@@ -96,7 +124,7 @@ export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle 
   // Shown once the task has something to show
   if (items.length === 0 && !legacyLogs) return null;
 
-  return (
+  const dropdown = (
     <Collapsible open={isExpanded} onOpenChange={onToggle}>
       <CollapsibleTrigger asChild>
         {/* Ghost button with a trailing chevron, like the settings dropdown triggers */}
@@ -104,7 +132,7 @@ export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle 
           type="button"
           className="flex h-10 w-full items-center gap-2 rounded-lg px-3 text-left outline-none transition-colors hover:bg-nav-hover focus-visible:shadow-(--shadow-focus) data-[state=open]:bg-nav-hover"
         >
-          <span className="text-sm text-foreground">{t('tasks:logs.title')}</span>
+          <span className="text-sm text-foreground">{title ?? t('tasks:logs.title')}</span>
           {status === 'failed' && <span className="text-xs text-destructive">{t('tasks:execution.phases.failed')}</span>}
           {status === 'stopped' && <span className="text-xs text-(--nav-label-color)">{t('tasks:logs.stopped')}</span>}
           {summaryParts.length > 0 && (
@@ -141,6 +169,15 @@ export function TaskLogs({ task, phaseLogs, isLoadingLogs, isExpanded, onToggle 
         </div>
       </CollapsibleContent>
     </Collapsible>
+  );
+
+  if (!heading) return dropdown;
+  return (
+    <div>
+      <h3 className="mb-1 text-sm text-foreground">{heading.title}</h3>
+      <p className="mb-3 text-sm text-(--nav-label-color)">{heading.description}</p>
+      {dropdown}
+    </div>
   );
 }
 

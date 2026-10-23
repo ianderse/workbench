@@ -95,6 +95,11 @@ export const taskMock = {
     data: null
   }),
 
+  getPreviousTaskRuns: async () => ({
+    success: true,
+    data: []
+  }),
+
   watchTaskLogs: async () => ({ success: true }),
 
   unwatchTaskLogs: async () => ({ success: true }),

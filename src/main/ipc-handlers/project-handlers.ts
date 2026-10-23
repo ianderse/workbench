@@ -1,7 +1,5 @@
 import { ipcMain } from 'electron';
 import { existsSync } from 'fs';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type {
   Project,
@@ -13,8 +11,11 @@ import type {
   GitBranchDetail,
   ProjectCostMetrics
 } from '../../shared/types';
+import { appLog } from '../app-logger';
 import { projectStore } from '../project-store';
-import { getProjectCostMetrics } from '../project-metrics';
+import { applyProjectMemory, removeProjectMemory } from '../self-improve';
+import { getProjectCostMetrics, warmProjectMetrics } from '../project-metrics';
+import { stopWatchingProjectMetrics, watchProjectMetrics } from '../project-metrics-watcher';
 import { migrateProjectDataDirs } from '../data-dir-migration';
 import {
   initializeProject,
@@ -23,10 +24,10 @@ import {
   checkGitStatus,
   initializeGit
 } from '../project-initializer';
-import { getToolPath } from '../cli-tool-manager';
+import { git } from '../utils/git-exec';
+import { safeSendToRenderer } from './utils';
 import type { BrowserWindow } from 'electron';
 
-const execFileAsync = promisify(execFile);
 
 // ============================================
 // Git Helper Functions
@@ -39,7 +40,7 @@ const execFileAsync = promisify(execFile);
 async function getGitBranches(projectPath: string): Promise<string[]> {
   try {
     // Get all branches (local + remote) using --all flag
-    const { stdout: result } = await execFileAsync(getToolPath('git'), ['branch', '--all', '--format=%(refname:short)'], {
+    const { stdout: result } = await git(['branch', '--all', '--format=%(refname:short)'], {
       cwd: projectPath,
       encoding: 'utf-8'
     });
@@ -85,13 +86,13 @@ async function getGitBranches(projectPath: string): Promise<string[]> {
  * only updated with `git fetch` when asked (a refresh button), never just to list branches.
  */
 async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false): Promise<GitBranchDetail[]> {
-  const git = (args: string[], timeout?: number) =>
-    execFileAsync(getToolPath('git'), args, { cwd: projectPath, encoding: 'utf-8', timeout }).then((r) => r.stdout);
+  const run = (args: string[], timeout?: number) =>
+    git(args, { cwd: projectPath, encoding: 'utf-8', timeout }).then((r) => r.stdout);
 
   try {
     if (fetchRemote) {
       try {
-        await git(['fetch', '--prune'], 10000);
+        await run(['fetch', '--prune'], 10000);
       } catch {
         // Fetch may fail if offline or no remote, continue with local refs
       }
@@ -99,10 +100,10 @@ async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false):
 
     // Current branch (isCurrent indicator), local and remote branches, in parallel
     const [currentResult, localResult, remoteResult] = await Promise.all([
-      git(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
-      git(['branch', '--format=%(refname:short)']),
+      run(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
+      run(['branch', '--format=%(refname:short)']),
       // %(symref) marks pointers like origin/HEAD (short name "origin"), which aren't branches
-      git(['for-each-ref', '--format=%(refname:short)%09%(symref)', 'refs/remotes']).catch(() => ''),
+      run(['for-each-ref', '--format=%(refname:short)%09%(symref)', 'refs/remotes']).catch(() => ''),
     ]);
     const currentBranch = currentResult.trim() || null;
 
@@ -142,7 +143,7 @@ async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false):
  */
 async function getCurrentGitBranch(projectPath: string): Promise<string | null> {
   try {
-    const { stdout: result } = await execFileAsync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    const { stdout: result } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: projectPath,
       encoding: 'utf-8'
     });
@@ -170,7 +171,7 @@ async function detectMainBranch(projectPath: string): Promise<string | null> {
 
   // If none of the common names found, check for origin/HEAD reference
   try {
-    const { stdout: result } = await execFileAsync(getToolPath('git'), ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+    const { stdout: result } = await git(['symbolic-ref', 'refs/remotes/origin/HEAD'], {
       cwd: projectPath,
       encoding: 'utf-8'
     });
@@ -210,6 +211,8 @@ export function registerProjectHandlers(
         const project = projectStore.addProject(projectPath);
         // A project used by an older version may still have the old data folder names
         await migrateProjectDataDirs(project.path, project.autoBuildPath);
+        // Every window shows the same project list
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_LIST_CHANGED);
         return { success: true, data: project };
       } catch (error) {
         return {
@@ -219,6 +222,17 @@ export function registerProjectHandlers(
       }
     }
   );
+
+  /**
+   * The first time a project is open in a window, read what its Claude Code sessions spent in the
+   * background, so Metrics has the figures ready when it is opened.
+   */
+  const warmOpenProjects = (projectIds: string[]): void => {
+    const open = projectStore.getProjects().filter((project) => projectIds.includes(project.id));
+    warmProjectMetrics(open, () => {
+      safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_METRICS_CHANGED);
+    });
+  };
 
   // Spending per initialized project (Settings > Accounts > Metrics)
   ipcMain.handle(
@@ -232,10 +246,27 @@ export function registerProjectHandlers(
     }
   );
 
+  // While the Metrics page is open, tell it when an agent window's session spends something
+  ipcMain.handle(
+    IPC_CHANNELS.PROJECT_METRICS_WATCH,
+    async (): Promise<IPCResult> => {
+      await watchProjectMetrics(projectStore.getProjects(), () => {
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_METRICS_CHANGED);
+      });
+      return { success: true };
+    }
+  );
+
+  ipcMain.handle(IPC_CHANNELS.PROJECT_METRICS_UNWATCH, (): IPCResult => {
+    stopWatchingProjectMetrics();
+    return { success: true };
+  });
+
   ipcMain.handle(
     IPC_CHANNELS.PROJECT_REMOVE,
     async (_, projectId: string): Promise<IPCResult> => {
       const success = projectStore.removeProject(projectId);
+      if (success) safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_LIST_CHANGED);
       return { success };
     }
   );
@@ -263,11 +294,30 @@ export function registerProjectHandlers(
       projectId: string,
       settings: Partial<ProjectSettings>
     ): Promise<IPCResult> => {
+      const before = projectStore.getProject(projectId)?.settings.selfImprove === true;
       const project = projectStore.updateProjectSettings(projectId, settings);
-      if (project) {
-        return { success: true };
+      if (!project) return { success: false, error: 'Project not found' };
+
+      // Switching self-improve on or off relocates the project's Claude Code memory, so it takes
+      // effect outside the app too. A failure leaves the setting saved but says what went wrong.
+      if (settings.selfImprove !== undefined && settings.selfImprove !== before) {
+        try {
+          if (settings.selfImprove) {
+            await applyProjectMemory(project.path);
+          } else {
+            await removeProjectMemory(project.path);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          appLog.error('[IPC] PROJECT_UPDATE_SETTINGS: self-improve setup failed:', error);
+          // Turning it on half way is worse than not turning it on: the nudge would ask sessions to
+          // save memories that nothing would read back. Turning it off half way is closer to off,
+          // so only this direction is reverted.
+          if (settings.selfImprove) projectStore.updateProjectSettings(projectId, { selfImprove: before });
+          return { success: false, error: message };
+        }
       }
-      return { success: false, error: 'Project not found' };
+      return { success: true };
     }
   );
 
@@ -280,6 +330,7 @@ export function registerProjectHandlers(
     async (): Promise<IPCResult<{ openProjectIds: string[]; activeProjectId: string | null; tabOrder: string[] }>> => {
       const tabState = projectStore.getTabState();
       console.log('[IPC] TAB_STATE_GET returning:', tabState);
+      warmOpenProjects(tabState.openProjectIds);
       return { success: true, data: tabState };
     }
   );
@@ -292,6 +343,7 @@ export function registerProjectHandlers(
     ): Promise<IPCResult> => {
       console.log('[IPC] TAB_STATE_SAVE called with:', tabState);
       projectStore.saveTabState(tabState);
+      warmOpenProjects(tabState.openProjectIds);
       return { success: true };
     }
   );
@@ -347,7 +399,7 @@ export function registerProjectHandlers(
           return { success: false, error: 'Project not found' };
         }
 
-        const result = initializeProject(project.path);
+        const result = await initializeProject(project.path);
 
         if (result.success) {
           // Update project's autoBuildPath
@@ -498,7 +550,7 @@ export function registerProjectHandlers(
         if (!existsSync(projectPath)) {
           return { success: false, error: 'Directory does not exist' };
         }
-        const gitStatus = checkGitStatus(projectPath);
+        const gitStatus = await checkGitStatus(projectPath);
         return { success: true, data: gitStatus };
       } catch (error) {
         return {
@@ -517,7 +569,7 @@ export function registerProjectHandlers(
         if (!existsSync(projectPath)) {
           return { success: false, error: 'Directory does not exist' };
         }
-        const result = initializeGit(projectPath);
+        const result = await initializeGit(projectPath);
         return { success: result.success, data: result, error: result.error };
       } catch (error) {
         return {

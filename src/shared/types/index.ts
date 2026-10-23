@@ -20,6 +20,7 @@ export * from './cli';
 export * from './provider-account';
 export * from './claude-code';
 export * from './live-agent';
+export * from './window';
 
 // IPC types (must be last to use types from other modules)
 export * from './ipc';

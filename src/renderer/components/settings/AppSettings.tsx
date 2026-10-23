@@ -8,7 +8,7 @@ import {
   Download,
   Blocks
 } from 'lucide-react';
-import { AgentOutlineIcon, GearIcon, ProjectOutlineIcon } from '../icons/app-icons';
+import { AgentNodeIcon, GearIcon, ProjectOutlineIcon } from '../icons/app-icons';
 
 import {
   FullScreenDialog,
@@ -87,8 +87,7 @@ type TopNavItem =
 const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'general', icon: GearIcon },
   { kind: 'app', id: 'accounts', icon: CircleUserRound },
-  // The wide, short creature reads small at 18px: 20px, with the extra 2px taken out of the gap
-  { kind: 'app', id: 'agents', icon: AgentOutlineIcon, iconClassName: '-mx-px h-5 w-5', iconStrokeWidth: 1.35 },
+  { kind: 'app', id: 'agents', icon: AgentNodeIcon, iconClassName: 'h-[16px] w-[16px]' },
   { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
   { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'app', id: 'devtools', icon: CodeXml },
@@ -162,7 +161,7 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
   }, []);
 
   const handleProjectHookReady = useCallback((hook: UseProjectSettingsReturn | null) => {
-    setProjectError(hook ? hook.error || hook.envError || null : null);
+    setProjectError(hook ? hook.error : null);
   }, []);
 
   // --- Autosave app settings -------------------------------------------------

@@ -44,11 +44,11 @@ export function registerLiveAgentHandlers(): void {
 
   ipcMain.handle(
     IPC_CHANNELS.LIVE_AGENT_SUBSCRIBE,
-    (event, clientId: string, cwd: string, projectPath: string): IPCResult => {
+    (event, clientId: string, cwd: string, projectPath: string, terminalId: string): IPCResult => {
       if (typeof clientId !== 'string' || typeof cwd !== 'string' || !cwd || !isKnownProject(projectPath)) {
         return { success: false, error: 'Invalid subscription' };
       }
-      liveAgentRelay.subscribe(event.sender, clientId, cwd, getFlowDir(projectPath));
+      liveAgentRelay.subscribe(event.sender, clientId, cwd, getFlowDir(projectPath), String(terminalId ?? ''));
       return { success: true };
     }
   );

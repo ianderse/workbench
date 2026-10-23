@@ -4,10 +4,10 @@
  * thread and posts what each subscribed agent window should show.
  * Started and stopped by LiveAgentRelay (./live-agent-relay.ts).
  */
-import { parentPort } from 'worker_threads';
+import { parentPort, workerData } from 'worker_threads';
 import { createRelay, type Relay } from './relay/relay';
 import { setLogSink } from './relay/lib/logger';
-import type { RelayWorkerRequest, RelayWorkerMessage } from './relay-worker-protocol';
+import type { RelayWorkerData, RelayWorkerRequest, RelayWorkerMessage } from './relay-worker-protocol';
 
 const port = parentPort;
 if (port) {
@@ -39,6 +39,7 @@ if (port) {
         createRelay({
           claudeDirs: request.claudeDirs,
           send: (clientIds, data) => post({ type: 'message', clientIds, data }),
+          wsl: (workerData as RelayWorkerData | undefined)?.wsl ?? null,
         }).then((created) => {
           if (stopping) {
             created.dispose();

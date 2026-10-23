@@ -16,10 +16,12 @@ import type {
   TerminalOperationResult
 } from './types';
 import { isWindows } from '../platform';
+import { whenShellRuntimeReady } from '../platform/shell-runtime';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeCodeEnv } from '../claude-code-settings';
 import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
+import { isSelfImproveEnabledForPath } from '../self-improve/setting';
 import { LIVE_AGENT_TERMINAL_ENV } from '../live-agent/project-setup';
 
 /**
@@ -59,7 +61,8 @@ export async function createTerminal(
   // worktree switching, terminal restart after shell exit). Without this, the
   // pendingDelete guard (5-second window) blocks session persistence for the
   // new terminal, causing it to be invisible to the session store.
-  SessionHandler.clearPendingDelete(id);
+  // Sessions live with their project, so a terminal without one has nothing to clear
+  if (projectPath) SessionHandler.clearPendingDelete(projectPath, id);
 
   try {
     // For auth terminals, don't inject existing OAuth token - we want a fresh login
@@ -82,6 +85,9 @@ export async function createTerminal(
     const graphifyOut = projectPath && (await hasGraphifyGraph(projectPath)) ? getGraphifyOutDir(projectPath) : undefined;
     if (graphifyOut) mergedEnv.GRAPHIFY_OUT = graphifyOut;
 
+    // Agent windows in a self-improve project are told to save what they learn, like task runs are
+    const selfImprove = await isSelfImproveEnabledForPath(projectPath);
+
     // Live agent: the hooks of a Claude Code session run here report this window, so its graph
     // shows only its own sessions
     mergedEnv[LIVE_AGENT_TERMINAL_ENV] = id;
@@ -103,14 +109,19 @@ export async function createTerminal(
       effectiveCwd = projectPath || os.homedir();
     }
 
-    const { pty: ptyProcess, shellType } = PtyManager.spawnPtyProcess(
+    // The window's shell depends on the runtime (WSL or native), decided at startup: a window
+    // restored right after launch waits for it. In WSL, PtyManager translates the path values
+    // (CLAUDE_CONFIG_DIR, GRAPHIFY_OUT) to Linux paths and passes the window's variables through WSLENV.
+    await whenShellRuntimeReady();
+
+    const { pty: ptyProcess, shellKind, wrapInBash } = PtyManager.spawnPtyProcess(
       effectiveCwd || os.homedir(),
       cols,
       rows,
       mergedEnv
     );
 
-    debugLog('[TerminalLifecycle] PTY process spawned, pid:', ptyProcess.pid, 'shellType:', shellType);
+    debugLog('[TerminalLifecycle] PTY process spawned, pid:', ptyProcess.pid, 'shellKind:', shellKind);
 
     const terminalCwd = effectiveCwd || os.homedir();
     const terminal: TerminalProcess = {
@@ -122,8 +133,10 @@ export async function createTerminal(
       cwd: terminalCwd,
       outputBuffer: '',
       title: `Terminal ${terminals.size + 1}`,
-      shellType,
+      shellKind,
+      ...(wrapInBash ? { wrapInBash } : {}),
       graphifyOut,
+      selfImprove,
     };
 
     terminals.set(id, terminal);
@@ -337,6 +350,8 @@ export async function destroyAllTerminals(
   PtyManager.setShuttingDown(true);
 
   await SessionHandler.persistAllSessionsAsync(terminals);
+  // Queued writes (a window closed moments ago) have to land before the process goes away
+  await SessionHandler.flushSessions();
 
   if (saveTimer) {
     clearInterval(saveTimer);
@@ -378,42 +393,3 @@ function handleTerminalExit(
   // Don't remove session - let it persist for restoration
 }
 
-/**
- * Restore multiple sessions from a specific date
- */
-export async function restoreSessionsFromDate(
-  date: string,
-  projectPath: string,
-  terminals: Map<string, TerminalProcess>,
-  getWindow: WindowGetter,
-  dataHandler: DataHandlerFn,
-  options: RestoreOptions,
-  cols = 80,
-  rows = 24
-): Promise<{ restored: number; failed: number; sessions: Array<{ id: string; success: boolean; error?: string }> }> {
-  const sessions = SessionHandler.getSessionsForDate(date, projectPath);
-  const results: Array<{ id: string; success: boolean; error?: string }> = [];
-
-  for (const session of sessions) {
-    const result = await restoreTerminal(
-      session,
-      terminals,
-      getWindow,
-      dataHandler,
-      options,
-      cols,
-      rows
-    );
-    results.push({
-      id: session.id,
-      success: result.success,
-      error: result.error
-    });
-  }
-
-  return {
-    restored: results.filter(r => r.success).length,
-    failed: results.filter(r => !r.success).length,
-    sessions: results
-  };
-}

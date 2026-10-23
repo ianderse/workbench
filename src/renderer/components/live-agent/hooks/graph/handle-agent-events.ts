@@ -1,7 +1,41 @@
-import type { Agent } from '../../lib/agent-types'
-import { AGENT_SPAWN_DISTANCE } from '../../lib/canvas-constants'
+import { NODE, type Agent } from '../../lib/agent-types'
+import { AGENT_DRAW } from '../../lib/canvas-constants'
 import type { MutableEventState } from './process-event'
+import { findFreeSlot } from './find-slot'
 import { asString, asBoolean } from './types'
+
+/** The middle of the widest direction still free around the parent */
+function widestGapAngle(name: string, parent: Agent, state: MutableEventState): number {
+  // Directions already taken around the parent: its other sub-agents, its own
+  // parent, and its tool calls
+  const takenAngles: number[] = []
+  const take = (node: { x: number; y: number }) => takenAngles.push(Math.atan2(node.y - parent.y, node.x - parent.x))
+  for (const agent of state.agents.values()) {
+    if (agent.parentId === parent.id || agent.id === parent.parentId) take(agent)
+  }
+  for (const tc of state.toolCalls.values()) {
+    if (tc.agentId === parent.id) take(tc)
+  }
+
+  if (takenAngles.length === 0) {
+    // Nothing around it yet: use a hash-based angle
+    const hash = name.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)
+    return (Math.abs(hash) % 360) * (Math.PI / 180)
+  }
+
+  takenAngles.sort((a, b) => a - b)
+  let bestGap = 0
+  let bestMid = takenAngles[0] + Math.PI
+  for (let i = 0; i < takenAngles.length; i++) {
+    const next = i + 1 < takenAngles.length ? takenAngles[i + 1] : takenAngles[0] + Math.PI * 2
+    const gap = next - takenAngles[i]
+    if (gap > bestGap) {
+      bestGap = gap
+      bestMid = takenAngles[i] + gap / 2
+    }
+  }
+  return bestMid
+}
 
 export function handleAgentSpawn(
   payload: Record<string, unknown>,
@@ -30,40 +64,18 @@ export function handleAgentSpawn(
   let x = 0, y = 0
   const parent = parentId ? state.agents.get(parentId) : undefined
   if (parent) {
-    // Directions already taken around the parent: its other sub-agents, its
-    // own parent, and its tool calls
-    const takenAngles: number[] = []
-    const take = (node: { x: number; y: number }) => takenAngles.push(Math.atan2(node.y - parent.y, node.x - parent.x))
-    for (const a of state.agents.values()) {
-      if (a.parentId === parentId || a.id === parent.parentId) take(a)
-    }
-    for (const tc of state.toolCalls.values()) {
-      if (tc.agentId === parentId) take(tc)
-    }
-
-    let angle: number
-    if (takenAngles.length === 0) {
-      // Nothing around it yet: use a hash-based angle
-      const hash = name.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)
-      angle = (Math.abs(hash) % 360) * (Math.PI / 180)
-    } else {
-      // Place it in the middle of the largest free gap
-      takenAngles.sort((a, b) => a - b)
-      let bestGap = 0
-      let bestMid = 0
-      for (let i = 0; i < takenAngles.length; i++) {
-        const next = i + 1 < takenAngles.length ? takenAngles[i + 1] : takenAngles[0] + Math.PI * 2
-        const gap = next - takenAngles[i]
-        if (gap > bestGap) {
-          bestGap = gap
-          bestMid = takenAngles[i] + gap / 2
-        }
-      }
-      angle = bestMid
-    }
-
-    x = parent.x + Math.cos(angle) * AGENT_SPAWN_DISTANCE
-    y = parent.y + Math.sin(angle) * AGENT_SPAWN_DISTANCE
+    // Out through the widest gap between what already hangs off the parent, then
+    // wherever near that direction the node covers nothing else
+    const pos = findFreeSlot({
+      parent: { id: parent.id, x: parent.x, y: parent.y, radius: parent.isMain ? NODE.radiusMain : NODE.radiusSub },
+      radius: NODE.radiusSub,
+      footprint: NODE.radiusSub + AGENT_DRAW.glowPadding,
+      preferredAngle: widestGapAngle(name, parent, state),
+      agents: state.agents,
+      toolCalls: state.toolCalls,
+    })
+    x = pos.x
+    y = pos.y
   }
 
   const agent: Agent = {
@@ -71,7 +83,8 @@ export function handleAgentSpawn(
     parentId: parentId || null,
     x, y,
     isMain,
-    opacity: 0, scale: 0.3,
+    isSatellite: asBoolean(payload.satellite) || undefined,
+    opacity: 0,
   }
   state.agents.set(name, agent)
 

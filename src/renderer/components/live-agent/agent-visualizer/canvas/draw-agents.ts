@@ -1,19 +1,20 @@
 import { displayedState } from '../../hooks/graph/types'
-import { Agent, NODE, ANIM, type ToolCallNode } from '../../lib/agent-types'
+import { Agent, ANIM, type AgentState, type ToolCallNode } from '../../lib/agent-types'
 import { getStateColor } from '../../lib/colors'
 import { AGENT_DRAW } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
-import { drawPolygon, CLAUDE_SPARK_D } from './draw-misc'
+import { CLAUDE_SPARK_D } from './draw-misc'
 import { drawFace, type FaceState } from './draw-face'
+import { drawNotes } from './draw-notes'
 import { getAgentGlowSprite } from './render-cache'
 import { AGENTS_ICON_PATH } from '../../../icons/app-icons'
+import { drawJellyShape, applyJellyStretch, shapeInradius, type NodeMotion } from '../../lib/jelly'
+import { clipOutsideAttached } from './node-motion'
 
-/** The main agent is a pentagon, sub-agents hexagons */
-const sidesOf = (agent: Agent) => (agent.isMain ? 5 : 6)
-
-/** The agent's outline at radius r, as a path */
-function drawNodeShape(ctx: CanvasRenderingContext2D, agent: Agent, r: number) {
-  drawPolygon(ctx, agent.x, agent.y, r, sidesOf(agent))
+/** The agent's border at radius r, as a path, as the jelly has it: rounded,
+ *  bowed, squashed, and drawn out toward whatever it is gooed to (see lib/jelly.ts) */
+function pathShape(ctx: CanvasRenderingContext2D, motion: NodeMotion, r: number, time: number) {
+  drawJellyShape(ctx, motion.x, motion.y, r, motion.sides, motion.rotation, motion, time)
 }
 
 let _claudeSparkPath: Path2D | null = null
@@ -56,49 +57,62 @@ function drawAgentsIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
   ctx.restore()
 }
 
-function drawAgentGlow(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean) {
+/** `pulse` dims the glow (1 = full brightness); it carries the active-state pulse,
+ *  applied to the sprite as it's drawn so the cached sprites stay the same few */
+function drawAgentGlow(
+  ctx: CanvasRenderingContext2D, motion: NodeMotion, r: number, color: string,
+  state: AgentState, isWaiting: boolean, pulse: number, time: number,
+) {
   const glowR = r + AGENT_DRAW.glowPadding
-  const glowAlpha = isWaiting ? 0.3 : agent.state === 'thinking' ? 0.2 : 0.1
-  // Neon glow: strongest at the border (from the shape's edge midpoints, cos(180° / sides)
-  // of its radius) and fading outward; the inside of the node is clipped out, so it stays clear
+  const glowAlpha = isWaiting ? 0.45 : state === 'thinking' ? 0.3 : 0.1
+  // Neon glow: strongest at the border (from where the shape is nearest its
+  // center) and fading outward; the inside of the node is clipped out, so it stays clear
   const outer = Math.ceil(glowR)
   ctx.save()
-  drawNodeShape(ctx, agent, r)
-  ctx.rect(agent.x - outer, agent.y - outer, outer * 2, outer * 2)
+  pathShape(ctx, motion, r, time)
+  ctx.rect(motion.x - outer, motion.y - outer, outer * 2, outer * 2)
   ctx.clip('evenodd')
   // Pre-rendered glow sprite instead of per-frame gradient creation
-  const sprite = getAgentGlowSprite(color, Math.round(r * Math.cos(Math.PI / sidesOf(agent))), outer, alphaHex(glowAlpha))
-  ctx.drawImage(sprite, agent.x - outer, agent.y - outer)
+  const sprite = getAgentGlowSprite(color, Math.round(shapeInradius(r, motion.sides)), outer, alphaHex(glowAlpha))
+  ctx.globalAlpha *= pulse
+  applyJellyStretch(ctx, motion)
+  ctx.drawImage(sprite, motion.x - outer, motion.y - outer)
   ctx.restore()
 
   // Ambient outer ring
-  drawNodeShape(ctx, agent, r + AGENT_DRAW.outerRingOffset)
+  pathShape(ctx, motion, r + AGENT_DRAW.outerRingOffset, time)
   ctx.strokeStyle = color + '25'
   ctx.lineWidth = 1
   ctx.stroke()
 }
 
-function drawScanline(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean, time: number) {
-  const scanSpeed = agent.state === 'thinking' || isWaiting ? ANIM.scanline.thinking : ANIM.scanline.normal
-  const scanY = agent.y - r + ((time * scanSpeed) % (r * 2))
+function drawScanline(
+  ctx: CanvasRenderingContext2D, motion: NodeMotion, r: number, color: string,
+  state: AgentState, isWaiting: boolean, time: number,
+) {
+  const scanSpeed = state === 'thinking' || isWaiting ? ANIM.scanline.thinking : ANIM.scanline.normal
+  const scanY = motion.y - r + ((time * scanSpeed) % (r * 2))
   ctx.save()
-  drawNodeShape(ctx, agent, r)
+  pathShape(ctx, motion, r, time)
   ctx.clip()
-  const scanGrad = ctx.createLinearGradient(agent.x, scanY - AGENT_DRAW.scanlineHalfH, agent.x, scanY + AGENT_DRAW.scanlineHalfH)
+  const scanGrad = ctx.createLinearGradient(motion.x, scanY - AGENT_DRAW.scanlineHalfH, motion.x, scanY + AGENT_DRAW.scanlineHalfH)
   scanGrad.addColorStop(0, color + '00')
   scanGrad.addColorStop(0.5, color + '20')
   scanGrad.addColorStop(1, color + '00')
   ctx.fillStyle = scanGrad
-  ctx.fillRect(agent.x - r, scanY - AGENT_DRAW.scanlineHalfH, r * 2, AGENT_DRAW.scanlineWidth)
+  ctx.fillRect(motion.x - r, scanY - AGENT_DRAW.scanlineHalfH, r * 2, AGENT_DRAW.scanlineWidth)
   ctx.restore()
 }
 
-function drawStateRing(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean, time: number) {
-  drawNodeShape(ctx, agent, r)
+function drawStateRing(
+  ctx: CanvasRenderingContext2D, motion: NodeMotion, r: number, color: string,
+  isMain: boolean, isWaiting: boolean, time: number,
+) {
+  pathShape(ctx, motion, r, time)
   ctx.strokeStyle = color
   ctx.lineWidth = 2
   // A waiting sub-agent's border runs as dashes (the main agent's face asks instead)
-  if (isWaiting && !agent.isMain) {
+  if (isWaiting && !isMain) {
     ctx.setLineDash([6, 4])
     ctx.lineDashOffset = -time * AGENT_DRAW.waitingDashSpeed
     ctx.lineWidth = 2.5
@@ -108,9 +122,12 @@ function drawStateRing(ctx: CanvasRenderingContext2D, agent: Agent, r: number, c
   ctx.lineDashOffset = 0
 }
 
-/** A sub-agent's icon: a lock while it waits for permission, else the Agents icon
- *  (the main agent shows its face, see drawFace) */
-function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, isWaiting: boolean) {
+/** A sub-agent's icon: a lock while it waits for permission, the Claude spark
+ *  for a background session the user started, else the Agents icon (the main
+ *  agent shows its face instead, see drawFace) */
+function drawCenterIcon(
+  ctx: CanvasRenderingContext2D, motion: NodeMotion, r: number, color: string, isWaiting: boolean, isSatellite: boolean,
+) {
   if (isWaiting) {
     // Geometric lock icon — fits the holographic style
     const s = r * 0.3
@@ -120,79 +137,79 @@ function drawCenterIcon(ctx: CanvasRenderingContext2D, agent: Agent, r: number, 
     ctx.lineWidth = 1.5
     // Lock body (rounded rect)
     ctx.beginPath()
-    ctx.roundRect(agent.x - s * 0.6, agent.y - s * 0.1, s * 1.2, s * 1.0, 2)
+    ctx.roundRect(motion.x - s * 0.6, motion.y - s * 0.1, s * 1.2, s * 1.0, 2)
     ctx.fill()
     // Lock shackle (arc)
     ctx.beginPath()
-    ctx.arc(agent.x, agent.y - s * 0.15, s * 0.4, Math.PI, 0)
+    ctx.arc(motion.x, motion.y - s * 0.15, s * 0.4, Math.PI, 0)
     ctx.stroke()
     ctx.restore()
+  } else if (isSatellite) {
+    drawClaudeSpark(ctx, motion.x, motion.y, r, color)
   } else {
-    drawAgentsIcon(ctx, agent.x, agent.y, r, color)
+    drawAgentsIcon(ctx, motion.x, motion.y, r, color)
   }
 }
 
-/** Pulse for an active agent (thinking or waiting for permission): two staggered
- *  rings of its shape expand outward from the node and fade as they grow. */
-function drawPulseRipples(ctx: CanvasRenderingContext2D, agent: Agent, r: number, color: string, time: number) {
-  for (let i = 0; i < 2; i++) {
-    const phase = (time * AGENT_DRAW.rippleSpeed + i * 0.5) % 1
-    drawNodeShape(ctx, agent, r + AGENT_DRAW.rippleInnerOffset + phase * AGENT_DRAW.rippleMaxExpand)
-    ctx.strokeStyle = color + alphaHex((1 - phase) * AGENT_DRAW.rippleMaxAlpha)
-    ctx.lineWidth = 1.5 * (1 - phase)
-    ctx.stroke()
-  }
+/** Pulse for an active agent (thinking or waiting for permission): its glow
+ *  brightens and dims, between `glowPulseTrough` of full brightness and full. */
+function glowPulse(isActive: boolean, time: number) {
+  if (!isActive) return 1
+  const trough = AGENT_DRAW.glowPulseTrough
+  return trough + (1 - trough) * (Math.sin(time * AGENT_DRAW.glowPulseSpeed) * 0.5 + 0.5)
 }
 
 /** `awaiting`: the agents waiting on their sub-agents (see displayedState);
- *  `faces`: the main agent's face animation, kept by the canvas between frames */
+ *  `faces`: the main agent's face animation, kept by the canvas between frames;
+ *  `motions`: where the jelly has each node this frame (see node-motion.ts) */
 export function drawAgents(
   ctx: CanvasRenderingContext2D,
   agents: Map<string, Agent>,
   awaiting: Set<string>,
   toolCalls: Map<string, ToolCallNode>,
   faces: Map<string, FaceState>,
+  motions: Map<string, NodeMotion>,
   time: number,
 ) {
-  for (const stored of agents.values()) {
-    const state = displayedState(stored, awaiting)
-    const agent = state === stored.state ? stored : { ...stored, state }
-    const radius = agent.isMain ? NODE.radiusMain : NODE.radiusSub
-    const color = getStateColor(agent.state)
+  for (const agent of agents.values()) {
+    const state = displayedState(agent, awaiting)
+    // Drawn where the jelly has it: out of its parent as it buds off, back in as it merges
+    const motion = motions.get(agent.id)
+    if (!motion) continue
+    const color = getStateColor(state)
 
-    const isWaiting = agent.state === 'waiting_permission'
-
-    const breathe = isWaiting
-      ? Math.sin(time * AGENT_DRAW.waitingBreatheSpeed) * AGENT_DRAW.waitingBreatheAmp + 1
-      : agent.state === 'thinking'
-      ? Math.sin(time * ANIM.breathe.thinkingSpeed) * ANIM.breathe.thinkingAmp + 1
-      : agent.state === 'idle' ? Math.sin(time * ANIM.breathe.idleSpeed) * ANIM.breathe.idleAmp + 1 : 1
-
-    const r = radius * breathe * agent.scale
+    const isWaiting = state === 'waiting_permission'
+    const isActive = state === 'thinking' || isWaiting
+    const r = motion.radius * motion.scale
 
     ctx.save()
     ctx.globalAlpha = agent.opacity
+    // Where it is gooed to its parent or to a node coming out of it, the two
+    // borders are one shape: keep what each draws out of the other
+    clipOutsideAttached(ctx, motion, motions, time)
 
-    drawAgentGlow(ctx, agent, r, color, isWaiting)
-    drawScanline(ctx, agent, r, color, isWaiting, time)
-    drawStateRing(ctx, agent, r, color, isWaiting, time)
+    drawAgentGlow(ctx, motion, r, color, state, isWaiting, glowPulse(isActive, time), time)
+    drawScanline(ctx, motion, r, color, state, isWaiting, time)
+    drawStateRing(ctx, motion, r, color, agent.isMain, isWaiting, time)
+
+    // What the node holds is squashed and stretched with it
+    ctx.save()
+    applyJellyStretch(ctx, motion)
     if (agent.isMain) {
-      // Eyes while it works; the Claude spark (fading in as they close) while it doesn't
-      const spark = drawFace(ctx, faces, stored, state, awaiting.has(agent.id), agents, toolCalls, agent.x, agent.y, r, color, time)
-      if (spark > 0.01) {
-        ctx.save()
-        ctx.globalAlpha *= spark
-        drawClaudeSpark(ctx, agent.x, agent.y, r, color)
-        ctx.restore()
-      }
+      // The main agent always has its face on: at work, or bored and whistling
+      drawFace(ctx, faces, agent, state, awaiting.has(agent.id), agents, toolCalls, motion.x, motion.y, r, color, time)
     } else {
-      drawCenterIcon(ctx, agent, r, color, isWaiting)
+      drawCenterIcon(ctx, motion, r, color, isWaiting, agent.isSatellite === true)
     }
-
-    if (agent.state === 'thinking' || isWaiting) {
-      drawPulseRipples(ctx, agent, r, color, time)
-    }
+    ctx.restore()
 
     ctx.restore()
+  }
+
+  // The whistled notes are in the air, not in the body: drawn over every node,
+  // outside its clip and its squash, and still drifting off after it stopped
+  for (const agent of agents.values()) {
+    const face = faces.get(agent.id)
+    if (face && face.notes.length > 0) drawNotes(ctx, face.notes, agent.opacity)
   }
 }

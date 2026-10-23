@@ -209,16 +209,18 @@
     "removeImage": "Remove image",
     "processingError": "Failed to process image",
     "requestChanges": "Request changes",
-    "description": "Claude Code applies them in the same session, then validates again",
+    "description": "Apply the same session and validate again",
     "placeholder": "Describe what to change",
     "submitting": "Submitting...",
     "addImages": "Add images",
+    "startOver": "Start over",
+    "startOverHint": "Discard the worktree and the run history and redo the task from scratch, using the feedback as notes on the discarded attempt",
     "dropImages": "Drop images to attach",
     "send": "Request changes"
   },
   "edit": {
     "title": "Edit task",
-    "description": "Update the title, description, reference images and connectors. Changes are saved to the task files.",
+    "description": "Update the description, reference images, connectors and git options. Changes are saved to the task files.",
     "saveChanges": "Save",
     "errors": {
       "updateFailed": "Failed to update task. Please try again."
@@ -276,8 +278,19 @@
     "incompleteDescription": "This task stopped before Claude Code finished it ({{completed}}/{{total}} task list items done). The process likely exited early. Resume to continue the same session.",
     "resume": "Resume task"
   },
+  "previousRuns": {
+    "title": "Previous runs",
+    "description": "Execution history of the previous task runs"
+  },
+  "currentRun": {
+    "runningTitle": "Currently running",
+    "runningDescription": "What the task is doing right now",
+    "title": "Current run",
+    "description": "What the task did in its latest run"
+  },
   "logs": {
     "title": "Logs",
+    "previousRunTitle": "Logs {{time}}",
     "stopped": "Stopped",
     "entries_one": "{{count}} entry",
     "entries_other": "{{count}} entries",

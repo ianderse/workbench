@@ -7,7 +7,6 @@
  * unsubscribe: opening or closing them never starts, stops or restarts it.
  */
 
-import os from 'os';
 import path from 'path';
 import { BrowserWindow, type WebContents } from 'electron';
 import type { Worker } from 'worker_threads';
@@ -16,19 +15,53 @@ import type { LiveAgentStatus } from '../../shared/types';
 import { appLog } from '../app-logger';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { expandHomePath } from '../claude-profile/profile-utils';
+import { getDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
+import { isWindows } from '../platform';
+import { getWslInfo } from '../platform/shell-runtime';
 import { createRelayWorker } from './create-relay-worker';
+import { getTerminalWriteTime } from './terminal-activity';
 import type { RelayWorkerMessage, RelayWorkerRequest } from './relay-worker-protocol';
 
 /** How long the worker gets to clean up (discovery files, hook server, watchers) before it is terminated */
 const STOP_TIMEOUT_MS = 2000;
+
+/** Relay messages that name the window a session runs in (they all start with their type) */
+const SESSION_MESSAGE_PREFIX = '{"type":"session-';
+
+/** How recently an agent window must have been used for it to claim a session (ms) */
+const RECENT_USE_MS = 2 * 60 * 1000;
+
+/** Sessions whose window is remembered */
+const MAX_REMEMBERED_SESSIONS = 200;
+
+/** A directory as compared with another window's */
+const dirKey = (dir: string) => (isWindows() ? path.resolve(dir).toLowerCase() : path.resolve(dir));
 
 /** A graph in an agent window, shown sessions run in `cwd` (`flowDir`: its project's .workbench/flow) */
 interface Subscription {
   webContents: WebContents;
   contentsId: number;
   clientId: string;
+  /** The agent window the graph belongs to (its terminal id) */
+  terminalId: string;
   cwd: string;
   flowDir: string;
+}
+
+/** What the relay tells a graph about a session (see relay/relay.ts) */
+interface SessionInfoMessage {
+  id?: string;
+  owner?: string;
+  [key: string]: unknown;
+}
+
+interface SessionMessage {
+  type: string;
+  sessionId?: string;
+  owner?: string;
+  session?: SessionInfoMessage;
+  sessions?: SessionInfoMessage[];
+  [key: string]: unknown;
 }
 
 /**
@@ -36,7 +69,7 @@ interface Subscription {
  * (~/.claude) and each Claude profile's own (agent windows run with CLAUDE_CONFIG_DIR set to it)
  */
 function getClaudeConfigDirs(): string[] {
-  const dirs = [path.join(os.homedir(), '.claude')];
+  const dirs = [getDefaultClaudeConfigDir()];
   try {
     // Only the stored dirs: getSettings() checks each profile's credentials (keychain), which can block
     for (const configDir of getClaudeProfileManager().getProfileConfigDirs()) {
@@ -49,6 +82,17 @@ function getClaudeConfigDirs(): string[] {
 }
 
 const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+/** A relay message that names the window its sessions run in, or null for every other message */
+function parseSessionMessage(data: string): SessionMessage | null {
+  if (!data.startsWith(SESSION_MESSAGE_PREFIX)) return null;
+  try {
+    const parsed: unknown = JSON.parse(data);
+    return parsed && typeof parsed === 'object' ? (parsed as SessionMessage) : null;
+  } catch {
+    return null;
+  }
+}
 
 export class LiveAgentRelay {
   private worker: Worker | null = null;
@@ -63,6 +107,10 @@ export class LiveAgentRelay {
   private subscriptions = new Map<string, Subscription>();
   /** webContents whose destruction or reload drops their subscriptions */
   private trackedContents = new Set<number>();
+  /** The agent window each session was given (see windowOf), newest last */
+  private sessionWindows = new Map<string, string>();
+  /** The window a session's hooks report, which Claude Code's shared daemon makes unreliable */
+  private reportedWindows = new Map<string, string>();
 
   getStatus(): LiveAgentStatus {
     return this.status;
@@ -78,11 +126,12 @@ export class LiveAgentRelay {
     else void this.stopWorker();
   }
 
-  /** A graph in an agent window wants the sessions run in `cwd`, in the project whose flow dir is `flowDir` */
-  subscribe(webContents: WebContents, clientId: string, cwd: string, flowDir: string): void {
+  /** A graph in the agent window `terminalId` wants the sessions run in `cwd`, in the project
+   *  whose flow dir is `flowDir` */
+  subscribe(webContents: WebContents, clientId: string, cwd: string, flowDir: string, terminalId = ''): void {
     const contentsId = webContents.id;
     const key = `${contentsId}:${clientId}`;
-    this.subscriptions.set(key, { webContents, contentsId, clientId, cwd, flowDir });
+    this.subscriptions.set(key, { webContents, contentsId, clientId, terminalId, cwd, flowDir });
     if (!this.trackedContents.has(contentsId)) {
       this.trackedContents.add(contentsId);
       const drop = () => {
@@ -130,6 +179,77 @@ export class LiveAgentRelay {
     this.stoppingWorker = null;
   }
 
+  /** The message with every session's window decided here rather than taken from its hooks */
+  private withWindows(message: SessionMessage, subscription: Subscription): string {
+    const windowOf = (sessionId: string | undefined, reported: string | undefined) =>
+      sessionId ? this.windowOf(sessionId, subscription.cwd, reported) : reported;
+    const decided: SessionMessage = { ...message };
+    switch (message.type) {
+      case 'session-list':
+        if (!message.sessions) break;
+        decided.sessions = message.sessions.map((session) => ({ ...session, owner: windowOf(session.id, session.owner) }));
+        break;
+      case 'session-started':
+        if (message.session) {
+          decided.session = { ...message.session, owner: windowOf(message.session.id, message.session.owner) };
+        }
+        break;
+      case 'session-owner':
+        // The graphs take an empty owner as "any window's", as they do for a session with none
+        decided.owner = windowOf(message.sessionId, message.owner) ?? '';
+        break;
+      default:
+        return JSON.stringify(message);
+    }
+    return JSON.stringify(decided);
+  }
+
+  /**
+   * The agent window a session belongs to.
+   *
+   * Claude Code runs its sessions in one daemon shared by the whole machine, which keeps the
+   * environment of whichever window happened to start it: the terminal id a session's hooks
+   * report is that window's, not the one the session runs in. So the reported window is only
+   * taken while it is the single one watching the directory. With several, the session goes to
+   * the window last used (the one the user ran it from), and otherwise, when none was used
+   * recently, back to what its hooks report. The first answer for a session is kept while that
+   * window is still there, so a session never moves from the graph already showing it.
+   */
+  private windowOf(sessionId: string, cwd: string, reported: string | undefined): string | undefined {
+    if (reported) this.remember(this.reportedWindows, sessionId, reported);
+    const key = dirKey(cwd);
+    const candidates = [
+      ...new Set(
+        [...this.subscriptions.values()]
+          .filter((subscription) => subscription.terminalId && dirKey(subscription.cwd) === key)
+          .map((subscription) => subscription.terminalId)
+      ),
+    ];
+    const decided = this.sessionWindows.get(sessionId);
+    if (decided && candidates.includes(decided)) return decided;
+
+    const claimed = reported ?? this.reportedWindows.get(sessionId);
+    const fallback = claimed && candidates.includes(claimed) ? claimed : undefined;
+    let window: string | undefined;
+    if (candidates.length === 0) window = claimed;
+    else if (candidates.length === 1) window = candidates[0];
+    else {
+      const lastUsed = candidates
+        .map((terminalId) => ({ terminalId, at: getTerminalWriteTime(terminalId) }))
+        .sort((a, b) => b.at - a.at)[0];
+      window = Date.now() - lastUsed.at < RECENT_USE_MS ? lastUsed.terminalId : fallback;
+    }
+    if (window && candidates.includes(window)) this.remember(this.sessionWindows, sessionId, window);
+    return window;
+  }
+
+  /** Keep a session's window, dropping the oldest once too many are remembered */
+  private remember(windows: Map<string, string>, sessionId: string, terminalId: string): void {
+    windows.delete(sessionId);
+    windows.set(sessionId, terminalId);
+    if (windows.size > MAX_REMEMBERED_SESSIONS) windows.delete(windows.keys().next().value!);
+  }
+
   private removeSubscription(key: string): void {
     if (!this.subscriptions.delete(key)) return;
     this.post({ type: 'unsubscribe', clientId: key });
@@ -156,7 +276,9 @@ export class LiveAgentRelay {
 
     let worker: Worker;
     try {
-      worker = createRelayWorker();
+      // Claude Code inside WSL: the relay maps its Linux paths
+      const wsl = getWslInfo();
+      worker = createRelayWorker({ wsl: wsl ? { distro: wsl.distro, mountRoot: wsl.mountRoot } : null });
     } catch (error) {
       appLog.error('[LiveAgent] Could not start the relay:', error);
       this.setStatus({ state: 'error', error: errorMessage(error) });
@@ -197,13 +319,16 @@ export class LiveAgentRelay {
         this.setStatus({ state: 'error', error: message.error });
         void worker.terminate().catch(() => undefined);
         break;
-      case 'message':
+      case 'message': {
+        const sessionMessage = parseSessionMessage(message.data);
         for (const key of message.clientIds) {
           const subscription = this.subscriptions.get(key);
           if (!subscription || subscription.webContents.isDestroyed()) continue;
-          subscription.webContents.send(IPC_CHANNELS.LIVE_AGENT_MESSAGE, subscription.clientId, message.data);
+          const data = sessionMessage ? this.withWindows(sessionMessage, subscription) : message.data;
+          subscription.webContents.send(IPC_CHANNELS.LIVE_AGENT_MESSAGE, subscription.clientId, data);
         }
         break;
+      }
       case 'log':
         if (message.level === 'error') appLog.error(message.message);
         else if (message.level === 'warn') appLog.warn(message.message);

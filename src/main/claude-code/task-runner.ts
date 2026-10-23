@@ -21,17 +21,17 @@
  */
 
 import { randomUUID } from 'crypto';
-import { execFile } from 'child_process';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { promisify } from 'util';
 import { resolveClaudeEnv } from './env';
 import { startClaudeProcess, type ClaudeProcessHandle } from './process';
 import { buildMcpConfig } from './mcp-config';
 import { triageTask, fixedTriage, applyPlanningPolicy } from './triage';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
 import { buildParallelTasksPrompt } from '../task-changelog';
+import { git } from '../utils/git-exec';
+import { getWslInfo, toHostPath, toRuntimePath, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { buildAttachmentBlocks } from '../insights/message-content';
 import { detectClaudeLimitMessage, parseLimitResetTime } from './limit';
 import {
@@ -52,6 +52,7 @@ import type {
   ClaudeCodeTaskSettings,
   ClaudeEffort,
   ClaudeRunInfo,
+  ClaudeRuntime,
   ClaudeRunPhase,
   ClaudeRunPhaseName,
   TaskTriage,
@@ -61,8 +62,6 @@ import type { McpConnectorSettings } from '../../shared/types/settings';
 import type { ExecutionPhase } from '../../shared/constants/phase-protocol';
 import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
 import { DATA_DIR_NAMES } from '../../shared/constants';
-
-const execFileAsync = promisify(execFile);
 
 export const CLAUDE_RUN_FILE = 'claude_run.json';
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -108,6 +107,8 @@ export interface TaskRunConfig {
   maxBudgetUsd?: number;
   /** Prompt section pointing Claude Code at the project's Graphify memory graph */
   graphifyPrompt?: string;
+  /** Tells the session to save what it learns, when the project's self-improve switch is on */
+  selfImprovePrompt?: string;
   /** The project's task changelog; each phase's prompt lists what the other tasks are changing */
   changelogPath?: string;
   /** Extra environment (e.g. GRAPHIFY_OUT, PATH with the graphify CLI) */
@@ -229,12 +230,28 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, paral
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
   if (config.graphifyPrompt) sections.push(config.graphifyPrompt);
+  if (config.selfImprovePrompt) sections.push(config.selfImprovePrompt);
   if (parallelTasksPrompt) sections.push(parallelTasksPrompt);
   return sections.join('\n\n');
 }
 
 function taskBlock(config: TaskRunConfig): string {
   return `<task title="${config.title.replace(/"/g, "'")}">\n${config.description}\n</task>`;
+}
+
+/**
+ * What a discarded attempt got wrong, for a run started over from "Request changes" with
+ * "Start over" ticked. Empty for a normal start and for a revision (which quotes the feedback
+ * as the change to apply).
+ */
+function restartNotes(config: TaskRunConfig): string {
+  const feedback = config.mode === 'start' ? config.feedback?.trim() : '';
+  if (!feedback) return '';
+  return `\n\nAn earlier attempt at this task was discarded and you are starting it over. The reviewer's notes on that attempt:
+
+<feedback>
+${feedback}
+</feedback>`;
 }
 
 function verificationHint(triage: TaskTriage | undefined): string {
@@ -380,7 +397,7 @@ export class ClaudeTaskRun {
         ({ triage, costUsd: triageCost } = await triageTask({
           description: revision
             ? `${this.config.description}\n\nThis task was already implemented. Assess only the follow-up change the reviewer requested:\n${this.config.feedback ?? ''}`
-            : this.config.description,
+            : `${this.config.description}${restartNotes(this.config)}`,
           cwd: this.config.worktreePath,
           attachmentNames: (revision ? this.config.feedbackAttachments ?? [] : this.config.attachments).map((a) => a.filename),
           settings,
@@ -418,6 +435,18 @@ export class ClaudeTaskRun {
     const model = name === 'plan' ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
     const effort: ClaudeEffort = name === 'plan' && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
     const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' ? 'validation' : 'coding';
+
+    // A session lives in the runtime it ran in (native or WSL); after a switch, start a new one
+    await whenShellRuntimeReady();
+    const runtime = currentRuntime();
+    if (this.info.sessionId && (this.info.runtime ?? 'native') !== runtime) {
+      this.emitLog(`Claude Code now runs ${runtime === 'wsl' ? 'in WSL' : 'natively'}, so this step starts a new session`);
+      this.info.sessionId = undefined;
+    }
+    if (this.info.runtime !== runtime) {
+      this.info.runtime = runtime;
+      this.saveInfo();
+    }
 
     const resumeSessionId = this.info.sessionId;
     const continuing = name === 'implement' && this.info.phases.some((p) => p.name === 'implement');
@@ -541,24 +570,34 @@ export class ClaudeTaskRun {
 
     switch (name) {
       case 'plan':
-        text = `${taskBlock(this.config)}
+        text = `${taskBlock(this.config)}${restartNotes(this.config)}
 
 Explore the codebase as needed and produce an implementation plan for this task. Don't change any files yet.
 The plan should name the files to change, the approach and why, edge cases, and how to verify the result (${verificationHint(triage)}).`;
         break;
       case 'implement':
-        if (continuing) {
+        if (continuing && resume) {
           text = `Continue the task from where you left off. Check \`git status\` and \`git log\` to see what is already done, then finish the work.`;
-        } else if (this.info.plan) {
+        } else if (this.info.plan && resume) {
           text = `The plan is approved. Implement it now, verify it with ${verificationHint(triage)}, and commit the result.`;
+        } else if (continuing || this.info.plan) {
+          // A new session for work that started in another one (the runtime changed): the task,
+          // the approved plan and what was done so far go with the first message
+          const plan = this.info.plan ? `\n\nThe approved implementation plan:\n\n<plan>\n${this.info.plan}\n</plan>` : '';
+          const started = continuing
+            ? '\n\nAn earlier session already worked on this task in this worktree. Check `git status` and `git log` to see what is already done.'
+            : '';
+          text = `${taskBlock(this.config)}${restartNotes(this.config)}${plan}${started}
+
+Implement this task${plan ? ' as planned' : ''}. Verify it with ${verificationHint(triage)}, then commit the result.`;
         } else {
-          text = `${taskBlock(this.config)}
+          text = `${taskBlock(this.config)}${restartNotes(this.config)}
 
 Implement this task. Verify it with ${verificationHint(triage)}, then commit the result.`;
         }
         break;
       case 'validate':
-        text = `Before handing this off, validate the work:
+        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}Before handing this off, validate the work:
 1. Run ${verificationHint(triage)}. Fix failures your change caused.
 2. Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task. Fix only findings that affect correctness or the task's requirements; don't gold-plate.
 3. Commit any remaining changes.
@@ -580,7 +619,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
     // Like the Claude chat: images as images, PDFs as documents, text files inlined
     const attachments = name === 'revise'
       ? [...(resume ? [] : this.config.attachments), ...(this.config.feedbackAttachments ?? [])]
-      : resume ? [] : this.config.attachments;
+      : resume ? [] : [...this.config.attachments, ...(this.config.feedbackAttachments ?? [])];
     const files: ImageAttachment[] = [];
     for (const attachment of attachments) {
       try {
@@ -629,7 +668,8 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       },
     });
 
-    const configDir = env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+    // Host path of the config dir (the transcript is copied with Windows file APIs, also in WSL)
+    const configDir = env.CLAUDE_CONFIG_DIR ? toHostPath(env.CLAUDE_CONFIG_DIR) : defaultClaudeConfigDir();
     if (params.resume && this.info.configDir && this.info.configDir !== configDir) {
       copySessionTranscript(params.sessionId, this.info.configDir, configDir);
     }
@@ -638,10 +678,10 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
       this.info.configDir = configDir;
       this.saveInfo();
     }
-    const specDirRelative = path.join('.workbench', DATA_DIR_NAMES.tasks, this.config.specId);
+    const specDirRelative = (getWslInfo() ? path.posix : path).join('.workbench', DATA_DIR_NAMES.tasks, this.config.specId);
     // Read at every phase, so a resumed session learns what the other tasks changed meanwhile
     const parallelTasksPrompt = this.config.changelogPath
-      ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir))
+      ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir), toRuntimePath(this.config.changelogPath))
       : undefined;
     const args = [
       '-p',
@@ -727,7 +767,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
         claudeCodeVersion: message.claude_code_version,
         model: message.model,
         permissionMode: message.permissionMode,
-        cwd: message.cwd,
+        cwd: message.cwd ? toHostPath(message.cwd) : message.cwd,
         tools: message.tools ?? [],
         agents: message.agents ?? [],
         skills: message.skills ?? [],
@@ -858,7 +898,9 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
     if (!FILE_EDIT_TOOLS.has(name)) return;
     const target = input.file_path ?? input.notebook_path;
     if (typeof target !== 'string' || !target) return;
-    const relative = path.relative(this.config.worktreePath, path.resolve(this.config.worktreePath, target));
+    // In WSL the session reports Linux paths (/mnt/c/...); compare them as host paths
+    const hostTarget = toHostPath(target);
+    const relative = path.relative(this.config.worktreePath, path.resolve(this.config.worktreePath, hostTarget));
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
     this.callbacks.onFilesEdited?.([relative.split(path.sep).join('/')]);
   }
@@ -968,11 +1010,11 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
   private async commitLeftovers(): Promise<void> {
     const cwd = this.config.worktreePath;
     try {
-      const { stdout } = await execFileAsync('git', ['status', '--porcelain', '--', '.', ':(exclude).workbench'], { cwd });
+      const { stdout } = await git(['status', '--porcelain', '--', '.', ':(exclude).workbench'], { cwd });
       if (!stdout.trim()) return;
-      await execFileAsync('git', ['add', '-A', '--', '.', ':(exclude).workbench'], { cwd });
+      await git(['add', '-A', '--', '.', ':(exclude).workbench'], { cwd });
       const title = this.info.triage?.title || this.config.title;
-      await execFileAsync('git', ['commit', '-m', title, '--no-verify'], { cwd });
+      await git(['commit', '-m', title, '--no-verify'], { cwd });
       this.emitLog('Committed remaining changes');
     } catch (error) {
       this.emitLog(`Could not commit remaining changes: ${error instanceof Error ? error.message : String(error)}`);
@@ -1026,6 +1068,17 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
 // =============================================================================
 // Persistence helpers
 // =============================================================================
+
+/** Where Claude Code runs now */
+function currentRuntime(): ClaudeRuntime {
+  return getWslInfo() ? 'wsl' : 'native';
+}
+
+/** Claude Code's default config dir (`~/.claude`) as a host path: the Linux home's in WSL */
+function defaultClaudeConfigDir(): string {
+  const wsl = getWslInfo();
+  return wsl ? toHostPath(path.posix.join(wsl.home, '.claude')) : path.join(os.homedir(), '.claude');
+}
 
 /**
  * Copy a session transcript (`<configDir>/projects/<project>/<sessionId>.jsonl`) to another

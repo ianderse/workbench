@@ -61,17 +61,16 @@ export function TerminalHeader({
   );
 
   return (
-    <div className="electron-no-drag group/header flex h-11 items-center justify-between border-b border-border px-2">
+    <div className="electron-no-drag flex h-11 items-center justify-between border-b border-border px-2">
       <div className="flex items-center gap-2">
-        {/* Drag handle - visible on hover */}
+        {/* Drag handle - always shown, dimmed until pointed at */}
         {dragHandleListeners && (
           <div
             {...dragHandleListeners}
             className={cn(
               'flex items-center justify-center',
               'w-4 h-8 -ml-1',
-              'opacity-0 group-hover/header:opacity-60',
-              'hover:opacity-100 transition-opacity',
+              'opacity-60 hover:opacity-100 transition-opacity',
               'cursor-grab active:cursor-grabbing',
               'text-muted-foreground hover:text-foreground'
             )}
@@ -137,7 +136,7 @@ export function TerminalHeader({
             e.stopPropagation();
             onClose();
           }}
-          title={t('common:close')}
+          title={t('common:buttons.close')}
         >
           <X className="h-4 w-4" />
         </Button>

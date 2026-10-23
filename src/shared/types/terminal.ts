@@ -3,12 +3,14 @@
  */
 
 /**
- * Shell type for Windows terminals.
- * Used to determine correct command chaining syntax:
- * - 'powershell': Uses ';' (PowerShell 5.1 doesn't support '&&')
- * - 'cmd': Uses '&&' (cmd.exe, PowerShell 7+, bash, etc.)
+ * The kind of shell an agent window runs, which decides the syntax of every command the app types
+ * into it (changing directory, quoting, environment variables, chaining):
+ * - 'posix': bash, zsh, fish and other Unix shells (single quotes, `VAR=value cmd`, `&&`)
+ * - 'cmd': cmd.exe and the other Windows shells that accept its syntax (`cd /d "..."`, `set "VAR=..."`, `&&`)
+ * - 'powershell': PowerShell 7 (pwsh.exe) and Windows PowerShell 5.1 (`Set-Location -LiteralPath '...'`,
+ *   `$env:VAR = '...'`, `& 'cmd'`; chained with ';' since 5.1 has no '&&')
  */
-export type WindowsShellType = 'powershell' | 'cmd';
+export type ShellKind = 'cmd' | 'powershell' | 'posix';
 
 export interface TerminalCreateOptions {
   id: string;
@@ -47,28 +49,7 @@ export interface TerminalRestoreResult {
   error?: string;
 }
 
-/**
- * Session date information for dropdown display
- */
-export interface SessionDateInfo {
-  date: string;  // YYYY-MM-DD format
-  label: string;  // Human readable: "Today", "Yesterday", "Dec 10"
-  sessionCount: number;  // Total sessions across all projects
-  projectCount: number;  // Number of projects with sessions
-}
 
-/**
- * Result of restoring sessions from a specific date
- */
-export interface SessionDateRestoreResult {
-  restored: number;
-  failed: number;
-  sessions: Array<{
-    id: string;
-    success: boolean;
-    error?: string;
-  }>;
-}
 
 /**
  * Rate limit information for SDK/CLI calls (non-terminal)

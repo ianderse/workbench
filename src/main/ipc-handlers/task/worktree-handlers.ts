@@ -2,28 +2,29 @@ import { handleIpc } from '../ipc-registry';
 import { BrowserWindow } from 'electron';
 import type { ConflictSeverity } from '../../../shared/types/task';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, PullRequestState, Project, Task } from '../../../shared/types';
+import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, WorktreeLocalMergeResult, PullRequestState, Project, Task } from '../../../shared/types';
 import path from 'path';
-import { minimatch } from 'minimatch';
+import { matchesExtensionGlob } from '../../utils/glob-markers';
 import { existsSync, readdirSync, statSync, readFileSync, promises as fsPromises } from 'fs';
-import { execFileSync, execFile } from 'child_process';
 import { projectStore } from '../../project-store';
 
 import { MergeOrchestrator } from '../../ai/merge/orchestrator';
 import { createMergeResolverFn } from '../../ai/runners/merge-resolver';
 import { createPR } from '../../ai/runners/github/pr-creator';
 import { mergePR } from '../../ai/runners/github/pr-merger';
+import { localMerge } from '../../worktree/local-merge';
 import { taskHooks } from '../../task-hooks';
 import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
-import { getToolPath } from '../../cli-tool-manager';
-import { promisify } from 'util';
+import { git } from '../../utils/git-exec';
+import { runTool, runToolScript } from '../../platform/runtime-exec';
+import { isWslRuntime } from '../../platform/shell-runtime';
 import {
   getTaskWorktreeDir,
   findTaskWorktree,
 } from '../../worktree-paths';
 import { persistPlanStatus, updateTaskMetadataFields } from './plan-file-utils';
-import { getIsolatedGitEnv, refreshGitIndex } from '../../utils/git-isolation';
+import { refreshGitIndex } from '../../utils/git-isolation';
 import { cleanupWorktree } from '../../utils/worktree-cleanup';
 import { taskStateManager } from '../../task-state-manager';
 import { safeSendToRenderer } from '../utils';
@@ -47,14 +48,13 @@ const PRINTABLE_CHARS_REGEX = /^[\x20-\x7E\u00A0-\uFFFF]*$/;
  * @param projectPath - Path to check and potentially fix
  * @returns true if fixed, false if no fix needed or not fixable
  */
-function fixMisconfiguredBareRepo(projectPath: string): boolean {
+async function fixMisconfiguredBareRepo(projectPath: string): Promise<boolean> {
   try {
     // Check if bare=true is set
-    const bareConfig = execFileSync(
-      getToolPath('git'),
+    const bareConfig = (await git(
       ['config', '--get', 'core.bare'],
-      { cwd: projectPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim().toLowerCase();
+      { cwd: projectPath, encoding: 'utf-8' }
+    )).stdout.trim().toLowerCase();
 
     if (bareConfig !== 'true') {
       return false; // Not marked as bare, nothing to fix
@@ -65,7 +65,7 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
     // This covers multiple ecosystems: JS/TS, Python, Rust, Go, Java, C#, etc.
     //
     // Markers are separated into exact matches and glob patterns for efficiency.
-    // Exact matches use existsSync() directly, while glob patterns use minimatch
+    // Exact matches use existsSync() directly, while glob patterns are matched
     // against a cached directory listing.
     const EXACT_MARKERS = [
       // JavaScript/TypeScript ecosystem
@@ -126,8 +126,7 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
           }
         }
 
-        // Use minimatch for proper glob pattern matching
-        return directoryFiles.some(file => minimatch(file, pattern, { nocase: true }));
+        return directoryFiles.some(file => matchesExtensionGlob(file, pattern));
       });
 
       if (!hasGlobMatch) {
@@ -137,10 +136,9 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
 
     // Fix the misconfiguration
     console.warn('[GIT] Detected misconfigured bare repository with source files. Auto-fixing by unsetting core.bare...');
-    execFileSync(
-      getToolPath('git'),
+    await git(
       ['config', '--unset', 'core.bare'],
-      { cwd: projectPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+      { cwd: projectPath, encoding: 'utf-8' }
     );
     console.warn('[GIT] Fixed: core.bare has been unset. Git operations should now work correctly.');
     return true;
@@ -160,14 +158,13 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
  * @param projectPath - Path to check
  * @returns true if it's a valid working tree, false if bare or not a git repo
  */
-function isGitWorkTree(projectPath: string): boolean {
+async function isGitWorkTree(projectPath: string): Promise<boolean> {
   try {
     // Use git rev-parse --is-inside-work-tree which returns "true" for working trees
     // and fails for bare repos or non-git directories
-    const result = execFileSync(
-      getToolPath('git'),
+    const { stdout: result } = await git(
       ['rev-parse', '--is-inside-work-tree'],
-      { cwd: projectPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+      { cwd: projectPath, encoding: 'utf-8' }
     );
     return result.trim() === 'true';
   } catch {
@@ -218,7 +215,7 @@ function getTaskBaseBranch(specDir: string): string | undefined {
  * This should be used instead of getting the current HEAD branch,
  * as the user may be on a feature branch when viewing worktree status.
  */
-function getEffectiveBaseBranch(projectPath: string, specId: string, projectMainBranch?: string): string {
+async function getEffectiveBaseBranch(projectPath: string, specId: string, projectMainBranch?: string): Promise<string> {
   // Defensive check for undefined inputs
   if (!projectPath || typeof projectPath !== 'string') {
     console.error('[getEffectiveBaseBranch] projectPath is undefined or not a string');
@@ -241,13 +238,21 @@ function getEffectiveBaseBranch(projectPath: string, specId: string, projectMain
     return projectMainBranch;
   }
 
-  // 3. Try to detect main/master branch
+  // 3. Try to detect main/master branch (in WSL both checks share one launch)
+  if (isWslRuntime()) {
+    const [main, master] = await runToolScript('git', [['rev-parse', '--verify', 'main'], ['rev-parse', '--verify', 'master']], {
+      cwd: projectPath,
+      encoding: 'utf-8',
+    });
+    if (main.code === 0) return 'main';
+    if (master.code === 0) return 'master';
+    return 'main';
+  }
   for (const branch of ['main', 'master']) {
     try {
-      execFileSync(getToolPath('git'), ['rev-parse', '--verify', branch], {
+      await git(['rev-parse', '--verify', branch], {
         cwd: projectPath,
         encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
       });
       return branch;
     } catch {
@@ -409,64 +414,35 @@ export function registerWorktreeHandlers(
 
         // Get branch info from git
         try {
-          // Get current branch in worktree
-          const branch = execFileSync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
-            cwd: worktreePath,
-            encoding: 'utf-8'
-          }).trim();
-
           // Get base branch using proper fallback chain:
           // 1. Task metadata baseBranch, 2. Project settings mainBranch, 3. main/master detection
-          const baseBranch = getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+          const baseBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
 
-          // Get user's current branch in main project (this is where changes will merge INTO)
-          let currentProjectBranch: string | undefined;
-          try {
-            currentProjectBranch = execFileSync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
-              cwd: project.path,
-              encoding: 'utf-8'
-            }).trim();
-          } catch {
-            // Ignore - might be in detached HEAD or git error
-          }
+          // Current branch, commit count and diff stats (cross-platform - no shell syntax). Polled
+          // for every task, so in WSL the three share one launch (one after the other natively).
+          // The working-tree diff against baseBranch captures ALL changes (committed and
+          // uncommitted), so the UI shows file stats before the agent commits its work.
+          const [branchResult, countResult, diffResult] = await runToolScript('git', [
+            ['rev-parse', '--abbrev-ref', 'HEAD'],
+            ['rev-list', '--count', `${baseBranch}..HEAD`],
+            ['diff', '--stat', baseBranch],
+          ], { cwd: worktreePath, encoding: 'utf-8' });
+          if (branchResult.code !== 0) throw new Error(branchResult.stderr.trim() || 'git rev-parse failed');
+          const branch = branchResult.stdout.trim();
 
-          // Get commit count (cross-platform - no shell syntax)
-          let commitCount = 0;
-          try {
-            const countOutput = execFileSync(getToolPath('git'), ['rev-list', '--count', `${baseBranch}..HEAD`], {
-              cwd: worktreePath,
-              encoding: 'utf-8',
-              stdio: ['pipe', 'pipe', 'pipe']
-            }).trim();
-            commitCount = parseInt(countOutput, 10) || 0;
-          } catch {
-            commitCount = 0;
-          }
+          const commitCount = countResult.code === 0 ? parseInt(countResult.stdout.trim(), 10) || 0 : 0;
 
-          // Get diff stats
           let filesChanged = 0;
           let additions = 0;
           let deletions = 0;
-
-          // Use working-tree diff against baseBranch to capture ALL changes
-          // (both committed and uncommitted). This ensures the UI shows file stats
-          // even when the agent hasn't committed its work yet.
-          try {
-            const diffStat = execFileSync(getToolPath('git'), ['diff', '--stat', baseBranch], {
-              cwd: worktreePath,
-              encoding: 'utf-8',
-              stdio: ['pipe', 'pipe', 'pipe']
-            }).trim();
-
+          if (diffResult.code === 0) {
             // Parse the summary line (e.g., "3 files changed, 50 insertions(+), 10 deletions(-)")
-            const summaryMatch = diffStat.match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
+            const summaryMatch = diffResult.stdout.trim().match(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/);
             if (summaryMatch) {
               filesChanged = parseInt(summaryMatch[1], 10) || 0;
               additions = parseInt(summaryMatch[2], 10) || 0;
               deletions = parseInt(summaryMatch[3], 10) || 0;
             }
-          } catch {
-            // Ignore diff errors
           }
 
           return {
@@ -476,7 +452,6 @@ export function registerWorktreeHandlers(
               worktreePath,
               branch,
               baseBranch,
-              currentProjectBranch,
               commitCount,
               filesChanged,
               additions,
@@ -529,7 +504,7 @@ export function registerWorktreeHandlers(
 
         // Auto-fix any misconfigured bare repo before merge operation
         // This prevents issues where git operations fail due to incorrect bare=true config
-        if (fixMisconfiguredBareRepo(project.path)) {
+        if (await fixMisconfiguredBareRepo(project.path)) {
           debug('Fixed misconfigured bare repository at:', project.path);
         }
 
@@ -544,17 +519,14 @@ export function registerWorktreeHandlers(
           `(source: ${taskBaseBranch ? 'task metadata' : projectMainBranch ? 'project settings' : 'default'})`);
 
         // Emit initial progress event so renderer shows the merge has started
-        const mainWindow = getMainWindow();
         const emitProgress = (stage: string, percent: number, message: string, details: Record<string, unknown> = {}) => {
-          if (mainWindow) {
-            mainWindow.webContents.send(IPC_CHANNELS.TASK_MERGE_PROGRESS, taskId, {
-              type: 'progress',
-              stage,
-              percent,
-              message,
-              details
-            });
-          }
+          safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_PROGRESS, taskId, {
+            type: 'progress',
+            stage,
+            percent,
+            message,
+            details
+          });
         };
 
         emitProgress('analyzing', 0, 'Starting merge engine');
@@ -601,10 +573,10 @@ export function registerWorktreeHandlers(
             if (applied) {
               // Stage all changed files
               try {
-                execFileSync(getToolPath('git'), ['add', '-A'], {
+                await git(['add', '-A'], {
                   cwd: project.path,
                   encoding: 'utf-8',
-                  env: getIsolatedGitEnv()
+                  isolated: true
                 });
                 debug('Staged merged files');
               } catch (gitErr) {
@@ -627,11 +599,11 @@ export function registerWorktreeHandlers(
         // Post-merge: check git status, update plan files, clean worktree
 
             // Get git status after merge (only if project is a working tree, not a bare repo)
-            if (isGitWorkTree(project.path)) {
+            if (await isGitWorkTree(project.path)) {
               try {
-                const gitStatusAfter = execFileSync(getToolPath('git'), ['status', '--short'], { cwd: project.path, encoding: 'utf-8' });
+                const { stdout: gitStatusAfter } = await git(['status', '--short'], { cwd: project.path, encoding: 'utf-8' });
                 debug('Git status AFTER merge in main project:\n', gitStatusAfter || '(clean)');
-                const gitDiffStaged = execFileSync(getToolPath('git'), ['diff', '--staged', '--stat'], { cwd: project.path, encoding: 'utf-8' });
+                const { stdout: gitDiffStaged } = await git(['diff', '--staged', '--stat'], { cwd: project.path, encoding: 'utf-8' });
                 debug('Staged changes:\n', gitDiffStaged || '(none)');
               } catch (e) {
                 debug('Failed to get git status after:', e);
@@ -650,9 +622,9 @@ export function registerWorktreeHandlers(
 
               if (isStageOnly) {
                 // Only check staged changes if project is a working tree (not bare repo)
-                if (isGitWorkTree(project.path)) {
+                if (await isGitWorkTree(project.path)) {
                   try {
-                    const gitDiffStaged = execFileSync(getToolPath('git'), ['diff', '--staged', '--stat'], { cwd: project.path, encoding: 'utf-8' });
+                    const { stdout: gitDiffStaged } = await git(['diff', '--staged', '--stat'], { cwd: project.path, encoding: 'utf-8' });
                     hasActualStagedChanges = gitDiffStaged.trim().length > 0;
                     debug('Stage-only verification: hasActualStagedChanges:', hasActualStagedChanges);
 
@@ -662,10 +634,9 @@ export function registerWorktreeHandlers(
                       try {
                         // Check if current branch contains all commits from spec branch
                         // git merge-base --is-ancestor returns exit code 0 if true, 1 if false
-                        execFileSync(
-                          getToolPath('git'),
+                        await git(
                           ['merge-base', '--is-ancestor', specBranch, 'HEAD'],
-                          { cwd: project.path, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+                          { cwd: project.path, encoding: 'utf-8' }
                         );
                         // If we reach here, the command succeeded (exit code 0) - branch is merged
                         mergeAlreadyCommitted = true;
@@ -764,11 +735,11 @@ export function registerWorktreeHandlers(
                   let diffSummary = '';
                   let filesChangedList: string[] = [];
 
-                  if (isGitWorkTree(project.path)) {
+                  if (await isGitWorkTree(project.path)) {
                     try {
                       const [diffResult, nameOnlyResult] = await Promise.all([
-                        execFileAsync(getToolPath('git'), ['diff', '--staged', '--stat'], { cwd: project.path, encoding: 'utf-8' }),
-                        execFileAsync(getToolPath('git'), ['diff', '--staged', '--name-only'], { cwd: project.path, encoding: 'utf-8' }),
+                        git(['diff', '--staged', '--stat'], { cwd: project.path, encoding: 'utf-8' }),
+                        git(['diff', '--staged', '--name-only'], { cwd: project.path, encoding: 'utf-8' }),
                       ]);
                       diffSummary = diffResult.stdout.trim();
                       const nameOnly = nameOnlyResult.stdout.trim();
@@ -937,11 +908,11 @@ export function registerWorktreeHandlers(
         // Check for uncommitted changes in the main project (only if not a bare repo)
         let hasUncommittedChanges = false;
         let uncommittedFiles: string[] = [];
-        if (isGitWorkTree(project.path)) {
+        if (await isGitWorkTree(project.path)) {
           try {
-            refreshGitIndex(project.path);
+            await refreshGitIndex(project.path);
 
-            const gitStatus = execFileSync(getToolPath('git'), ['status', '--porcelain'], {
+            const { stdout: gitStatus } = await git(['status', '--porcelain'], {
               cwd: project.path,
               encoding: 'utf-8'
             });
@@ -991,7 +962,7 @@ export function registerWorktreeHandlers(
         const worktreePath = findTaskWorktree(project.path, task.specId);
         if (worktreePath) {
           console.warn('[IPC] Refreshing evolution data from worktree:', worktreePath);
-          orchestrator.evolutionTracker.refreshFromGit(task.specId, worktreePath, effectiveBaseBranch);
+          await orchestrator.evolutionTracker.refreshFromGit(task.specId, worktreePath, effectiveBaseBranch);
         } else {
           console.warn('[IPC] No worktree found for preview — evolution data may be stale');
         }
@@ -1126,9 +1097,6 @@ export function registerWorktreeHandlers(
     }
   );
 
-  // Promisified execFile for async git operations
-  const execFileAsync = promisify(execFile);
-
   /**
    * List all spec worktrees for a project
    * Per-spec architecture: Each spec has its own worktree at .workbench/worktrees/tasks/{spec-name}/
@@ -1166,42 +1134,28 @@ export function registerWorktreeHandlers(
         // Helper to process a single worktree entry (async)
         const processWorktreeEntry = async (entry: string, entryPath: string): Promise<WorktreeListItem | null> => {
           try {
-            // Get branch info (async)
-            const branchResult = await execFileAsync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
-              cwd: entryPath,
-              encoding: 'utf-8'
-            });
-            const branch = (branchResult.stdout as string).trim();
-
             // Get base branch using proper fallback chain:
             // 1. Task metadata baseBranch, 2. Project settings mainBranch, 3. main/master detection
             // Note: We do NOT use current HEAD as that may be a feature branch
-            const baseBranch = getEffectiveBaseBranch(project.path, entry, project.settings?.mainBranch);
+            const baseBranch = await getEffectiveBaseBranch(project.path, entry, project.settings?.mainBranch);
 
-// Get commit count (async, cross-platform - no shell syntax)
-            let commitCount = 0;
-            try {
-              const countResult = await execFileAsync(getToolPath('git'), ['rev-list', '--count', `${baseBranch}..HEAD`], {
-                cwd: entryPath,
-                encoding: 'utf-8'
-              });
-              commitCount = parseInt((countResult.stdout as string).trim(), 10) || 0;
-            } catch {
-              commitCount = 0;
-            }
+            // Branch, commit count and diff stats (async, cross-platform - no shell syntax); in
+            // WSL the three share one launch
+            const [branchResult, countResult, diffResult] = await runToolScript('git', [
+              ['rev-parse', '--abbrev-ref', 'HEAD'],
+              ['rev-list', '--count', `${baseBranch}..HEAD`],
+              ['diff', '--shortstat', `${baseBranch}...HEAD`],
+            ], { cwd: entryPath, encoding: 'utf-8' });
+            if (branchResult.code !== 0) throw new Error(branchResult.stderr.trim() || 'git rev-parse failed');
+            const branch = branchResult.stdout.trim();
 
-            // Get diff stats (async, cross-platform - no shell syntax)
+            const commitCount = countResult.code === 0 ? parseInt(countResult.stdout.trim(), 10) || 0 : 0;
+
             let filesChanged = 0;
             let additions = 0;
             let deletions = 0;
-
-            try {
-              const diffResult = await execFileAsync(getToolPath('git'), ['diff', '--shortstat', `${baseBranch}...HEAD`], {
-                cwd: entryPath,
-                encoding: 'utf-8'
-              });
-              const diffStat = (diffResult.stdout as string).trim();
-
+            if (diffResult.code === 0) {
+              const diffStat = diffResult.stdout.trim();
               const filesMatch = diffStat.match(/(\d+) files? changed/);
               const addMatch = diffStat.match(/(\d+) insertions?/);
               const delMatch = diffStat.match(/(\d+) deletions?/);
@@ -1209,8 +1163,6 @@ export function registerWorktreeHandlers(
               if (filesMatch) filesChanged = parseInt(filesMatch[1], 10) || 0;
               if (addMatch) additions = parseInt(addMatch[1], 10) || 0;
               if (delMatch) deletions = parseInt(delMatch[1], 10) || 0;
-            } catch {
-              // Ignore diff errors
             }
 
             // Check if there's a task associated with this worktree
@@ -1429,10 +1381,6 @@ export function registerWorktreeHandlers(
           debug('Using stored base branch:', taskBaseBranch);
         }
 
-        // Get tool paths
-        const ghPath = getToolPath('gh');
-        const gitPath = getToolPath('git');
-
         debug('Creating PR via TypeScript runner:', { branchName, baseBranch, prTitle });
 
         // Run the TypeScript PR creator
@@ -1447,8 +1395,6 @@ export function registerWorktreeHandlers(
           baseBranch,
           title: prTitle,
           draft: options?.draft,
-          ghPath,
-          gitPath,
         });
 
         debug('PR creation result:', result);
@@ -1524,8 +1470,6 @@ export function registerWorktreeHandlers(
           worktreePath,
           prUrl,
           targetBranch: options?.targetBranch,
-          gitPath: getToolPath('git'),
-          ghPath: getToolPath('gh'),
           taskTitle: task.title,
           taskDescription: task.metadata?.userDescription || task.description,
           profileId: project.settings?.claudeProfileId,
@@ -1553,7 +1497,7 @@ export function registerWorktreeHandlers(
       const prUrl = task.metadata?.prUrl;
       if (!prUrl) return { success: false, error: 'This task has no pull request' };
       try {
-        const { stdout } = await promisify(execFile)(getToolPath('gh'), ['pr', 'view', prUrl, '--json', 'state', '--jq', '.state'], {
+        const { stdout } = await runTool('gh', ['pr', 'view', prUrl, '--json', 'state', '--jq', '.state'], {
           cwd: project.path,
           encoding: 'utf-8',
           timeout: 30000,
@@ -1570,10 +1514,50 @@ export function registerWorktreeHandlers(
       }
     }
   );
+
+  /**
+   * Merge a task's branch into its base branch with plain git, in the project itself.
+   * Nothing is pushed and no pull request is involved; a merged task moves to Done.
+   */
+  handleIpc(
+    IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL,
+    async (_, taskId: string): Promise<IPCResult<WorktreeLocalMergeResult>> => {
+      const { task, project } = findTaskAndProject(taskId);
+      if (!task || !project) return { success: false, error: 'Task not found' };
+      if (task.status === 'in_progress' || task.status === 'ai_review') {
+        return { success: false, error: 'Stop the task before merging its branch' };
+      }
+      const worktreePath = findTaskWorktree(project.path, task.specId);
+      if (!worktreePath) return { success: false, error: 'No worktree found for this task' };
+      const targetBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+      if (!GIT_BRANCH_REGEX.test(targetBranch)) return { success: false, error: `Invalid base branch name: ${targetBranch}` };
+      if (localMerges.has(taskId)) return { success: false, error: "This task's branch is already being merged" };
+
+      localMerges.add(taskId);
+      try {
+        const result = await localMerge({
+          projectDir: project.path,
+          worktreePath,
+          targetBranch,
+          dataDir: project.autoBuildPath,
+        });
+        if (result.success) await markTaskDone(task, project, worktreePath);
+        return { success: true, data: result };
+      } catch (error) {
+        console.error('[MERGE_LOCAL] Exception in handler:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to merge the task branch' };
+      } finally {
+        localMerges.delete(taskId);
+      }
+    }
+  );
 }
 
 /** Tasks whose pull request is being merged */
 const mergingPRs = new Set<string>();
+
+/** Tasks whose branch is being merged locally */
+const localMerges = new Set<string>();
 
 /** Set fields of a task's metadata in the main project and its worktree */
 function writeTaskMetadataFields(project: Project, task: Task, worktreePath: string | null, fields: Record<string, unknown>): void {
@@ -1582,9 +1566,14 @@ function writeTaskMetadataFields(project: Project, task: Task, worktreePath: str
   if (worktreePath) updateTaskMetadataFields(path.join(worktreePath, specsBaseDir, task.specId, 'task_metadata.json'), fields);
 }
 
-/** A merged PR: remember it and move the task to Done (state machine, else the plan files) */
+/** A merged PR: remember it and move the task to Done */
 async function recordPRMerged(task: Task, project: Project, worktreePath: string): Promise<void> {
   writeTaskMetadataFields(project, task, worktreePath, { prState: 'merged' });
+  await markTaskDone(task, project, worktreePath);
+}
+
+/** Move a merged task to Done (state machine, else the plan files) */
+async function markTaskDone(task: Task, project: Project, worktreePath: string): Promise<void> {
   taskStateManager.handleUiEvent(task.id, { type: 'MARK_DONE' }, task, project);
   if (taskStateManager.getCurrentState(task.id) !== 'done') {
     const specsBaseDir = getSpecsDir(project.autoBuildPath);

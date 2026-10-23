@@ -67,24 +67,8 @@ export const terminalMock = {
     console.warn('[Browser Mock] activateDeferredClaudeResume called');
   },
 
-  getTerminalSessionDates: async () => ({
-    success: true,
-    data: []
-  }),
 
-  getTerminalSessionsForDate: async () => ({
-    success: true,
-    data: []
-  }),
 
-  restoreTerminalSessionsFromDate: async () => ({
-    success: true,
-    data: {
-      restored: 0,
-      failed: 0,
-      sessions: []
-    }
-  }),
 
   saveTerminalBuffer: async () => {},
 

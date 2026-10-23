@@ -37,7 +37,7 @@ export const MIN_TERMINALS = 1;
 export const MAX_TERMINALS_LIMIT = 24;
 
 export const DEFAULT_APP_SETTINGS = {
-  theme: 'dark' as const,
+  theme: 'system' as const,
   colorTheme: 'default' as const,
   pythonPath: undefined as string | undefined,
   gitPath: undefined as string | undefined,
@@ -58,6 +58,8 @@ export const DEFAULT_APP_SETTINGS = {
   interfaceFont: 'anthropic-sans' as const,
   // Graph page colors: one muted color (Graphify's community colors with 'colorful')
   graphStyle: 'plain' as const,
+  // Windows shell: native tools with PowerShell agent windows ('wsl' runs everything in WSL)
+  windowsShell: 'pwsh' as const,
   // Log order setting for task detail view (default chronological - oldest first)
   logOrder: 'chronological' as const,
   // Beta updates opt-in (receive pre-release versions)
@@ -118,8 +120,7 @@ export const AUTO_BUILD_PATHS = {
   QA_REPORT: 'qa_report.md',
   BUILD_PROGRESS: 'build-progress.txt',
   CONTEXT: 'context.json',
-  REQUIREMENTS: 'requirements.json',
-  PROJECT_INDEX: '.workbench/project_index.json'
+  REQUIREMENTS: 'requirements.json'
 } as const;
 
 /**

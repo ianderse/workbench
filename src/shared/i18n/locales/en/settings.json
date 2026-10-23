@@ -206,7 +206,11 @@
     "sourceSystemPath": "System PATH",
     "sourceBundled": "Bundled",
     "sourceFallback": "Fallback",
+    "sourceWsl": "WSL",
     "notDetected": "Not detected",
+    "notDetectedWsl": "Not installed in WSL",
+    "wslPathDescription": "Linux path inside WSL (leave empty for auto-detection)",
+    "wslPathPlaceholder": "For example {{example}}",
     "detecting": "Detecting..."
   },
   "theme": {
@@ -220,7 +224,22 @@
     "graphStyle": "Graph style",
     "graphStyleDescription": "Use plain or colorful mode for showing your project's knowledge graph",
     "graphPlain": "Plain",
-    "graphColorful": "Colorful"
+    "graphColorful": "Colorful",
+    "windowsShell": "Shell",
+    "windowsShellDescription": "Run agent windows, tasks and tools with PowerShell or inside WSL",
+    "windowsShellPwsh": "PWSH",
+    "windowsShellWsl": "WSL",
+    "restartToApply": "Restart to apply",
+    "wslChecking": "Checking WSL",
+    "wslCheckAgain": "Check WSL again",
+    "wslFallback": "WSL could not start, so this session uses PWSH",
+    "wslUnavailable": {
+      "not-windows": "WSL is only available on Windows",
+      "not-installed": "WSL is not installed",
+      "no-distro": "WSL has no Linux distribution installed",
+      "timeout": "WSL did not respond in time",
+      "error": "WSL could not be checked"
+    }
   },
   "fonts": {
     "interfaceFont": "Interface font",
@@ -294,9 +313,11 @@
       "title": "General",
       "description": "Auto-Build and agent config",
       "useClaudeMd": "Use CLAUDE.md",
-      "useClaudeMdDescription": "Include CLAUDE.md instructions in agent context",
+      "useClaudeMdDescription": "Give agents the project's CLAUDE.md, written under Project index above",
+      "selfImprove": "Self-improve",
+      "selfImproveDescription": "Enable compounding engineering mode that autodetects and saves user preferences for later sessions",
       "useGraphify": "Use Graphify",
-      "useGraphifyDescription": "Give agents the project's knowledge graph, built under Knowledge index above. Turning it off deletes the graph (.workbench/knowledge)",
+      "useGraphifyDescription": "Give agents the project's knowledge graph, built under Knowledge index above",
       "useGraphifyNotInstalled": "Install Graphify on the Updates page to use the project's knowledge graph"
     },
     "queue": {
@@ -342,12 +363,24 @@
       "title": "Metrics",
       "tasks_one": "{{count}} task",
       "tasks_other": "{{count}} tasks",
-      "total": "Total",
-      "updated": "Spending of all tasks · updated {{time}}",
-      "notUpdated": "Spending of all tasks",
       "refresh": "Refresh",
       "empty": "No initialized projects",
-      "error": "Could not read the projects' spending"
+      "error": "Could not read the projects' spending",
+      "chart": {
+        "label": "Daily usage cost of {{name}}",
+        "emptyRange": "No usage in this range",
+        "rangeLabel": "Usage range",
+        "rangeTotal": {
+          "all": "All-time total",
+          "days30": "30d total",
+          "days7": "7d total"
+        },
+        "ranges": {
+          "all": "All",
+          "days30": "30d",
+          "days7": "7d"
+        }
+      }
     },
     "toast": {
       "settingsUpdateFailed": "Failed to Update Settings",
@@ -473,13 +506,13 @@
       "budgetPlaceholder": "No limit"
     },
     "context": {
-      "index": "Project index",
-      "indexDescription": "AI-discovered knowledge about your codebase",
-      "noIndex": "No index yet. Analyze the project to create one.",
-      "analyze": "Analyze project",
-      "refresh": "Refresh",
-      "analyzing": "Analyzing project...",
-      "loadFailed": "Failed to load project index",
+      "projectIndex": "Project index",
+      "projectIndexDescription": "CLAUDE.md · {{lines}} lines · written {{time}}",
+      "projectIndexNotEnabled": "Turn on Use CLAUDE.md in the Knowledge section to generate CLAUDE.md",
+      "projectIndexBuilding": "Reading the project and writing its CLAUDE.md",
+      "rebuildProjectIndex": "Rewrite",
+      "projectIndexFailed": "Couldn't write CLAUDE.md",
+      "projectIndexFailedUnknown": "The run stopped without a message",
       "memoryIndex": "Knowledge index",
       "memoryIndexDescription": "{{nodes}} nodes · {{edges}} edges · built {{time}}",
       "noMemoryIndex": "Map the project's code into a Graphify graph in .workbench/knowledge",
@@ -487,7 +520,16 @@
       "memoryIndexNotEnabled": "Turn on Use Graphify in the Knowledge section to build a memory graph",
       "buildMemoryIndex": "Build",
       "rebuildMemoryIndex": "Rebuild",
-      "memoryIndexFailed": "Couldn't build the memory graph"
+      "memoryIndexFailed": "Couldn't build the memory graph",
+      "compengIndex": "Memory index",
+      "compengIndexNotEnabled": "Turn on Self-improve in the Knowledge section to read what past sessions taught",
+      "compengIndexBuilding": "Reading past sessions for preferences you already stated",
+      "compengIndexDescription": "{{memories}} memories · {{sessions}} sessions read · built {{time}}",
+      "noCompengIndex": "Read the project's past sessions for the preferences you already stated",
+      "buildCompengIndex": "Build",
+      "rebuildCompengIndex": "Rebuild",
+      "compengIndexFailed": "Couldn't read the past sessions",
+      "compengIndexFailedUnknown": "The build stopped without a message"
     },
     "mcp": {
       "serversTitle": "MCP servers",
@@ -546,9 +588,9 @@
     },
     "agentWindows": {
       "skipPermissions": "Skip permission prompts",
-      "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions, so it runs commands and edits files without asking",
+      "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions",
       "liveAgent": "Live agent",
-      "liveAgentDescription": "Agent windows of {{project}} show a live graph of the Claude Code session next to the terminal",
+      "liveAgentDescription": "Claude Code windows show a live graph for all project sessions",
       "liveAgentNoProject": "Select a project to show a live graph of its Claude Code sessions in its agent windows",
       "liveAgentFailed": "Live agent could not be changed: {{error}}",
       "liveAgentHooksFailed": "The graph works from the session transcripts only. {{error}}"

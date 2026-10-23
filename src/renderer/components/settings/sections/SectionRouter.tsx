@@ -1,4 +1,4 @@
-import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo, ProjectEnvConfig } from '../../../../shared/types';
+import type { Project, ProjectSettings as ProjectSettingsType, AutoBuildVersionInfo } from '../../../../shared/types';
 import { GeneralSettings } from '../../project-settings/GeneralSettings';
 import { KnowledgeSettings } from '../../project-settings/KnowledgeSettings';
 import { ProjectTaskSettings } from '../../project-settings/ProjectTaskSettings';
@@ -13,10 +13,6 @@ interface SectionRouterProps {
   versionInfo: AutoBuildVersionInfo | null;
   isCheckingVersion: boolean;
   isUpdating: boolean;
-  envConfig: ProjectEnvConfig | null;
-  isLoadingEnv: boolean;
-  envError: string | null;
-  updateEnvConfig: (updates: Partial<ProjectEnvConfig>) => void;
   handleInitialize: () => Promise<void>;
 }
 
@@ -32,10 +28,6 @@ export function SectionRouter({
   versionInfo,
   isCheckingVersion,
   isUpdating,
-  envConfig,
-  isLoadingEnv,
-  envError,
-  updateEnvConfig,
   handleInitialize
 }: SectionRouterProps) {
   switch (activeSection) {
@@ -60,8 +52,6 @@ export function SectionRouter({
                 projectPath={project.path}
                 settings={settings}
                 setSettings={setSettings}
-                envConfig={envConfig}
-                updateEnvConfig={updateEnvConfig}
               />
             </>
           )}

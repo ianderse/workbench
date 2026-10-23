@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUpDown, MoreHorizontal, Search, Trash2, X } from 'lucide-react';
+import { ArrowUpDown, MonitorX, MoreHorizontal, Search, Trash2, X } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,9 +18,15 @@ type SortMode = 'nameAsc' | 'nameDesc';
 interface ProjectsPageProps {
   projects: Project[];
   activeProjectId: string | null;
+  /** Projects that have a window open (this window's project included) */
+  windowedProjectIds: ReadonlySet<string>;
+  /** Whether a window can be closed: with one window left there is nothing to quit back to */
+  canQuitWindow: boolean;
   onSelectProject: (projectId: string) => void;
   onAddProject: () => void;
   onRemoveProject: (projectId: string) => void;
+  /** Close the window of an open project ("Quit window") */
+  onQuitProjectWindow: (projectId: string) => void;
 }
 
 const iconButtonClass =
@@ -55,9 +61,12 @@ function useRelativeTime() {
 export function ProjectsPage({
   projects,
   activeProjectId,
+  windowedProjectIds,
+  canQuitWindow,
   onSelectProject,
   onAddProject,
-  onRemoveProject
+  onRemoveProject,
+  onQuitProjectWindow
 }: ProjectsPageProps) {
   const { t } = useTranslation('common');
   const formatRelative = useRelativeTime();
@@ -159,6 +168,7 @@ export function ProjectsPage({
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             {visibleProjects.map((project) => {
               const isActive = project.id === activeProjectId;
+              const hasWindow = windowedProjectIds.has(project.id);
               return (
                 <div
                   key={project.id}
@@ -191,8 +201,9 @@ export function ProjectsPage({
                   {!project.autoBuildPath && (
                     <p className="mt-1 text-xs text-(--nav-label-color)">{t('projectsPage.notInitialized')}</p>
                   )}
-                  <p className="mt-auto pt-5 text-sm text-muted-foreground">
+                  <p className="mt-auto flex items-center gap-2 pt-5 text-sm text-muted-foreground">
                     {formatRelative(project.updatedAt)}
+                    {hasWindow && <span className="text-(--nav-label-color)">{t('projectsPage.open')}</span>}
                   </p>
 
                   {/* Card actions */}
@@ -208,6 +219,16 @@ export function ProjectsPage({
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-52 rounded-xl p-1.5">
+                        {/* Only a project with a window, and never the last one */}
+                        {hasWindow && canQuitWindow && (
+                          <DropdownMenuItem
+                            onSelect={() => onQuitProjectWindow(project.id)}
+                            className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5"
+                          >
+                            <MonitorX className="h-4 w-4" strokeWidth={1.75} />
+                            {t('projectsPage.quitWindow')}
+                          </DropdownMenuItem>
+                        )}
                         <DropdownMenuItem
                           onSelect={() => onRemoveProject(project.id)}
                           className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-destructive focus:text-destructive"

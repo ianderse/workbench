@@ -1,6 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ArrowUp, Image as ImageIcon, Loader2, Paperclip, X } from 'lucide-react';
+import { ArrowUp, Check, Image as ImageIcon, Loader2, Paperclip, X } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '../../ui/tooltip';
 import {
   generateImageId,
@@ -25,6 +25,10 @@ interface QAFeedbackSectionProps {
   images?: ImageAttachment[];
   /** Callback when images change - optional for backward compatibility */
   onImagesChange?: (images: ImageAttachment[]) => void;
+  /** Redo the task from scratch instead of revising what it built (off by default) */
+  startOver?: boolean;
+  /** Callback when the start over choice changes; the checkbox shows only when it is given */
+  onStartOverChange?: (startOver: boolean) => void;
 }
 
 const MIME_TO_EXTENSION: Record<string, string> = {
@@ -39,7 +43,8 @@ const MIME_TO_EXTENSION: Record<string, string> = {
  * "Request changes" composer, styled like the chat composer on the Claude page: the feedback
  * field with attached images, a paperclip button to add images (paste and drop work too), and a send
  * button. Enter sends, Shift+Enter adds a line. Claude Code applies the request in the task's
- * session, assessing it first and validating afterwards.
+ * session, assessing it first and validating afterwards. With "Start over" ticked the task's
+ * worktree and run history are discarded instead and the task is redone from scratch.
  */
 export function QAFeedbackSection({
   feedback,
@@ -47,7 +52,9 @@ export function QAFeedbackSection({
   onFeedbackChange,
   onReject,
   images = [],
-  onImagesChange
+  onImagesChange,
+  startOver = false,
+  onStartOverChange
 }: QAFeedbackSectionProps) {
   const { t } = useTranslation('tasks');
   const imageUploadEnabled = !!onImagesChange;
@@ -245,6 +252,32 @@ export function QAFeedbackSection({
                   <TooltipContent>{t('feedback.addImages')}</TooltipContent>
                 </Tooltip>
               </>
+            )}
+            {/* Off by default: the revision continues in the worktree the task already built */}
+            {onStartOverChange && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    role="checkbox"
+                    aria-checked={startOver}
+                    disabled={isSubmitting}
+                    onClick={() => onStartOverChange(!startOver)}
+                    className="flex h-8 items-center gap-2 rounded-lg px-2 text-xs text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+                  >
+                    <span
+                      className={cn(
+                        'flex h-4 w-4 items-center justify-center rounded-[0.25rem] border transition-colors',
+                        startOver ? 'border-primary bg-primary text-primary-foreground' : 'border-border'
+                      )}
+                    >
+                      {startOver && <Check className="h-3 w-3" strokeWidth={3} />}
+                    </span>
+                    {t('feedback.startOver')}
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>{t('feedback.startOverHint')}</TooltipContent>
+              </Tooltip>
             )}
           </div>
           {/* Send appears once there is something to send */}

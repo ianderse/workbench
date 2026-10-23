@@ -5,15 +5,20 @@
  * Every task, triage and utility call runs the locally installed `claude` CLI. Credentials
  * come from the chosen Claude profile's CLAUDE_CONFIG_DIR (the CLI refreshes OAuth tokens
  * itself), or from the active API profile (Anthropic-compatible endpoint) when one is set.
+ *
+ * When the app runs its tools in WSL (shell-runtime), `command` is the distribution's claude and
+ * the environment keeps host values (CLAUDE_CONFIG_DIR as a Windows path); runtime-exec
+ * translates paths and forwards variables when it launches the run.
  */
 
 import path from 'path';
 import { existsSync } from 'fs';
 import { getClaudeCliInvocationAsync } from '../cli-utils';
-import { getToolInfo } from '../cli-tool-manager';
+import { getToolInfoAsync } from '../cli-tool-manager';
 import { getBestAvailableProfileEnv, getUsableProfileEnv, isDetectedClaudeCodeProfile } from '../rate-limit-detector';
 import { getAPIProfileEnv } from '../services/profile';
 import { isWindows } from '../platform';
+import { getWslInfo, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { withClaudeConfigDir } from '../claude-profile/config-dir-paths';
 
 /** Variables that would make Claude Code use an API key instead of the profile's sign-in */
@@ -61,11 +66,22 @@ function deriveGitBashPath(gitExePath: string): string | null {
  * Picks the best available Claude profile (rate-limit aware) unless one is given.
  */
 export async function resolveClaudeEnv(options: ClaudeEnvOptions = {}): Promise<ClaudeEnvResult> {
-  const { command, env: baseEnv } = await getClaudeCliInvocationAsync();
+  // Runs spawned right after startup must know whether Claude Code runs in WSL
+  await whenShellRuntimeReady();
+  const wsl = getWslInfo();
+
+  // In WSL: the distribution's own claude, and the app's environment as it is (PATH and other
+  // Windows-only variables stay on the Windows side; runtime-exec sends what the run adds)
+  const { command, env: baseEnv } = wsl
+    ? { command: wsl.tools.claude.path ?? 'claude', env: { ...process.env } as Record<string, string> }
+    : await getClaudeCliInvocationAsync();
   const env: Record<string, string> = { ...baseEnv, ...(options.extraEnv ?? {}) };
 
-  if (isWindows() && !env.CLAUDE_CODE_GIT_BASH_PATH) {
-    const gitInfo = getToolInfo('git');
+  if (wsl) {
+    // Git Bash is a Windows-only setting of Claude Code
+    delete env.CLAUDE_CODE_GIT_BASH_PATH;
+  } else if (isWindows() && !env.CLAUDE_CODE_GIT_BASH_PATH) {
+    const gitInfo = await getToolInfoAsync('git');
     const bashPath = gitInfo.found && gitInfo.path ? deriveGitBashPath(gitInfo.path) : null;
     if (bashPath) env.CLAUDE_CODE_GIT_BASH_PATH = bashPath;
   }

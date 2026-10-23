@@ -6,7 +6,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRelay, type Relay } from '../relay/relay';
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555';
@@ -19,6 +19,10 @@ describe('relay', () => {
   let transcript: string;
   let relay: Relay;
   const sent: Array<{ clientIds: string[]; message: { type: string; [key: string]: unknown } }> = [];
+  /** The agent events sent to the clients so far */
+  const events = () => sent
+    .filter((entry) => entry.message.type === 'agent-event')
+    .map((entry) => entry.message.event as { type: string; payload: Record<string, unknown> });
   /** Discovery files this relay wrote in the project's flow directory */
   const discoveryFiles = () =>
     (fs.existsSync(flowDir) ? fs.readdirSync(flowDir) : []).filter((file) => file.endsWith(`-${process.pid}.json`));
@@ -99,6 +103,66 @@ describe('relay', () => {
     relay.subscribe('window-c', workspace, flowDir);
     const list = sent.find((entry) => entry.message.type === 'session-list');
     expect(list?.message.sessions).toEqual([expect.objectContaining({ id: SESSION_ID, owner: 'terminal-1' })]);
+  });
+
+  it('draws a background agent the session started (/subtask) and completes it on its report', async () => {
+    // Claude Code runs /subtask as an agent of the session: no Agent tool call, an
+    // informational line naming it, its own transcript under subagents/, and a
+    // <task-notification> when it is done
+    const agentId = 'aanalyze-the-deps-3dc25cd955d35ae1';
+    const append = (entry: Record<string, unknown>) =>
+      fs.appendFileSync(transcript, JSON.stringify({ cwd: workspace, ...entry }) + '\n');
+    const subagentsDir = path.join(path.dirname(transcript), SESSION_ID, 'subagents');
+    fs.mkdirSync(subagentsDir, { recursive: true });
+
+    relay.subscribe('window-a', workspace, flowDir);
+    const { port } = JSON.parse(fs.readFileSync(path.join(flowDir, discoveryFiles()[0]), 'utf-8'));
+    sent.length = 0;
+
+    append({ type: 'system', subtype: 'informational', content: 'Started in the background: analyze the deps', launchedAgentId: agentId });
+    // Its own transcript, as Claude Code writes it (the sidecar names no launching tool call)
+    fs.writeFileSync(
+      path.join(subagentsDir, `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: 'fork', isFork: true, description: 'analyze the deps', finished: false })
+    );
+    fs.writeFileSync(path.join(subagentsDir, `agent-${agentId}.jsonl`), JSON.stringify({
+      type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_read', name: 'Read' }] },
+    }) + '\n');
+    // Past SCAN_INTERVAL_MS: where fs.watch delivers late (macOS), the scan tick is what finds the file
+    await vi.waitFor(
+      () => expect(events().some((event) => event.type === 'tool_call_start')).toBe(true),
+      { timeout: 5000 }
+    );
+
+    // Its node is the session's, drawn apart from ordinary sub-agents, and its work hangs off it
+    expect(events()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'agent_spawn', payload: { name: agentId, parent: 'orchestrator', satellite: true } }),
+      expect.objectContaining({ type: 'tool_call_start', payload: expect.objectContaining({ agent: agentId, tool: 'Read' }) }),
+    ]));
+    expect(events().some((event) => event.type === 'agent_complete')).toBe(false);
+
+    // Its hooks don't end it: a /subtask fork keeps working past its SubagentStop, and the
+    // Stop it fires is its own turn ending, not the main agent's
+    const hook = (body: Record<string, unknown>) => fetch(`http://127.0.0.1:${port}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: SESSION_ID, cwd: workspace, transcript_path: transcript, ...body }),
+    });
+    await hook({ hook_event_name: 'SubagentStop', agent_id: agentId });
+    await hook({ hook_event_name: 'Stop', agent_id: agentId });
+    expect(events().some((event) => event.type === 'agent_complete')).toBe(false);
+
+    // It reports back when it is done
+    append({
+      type: 'user', uuid: 'u2',
+      message: { role: 'user', content: `<task-notification>\n<task-id>${agentId}</task-id>\n</task-notification>` },
+    });
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_complete', payload: { name: agentId } }),
+      ])),
+      { timeout: 5000 }
+    );
   });
 
   it('gives no node to a sub-agent handing its report back (SubagentHandback)', async () => {

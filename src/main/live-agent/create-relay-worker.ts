@@ -5,7 +5,9 @@
  */
 import type { Worker } from 'worker_threads';
 import createWorker from './relay-worker?nodeWorker';
+import type { RelayWorkerData } from './relay-worker-protocol';
 
-export function createRelayWorker(): Worker {
-  return createWorker({});
+/** `data`: what the worker needs from the main thread to start (it can't read the shell runtime itself) */
+export function createRelayWorker(data: RelayWorkerData = { wsl: null }): Worker {
+  return createWorker({ workerData: data });
 }

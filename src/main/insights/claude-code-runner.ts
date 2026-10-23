@@ -20,14 +20,18 @@ import { dirname, join } from 'node:path';
 import { resolveClaudeEnv } from '../claude-code/env';
 import { startClaudeProcess } from '../claude-code/process';
 import type { ClaudeStreamMessage, ClaudeUserContentBlock } from '../claude-code/stream-types';
-import { getToolInfo } from '../cli-tool-manager';
+import { getToolInfoAsync } from '../cli-tool-manager';
 import { getPathDelimiter } from '../platform';
+import { getShellRuntimeStatus, getWslInfo, toRuntimePath, whenShellRuntimeReady } from '../platform/shell-runtime';
+import { appLog } from '../app-logger';
 import { INSIGHTS_ERROR_CODES, formatInsightsError } from '../../shared/constants/insights';
 import { CLAUDE_EFFORTS, CLAUDE_MODEL_ALIASES } from '../../shared/types/claude-code';
 import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-code';
 import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
-import { TASK_TOOLS_SERVER_NAME, type TaskToolsMcpServer } from './task-tools-mcp';
+import { TASK_TOOLS_SERVER_NAME, toBridgeServer, type TaskToolsMcpServer, type TaskToolsStdioServer } from './task-tools-mcp';
+// The bridge's source, bundled as text and written next to the turn's other temp files
+import TASK_TOOLS_BRIDGE_SOURCE from './task-tools-bridge.cjs?raw';
 import { buildMessageContent } from './message-content';
 import {
   buildConversationPrompt,
@@ -254,6 +258,60 @@ function handleInsightsEvent(
 // =============================================================================
 
 /**
+ * How Claude Code reaches the turn's task tools, served over HTTP on the host's 127.0.0.1:
+ * - 'direct': natively, and inside WSL1 or WSL2 with mirrored networking (they share the
+ *   host's localhost)
+ * - 'bridge': inside WSL2 with NAT networking, which gives the distribution its own localhost:
+ *   through the stdio bridge (task-tools-bridge.cjs) that Claude Code starts as a Windows
+ *   process through WSL interop
+ * - 'off': the distribution has WSL interop off (the probe says so), or the bridge failed to
+ *   start before; tasks are suggested instead
+ */
+export type TaskToolsRoute = 'direct' | 'bridge' | 'off';
+
+/** Set once the bridge failed to start, so later turns don't offer tools Claude can't reach */
+let taskToolsBridgeFailed = false;
+
+export function getTaskToolsRoute(): TaskToolsRoute {
+  const wsl = getWslInfo();
+  if (!wsl) return 'direct';
+  if (wsl.networkingMode === 'mirrored' || getShellRuntimeStatus().wsl?.version === 1) return 'direct';
+  // The bridge is a Windows program, which the distribution can only run with interop on
+  return taskToolsBridgeFailed || wsl.interop === false ? 'off' : 'bridge';
+}
+
+/** Claude Code's init message lists the bridge as failed: task tools are off from the next turn */
+function noteBridgeFailure(event: ClaudeStreamMessage | Record<string, unknown>): void {
+  const raw = event as { type?: unknown; subtype?: unknown; mcp_servers?: unknown };
+  if (raw.type !== 'system' || raw.subtype !== 'init' || !Array.isArray(raw.mcp_servers)) return;
+  const server = (raw.mcp_servers as Array<{ name?: string; status?: string }>).find((entry) => entry.name === TASK_TOOLS_SERVER_NAME);
+  if (server?.status !== 'failed' || taskToolsBridgeFailed) return;
+  taskToolsBridgeFailed = true;
+  appLog.warn(`[Insights] The task tools bridge did not start in WSL (${getWslInfo()?.distro ?? 'unknown'}), is WSL interop off? Task tools are off for this session; tasks are suggested instead`);
+}
+
+/**
+ * Forget a bridge failure (tests)
+ * @internal
+ */
+export function resetTaskToolsBridgeForTests(): void {
+  taskToolsBridgeFailed = false;
+}
+
+/** The task tools entry of the turn's MCP config (the bridge script is written to `tempDir`) */
+async function taskToolsEntry(
+  taskTools: TaskToolsMcpServer,
+  route: Exclude<TaskToolsRoute, 'off'>,
+  tempDir: string,
+): Promise<TaskToolsMcpServer | TaskToolsStdioServer> {
+  if (route === 'direct') return taskTools;
+  const bridgeScript = join(tempDir, 'task-tools-bridge.cjs');
+  await writeFile(bridgeScript, TASK_TOOLS_BRIDGE_SOURCE, 'utf-8');
+  // Claude Code starts the executable by its Linux path; the Windows process reads the script by its Windows path
+  return toBridgeServer(taskTools, toRuntimePath(process.execPath), bridgeScript);
+}
+
+/**
  * Run an Insights turn through the Claude Code CLI.
  * Rejects with a readable message when the CLI fails, or an AbortError when cancelled.
  */
@@ -261,29 +319,44 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
   const { projectDir, message, history = [], abortSignal, attachments, graphify } = config;
 
   try {
-    const cliInfo = getToolInfo('claude');
-    if (!cliInfo.found) {
-      throw new Error(formatInsightsError(INSIGHTS_ERROR_CODES.claudeCodeMissing, cliInfo.message || 'Claude Code CLI not found'));
+    await whenShellRuntimeReady();
+    const wsl = getWslInfo();
+    if (wsl) {
+      // Claude Code runs inside WSL: the distribution's own claude (from the startup probe)
+      if (!wsl.tools.claude.path) {
+        throw new Error(formatInsightsError(INSIGHTS_ERROR_CODES.claudeCodeMissing, `Claude Code CLI not found in WSL (${wsl.distro})`));
+      }
+    } else {
+      const cliInfo = await getToolInfoAsync('claude', { refreshIfMissing: true });
+      if (!cliInfo.found) {
+        throw new Error(formatInsightsError(INSIGHTS_ERROR_CODES.claudeCodeMissing, cliInfo.message || 'Claude Code CLI not found'));
+      }
     }
+    const taskToolsRoute = getTaskToolsRoute();
+    const offeredTaskTools = taskToolsRoute === 'off' ? undefined : config.taskTools;
 
     const { command, env } = await resolveClaudeEnv({ profileId: config.profileId });
     if (graphify) {
-      // graphify commands find the project's graph (GRAPHIFY_OUT) and run without a full path
+      // graphify commands find the project's graph (GRAPHIFY_OUT, translated for WSL when the
+      // run starts) and run without a full path (natively; in WSL from the login PATH)
       env.GRAPHIFY_OUT = dirname(graphify.graph);
-      env.PATH = [dirname(graphify.cli), env.PATH].filter(Boolean).join(getPathDelimiter());
+      if (!wsl) env.PATH = [dirname(graphify.cli), env.PATH].filter(Boolean).join(getPathDelimiter());
     }
 
     // System prompt goes through a file: no argument length or shell quoting limits
     const tempDir = await mkdtemp(join(tmpdir(), 'workbench-insights-'));
     const systemPromptFile = join(tempDir, 'system-prompt.md');
-    const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!config.taskTools });
+    const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!offeredTaskTools });
     const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;
     await writeFile(systemPromptFile, systemPrompt, 'utf-8');
     // The task tools' URL and token go through a file too, so they aren't in the process list
     let mcpConfigFile: string | undefined;
-    if (config.taskTools) {
+    const taskTools = offeredTaskTools && taskToolsRoute !== 'off'
+      ? await taskToolsEntry(offeredTaskTools, taskToolsRoute, tempDir)
+      : undefined;
+    if (taskTools) {
       mcpConfigFile = join(tempDir, 'mcp-config.json');
-      await writeFile(mcpConfigFile, JSON.stringify({ mcpServers: { [TASK_TOOLS_SERVER_NAME]: config.taskTools } }), 'utf-8');
+      await writeFile(mcpConfigFile, JSON.stringify({ mcpServers: { [TASK_TOOLS_SERVER_NAME]: taskTools } }), 'utf-8');
       env.MCP_TOOL_TIMEOUT = String(TASK_TOOL_TIMEOUT_MS);
     }
 
@@ -296,7 +369,10 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
         env,
         // Document blocks (PDFs) are valid Anthropic content even though the shared type omits them
         input: buildMessageContent(buildConversationPrompt(message, history), attachments) as ClaudeUserContentBlock[],
-        onMessage: (event) => handleInsightsEvent(event, state, onStream),
+        onMessage: (event) => {
+          if (taskTools?.type === 'stdio') noteBridgeFailure(event);
+          handleInsightsEvent(event, state, onStream);
+        },
         abortSignal,
       });
       const outcome = await handle.done;

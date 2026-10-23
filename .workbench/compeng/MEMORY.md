@@ -1,0 +1,5 @@
+- [Keep changes local](keep-changes-local.md) — Keep changes local: do not commit or push them unless the user asks.
+- [Never commit PLAN.md](plan-md-never-commit.md) — PLAN.md at the repo root is a personal planning file the user deletes; never commit it.
+- [Commit changes in correlated groups](commit-in-correlated-groups.md) — Split a batch of changes into logically correlated groups and commit each group separately.
+- [Keep answers and summaries concise](concise-summaries.md) — Give short, highlight-focused answers and summaries instead of long documents.
+- [Act, do not offer menus](act-dont-offer-menus.md) — When told to remove or change something, carry it out instead of presenting options.

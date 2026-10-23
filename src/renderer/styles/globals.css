@@ -5,13 +5,38 @@
    OS color scheme: otherwise light mode on a dark OS got dark-mode text, e.g. white code in Markdown */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Bundled UI font (shipped with the build, no network needed). Only the Regular cut is bundled,
-   so it is declared as weight 400 and the browser synthesizes bold for semibold/bold text.
-   Dank Mono, the terminal font, is registered from main.tsx before terminals open. */
+/* Bundled UI font (shipped with the build, no network needed). Each weight the UI uses (regular,
+   medium, semibold, bold) has its own cut: a synthesized bold smears the regular letters, which
+   looks blurry on Windows. Dank Mono, the terminal font, is registered from main.tsx before
+   terminals open. */
 @font-face {
   font-family: 'Anthropic Sans';
   src: url('../assets/fonts/AnthropicSans-Text-Regular-Static.otf') format('opentype');
   font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('../assets/fonts/AnthropicSans-Text-Medium-Static.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('../assets/fonts/AnthropicSans-Text-Semibold-Static.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Anthropic Sans';
+  src: url('../assets/fonts/AnthropicSans-Text-Bold-Static.otf') format('opentype');
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -21,6 +46,30 @@
   font-family: 'Inter';
   src: url('../assets/fonts/Inter-Regular.otf') format('opentype');
   font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/Inter-Medium.ttf') format('truetype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/Inter-SemiBold.otf') format('opentype');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('../assets/fonts/Inter-Bold.otf') format('opentype');
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -354,6 +403,8 @@
   --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
   --review-highlight-border: var(--card-border);
   --review-highlight-bg: var(--muted);
+  /* Faint grid behind the live agent graph */
+  --grid-line: rgba(11, 11, 11, 0.05);
 }
 
 /* ============================================
@@ -500,6 +551,8 @@
   --tooltip-shadow: 0 8px 24px rgba(0, 0, 0, 0.32), 0 2px 6px rgba(0, 0, 0, 0.2);
   --review-highlight-border: var(--card-border);
   --review-highlight-bg: var(--muted);
+  /* Faint grid behind the live agent graph */
+  --grid-line: rgba(255, 255, 255, 0.035);
 }
 
 /* Default theme: serif display headings use a lighter weight, like Claude Desktop */
@@ -1279,4 +1332,28 @@ body {
 .claude-dialog [data-size='sm'] {
   height: 2rem;
   font-size: 0.875rem;
+}
+
+/* Clouds drifting behind Clawd in the usage breakdown; each one sets its own from/to */
+@keyframes clawd-cloud-drift {
+  from {
+    transform: translateX(var(--clawd-cloud-from));
+  }
+  to {
+    transform: translateX(var(--clawd-cloud-to));
+  }
+}
+
+/* ============================================
+   Live agent grid (the website's hero stage)
+   A faint grid behind the graph, so the nodes read as sitting in a space; it
+   fades out from the middle, so the panel keeps no frame of its own.
+   ============================================ */
+.live-agent-grid {
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 38px 38px;
+  mask-image: radial-gradient(50% 50% at 50% 50%, #000 12%, transparent 100%);
+  -webkit-mask-image: radial-gradient(50% 50% at 50% 50%, #000 12%, transparent 100%);
 }

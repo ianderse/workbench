@@ -6,6 +6,8 @@
  * - macOS: Keychain (via `security` command)
  * - Linux: Secret Service API (via `secret-tool` command), with fallback to .credentials.json file
  * - Windows: Windows Credential Manager (via PowerShell)
+ * - WSL (a config dir in a distribution's Linux home, `\\wsl.localhost\<distro>\...`): only the
+ *   dir's .credentials.json, which is what Claude Code inside WSL uses (see credentialBackendFor)
  *
  * Supports both:
  * - Default profile: "Claude Code-credentials" service / default config dir
@@ -15,13 +17,16 @@
  * Mirrors the functionality of src/main/claude-profile/credential-utils.ts (originally from Python core/auth)
  */
 
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'fs';
+import { closeSync, existsSync, ftruncateSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, writeSync } from 'fs';
 import { homedir, userInfo } from 'os';
-import { dirname, join } from 'path';
+import path, { dirname, join } from 'path';
 import { isMacOS, isWindows, isLinux } from '../platform';
-import { isDefaultClaudeConfigDir } from './config-dir-paths';
+import { expandClaudeHome } from '../platform/claude-home';
+import { getWslExePath } from '../platform/wsl-detect';
+import { isWslUncPath } from '../platform/wsl-paths';
+import { getDefaultClaudeConfigDir, isDefaultClaudeConfigDir } from './config-dir-paths';
 
 /**
  * Create a safe fingerprint of a token for debug logging.
@@ -1131,6 +1136,142 @@ function getCredentialsFromWindows(configDir?: string, forceRefresh = false): Pl
 }
 
 // =============================================================================
+// WSL Credentials File Implementation
+// =============================================================================
+
+/**
+ * Where a config dir's sign-in credentials are kept:
+ * - 'platform': this OS's store (macOS Keychain; Linux Secret Service or file; Windows file and
+ *   Credential Manager)
+ * - 'wsl-file': the dir is in a WSL distribution's Linux home (`\\wsl.localhost\<distro>\...`,
+ *   the app runs Claude Code inside WSL). Claude Code on Linux keeps the sign-in in the dir's
+ *   .credentials.json only, so that file is read and written directly: no PowerShell, no
+ *   Credential Manager, no icacls
+ *
+ * @param configDir - The config dir (may start with ~); Claude Code's default dir when missing
+ */
+export type CredentialBackend = 'platform' | 'wsl-file';
+
+export function credentialBackendFor(configDir?: string): CredentialBackend {
+  if (!isWindows()) return 'platform';
+  const dir = configDir ? expandClaudeHome(configDir) : getDefaultClaudeConfigDir();
+  return isWslUncPath(dir) ? 'wsl-file' : 'platform';
+}
+
+/** The .credentials.json of a config dir in WSL (a UNC path) */
+function getWslCredentialsPath(configDir?: string): string {
+  const dir = configDir ? expandClaudeHome(configDir) : getDefaultClaudeConfigDir();
+  return path.win32.join(dir, '.credentials.json');
+}
+
+function getCredentialsFromWslFile(configDir?: string, forceRefresh = false): PlatformCredentials {
+  const credentialsPath = getWslCredentialsPath(configDir);
+  return getCredentialsFromFile(credentialsPath, `wsl-file:${credentialsPath}`, 'WSL:File', forceRefresh);
+}
+
+function getFullCredentialsFromWslFile(configDir?: string): FullOAuthCredentials {
+  return getFullCredentialsFromFile(getWslCredentialsPath(configDir), 'WSL:File:Full');
+}
+
+/** `\\wsl.localhost\<distro>\x\y` -> { distro, linuxPath: '/x/y' } */
+function parseWslUncPath(uncPath: string): { distro: string; linuxPath: string } | null {
+  const match = /^[\\/]{2}wsl(?:\$|\.localhost)[\\/]([^\\/]+)[\\/](.+)$/i.exec(uncPath);
+  return match ? { distro: match[1], linuxPath: `/${match[2].replace(/\\/g, '/')}` } : null;
+}
+
+/**
+ * Restrict a credentials file created from Windows to its owner (0600) inside the distribution.
+ * Files created over \\wsl.localhost get the distribution's default mode. Async, best effort.
+ */
+function restrictWslFileMode(uncPath: string): void {
+  const target = parseWslUncPath(uncPath);
+  if (!target) return;
+  execFile(
+    getWslExePath(),
+    ['-d', target.distro, '--exec', 'chmod', '600', target.linuxPath],
+    { windowsHide: true, timeout: 15_000 },
+    (error) => {
+      if (error) console.warn('[CredentialUtils:WSL:Update] Could not restrict the credentials file mode:', error.message);
+    }
+  );
+}
+
+/**
+ * Update the .credentials.json of a config dir in WSL with new tokens. The file is rewritten in
+ * place (opened, written, truncated), so it keeps its Linux owner and 0600 mode; other entries of
+ * the file (and other fields of the sign-in) are kept.
+ */
+function updateWslFileCredentials(
+  configDir: string | undefined,
+  credentials: {
+    accessToken: string;
+    refreshToken: string;
+    expiresAt: number;
+    scopes?: string[];
+  }
+): UpdateCredentialsResult {
+  const credentialsPath = getWslCredentialsPath(configDir);
+  if (!isValidCredentialsPath(credentialsPath)) {
+    return { success: false, error: 'Invalid credentials path' };
+  }
+
+  try {
+    let existing: Record<string, unknown> = {};
+    const exists = existsSync(credentialsPath);
+    if (exists) {
+      try {
+        const parsed = JSON.parse(readFileSync(credentialsPath, 'utf-8')) as unknown;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) existing = parsed as Record<string, unknown>;
+      } catch {
+        // An unreadable file is replaced
+      }
+    }
+    const existingOauth = existing.claudeAiOauth && typeof existing.claudeAiOauth === 'object'
+      ? existing.claudeAiOauth as Record<string, unknown>
+      : {};
+
+    // CodeQL: network data validated before write - validate token fields are expected types before writing
+    const newCredentialData = {
+      ...existing,
+      claudeAiOauth: {
+        ...existingOauth,
+        accessToken: typeof credentials.accessToken === 'string' ? credentials.accessToken : '',
+        refreshToken: typeof credentials.refreshToken === 'string' ? credentials.refreshToken : '',
+        expiresAt: typeof credentials.expiresAt === 'number' ? credentials.expiresAt : 0,
+        scopes: Array.isArray(credentials.scopes)
+          ? credentials.scopes.filter(s => typeof s === 'string')
+          : (Array.isArray(existingOauth.scopes) ? existingOauth.scopes : []),
+      },
+    };
+    const content = Buffer.from(JSON.stringify(newCredentialData, null, 2), 'utf-8');
+
+    if (exists) {
+      // In place: the Linux file keeps its owner and mode
+      // lgtm[js/http-to-file-access] - credentialsPath is from controlled configDir
+      const fd = openSync(credentialsPath, 'r+');
+      try {
+        writeSync(fd, content, 0, content.length, 0);
+        ftruncateSync(fd, content.length);
+      } finally {
+        closeSync(fd);
+      }
+    } else {
+      mkdirSync(dirname(credentialsPath), { recursive: true });
+      // lgtm[js/http-to-file-access] - credentialsPath is from controlled configDir
+      writeFileSync(credentialsPath, content, { flag: 'wx', mode: 0o600 });
+      restrictWslFileMode(credentialsPath);
+    }
+
+    clearKeychainCache(configDir);
+    return { success: true };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error('[CredentialUtils:WSL:Update] Failed to update credentials file:', errorMessage);
+    return { success: false, error: `File update failed: ${errorMessage}` };
+  }
+}
+
+// =============================================================================
 // Cross-Platform Public API
 // =============================================================================
 
@@ -1152,6 +1293,10 @@ function getCredentialsFromWindows(configDir?: string, forceRefresh = false): Pl
  * @returns Object with token and email (both may be null if not found or invalid)
  */
 export function getCredentialsFromKeychain(configDir?: string, forceRefresh = false): PlatformCredentials {
+  if (credentialBackendFor(configDir) === 'wsl-file') {
+    return getCredentialsFromWslFile(configDir, forceRefresh);
+  }
+
   if (isMacOS()) {
     return getCredentialsFromMacOSKeychain(configDir, forceRefresh);
   }
@@ -1182,12 +1327,14 @@ export function clearKeychainCache(configDir?: string): void {
     const linuxFileKey = `linux:${getLinuxCredentialsPath(configDir)}`;
     const windowsKey = `windows:${getWindowsCredentialTarget(configDir)}`;
     const windowsFileKey = `windows-file:${getWindowsCredentialsPath(configDir)}`;
+    const wslFileKey = `wsl-file:${getWslCredentialsPath(configDir)}`;
 
     credentialCache.delete(macOSKey);
     credentialCache.delete(linuxSecretKey);
     credentialCache.delete(linuxFileKey);
     credentialCache.delete(windowsKey);
     credentialCache.delete(windowsFileKey);
+    credentialCache.delete(wslFileKey);
   } else {
     credentialCache.clear();
   }
@@ -1537,6 +1684,10 @@ function getFullCredentialsFromWindows(configDir?: string): FullOAuthCredentials
  * @returns Full credentials including refresh token and expiry information
  */
 export function getFullCredentialsFromKeychain(configDir?: string): FullOAuthCredentials {
+  if (credentialBackendFor(configDir) === 'wsl-file') {
+    return getFullCredentialsFromWslFile(configDir);
+  }
+
   if (isMacOS()) {
     return getFullCredentialsFromMacOSKeychain(configDir);
   }
@@ -2189,6 +2340,10 @@ export function updateKeychainCredentials(
     scopes?: string[];
   }
 ): UpdateCredentialsResult {
+  if (credentialBackendFor(configDir) === 'wsl-file') {
+    return updateWslFileCredentials(configDir, credentials);
+  }
+
   if (isMacOS()) {
     return updateMacOSKeychainCredentials(configDir, credentials);
   }

@@ -12,6 +12,7 @@ import { renderHook } from '@testing-library/react';
 // Mock terminal-store module
 vi.mock('../../stores/terminal-store', () => ({
   writeToTerminal: vi.fn(),
+  isWindowTerminal: vi.fn(() => true),
 }));
 
 // Mock terminal-buffer-manager module
@@ -74,7 +75,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: mockWriteToTerminal,
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: mockGetSize },
       }));
@@ -103,7 +105,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: vi.fn(),
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -132,6 +135,31 @@ describe('useGlobalTerminalListeners', () => {
   });
 
   describe('terminal output handling', () => {
+    it('ignores output from another window\'s terminals', async () => {
+      vi.resetModules();
+
+      const mockWriteToTerminal = vi.fn();
+
+      vi.doMock('../../stores/terminal-store', () => ({
+        writeToTerminal: mockWriteToTerminal,
+        isWindowTerminal: () => false,
+      }));
+      vi.doMock('../../lib/terminal-buffer-manager', () => ({
+        terminalBufferManager: { getSize: vi.fn(() => 100) },
+      }));
+      vi.doMock('../../../shared/utils/debug-logger', () => ({
+        debugLog: vi.fn(),
+        debugWarn: vi.fn(),
+      }));
+
+      const { useGlobalTerminalListeners } = await import('../useGlobalTerminalListeners');
+      renderHook(() => useGlobalTerminalListeners());
+
+      terminalOutputCallback?.('other-window-terminal', 'output');
+
+      expect(mockWriteToTerminal).not.toHaveBeenCalled();
+    });
+
     it('should call writeToTerminal when output is received', async () => {
       vi.resetModules();
 
@@ -139,7 +167,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: mockWriteToTerminal,
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -166,7 +195,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: vi.fn(),
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -194,7 +224,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: mockWriteToTerminal,
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -227,7 +258,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: vi.fn(),
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -256,7 +288,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: vi.fn(),
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -281,7 +314,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: vi.fn(),
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -310,7 +344,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: mockWriteToTerminal,
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -336,7 +371,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: mockWriteToTerminal,
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));
@@ -363,7 +399,8 @@ describe('useGlobalTerminalListeners', () => {
 
       vi.doMock('../../stores/terminal-store', () => ({
         writeToTerminal: mockWriteToTerminal,
-      }));
+        isWindowTerminal: () => true,
+        }));
       vi.doMock('../../lib/terminal-buffer-manager', () => ({
         terminalBufferManager: { getSize: vi.fn(() => 100) },
       }));

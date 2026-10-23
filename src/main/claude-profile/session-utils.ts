@@ -1,6 +1,7 @@
 import { mkdir, copyFile, cp, unlink } from 'fs/promises';
-import { join, dirname } from 'path';
-import { homedir } from 'os';
+import path, { dirname } from 'path';
+import { claudeProjectSlug, expandClaudeHome, isClaudeHomeInWsl } from '../platform/claude-home';
+import { toRuntimePath } from '../platform/shell-runtime';
 import { isNodeError } from '../utils/type-guards';
 
 /**
@@ -19,11 +20,19 @@ import { isNodeError } from '../utils/type-guards';
  * @returns The sanitized path format used by Claude for project identification
  */
 function cwdToProjectPath(cwd: string): string {
+  // Claude Code inside WSL names the folder after the Linux path it sees (/mnt/c/foo/bar);
+  // toRuntimePath leaves a path that is already a Linux one as it is
+  if (isClaudeHomeInWsl()) return claudeProjectSlug(toRuntimePath(cwd));
   // Normalize to forward slashes first (cross-platform: Windows C:\foo\bar -> C:/foo/bar)
   const normalized = cwd.replace(/\\/g, '/');
   // Remove Windows drive letter (C:, D:, etc.) to avoid colons in directory names
   // Then replace all path separators with dashes (keeping leading dash for Unix paths)
   return normalized.replace(/^[a-zA-Z]:/, '').replace(/\//g, '-');
+}
+
+/** Join onto a config dir: in WSL the dirs are UNC paths of the Linux home (Windows separators) */
+function joinConfigDir(...parts: string[]): string {
+  return (isClaudeHomeInWsl() ? path.win32 : path).join(...parts);
 }
 
 /**
@@ -34,13 +43,11 @@ function cwdToProjectPath(cwd: string): string {
  * @param sessionId - The session UUID
  * @returns Full path to the session .jsonl file
  */
-function getSessionFilePath(configDir: string, cwd: string, sessionId: string): string {
-  const expandedConfigDir = configDir.startsWith('~')
-    ? configDir.replace(/^~/, homedir())
-    : configDir;
+export function getSessionFilePath(configDir: string, cwd: string, sessionId: string): string {
+  const expandedConfigDir = expandClaudeHome(configDir);
 
   const projectPath = cwdToProjectPath(cwd);
-  return join(expandedConfigDir, 'projects', projectPath, `${sessionId}.jsonl`);
+  return joinConfigDir(expandedConfigDir, 'projects', projectPath, `${sessionId}.jsonl`);
 }
 
 /**
@@ -52,12 +59,10 @@ function getSessionFilePath(configDir: string, cwd: string, sessionId: string): 
  * @returns Full path to the session directory (contains tool-results/)
  */
 function getSessionDirPath(configDir: string, cwd: string, sessionId: string): string {
-  const expandedConfigDir = configDir.startsWith('~')
-    ? configDir.replace(/^~/, homedir())
-    : configDir;
+  const expandedConfigDir = expandClaudeHome(configDir);
 
   const projectPath = cwdToProjectPath(cwd);
-  return join(expandedConfigDir, 'projects', projectPath, sessionId);
+  return joinConfigDir(expandedConfigDir, 'projects', projectPath, sessionId);
 }
 
 /**

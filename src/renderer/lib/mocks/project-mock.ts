@@ -33,9 +33,15 @@ export const projectMock = {
       name: project.name,
       path: project.path,
       taskCount: 0,
-      totalCostUsd: 0
+      totalCostUsd: 0,
+      daily: []
     }))
   }),
+
+  // Nothing spends in the browser, so there is never a change to report
+  watchProjectCostMetrics: async () => ({ success: true }),
+  unwatchProjectCostMetrics: async () => ({ success: true }),
+  onProjectCostMetricsChanged: () => () => {},
 
   updateProjectSettings: async () => ({ success: true }),
 
@@ -125,5 +131,23 @@ export const projectMock = {
   initializeGit: async () => ({
     success: true,
     data: { success: true }
-  })
+  }),
+
+  onProjectListChanged: () => () => {},
+
+  // Project windows (the browser mock always behaves like a single window)
+  assignedProjectId: null,
+
+  listProjectWindows: async () => ({
+    success: true,
+    data: [{ windowId: 1, projectId: mockProjects[0]?.id ?? null }]
+  }),
+
+  reportWindowProject: () => {},
+
+  openProjectWindow: async () => ({ success: true, data: { focused: false } }),
+
+  closeProjectWindow: async () => ({ success: true }),
+
+  onProjectWindowsChanged: () => () => {}
 };

@@ -1,77 +1,75 @@
+import { useEffect } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
 import { cn } from '../../lib/utils';
+import { formatDateTime } from '../../../shared/utils/format-date-time';
 import { SettingsRow } from '../settings/SettingsRow';
 import { StatusIndicator } from '../settings/common/StatusIndicator';
-import { useContextStore } from '../../stores/context-store';
-import { useRefreshIndex } from './hooks';
-import { useEffect, useState } from 'react';
-import { loadProjectContext } from '../../stores/context-store';
-import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
+import { useProjectStore } from '../../stores/project-store';
+import { useProjectIndexStore } from '../../stores/project-index-store';
 
 /**
- * The project index row (Analyze/Refresh, plus loading and error), placed in the Project
- * page's Project section.
+ * The project index row: runs Claude Code's own `/init` over the project and writes the CLAUDE.md
+ * every session in it reads, which is what the project is indexed as for the agents. First row of
+ * the Project page's Project section, above the Knowledge and Memory indexes.
+ *
+ * The first CLAUDE.md is written by switching Use CLAUDE.md on (Knowledge section), and the switch
+ * waits for it; both places read the one build state, so either shows the other's progress. This
+ * row rewrites the file, which is how a project folds in what changed since the last run.
  */
 export function ProjectIndexRows({ projectId }: { projectId: string }) {
   const { t } = useTranslation('settings');
-  const { projectIndex, indexLoading, indexError } = useContextStore();
-  const refreshIndex = useRefreshIndex(projectId);
+  const useClaudeMd = useProjectStore(
+    (state) => state.projects.find((project) => project.id === projectId)?.settings.useClaudeMd !== false
+  );
+  // undefined until the project's CLAUDE.md has been checked for, null when it has none
+  const stored = useProjectIndexStore((state) => state.index[projectId]);
+  const index = stored ?? null;
+  // Use CLAUDE.md is on only while the project has one, so that is what this row waits for too
+  const enabled = useClaudeMd && !!index;
+  const isBuilding = useProjectIndexStore((state) => !!state.building[projectId]);
+  const error = useProjectIndexStore((state) => state.buildError[projectId] ?? null);
+  const refresh = useProjectIndexStore((state) => state.refresh);
+  const build = useProjectIndexStore((state) => state.build);
 
-  // Whether the project has an index, remembered per project so opening the page doesn't load
-  // the project context (and start the memory service) again; Analyze/Refresh updates it
-  const cacheKey = `project-index:${projectId}`;
-  const [cachedHasIndex, setCachedHasIndex] = useState(() => readRefreshCache<boolean>(cacheKey));
-  // The shared context store may hold another project's index: only trust it after this page
-  // loaded or analyzed this project
-  const [fetchedHere, setFetchedHere] = useState(false);
+  // Stats of the file itself (a small local read, so checking for it on open is cheap)
   useEffect(() => {
-    const cached = readRefreshCache<boolean>(cacheKey);
-    setCachedHasIndex(cached);
-    setFetchedHere(false);
-    if (cached === undefined) void loadProjectContext(projectId).then(() => setFetchedHere(true));
-  }, [cacheKey, projectId]);
-  useEffect(() => {
-    if (!fetchedHere || indexLoading || indexError) return;
-    writeRefreshCache(cacheKey, !!projectIndex);
-    setCachedHasIndex(!!projectIndex);
-  }, [cacheKey, fetchedHere, projectIndex, indexLoading, indexError]);
-  const onRefresh = () => {
-    void refreshIndex().then(() => setFetchedHere(true));
-  };
-  const hasIndex = fetchedHere ? !!projectIndex : !!cachedHasIndex;
+    if (stored === undefined) void refresh(projectId);
+  }, [stored, projectId, refresh]);
+
+  const description = isBuilding
+    ? t('projectPages.context.projectIndexBuilding')
+    : !enabled
+      ? t('projectPages.context.projectIndexNotEnabled')
+      : t('projectPages.context.projectIndexDescription', {
+          lines: index.lines.toLocaleString(),
+          time: formatDateTime(index.builtAt),
+        });
 
   return (
     <>
-      <SettingsRow
-        label={t('projectPages.context.index')}
-        description={
-          !indexLoading && !hasIndex && !indexError
-            ? t('projectPages.context.noIndex')
-            : t('projectPages.context.indexDescription')
-        }
-      >
-        <Button variant="outline" size="sm" onClick={onRefresh} disabled={indexLoading} className="gap-2">
-          <RefreshCw className={cn('h-4 w-4', indexLoading && 'animate-spin')} strokeWidth={1.75} />
-          {hasIndex ? t('projectPages.context.refresh') : t('projectPages.context.analyze')}
+      <SettingsRow label={t('projectPages.context.projectIndex')} description={description}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void build(projectId)}
+          disabled={!enabled || isBuilding}
+          className="gap-2"
+        >
+          <RefreshCw className={cn('h-4 w-4', isBuilding && 'animate-spin')} strokeWidth={1.75} />
+          {t('projectPages.context.rebuildProjectIndex')}
         </Button>
       </SettingsRow>
 
-      {indexError && (
+      {error !== null && (
         <SettingsRow
           label={
             <StatusIndicator state="error" tone="foreground">
-              {t('projectPages.context.loadFailed')}
+              {t('projectPages.context.projectIndexFailed')}
             </StatusIndicator>
           }
-          description={indexError}
-        />
-      )}
-
-      {indexLoading && (
-        <SettingsRow
-          label={<StatusIndicator state="loading">{t('projectPages.context.analyzing')}</StatusIndicator>}
+          description={error || t('projectPages.context.projectIndexFailedUnknown')}
         />
       )}
     </>

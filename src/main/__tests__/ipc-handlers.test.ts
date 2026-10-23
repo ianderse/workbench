@@ -83,6 +83,7 @@ vi.mock("electron-log/main.js", () => ({
 // Mock cli-tool-manager to avoid blocking tool detection on Windows
 vi.mock("../cli-tool-manager", () => ({
   getToolInfo: vi.fn(() => ({ found: false, path: null, source: "mock" })),
+  getToolInfoAsync: vi.fn(() => Promise.resolve({ found: false, path: null, source: "mock" })),
   getToolPath: vi.fn((tool: string) => tool),
   deriveGitBashPath: vi.fn(() => null),
   clearCache: vi.fn(),
@@ -227,7 +228,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler("project:add", {}, "/nonexistent/path");
@@ -243,7 +245,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler("project:add", {}, TEST_PROJECT_PATH);
@@ -260,7 +263,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Add project twice
@@ -279,7 +283,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler("project:list", {});
@@ -295,7 +300,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Add a project
@@ -315,7 +321,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler("project:remove", {}, "nonexistent-id");
@@ -328,7 +335,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Add a project first
@@ -353,7 +361,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler("project:updateSettings", {}, "nonexistent-id", {
@@ -371,7 +380,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Add a project first
@@ -394,7 +404,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Add a project first
@@ -414,7 +425,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Create .workbench directory first (before adding project so it gets detected)
@@ -462,7 +474,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler(
@@ -484,7 +497,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Create .workbench directory first (before adding project so it gets detected)
@@ -515,14 +529,15 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler("settings:get", {});
 
       expect(result).toHaveProperty("success", true);
       const data = (result as { data: { theme: string } }).data;
-      expect(data).toHaveProperty("theme", "dark");
+      expect(data).toHaveProperty("theme", "system");
     });
   });
 
@@ -532,7 +547,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler(
@@ -558,7 +574,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       const result = await ipcMain.invokeHandler("app:version", {});
@@ -573,7 +590,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       mockAgentManager.emit("log", "task-1", "Test log message");
@@ -591,7 +609,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       mockAgentManager.emit("error", "task-1", "Test error message");
@@ -609,7 +628,8 @@ describe("IPC Handlers", { timeout: 30000 }, () => {
       setupIpcHandlers(
         mockAgentManager as never,
         mockTerminalManager as never,
-        () => mockMainWindow as never
+        () => mockMainWindow as never,
+        { createProjectWindow: vi.fn() }
       );
 
       // Add project first

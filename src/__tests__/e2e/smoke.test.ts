@@ -1222,6 +1222,7 @@ describe('E2E Smoke Tests', () => {
         'task-001',
         true,
         'Looks good!',
+        undefined,
         undefined
       );
       expect(result).toMatchObject({
@@ -1255,6 +1256,7 @@ describe('E2E Smoke Tests', () => {
         'task-001',
         false,
         'Missing error handling',
+        undefined,
         undefined
       );
       expect(result).toMatchObject({
@@ -1292,7 +1294,8 @@ describe('E2E Smoke Tests', () => {
         'task-001',
         false,
         'UI issue shown in screenshots',
-        screenshots
+        screenshots,
+        undefined
       );
     });
   });

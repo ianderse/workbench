@@ -15,3 +15,9 @@ export type RelayWorkerMessage =
   | { type: 'message'; clientIds: string[]; data: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
   | { type: 'stopped' };
+
+/** The worker's workerData */
+export interface RelayWorkerData {
+  /** The WSL distribution Claude Code runs in (Windows with the WSL shell), else null */
+  wsl: { distro: string; mountRoot?: string } | null;
+}

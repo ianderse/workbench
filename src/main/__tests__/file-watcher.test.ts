@@ -298,4 +298,17 @@ describe('FileWatcher concurrency', () => {
       expect(fw.getWatchedSpecDir(taskId)).toBe(specDir2);
     });
   });
+
+  // -------------------------------------------------------------------------
+  // Plans inside WSL: file system events don't work on \\wsl.localhost paths
+  // -------------------------------------------------------------------------
+  describe('polling', () => {
+    it('polls a plan inside WSL and uses events everywhere else', async () => {
+      const chokidar = (await import('chokidar')).default as unknown as { watch: ReturnType<typeof vi.fn> };
+      await fw.watch('task-wsl', '\\\\wsl.localhost\\Ubuntu\\home\\me\\proj\\.workbench\\tasks\\001');
+      await fw.watch('task-local', '/project/.workbench/tasks/002');
+      expect(chokidar.watch.mock.calls[0][1]).toMatchObject({ usePolling: true });
+      expect(chokidar.watch.mock.calls[1][1]).not.toHaveProperty('usePolling');
+    });
+  });
 });

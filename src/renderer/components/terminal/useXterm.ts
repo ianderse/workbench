@@ -50,6 +50,8 @@ export interface UseXtermReturn {
   rows: number;
   /** Whether dimensions have been measured and are ready */
   dimensionsReady: boolean;
+  /** Background color the terminal is painting with, for the padding around it */
+  themeBackground: string;
 }
 
 export function useXterm({ terminalId, onCommandEnter, onResize, onDimensionsReady }: UseXtermOptions): UseXtermReturn {
@@ -64,6 +66,8 @@ export function useXterm({ terminalId, onCommandEnter, onResize, onDimensionsRea
   const webglManagerRef = useRef<WebGLContextManagerType | null>(null);
   const onResizeRef = useRef(onResize);
   const [dimensions, setDimensions] = useState<{ cols: number; rows: number }>({ cols: 80, rows: 24 });
+  // The terminal's own background, so the padding around it keeps up with the colors xterm uses
+  const [themeBackground, setThemeBackground] = useState<string>(() => getTerminalTheme().background);
 
   // Get font settings from store
   // Note: We subscribe to the entire store here for initial terminal creation.
@@ -345,15 +349,36 @@ export function useXterm({ terminalId, onCommandEnter, onResize, onDimensionsRea
     };
   }, [terminalId, onCommandEnter, onResize, onDimensionsReady, fontSettings.cursorAccentColor, fontSettings.cursorBlink, fontSettings.cursorStyle, fontSettings.fontFamily.join, fontSettings.fontSize, fontSettings.fontWeight, fontSettings.letterSpacing, fontSettings.lineHeight, fontSettings.scrollback]);
 
-  // Follow the app's light/dark mode: swap the color theme when the `dark` class on <html> changes
+  // Follow the app's light/dark mode: swap the color theme when the `dark` class on <html> changes.
+  // A window running a CLI keeps the colors its session started with, because Claude Code reads its
+  // own theme once, as it starts: recoloring around it would leave its output unreadable. The window
+  // catches up when that session ends, and the next one starts in the app's current theme.
   useEffect(() => {
-    const xterm = xtermRef.current;
-    if (!xterm) return;
-    const observer = new MutationObserver(() => {
-      xterm.options.theme = { ...getTerminalTheme(), cursorAccent: xterm.options.theme?.cursorAccent };
-    });
+    const applyTheme = (): void => {
+      const xterm = xtermRef.current;
+      if (!xterm) return;
+      if (useTerminalStore.getState().getTerminal(terminalId)?.isCLIMode) return;
+      const theme = getTerminalTheme();
+      xterm.options.theme = { ...theme, cursorAccent: xterm.options.theme?.cursorAccent };
+      setThemeBackground(theme.background);
+    };
+
+    const observer = new MutationObserver(applyTheme);
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-    return () => observer.disconnect();
+
+    // The session ending is what lets a window that stayed behind catch up
+    let wasCLIMode = useTerminalStore.getState().getTerminal(terminalId)?.isCLIMode ?? false;
+    const unsubscribe = useTerminalStore.subscribe((state) => {
+      const isCLIMode = state.getTerminal(terminalId)?.isCLIMode ?? false;
+      if (isCLIMode === wasCLIMode) return;
+      wasCLIMode = isCLIMode;
+      if (!isCLIMode) applyTheme();
+    });
+
+    return () => {
+      observer.disconnect();
+      unsubscribe();
+    };
   }, [terminalId]);
 
   // Subscribe to font settings changes and update terminal reactively
@@ -630,5 +655,6 @@ export function useXterm({ terminalId, onCommandEnter, onResize, onDimensionsRea
     cols: dimensions.cols,
     rows: dimensions.rows,
     dimensionsReady: dimensionsReadyCalledRef.current,
+    themeBackground,
   };
 }

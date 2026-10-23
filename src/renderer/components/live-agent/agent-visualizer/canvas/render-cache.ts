@@ -28,19 +28,3 @@ export function getAgentGlowSprite(
   glowSpriteCache.set(key, sprite)
   return sprite
 }
-
-// ─── Text measurement cache ────────────────────────────────────────────────
-// Caches ctx.measureText().width to avoid redundant browser layout per frame.
-
-const textWidthCache = new Map<string, number>()
-const TEXT_CACHE_MAX = 2000
-
-export function measureTextCached(ctx: CanvasRenderingContext2D, text: string): number {
-  const key = ctx.font + '|' + text
-  let w = textWidthCache.get(key)
-  if (w !== undefined) return w
-  w = ctx.measureText(text).width
-  if (textWidthCache.size > TEXT_CACHE_MAX) textWidthCache.clear()
-  textWidthCache.set(key, w)
-  return w
-}

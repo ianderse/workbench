@@ -7,6 +7,7 @@
 import { promises as fsPromises } from 'fs';
 import { appLog } from '../app-logger';
 import { projectStore } from '../project-store';
+import { whenShellRuntimeReady } from '../platform/shell-runtime';
 import { liveAgentRelay } from './live-agent-relay';
 import { addToWorktree, getFlowDir, listWorktrees, removeFromProject, removeFromWorktree, setUpProject } from './project-setup';
 
@@ -52,6 +53,8 @@ async function addToWorktrees(projectPath: string): Promise<void> {
  */
 export async function setLiveAgentEnabled(projectPath: string, enabled: boolean): Promise<{ hooksError?: string }> {
   if (enabled) {
+    // The hook command depends on where WSL mounts Windows drives (startup detection)
+    await whenShellRuntimeReady();
     const result = setUpProject(projectPath);
     await addToWorktrees(projectPath);
     liveAgentRelay.setEnabled(true);
@@ -75,6 +78,7 @@ export async function setLiveAgentEnabled(projectPath: string, enabled: boolean)
  * changed, e.g. Workbench's executable moved) and start the relay when any has it on
  */
 export async function syncLiveAgentAtStartup(): Promise<void> {
+  await whenShellRuntimeReady();
   let anyEnabled = false;
   for (const project of projectStore.getProjects()) {
     if (!(await isLiveAgentEnabled(project.path))) continue;

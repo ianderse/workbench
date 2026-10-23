@@ -7,10 +7,43 @@
 import { ipcMain } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants/ipc';
 import type { CustomMcpServer, McpHealthCheckResult, McpHealthStatus, McpTestConnectionResult } from '../../shared/types/project';
-import { spawn } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { appLog } from '../app-logger';
 import { isWindows } from '../platform';
 import { getWhereExePath } from '../utils/windows-paths';
+import { getWslInfo, whenShellRuntimeReady } from '../platform/shell-runtime';
+import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
+import { execInWsl } from '../platform/wsl-exec-basic';
+import { isUnderMountRoot } from '../platform/wsl-detect';
+
+/**
+ * Where a command lives inside WSL (`command -v` with the login PATH), when the app runs its
+ * tools there. `windowsOnly` when only a Windows program of that name was found (on the Windows
+ * PATH WSL appends), which Claude Code inside WSL can't use as an MCP server.
+ */
+export async function findWslCommand(command: string): Promise<{ path: string | null; windowsOnly: boolean }> {
+  const wsl = getWslInfo();
+  if (!wsl) return { path: null, windowsOnly: false };
+  let found = '';
+  try {
+    // Without the login PATH's Windows entries removed, so a Windows-only program can be named
+    const { stdout } = await execInWsl('/bin/sh', ['-c', 'command -v "$1"', 'sh', command], { timeout: 15000 });
+    found = stdout.trim().split(/\r?\n/)[0]?.trim() ?? '';
+  } catch {
+    return { path: null, windowsOnly: false };
+  }
+  if (!found.startsWith('/')) return { path: null, windowsOnly: false };
+  if (isUnderMountRoot(found, wsl.mountRoot)) return { path: null, windowsOnly: true };
+  return { path: found, windowsOnly: false };
+}
+
+/** Why a command can't run in WSL, for the health check and the connection test */
+function wslMissingMessage(command: string, windowsOnly: boolean): string {
+  const distro = getWslInfo()?.distro ?? 'WSL';
+  return windowsOnly
+    ? `Command '${command}' is only installed on Windows; install it in WSL (${distro}), where the app runs its tools`
+    : `Command '${command}' not found in WSL (${distro})`;
+}
 
 /**
  * Defense-in-depth: Frontend-side command validation
@@ -176,25 +209,38 @@ async function checkCommandHealth(server: CustomMcpServer, startTime: number): P
     };
   }
 
-  return new Promise((resolve) => {
-    // Defense-in-depth: Validate command and args before spawn
-    if (!isCommandSafe(server.command)) {
-      return resolve({
-        serverId: server.id,
-        status: 'unhealthy',
-        message: `Invalid command '${server.command}' - not in allowlist`,
-        checkedAt: new Date().toISOString(),
-      });
-    }
-    if (!areArgsSafe(server.args)) {
-      return resolve({
-        serverId: server.id,
-        status: 'unhealthy',
-        message: 'Args contain dangerous flags or shell metacharacters',
-        checkedAt: new Date().toISOString(),
-      });
-    }
+  // Defense-in-depth: Validate command and args before spawn
+  if (!isCommandSafe(server.command)) {
+    return {
+      serverId: server.id,
+      status: 'unhealthy',
+      message: `Invalid command '${server.command}' - not in allowlist`,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+  if (!areArgsSafe(server.args)) {
+    return {
+      serverId: server.id,
+      status: 'unhealthy',
+      message: 'Args contain dangerous flags or shell metacharacters',
+      checkedAt: new Date().toISOString(),
+    };
+  }
 
+  // In WSL the server runs inside the distribution (Claude Code runs there), so look it up there
+  await whenShellRuntimeReady();
+  if (getWslInfo()) {
+    const { path: found, windowsOnly } = await findWslCommand(server.command);
+    return {
+      serverId: server.id,
+      status: found ? 'healthy' : 'unhealthy',
+      message: found ? `Command '${server.command}' found in WSL` : wslMissingMessage(server.command, windowsOnly),
+      responseTime: Date.now() - startTime,
+      checkedAt: new Date().toISOString(),
+    };
+  }
+
+  return new Promise((resolve) => {
     const command = isWindows() ? getWhereExePath() : 'which';
     const proc = spawn(command, [server.command!], {
       timeout: 5000,
@@ -413,31 +459,52 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
     };
   }
 
-  return new Promise((resolve) => {
-    // Defense-in-depth: Validate command and args before spawn
-    if (!isCommandSafe(server.command)) {
-      return resolve({
-        serverId: server.id,
-        success: false,
-        message: `Invalid command '${server.command}' - not in allowlist`,
-      });
-    }
-    if (!areArgsSafe(server.args)) {
-      return resolve({
-        serverId: server.id,
-        success: false,
-        message: 'Args contain dangerous flags or shell metacharacters',
-      });
-    }
+  // Defense-in-depth: Validate command and args before spawn
+  if (!isCommandSafe(server.command)) {
+    return {
+      serverId: server.id,
+      success: false,
+      message: `Invalid command '${server.command}' - not in allowlist`,
+    };
+  }
+  if (!areArgsSafe(server.args)) {
+    return {
+      serverId: server.id,
+      success: false,
+      message: 'Args contain dangerous flags or shell metacharacters',
+    };
+  }
 
+  // In WSL the server is started inside the distribution, as Claude Code there would start it
+  await whenShellRuntimeReady();
+  let wslCommand: string | null = null;
+  if (getWslInfo()) {
+    const { path: found, windowsOnly } = await findWslCommand(server.command);
+    if (!found) {
+      return {
+        serverId: server.id,
+        success: false,
+        message: wslMissingMessage(server.command, windowsOnly),
+        responseTime: Date.now() - startTime,
+      };
+    }
+    wslCommand = found;
+  }
+
+  return new Promise((resolve) => {
     const args = server.args || [];
 
-    // On Windows, use shell: true to properly handle .cmd/.bat scripts like npx
-    const proc = spawn(server.command!, args, {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 15000, // OS-level timeout for reliable process termination
-      shell: isWindows(), // Required for Windows to run npx.cmd
-    });
+    // In WSL: through the runtime layer (Windows path arguments translated). On Windows, use
+    // shell: true to properly handle .cmd/.bat scripts like npx
+    const proc: ChildProcess = wslCommand
+      ? spawnTool('python', args, { command: wslCommand, stdio: ['pipe', 'pipe', 'pipe'] })
+      : spawn(server.command!, args, {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 15000, // OS-level timeout for reliable process termination
+        shell: isWindows(), // Required for Windows to run npx.cmd
+      });
+    // In WSL killing wsl.exe alone can leave the Linux process running
+    const stop = () => (wslCommand ? killRuntimeProcess(proc) : proc.kill());
 
     let stdout = '';
     let stderr = '';
@@ -446,7 +513,7 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
     const timeoutId = setTimeout(() => {
       if (!resolved) {
         resolved = true;
-        proc.kill();
+        stop();
         const responseTime = Date.now() - startTime;
         resolve({
           serverId: server.id,
@@ -472,9 +539,9 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
       },
     }) + '\n';
 
-    proc.stdin.write(initRequest);
+    proc.stdin?.write(initRequest);
 
-    proc.stdout.on('data', (data) => {
+    proc.stdout?.on('data', (data: Buffer) => {
       stdout += data.toString('utf-8');
 
       // Try to parse JSON response
@@ -486,7 +553,7 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
             if (!resolved) {
               resolved = true;
               clearTimeout(timeoutId);
-              proc.kill();
+              stop();
               const responseTime = Date.now() - startTime;
               resolve({
                 serverId: server.id,
@@ -503,7 +570,7 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
       }
     });
 
-    proc.stderr.on('data', (data) => {
+    proc.stderr?.on('data', (data: Buffer) => {
       stderr += data.toString('utf-8');
     });
 

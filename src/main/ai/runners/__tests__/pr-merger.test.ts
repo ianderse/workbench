@@ -11,7 +11,7 @@ import { execFileSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 
-vi.mock('../../../cli-tool-manager', () => ({ getToolPath: () => 'git' }));
+vi.mock('../../../cli-tool-manager', () => ({ getToolPath: () => 'git', getToolPathAsync: async () => 'git' }));
 vi.mock('../merge-agent', () => ({ runMergeAgent: vi.fn() }));
 
 import { mergePR, type MergePRConfig } from '../github/pr-merger';
@@ -78,7 +78,7 @@ function fakeGh(view: { state?: string; baseRefName?: string } = {}) {
 }
 
 function config(overrides: Partial<MergePRConfig>): MergePRConfig {
-  return { projectDir: project, worktreePath: worktree, prUrl: PR_URL, gitPath: 'git', ghPath: 'gh', ...overrides };
+  return { projectDir: project, worktreePath: worktree, prUrl: PR_URL, ...overrides };
 }
 
 const pushedBranchHas = (ref: string) => {

@@ -126,6 +126,9 @@ export default function LiveAgentGraph({ cwd, projectPath, terminalId }: LiveAge
     // No background of its own: the agent window's (bg-sidebar, the terminal's too) shows through,
     // so the terminal and the graph read as one piece
     <div className="h-full w-full relative overflow-hidden" aria-label={t('liveAgent.graphLabel')}>
+      {/* A faint grid behind everything, fading out into the window (the website's hero stage) */}
+      <div className="live-agent-grid absolute inset-0 pointer-events-none" aria-hidden="true" />
+
       {/* Empty state when no live data */}
       {isEmpty && (
         <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none px-4">

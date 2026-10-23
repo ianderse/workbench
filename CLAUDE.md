@@ -54,7 +54,7 @@ only.
 
 **No time estimates** — Provide priority-based ordering instead of duration predictions.
 
-**PR target** — Always target the `develop` branch for PRs, not `main`. Main is reserved for releases.
+**PR target** — Always target the `main` branch for PRs; it is the only long-lived branch.
 
 **Never block the main process** — IPC handlers reachable from the UI must not run synchronous child processes
 (`execFileSync`/`execSync`) or network calls; use async `execFile` (promisified). A sync `git fetch` used to freeze the
@@ -108,34 +108,31 @@ remains about what the user wants.
 ## Commands
 
 ```bash
-npm install            # Install dependencies (postinstall rebuilds native modules for Electron)
-npm run dev            # Development mode with HMR
-npm run dev:debug      # Development mode with verbose debug output
-npm run dev:mcp        # Development mode with remote debugging on port 9222 (Electron MCP)
-npm start              # Production build + run
-npm run typecheck      # TypeScript type check (strict)
-npm test               # Unit + integration tests (Vitest)
+npm install            # Install dependencies (postinstall rebuilds native modules; on Linux it also fixes chrome-sandbox)
+npm run dev            # Development mode with HMR and remote debugging on port 9222 (Electron MCP)
+npm test               # Type check (strict) + all tests (Vitest)
 ```
 
 ### Packaging
 
 | Command                 | Output                                           |
 |-------------------------|--------------------------------------------------|
-| `npm run package`       | Package for the current platform                 |
 | `npm run package:mac`   | macOS `.dmg` + `.zip`                            |
 | `npm run package:win`   | Windows `.exe` (NSIS installer)                  |
-| `npm run package:linux` | Linux `.deb` (check with `npm run verify:linux`) |
+| `npm run package:linux` | Linux `.deb`                                     |
 
 Packages are written to `dist/`.
 
 ### Releases
 
-```bash
-node .github/scripts/bump-version.js patch|minor|major  # Bump version, then open a PR to main
-```
+Releases are created by hand on GitHub, never by a workflow. Publishing a release runs `release.yml`; publishing a
+pre-release runs `beta-release.yml`. Each one builds the four platforms in a matrix (`npm ci`, `npm run build`,
+`npm run package:*`), takes the version from the release tag (`package.json` keeps the plain base version, and the beta
+workflow adds `-beta` when the tag has no pre-release suffix) and uploads the installers and update manifests to that
+release with `gh release upload`.
 
-Merging to `main` runs `prepare-release.yml`, which tags the version and triggers `release.yml`. Beta releases run
-manually via `beta-release.yml`.
+Builds are unsigned and not notarized: the repo holds no signing secrets. Auto-update against a private release repo
+also needs `UPDATER_GH_TOKEN` passed to `npm run build`, which no workflow does today.
 
 ## Project Structure
 
@@ -157,7 +154,7 @@ workbench/
 │   ├── renderer/            # React UI (components, stores, contexts, hooks, styles)
 │   └── shared/              # Shared types, i18n, constants, utils
 ├── resources/               # App and tray icons, macOS entitlements
-└── .github/                 # Workflows and scripts (postinstall, prebuilds, deb check, bump-version)
+└── .github/                 # Workflows and the postinstall script
 ```
 
 ## Claude Code Layer (`src/main/claude-code/`)
@@ -225,7 +222,7 @@ get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at 
 
 ### Electron MCP (testing the app from a task)
 
-Run `npm run dev:mcp` and switch on Electron in Settings > Connectors (or in the task's connectors). Claude Code can
+Run `npm run dev` and switch on Electron in Settings > Connectors (or in the task's connectors). Claude Code can
 then drive the running app over the Chrome DevTools Protocol with `get_electron_window_info`, `take_screenshot`,
 `send_command_to_electron`, and `read_electron_logs`.
 
@@ -251,7 +248,7 @@ loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "W
 (optional interface font). Settings > General > Appearance picks the interface and command line fonts.
 
 **Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Agents,
-Project, Connectors, Developer, Updates (Project is the selected project's page: index, Knowledge, Tasks, Branches).
+Project, Connectors, Developer, Updates (Project is the selected project's page: Project, Knowledge, Tasks, Branches).
 The project's `useClaudeMd`, `maxBudgetUsd` (budget per task) and `claudeProfileId` (its Claude account;
 unset = the account in use) are kept in the project's own `.workbench/settings.json` (`src/main/project-store.ts`). Build pages from `SettingsSection` +
 `SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
@@ -304,8 +301,43 @@ Supports Windows, macOS, and Linux; CI runs tests on all three. Use `src/main/pl
 | `requiresShell(command)`                  | `.cmd/.bat` shell detection (Win) |
 | `joinPaths(...parts)`                     | Platform-correct path joining     |
 
+### Shell runtime (Windows: PWSH or WSL)
+
+On Windows, Settings > General > Shell (`AppSettings.windowsShell`, `'pwsh'` by default, applied after a restart)
+chooses where Workbench runs everything: natively with PowerShell agent windows (`pwsh.exe`, falling back to
+Windows PowerShell 5.1), or inside WSL (the default distro). `src/main/platform/shell-runtime.ts`
+(`initShellRuntime()` at startup, `whenShellRuntimeReady()`, `isWslRuntime()`, `getWslInfo()`,
+`toRuntimePath()` / `toHostPath()`) holds the active runtime; `wsl-detect.ts` checks availability and probes the
+distro once (user, home, login shell and PATH, mount root, networking, interop, tool paths). When WSL can't
+start, the session runs natively and the Settings row says why. These modules are not re-exported from `platform/index.ts`.
+
+- **Start tools through `runTool` / `spawnTool` / `killRuntimeProcess`** (`platform/runtime-exec.ts`) and git
+  through `git()` (`utils/git-exec.ts`), never `execFile(getToolPath(...))` or a literal `'git'` spawn (an
+  architecture test fails on those). In WSL mode they run `wsl.exe -d <distro> --cd <dir> --exec ...`, translate
+  whole-argument Windows paths, and pass changed env vars through `WSLENV` (never PATH); in pwsh mode they behave
+  as a plain spawn. `getToolPath()` and `getToolInfoAsync()` describe tools (Linux paths in WSL mode), they don't
+  run them.
+- **Stored paths stay Windows paths** (projects, worktrees, profile config dirs, the WSL Claude home as
+  `\\wsl.localhost\<distro>\home\<user>`); translate only at process boundaries (args, cwd, env, prompt text,
+  git output such as `worktree list --porcelain`).
+- **Claude home:** use `getClaudeHome()` / `expandClaudeHome()` / `joinClaudeHome()` / `claudeProjectSlug()`
+  (`platform/claude-home.ts`), not `os.homedir()`. WSL accounts live in the Linux home with file-only credentials
+  and their own profile store (`claude-profiles.wsl.json`).
+- **Agent windows** know their `shellKind` (`'cmd' | 'powershell' | 'posix'`); command builders in
+  `terminal/cli-integration-handler.ts` and `shared/utils/shell-escape.ts` choose syntax from it, not from
+  `isWindows()`. WSL windows type bash syntax (wrapped in `bash -c` when the login shell is fish).
+- **WSL2 NAT networking** can't reach the app's `127.0.0.1`: Insights task tools go through a stdio bridge
+  (`insights/task-tools-bridge.cjs`) run as a Windows process through interop, and the Live agent hook command has
+  a WSL branch. Watchers poll `\\wsl.localhost` paths (`fs.watch` fails there).
+- **Worktrees** use relative links only when both runtimes' git is 2.48 or newer; on a runtime switch,
+  `worktree/runtime-switch.ts` repairs every project's worktrees in the background.
+
 ## Known Gotchas
 
 **Electron path resolution** — Paths often differ between dev and packaged builds (`app.isPackaged`,
 `process.resourcesPath`). In dev, `__dirname` is `out/main`; in production, bundled assets live under
 `process.resourcesPath`. Verify both contexts.
+
+<!-- workbench:project-memory:start -->
+Preferences learned in past sessions: @.workbench/compeng/MEMORY.md
+<!-- workbench:project-memory:end -->

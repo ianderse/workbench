@@ -49,6 +49,7 @@ vi.mock('../../claude-profile-manager', () => ({
 }));
 
 import { LiveAgentRelay } from '../live-agent-relay';
+import { noteTerminalWrite } from '../terminal-activity';
 
 /** A window's webContents, enough for subscriptions */
 function fakeContents(id: number) {
@@ -62,6 +63,19 @@ function fakeContents(id: number) {
 
 type Contents = ReturnType<typeof fakeContents>;
 const asContents = (contents: Contents) => contents as unknown as Electron.WebContents;
+
+/** The window each session was given, as the graphs were told, in order */
+function ownersSent(contents: Contents): Array<[string, string | undefined]> {
+  return contents.send.mock.calls.flatMap((call: unknown[]) => {
+    const data = call[2] as string;
+    const message = JSON.parse(data);
+    const sessions = message.type === 'session-list' ? message.sessions
+      : message.type === 'session-started' ? [message.session]
+      : message.type === 'session-owner' ? [{ id: message.sessionId, owner: message.owner }]
+      : [];
+    return sessions.map((session: { id: string; owner?: string }): [string, string | undefined] => [session.id, session.owner]);
+  });
+}
 
 describe('LiveAgentRelay', () => {
   let relay: LiveAgentRelay;
@@ -179,6 +193,92 @@ describe('LiveAgentRelay', () => {
     relay.setEnabled(false);
     relay.setEnabled(true);
     expect(workers).toHaveLength(2);
+  });
+
+  it('gives a session to the window last used, not the one its hooks name', () => {
+    // Claude Code runs every session in one shared daemon, so their hooks all report the window
+    // that started it (here the first one)
+    relay.setEnabled(true);
+    const contents = fakeContents(1);
+    relay.subscribe(asContents(contents), 'a', '/projects/app', '/projects/app/.workbench/flow', 'window-1a');
+    relay.subscribe(asContents(contents), 'b', '/projects/app', '/projects/app/.workbench/flow', 'window-1b');
+
+    vi.useFakeTimers();
+    try {
+      noteTerminalWrite('window-1a');
+      vi.advanceTimersByTime(1000);
+      workers[0].emit('message', {
+        type: 'message', clientIds: ['1:a', '1:b'],
+        data: JSON.stringify({ type: 'session-started', session: { id: 'session-1', owner: 'window-1a' } }),
+      });
+      noteTerminalWrite('window-1b');
+      vi.advanceTimersByTime(1000);
+      workers[0].emit('message', {
+        type: 'message', clientIds: ['1:a', '1:b'],
+        data: JSON.stringify({ type: 'session-started', session: { id: 'session-2', owner: 'window-1a' } }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(ownersSent(contents)).toEqual([
+      ['session-1', 'window-1a'], ['session-1', 'window-1a'],
+      ['session-2', 'window-1b'], ['session-2', 'window-1b'],
+    ]);
+  });
+
+  it('keeps a session with the window it was given when another window is used', () => {
+    relay.setEnabled(true);
+    const contents = fakeContents(1);
+    relay.subscribe(asContents(contents), 'a', '/projects/app', '/projects/app/.workbench/flow', 'window-2a');
+    relay.subscribe(asContents(contents), 'b', '/projects/app', '/projects/app/.workbench/flow', 'window-2b');
+
+    vi.useFakeTimers();
+    try {
+      noteTerminalWrite('window-2a');
+      vi.advanceTimersByTime(1000);
+      workers[0].emit('message', {
+        type: 'message', clientIds: ['1:a'],
+        data: JSON.stringify({ type: 'session-list', sessions: [{ id: 'session-3', owner: 'window-2b' }] }),
+      });
+      noteTerminalWrite('window-2b');
+      vi.advanceTimersByTime(1000);
+      // The session's hooks report the other window again: the graph showing it keeps it
+      workers[0].emit('message', {
+        type: 'message', clientIds: ['1:a', '1:b'],
+        data: JSON.stringify({ type: 'session-owner', sessionId: 'session-3', owner: 'window-2b' }),
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(ownersSent(contents)).toEqual([
+      ['session-3', 'window-2a'], ['session-3', 'window-2a'], ['session-3', 'window-2a'],
+    ]);
+  });
+
+  it('gives the only window watching a directory every session run in it', () => {
+    relay.setEnabled(true);
+    const contents = fakeContents(1);
+    relay.subscribe(asContents(contents), 'a', '/projects/app', '/projects/app/.workbench/flow', 'window-3a');
+    relay.subscribe(asContents(contents), 'b', '/projects/other', '/projects/other/.workbench/flow', 'window-3b');
+
+    workers[0].emit('message', {
+      type: 'message', clientIds: ['1:a'],
+      data: JSON.stringify({ type: 'session-started', session: { id: 'session-4', owner: 'window-3b' } }),
+    });
+
+    expect(ownersSent(contents)).toEqual([['session-4', 'window-3a']]);
+  });
+
+  it('passes every other message on unchanged', () => {
+    relay.setEnabled(true);
+    const contents = fakeContents(1);
+    relay.subscribe(asContents(contents), 'a', '/projects/app', '/projects/app/.workbench/flow', 'window-4a');
+
+    const event = '{"type":"agent-event","event":{"type":"agent_spawn","sessionId":"session-1"}}';
+    workers[0].emit('message', { type: 'message', clientIds: ['1:a'], data: event });
+    expect(contents.send).toHaveBeenCalledWith('liveAgent:message', 'a', event);
   });
 
   it('reports a crashed worker as a status without throwing', () => {

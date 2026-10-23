@@ -84,6 +84,11 @@
     "remove": "Remove",
     "error": "Failed to remove project"
   },
+  "openProject": {
+    "title": "Open \"{{projectName}}\" in...",
+    "thisWindow": "This window",
+    "newWindow": "New window"
+  },
   "appUpdate": {
     "title": "App update available",
     "description": "A new version of Workbench is ready to download",

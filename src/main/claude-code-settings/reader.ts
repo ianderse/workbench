@@ -13,9 +13,8 @@
  */
 
 import { existsSync, readFileSync } from 'fs';
-import { homedir } from 'os';
 import path from 'path';
-import { isWindows, isMacOS } from '../platform';
+import { expandClaudeHome, getClaudeManagedSettingsPath, isClaudeHomeInWsl, joinClaudeHome } from '../platform/claude-home';
 import type { ClaudeCodeSettings, ClaudeCodeSettingsHierarchy } from './types';
 import { mergeClaudeCodeSettings } from './merger';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
@@ -192,8 +191,8 @@ function readJsonFile(filePath: string): ClaudeCodeSettings | undefined {
  *
  * Priority:
  * 1. Active Claude profile's configDir (from ClaudeProfileManager)
- * 2. CLAUDE_CONFIG_DIR environment variable
- * 3. Default: ~/.claude
+ * 2. CLAUDE_CONFIG_DIR environment variable (natively; Claude Code inside WSL doesn't see the app's)
+ * 3. Default: ~/.claude (the Linux home's when Claude Code runs in WSL)
  */
 function getUserConfigDir(): string {
   // Try to get configDir from the active Claude profile.
@@ -208,7 +207,7 @@ function getUserConfigDir(): string {
       if (activeProfile?.configDir) {
         const configDir = activeProfile.configDir.startsWith('~/')
           || activeProfile.configDir === '~'
-          ? activeProfile.configDir.replace(/^~/, homedir())
+          ? expandClaudeHome(activeProfile.configDir)
           : activeProfile.configDir;
         debugLog(`${LOG_PREFIX} Using active profile configDir:`, configDir);
         return configDir;
@@ -219,14 +218,14 @@ function getUserConfigDir(): string {
   }
 
   // Fall back to CLAUDE_CONFIG_DIR env var
-  const envConfigDir = process.env.CLAUDE_CONFIG_DIR;
+  const envConfigDir = isClaudeHomeInWsl() ? undefined : process.env.CLAUDE_CONFIG_DIR;
   if (envConfigDir) {
     debugLog(`${LOG_PREFIX} Using CLAUDE_CONFIG_DIR:`, envConfigDir);
     return envConfigDir;
   }
 
   // Default: ~/.claude
-  const defaultDir = path.join(homedir(), '.claude');
+  const defaultDir = joinClaudeHome('.claude');
   debugLog(`${LOG_PREFIX} Using default config dir:`, defaultDir);
   return defaultDir;
 }
@@ -263,32 +262,11 @@ export function readProjectLocalSettings(projectPath: string): ClaudeCodeSetting
 }
 
 /**
- * Get the platform-specific path for managed settings.
- *
- * - macOS:   /Library/Application Support/ClaudeCode/managed-settings.json
- * - Linux:   /etc/claude-code/managed-settings.json
- * - Windows: C:\Program Files\ClaudeCode\managed-settings.json
- */
-function getManagedSettingsPath(): string {
-  if (isWindows()) {
-    const programFiles = process.env.ProgramFiles || 'C:\\Program Files';
-    return path.join(programFiles, 'ClaudeCode', 'managed-settings.json');
-  }
-
-  if (isMacOS()) {
-    return '/Library/Application Support/ClaudeCode/managed-settings.json';
-  }
-
-  // Linux
-  return '/etc/claude-code/managed-settings.json';
-}
-
-/**
  * Read managed (system-wide) settings.
- * Path: platform-specific (see getManagedSettingsPath)
+ * Path: platform-specific (see getClaudeManagedSettingsPath)
  */
 export function readManagedSettings(): ClaudeCodeSettings | undefined {
-  const settingsPath = getManagedSettingsPath();
+  const settingsPath = getClaudeManagedSettingsPath();
   debugLog(`${LOG_PREFIX} Reading managed settings:`, settingsPath);
   return readJsonFile(settingsPath);
 }

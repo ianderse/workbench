@@ -15,19 +15,19 @@
  * returns the existing worktree without error.
  */
 
-import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync } from 'fs';
 import { cp, rm } from 'fs/promises';
 import { join, resolve } from 'path';
-import { promisify } from 'util';
 
 import { getSpecsDir } from '../../shared/constants';
+import { isSelfImproveEnabledForPath } from '../self-improve/setting';
+import { git as runGit } from '../utils/git-exec';
+import { toHostPath } from '../platform/shell-runtime';
+import { repairForeignWorktrees, worktreeGitArgs } from './runtime-worktrees';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Run a git sub-command in the given working directory.
@@ -40,14 +40,16 @@ async function git(
   allowFailure = false,
 ): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('git', args, { cwd });
+    const { stdout } = await runGit(args, { cwd });
     return stdout.trim();
   } catch (err: unknown) {
     if (allowFailure) {
       return '';
     }
     const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`git ${args[0]} failed: ${message}`);
+    // The sub-command, after any `-c <config>` options
+    const command = args.find((arg, i) => arg !== '-c' && args[i - 1] !== '-c') ?? args[0];
+    throw new Error(`git ${command} failed: ${message}`);
   }
 }
 
@@ -95,6 +97,9 @@ export async function createOrGetWorktree(
   // ------------------------------------------------------------------
   // Step 1: Prune stale worktree references from git's internal records
   // ------------------------------------------------------------------
+  // On Windows, worktrees linked by the other runtime's git (native / WSL) are repaired first,
+  // or the prune would drop them as broken
+  await repairForeignWorktrees(projectPath);
   console.warn('[WorktreeManager] Pruning stale worktree references...');
   await git(['worktree', 'prune'], projectPath, /* allowFailure */ true);
 
@@ -164,39 +169,41 @@ export async function createOrGetWorktree(
     // Branch already exists — attach the worktree to it without -b
     console.warn(`[WorktreeManager] Reusing existing branch: ${branchName}`);
     await git(
-      ['worktree', 'add', worktreePath, branchName],
+      await worktreeGitArgs(['worktree', 'add', worktreePath, branchName]),
       projectPath,
     );
   } else {
-    // Determine the start point
-    let startPoint = baseBranch;
+    // Determine the start point: the local branch when asked for, the remote ref otherwise,
+    // falling back to the other form so a base branch that exists on only one side still
+    // works instead of failing with git's "invalid reference"
+    const remoteRef = `origin/${baseBranch}`;
+    const candidates = useLocalBranch ? [baseBranch, remoteRef] : [remoteRef, baseBranch];
 
-    if (useLocalBranch) {
-      console.warn(
-        `[WorktreeManager] Creating worktree from local branch: ${baseBranch}`,
-      );
-    } else {
-      const remoteRef = `origin/${baseBranch}`;
-      const remoteExists = await git(
-        ['rev-parse', '--verify', remoteRef],
+    let startPoint: string | undefined;
+    for (const candidate of candidates) {
+      const resolved = await git(
+        ['rev-parse', '--verify', '--quiet', candidate],
         projectPath,
         /* allowFailure */ true,
       );
-
-      if (remoteExists) {
-        startPoint = remoteRef;
-        console.warn(
-          `[WorktreeManager] Creating worktree from remote: ${remoteRef}`,
-        );
-      } else {
-        console.warn(
-          `[WorktreeManager] Remote ref ${remoteRef} not found, using local branch: ${baseBranch}`,
-        );
+      if (resolved) {
+        startPoint = candidate;
+        break;
       }
     }
 
+    if (!startPoint) {
+      throw new Error(
+        `Base branch "${baseBranch}" does not exist in this repository (looked for ${baseBranch} and ${remoteRef}). ` +
+          'Create it, or give the task a base branch that exists.',
+      );
+    }
+
+    console.warn(`[WorktreeManager] Creating worktree from ${startPoint}`);
+
+    // Relative links (git 2.48+) when every git that may open the repository supports them
     await git(
-      ['worktree', 'add', '-b', branchName, '--no-track', worktreePath, startPoint],
+      await worktreeGitArgs(['worktree', 'add', '-b', branchName, '--no-track', worktreePath, startPoint]),
       projectPath,
     );
   }
@@ -268,6 +275,15 @@ export async function createOrGetWorktree(
     }
   }
 
+  // A worktree is its own checkout and .claude/settings.local.json isn't committed, so a session
+  // started here would otherwise fall back to ~/.claude and split the project's memory in two
+  if (await isSelfImproveEnabledForPath(projectPath)) {
+    // Imported here rather than at the top: this is the only use, and the module behind it reaches
+    // the app logger, which pulls electron into everything that imports worktree creation
+    const { ensureWorktreeProjectMemory } = await import('../self-improve/relocation');
+    await ensureWorktreeProjectMemory(resolve(worktreePath), projectPath);
+  }
+
   return { worktreePath: resolve(worktreePath), branch: branchName };
 }
 
@@ -297,7 +313,8 @@ async function isWorktreeRegistered(
     .split(/\r?\n/)
     .some((line) => {
       if (!line.startsWith('worktree ')) return false;
-      const listed = line.slice('worktree '.length).trim();
+      // git in WSL lists Linux paths
+      const listed = toHostPath(line.slice('worktree '.length).trim());
       return resolve(listed) === normalizedTarget;
     });
 }

@@ -61,7 +61,8 @@
     "deleting": "Deleting...",
     "openPR": "Open PR",
     "mergePR": "Merge PR",
-    "createPR": "Create PR"
+    "createPR": "Create PR",
+    "localMerge": "Local merge"
   },
   "actions": {
     "save": "Save",
@@ -231,11 +232,9 @@
     "apiKeyUnknown": "Pay as you go: {{provider}} bills this API profile per token, so there's no usage limit to show",
     "manageAccounts": "Manage accounts",
     "inUse": "In Use",
-    "profile": "Profile",
     "notAvailable": "N/A",
     "usageStatusAriaLabel": "Usage status",
-    "usageBreakdown": "Usage Breakdown",
-    "used": "used",
+    "usageBreakdown": "Usage",
     "loading": "Loading...",
     "sessionDefault": "Session",
     "weeklyDefault": "Weekly",
@@ -250,10 +249,16 @@
     "reauthRequired": "Re-authentication required",
     "reauthRequiredDescription": "Your session has expired. Re-authenticate to view usage and continue using this account.",
     "reauthButton": "Re-authenticate",
-    "clickToOpenSettings": "Click to open Settings →",
     "sessionShort": "5-hour session usage",
     "weeklyShort": "7-day weekly usage",
-    "swap": "Swap"
+    "swap": "Swap",
+    "weekAllModels": "Week",
+    "compactHours": "{{hours}}h {{minutes}}m",
+    "compactDays": "{{days}}d {{hours}}h",
+    "resetsInLowerHours": "resets in {{hours}}h {{minutes}}m",
+    "resetsInLowerDays": "resets in {{days}}d {{hours}}h",
+    "heartsLeft": "{{percent}}% of the 5-hour limit left",
+    "weekScoped": "{{model}} · Week"
   },
   "oauth": {
     "enterCode": "Manual Code Entry (Fallback)",
@@ -375,7 +380,8 @@
     },
     "branchType": {
       "local": "Local",
-      "remote": "Remote"
+      "remote": "Remote",
+      "missing": "Not in the project"
     }
   },
   "projectsPage": {
@@ -391,6 +397,8 @@
     "notInitialized": "Not initialized yet",
     "actions": "Actions for {{name}}",
     "remove": "Remove project",
+    "quitWindow": "Quit window",
+    "open": "Open",
     "empty": "No projects yet. Add a project folder to get started.",
     "noResults": "No projects match your search."
   }

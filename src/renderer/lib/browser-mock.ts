@@ -13,8 +13,6 @@ import {
   workspaceMock,
   terminalMock,
   claudeProfileMock,
-  contextMock,
-  integrationMock,
   insightsMock,
   infrastructureMock,
   settingsMock
@@ -45,12 +43,6 @@ const browserMockAPI: ElectronAPI = {
 
   // Settings
   ...settingsMock,
-
-  // Context Operations
-  ...contextMock,
-
-  // Environment Configuration & Integration Operations
-  ...integrationMock,
 
   // Insights Operations
   ...insightsMock,
@@ -131,6 +123,13 @@ const browserMockAPI: ElectronAPI = {
   installGraphify: async () => ({ success: true, data: { command: 'uv tool install graphifyy' } }),
   getGraphifyIndex: async () => ({ success: true, data: null }),
   buildGraphifyIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
+  getProjectIndex: async () => ({ success: true, data: null }),
+  buildProjectIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
+  isProjectIndexBuilding: async () => ({ success: true, data: false }),
+  deleteProjectIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
+  getMemoryIndex: async () => ({ success: true, data: null }),
+  buildMemoryIndex: async () => ({ success: false, error: 'Not available in browser mode' }),
+  isMemoryIndexBuilding: async () => ({ success: true, data: false }),
   hasGraphifyGraph: async () => ({ success: true, data: false }),
   isGraphifyEnabled: async () => ({ success: true, data: false }),
   setGraphifyEnabled: async () => ({ success: false, error: 'Not available in browser mode' }),

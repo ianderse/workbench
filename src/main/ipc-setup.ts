@@ -9,6 +9,7 @@ import type { BrowserWindow } from 'electron';
 import { AgentManager } from './agent';
 import { TerminalManager } from './terminal-manager';
 import { setupIpcHandlers as setupModularHandlers } from './ipc-handlers';
+import type { WindowHandlerDeps } from './ipc-handlers/window-handlers';
 
 /**
  * Setup all IPC handlers
@@ -22,21 +23,21 @@ import { setupIpcHandlers as setupModularHandlers } from './ipc-handlers';
  * - agent-events-handlers.ts: Agent event forwarding
  * - settings-handlers.ts: App settings and dialogs
  * - file-handlers.ts: File system operations
- * - context-handlers.ts: Project context and memory
- * - env-handlers.ts: Environment configuration
  * - github-handlers.ts: GitHub integration
  * - autobuild-source-handlers.ts: Source updates
  * - insights-handlers.ts: AI insights chat
  *
  * @param agentManager - The agent manager instance
  * @param terminalManager - The terminal manager instance
- * @param getMainWindow - Function to get the main BrowserWindow
+ * @param getMainWindow - Function to get the window in use
+ * @param windowDeps - How to open a project's own window (project windows)
  */
 export function setupIpcHandlers(
   agentManager: AgentManager,
   terminalManager: TerminalManager,
-  getMainWindow: () => BrowserWindow | null
+  getMainWindow: () => BrowserWindow | null,
+  windowDeps: WindowHandlerDeps
 ): void {
   // Delegate to modular handler setup
-  setupModularHandlers(agentManager, terminalManager, getMainWindow);
+  setupModularHandlers(agentManager, terminalManager, getMainWindow, windowDeps);
 }

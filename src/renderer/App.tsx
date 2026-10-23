@@ -33,6 +33,7 @@ import { useSettingsStore, loadSettings, loadProfiles } from './stores/settings-
 import { loadClaudeProfiles } from './stores/claude-profile-store';
 import { useTerminalStore, restoreTerminalSessions } from './stores/terminal-store';
 import { useIpcListeners } from './hooks/useIpc';
+import { closeProjectWindow, openProjectWindow, useProjectWindows } from './hooks/useProjectWindows';
 import { useTitleBarColors } from './hooks/useTitleBarColors';
 import { useGlobalTerminalListeners } from './hooks/useGlobalTerminalListeners';
 import { useTerminalProfileChange } from './hooks/useTerminalProfileChange';
@@ -116,6 +117,11 @@ export function App() {
 
   // GitHub setup state (shown after Workbench init)
 
+  // Project picked on the Projects page while it has no window yet: this window or a new one
+  const [projectToOpen, setProjectToOpen] = useState<Project | null>(null);
+  // A just-added project still to be set up: its initialize prompt waits for that answer
+  const [projectToInitialize, setProjectToInitialize] = useState<Project | null>(null);
+
   // Remove project confirmation state
   const [showRemoveProjectDialog, setShowRemoveProjectDialog] = useState(false);
   const [removeProjectError, setRemoveProjectError] = useState<string | null>(null);
@@ -182,6 +188,19 @@ export function App() {
     }
   }, [projects, activeProjectId, selectedProjectId, openProjectIds, openProjectTab, setActiveProject, projectTabs.length, projectTabs.map]);
 
+  // The projects that have a window, so cards can offer "Quit window" and switching can
+  // focus an open project instead of opening it twice
+  const { projectIds: windowedProjectIds, count: windowCount } = useProjectWindows();
+
+  // Tell the main process which project this window shows (tray menu, window lookups).
+  // Waits for the projects to load: reporting "no project" first would clear the project a
+  // new window was opened for.
+  useEffect(() => {
+    const projectId = activeProjectId ?? selectedProjectId ?? null;
+    if (!projectId && projects.length === 0) return;
+    window.electronAPI.reportWindowProject(projectId);
+  }, [activeProjectId, selectedProjectId, projects.length]);
+
   const { t, i18n } = useTranslation('dialogs');
 
   // Sync spell check language with i18n language
@@ -237,8 +256,11 @@ export function App() {
 
   // Listen for app updates - auto-open settings to 'updates' section when update is ready
   useEffect(() => {
-    // When an update is downloaded and ready to install, open settings to updates section
+    // When an update is downloaded and ready to install, open settings to updates section.
+    // The event reaches every project window, so only the one the user is in opens the
+    // dialog; the others show the update notification like any other window would.
     const cleanupDownloaded = window.electronAPI.onAppUpdateDownloaded(() => {
+      if (!document.hasFocus()) return;
       console.warn('[App] Update downloaded, opening settings to updates section');
       setSettingsInitialSection('updates');
       setIsSettingsDialogOpen(true);
@@ -482,22 +504,80 @@ export function App() {
     }
   };
 
+  // Offer to create the project's .workbench folder (the project has none yet)
+  const askToInitialize = useCallback((project: Project) => {
+    setPendingProject(project);
+    setInitError(null);
+    setInitSuccess(false);
+    setShowInitDialog(true);
+  }, []);
+
+  /**
+   * A project the user just added or created opens like any project card: a window showing no
+   * project takes it, otherwise the dialog asks for this window or a new one. The initialize
+   * prompt waits for that answer, and a project opened in a new window is set up from there
+   * (its project menu and Settings > Project both offer it) rather than from this window.
+   */
   const handleProjectAdded = (project: Project, needsInit: boolean) => {
-    openProjectTab(project.id);
-    if (needsInit) {
-      setPendingProject(project);
-      setInitError(null);
-      setInitSuccess(false);
-      setShowInitDialog(true);
+    if (!activeProjectId && !selectedProjectId) {
+      openProjectTab(project.id);
+      if (needsInit) askToInitialize(project);
+      return;
     }
+    setProjectToOpen(project);
+    setProjectToInitialize(needsInit ? project : null);
   };
 
-  // Make a project active (sidebar switcher / Projects page); leaving the Projects page for its board
+  // Show a project in this window; leaving the Projects page for its board
   const handleSelectProject = useCallback((projectId: string) => {
     openProjectTab(projectId);
     setActiveProject(projectId);
     setActiveView((view) => (view === 'projects' ? 'kanban' : view));
   }, [openProjectTab, setActiveProject]);
+
+  /**
+   * A project card on the Projects page: the project this window already shows just opens its
+   * board, a project open in another window focuses that window, and anything else asks
+   * whether to use this window or a new one.
+   */
+  const handleOpenProject = useCallback((projectId: string) => {
+    if (projectId === (activeProjectId || selectedProjectId)) {
+      setActiveView((view) => (view === 'projects' ? 'kanban' : view));
+      return;
+    }
+
+    // Open brings the project's window to the front when it already has one
+    if (windowedProjectIds.has(projectId)) {
+      void openProjectWindow(projectId);
+      return;
+    }
+
+    const project = projects.find((p) => p.id === projectId);
+    if (project) setProjectToOpen(project);
+  }, [activeProjectId, selectedProjectId, projects, windowedProjectIds]);
+
+  // "This window" in the open dialog
+  const handleOpenProjectHere = useCallback(() => {
+    if (!projectToOpen) return;
+    handleSelectProject(projectToOpen.id);
+    const initialize = projectToInitialize?.id === projectToOpen.id ? projectToInitialize : null;
+    setProjectToOpen(null);
+    setProjectToInitialize(null);
+    if (initialize) askToInitialize(initialize);
+  }, [projectToOpen, projectToInitialize, handleSelectProject, askToInitialize]);
+
+  // "New window" in the open dialog
+  const handleOpenProjectInNewWindow = useCallback(() => {
+    if (!projectToOpen) return;
+    void openProjectWindow(projectToOpen.id);
+    setProjectToOpen(null);
+    setProjectToInitialize(null);
+  }, [projectToOpen]);
+
+  // "Quit window" on an open project's card: close that project's window
+  const handleQuitProjectWindow = useCallback((projectId: string) => {
+    void closeProjectWindow(projectId);
+  }, []);
 
   // "Open agent" in task details opens the task's session in a new agent window: close the task
   // dialog and show the Agents page of the task's project
@@ -630,9 +710,12 @@ export function App() {
               <ProjectsPage
                 projects={projects}
                 activeProjectId={activeProjectId || selectedProjectId}
-                onSelectProject={handleSelectProject}
+                windowedProjectIds={windowedProjectIds}
+                canQuitWindow={windowCount > 1}
+                onSelectProject={handleOpenProject}
                 onAddProject={handleAddProject}
                 onRemoveProject={handleProjectTabClose}
+                onQuitProjectWindow={handleQuitProjectWindow}
               />
             ) : selectedProject ? (
               <>
@@ -760,6 +843,30 @@ export function App() {
                 ) : (
                   t('common:buttons.initialize', { ns: 'common' })
                 )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Open a project: this window or a new one */}
+        <Dialog
+          open={!!projectToOpen}
+          onOpenChange={(open) => {
+            if (open) return;
+            setProjectToOpen(null);
+            setProjectToInitialize(null);
+          }}
+        >
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t('openProject.title', { projectName: projectToOpen?.name || '' })}</DialogTitle>
+            </DialogHeader>
+            <DialogFooter>
+              <Button variant="ghost" size="sm" onClick={handleOpenProjectHere}>
+                {t('openProject.thisWindow')}
+              </Button>
+              <Button size="sm" onClick={handleOpenProjectInNewWindow}>
+                {t('openProject.newWindow')}
               </Button>
             </DialogFooter>
           </DialogContent>

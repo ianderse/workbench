@@ -1,5 +1,6 @@
 import { RefreshCw, Download } from 'lucide-react';
 import { ProjectIndexRows } from '../context/ProjectIndex';
+import { CompengIndexRows } from '../context/CompengIndex';
 import { MemoryIndexRows } from '../context/MemoryIndex';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
@@ -57,8 +58,12 @@ export function GeneralSettings({
             </SettingsRow>
           ) : (
             <>
+              {/* ProjectIndexRows is the project index (CLAUDE.md); MemoryIndexRows is the
+                  Knowledge index (the code graph); CompengIndexRows is the Memory index (what
+                  past sessions taught) */}
               <ProjectIndexRows projectId={project.id} />
               <MemoryIndexRows projectId={project.id} />
+              <CompengIndexRows projectId={project.id} />
             </>
           )}
         </SettingsRows>

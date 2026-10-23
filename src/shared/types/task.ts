@@ -4,7 +4,7 @@
 
 import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
-import type { ClaudeRunInfo } from './claude-code';
+import type { ClaudeRunInfo, ClaudeRunPhase } from './claude-code';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -103,6 +103,21 @@ export interface TaskLogs {
     coding: TaskPhaseLog;
     validation: TaskPhaseLog;
   };
+}
+
+/**
+ * A run of a task that was thrown away when the task was started over. Its logs and the steps
+ * of its Claude Code run are kept so the task dialog can still show what happened.
+ */
+export interface ArchivedTaskRun {
+  /** Position in the task's history, oldest first, starting at 1 */
+  index: number;
+  /** When the run was put aside (ISO) */
+  archivedAt: string;
+  logs: TaskLogs | null;
+  /** The run's steps (triage, plan, implement, revise, validate) with their time and cost */
+  phases: ClaudeRunPhase[];
+  totalCostUsd?: number;
 }
 
 // Streaming markers from Python (similar to InsightsStreamChunk)
@@ -290,7 +305,6 @@ export interface WorktreeStatus {
   worktreePath?: string;
   branch?: string;
   baseBranch?: string;
-  currentProjectBranch?: string; // User's current checked-out branch in main project (merge target)
   commitCount?: number;
   filesChanged?: number;
   additions?: number;
@@ -449,6 +463,20 @@ export interface WorktreeMergePRResult {
   error?: string;
 }
 
+/** Result of merging a task's branch into its base branch with git, locally */
+export interface WorktreeLocalMergeResult {
+  success: boolean;
+  /** Branch the task branch was merged into */
+  targetBranch?: string;
+  /** The task branch */
+  sourceBranch?: string;
+  /** The base branch already had the task's commits, so nothing was merged */
+  alreadyMerged?: boolean;
+  /** Files git could not merge on its own (the merge was undone) */
+  conflictedFiles?: string[];
+  error?: string;
+}
+
 /**
  * Result of creating a PR from a worktree
  */
@@ -502,4 +530,13 @@ export interface TaskStartOptions {
   workers?: number;
   model?: string;
   baseBranch?: string; // Override base branch for worktree creation
+}
+
+/** Options of a "request changes" review */
+export interface TaskReviewOptions {
+  /**
+   * Discard the task's worktree, branch and run history and redo it from scratch, instead of
+   * applying the feedback to what the session already built. Off by default.
+   */
+  startOver?: boolean;
 }

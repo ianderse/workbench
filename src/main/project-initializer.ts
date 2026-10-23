@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'fs';
 import path from 'path';
-import { execFileSync } from 'child_process';
-import { getToolPath } from './cli-tool-manager';
+import { git } from './utils/git-exec';
 import { DATA_DIR_NAMES } from '../shared/constants';
 
 /**
@@ -32,15 +31,12 @@ export interface GitStatus {
 /**
  * Check if a directory is a git repository and has at least one commit
  */
-export function checkGitStatus(projectPath: string): GitStatus {
-  const git = getToolPath('git');
-
+export async function checkGitStatus(projectPath: string): Promise<GitStatus> {
   try {
     // Check if it's a git repository
-    execFileSync(git, ['rev-parse', '--git-dir'], {
+    await git(['rev-parse', '--git-dir'], {
       cwd: projectPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      encoding: 'utf-8'
     });
   } catch {
     return {
@@ -54,10 +50,9 @@ export function checkGitStatus(projectPath: string): GitStatus {
   // Check if there are any commits
   let hasCommits = false;
   try {
-    execFileSync(git, ['rev-parse', 'HEAD'], {
+    await git(['rev-parse', 'HEAD'], {
       cwd: projectPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      encoding: 'utf-8'
     });
     hasCommits = true;
   } catch {
@@ -68,11 +63,10 @@ export function checkGitStatus(projectPath: string): GitStatus {
   // Get current branch
   let currentBranch: string | null = null;
   try {
-    currentBranch = execFileSync(git, ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    currentBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: projectPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
+      encoding: 'utf-8'
+    })).stdout.trim();
   } catch {
     // Branch detection failed
   }
@@ -97,47 +91,42 @@ export function checkGitStatus(projectPath: string): GitStatus {
  * Initialize git in a project directory and create an initial commit.
  * This is a user-friendly way to set up git for non-technical users.
  */
-export function initializeGit(projectPath: string): InitializationResult {
+export async function initializeGit(projectPath: string): Promise<InitializationResult> {
   debug('initializeGit called', { projectPath });
 
   // Check current git status
-  const status = checkGitStatus(projectPath);
-  const git = getToolPath('git');
+  const status = await checkGitStatus(projectPath);
 
   try {
     // Step 1: Initialize git if needed
     if (!status.isGitRepo) {
       debug('Initializing git repository');
-      execFileSync(git, ['init'], {
+      await git(['init'], {
         cwd: projectPath,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe']
+        encoding: 'utf-8'
       });
     }
 
     // Step 2: Check if there are files to commit
-    const statusOutput = execFileSync(git, ['status', '--porcelain'], {
+    const statusOutput = (await git(['status', '--porcelain'], {
       cwd: projectPath,
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    }).trim();
+      encoding: 'utf-8'
+    })).stdout.trim();
 
     // Step 3: If there are untracked/modified files, add and commit them
     if (statusOutput || !status.hasCommits) {
       debug('Adding files and creating initial commit');
 
       // Add all files
-      execFileSync(git, ['add', '-A'], {
+      await git(['add', '-A'], {
         cwd: projectPath,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe']
+        encoding: 'utf-8'
       });
 
       // Create initial commit
-      execFileSync(git, ['commit', '-m', 'Initial commit', '--allow-empty'], {
+      await git(['commit', '-m', 'Initial commit', '--allow-empty'], {
         cwd: projectPath,
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe']
+        encoding: 'utf-8'
       });
     }
 
@@ -263,7 +252,7 @@ export function isInitialized(projectPath: string): boolean {
  * - Project directory must exist
  * - Project must be a git repository with at least one commit
  */
-export function initializeProject(projectPath: string): InitializationResult {
+export async function initializeProject(projectPath: string): Promise<InitializationResult> {
   debug('initializeProject called', { projectPath });
 
   // Validate project path exists
@@ -276,7 +265,7 @@ export function initializeProject(projectPath: string): InitializationResult {
   }
 
   // Check git status - Workbench requires git for worktree-based builds
-  const gitStatus = checkGitStatus(projectPath);
+  const gitStatus = await checkGitStatus(projectPath);
   if (!gitStatus.isGitRepo || !gitStatus.hasCommits) {
     debug('Git check failed', { gitStatus });
     return {

@@ -13,14 +13,10 @@
  * A failed merge leaves the worktree as it was. All git/gh calls are async.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-import { getIsolatedGitEnv } from '../../../utils/git-isolation';
+import { git as runGit } from '../../../utils/git-exec';
+import { runTool } from '../../../platform/runtime-exec';
 import { runMergeAgent, type MergeAgentFn, type MissingTargetLines } from '../merge-agent';
 import type { MergePRStep, WorktreeMergePRResult } from '../../../../shared/types/task';
-
-const execFileAsync = promisify(execFile);
 
 export interface MergePRConfig {
   /** Project root directory (main git repo; gh runs here) */
@@ -30,8 +26,6 @@ export interface MergePRConfig {
   prUrl: string;
   /** Branch to merge into; the PR's current base when omitted */
   targetBranch?: string;
-  gitPath: string;
-  ghPath: string;
   taskTitle?: string;
   taskDescription?: string;
   /** Claude profile for the merge agent */
@@ -91,9 +85,9 @@ async function findMissingTargetLines(
 export async function mergePR(config: MergePRConfig): Promise<MergePRResult> {
   const { worktreePath, prUrl, projectDir, onProgress } = config;
   const git = async (args: string[]) =>
-    (await execFileAsync(config.gitPath, args, { cwd: worktreePath, env: getIsolatedGitEnv(), encoding: 'utf-8', maxBuffer: 20 * 1024 * 1024 })).stdout;
+    (await runGit(args, { cwd: worktreePath, isolated: true, encoding: 'utf-8', maxBuffer: 20 * 1024 * 1024 })).stdout;
   const gh = config.gh ?? (async (args: string[]) =>
-    (await execFileAsync(config.ghPath, args, { cwd: projectDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })).stdout);
+    (await runTool('gh', args, { cwd: projectDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })).stdout);
   const mergeAgent = config.mergeAgent ?? runMergeAgent;
   const dataDir = `${(config.dataDir || '.workbench').replace(/\\/g, '/')}/`;
   const isMerging = () => git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).then(() => true, () => false);

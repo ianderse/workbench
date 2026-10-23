@@ -17,8 +17,8 @@ import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { rm } from 'fs/promises';
 import { existsSync } from 'fs';
-import { getToolPath } from '../cli-tool-manager';
-import { getIsolatedGitEnv } from './git-isolation';
+import { git } from './git-exec';
+import { repairForeignWorktrees } from '../worktree/runtime-worktrees';
 import { getTaskWorktreeDir, getTerminalWorktreeDir, isPathWithinBase, findTaskWorktree } from '../worktree-paths';
 
 // Async child processes: cleanup runs from IPC handlers and must not block the main process
@@ -67,10 +67,10 @@ async function getWorktreeBranch(worktreePath: string, specId: string, timeout: 
   // First try to get branch from the worktree's HEAD
   if (existsSync(worktreePath)) {
     try {
-      const { stdout } = await execFileAsync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      const { stdout } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
         cwd: worktreePath,
         encoding: 'utf-8',
-        env: getIsolatedGitEnv(),
+        isolated: true,
         timeout
       });
       const branch = stdout.trim();
@@ -240,10 +240,13 @@ export async function cleanupWorktree(options: WorktreeCleanupOptions): Promise<
   // After manual deletion, git still thinks the worktree exists in .git/worktrees/
   // Running prune cleans up these stale references
   try {
-    await execFileAsync(getToolPath('git'), ['worktree', 'prune'], {
+    // On Windows, other worktrees linked by the other runtime's git (native / WSL) are repaired
+    // first, or the prune would drop them as broken
+    await repairForeignWorktrees(projectPath);
+    await git(['worktree', 'prune'], {
       cwd: projectPath,
       encoding: 'utf-8',
-      env: getIsolatedGitEnv(),
+      isolated: true,
       timeout
     });
     console.warn(`${logPrefix} Git worktree references pruned`);
@@ -257,10 +260,10 @@ export async function cleanupWorktree(options: WorktreeCleanupOptions): Promise<
   // 4. Delete the branch if requested
   if (deleteBranch && branch) {
     try {
-      await execFileAsync(getToolPath('git'), ['branch', '-D', branch], {
+      await git(['branch', '-D', branch], {
         cwd: projectPath,
         encoding: 'utf-8',
-        env: getIsolatedGitEnv(),
+        isolated: true,
         timeout
       });
       console.warn(`${logPrefix} Branch deleted: ${branch}`);
@@ -301,9 +304,9 @@ export async function discardTaskWorktree(
   // creating the worktree again would reuse it with the old commits
   const branch = `workbench/${specId}`;
   try {
-    await execFileAsync(getToolPath('git'), ['branch', '-D', branch], {
+    await git(['branch', '-D', branch], {
       cwd: projectPath,
-      env: getIsolatedGitEnv(),
+      isolated: true,
       timeout: 30000
     });
     console.warn(`${logPrefix} Branch deleted: ${branch}`);

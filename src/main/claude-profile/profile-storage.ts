@@ -5,15 +5,14 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { readFile } from 'fs/promises';
-import { homedir } from 'os';
 import { join } from 'path';
+import { expandClaudeHome, joinClaudeHome } from '../platform/claude-home';
 import type { ClaudeProfile, ClaudeAutoSwitchSettings } from '../../shared/types';
 
-/**
- * Directory constants for profile isolation
- */
-const DEFAULT_CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
-const CLAUDE_PROFILES_DIR = join(homedir(), '.claude-profiles');
+/** Claude Code's default ~/.claude (in the Linux home when Claude Code runs in WSL) */
+const getDefaultClaudeConfigDir = () => joinClaudeHome('.claude');
+/** The app's isolated profile dirs (~/.claude-profiles) */
+const getClaudeProfilesDir = () => joinClaudeHome('.claude-profiles');
 
 const STORE_VERSION = 3;  // Bumped for encrypted token storage
 
@@ -55,10 +54,10 @@ function usesLegacySharedDirectory(profile: ClaudeProfile): boolean {
 
   // Normalize paths for comparison
   const normalizedConfigDir = profile.configDir.startsWith('~')
-    ? join(homedir(), profile.configDir.slice(1))
+    ? expandClaudeHome(profile.configDir)
     : profile.configDir;
 
-  return normalizedConfigDir === DEFAULT_CLAUDE_CONFIG_DIR;
+  return normalizedConfigDir === getDefaultClaudeConfigDir();
 }
 
 /**
@@ -73,14 +72,15 @@ function migrateProfileToIsolatedDirectory(profile: ClaudeProfile): string {
   const baseName = profile.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'primary';
 
   // Ensure the profiles directory exists
-  if (!existsSync(CLAUDE_PROFILES_DIR)) {
-    mkdirSync(CLAUDE_PROFILES_DIR, { recursive: true });
+  const profilesDir = getClaudeProfilesDir();
+  if (!existsSync(profilesDir)) {
+    mkdirSync(profilesDir, { recursive: true });
   }
 
   // Check for directory collision and append counter if needed
   let sanitizedName = baseName;
   let counter = 1;
-  let isolatedDir = join(CLAUDE_PROFILES_DIR, sanitizedName);
+  let isolatedDir = join(profilesDir, sanitizedName);
 
   // Keep incrementing counter until we find an available directory name
   // Use profile.id as a marker file to detect if the directory belongs to this profile
@@ -103,7 +103,7 @@ function migrateProfileToIsolatedDirectory(profile: ClaudeProfile): string {
     // Directory exists but belongs to different profile, try next counter
     counter++;
     sanitizedName = `${baseName}-${counter}`;
-    isolatedDir = join(CLAUDE_PROFILES_DIR, sanitizedName);
+    isolatedDir = join(profilesDir, sanitizedName);
   }
 
   // Create the profile directory if it doesn't exist

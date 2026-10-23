@@ -5,26 +5,25 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { claudeProjectSlug, expandClaudeHome, joinClaudeHome } from '../platform/claude-home';
+import { toHostPath, toRuntimePath } from '../platform/shell-runtime';
 import type { TerminalProcess } from './types';
-import { getTerminalSessionStore, type TerminalSession } from '../terminal-session-store';
+import { getTerminalSessionStore, flushTerminalSessionStores, type TerminalSession } from '../terminal-session-store';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 
 /**
- * Get the Claude project slug from a project path.
- * Claude uses the full path with forward slashes replaced by dashes.
- */
-function getClaudeProjectSlug(projectPath: string): string {
-  return projectPath.replace(/[/\\]/g, '-');
-}
-
-/**
- * Find the most recent Claude session file for a project (the one `claude --continue` picks up)
+ * Find the most recent Claude session file for a project (the one `claude --continue` picks up).
+ *
+ * Claude Code names the project's folder after the path as it sees it: in the WSL runtime the
+ * Linux path (`/mnt/c/...`), under the Linux home's config dir, which the app reads through its
+ * UNC path.
  */
 export function findMostRecentClaudeSession(projectPath: string, configDir?: string): string | null {
-  const slug = getClaudeProjectSlug(projectPath);
-  // Claude writes sessions under its config dir (CLAUDE_CONFIG_DIR of the profile, else ~/.claude)
-  const claudeProjectDir = path.join(configDir || path.join(os.homedir(), '.claude'), 'projects', slug);
+  const slug = claudeProjectSlug(toRuntimePath(projectPath));
+  // Claude writes sessions under its config dir (CLAUDE_CONFIG_DIR of the profile, else ~/.claude);
+  // a Linux path of one is read through its UNC path
+  const configRoot = configDir ? toHostPath(expandClaudeHome(configDir)) : joinClaudeHome('.claude');
+  const claudeProjectDir = path.join(configRoot, 'projects', slug);
 
   try {
     if (!fs.existsSync(claudeProjectDir)) {
@@ -81,7 +80,7 @@ export function persistSession(terminal: TerminalProcess): void {
     return;
   }
 
-  const store = getTerminalSessionStore();
+  const store = getTerminalSessionStore(terminal.projectPath);
   store.saveSession(createSessionObject(terminal));
 }
 
@@ -94,7 +93,7 @@ export function persistSessionAsync(terminal: TerminalProcess): void {
     return;
   }
 
-  const store = getTerminalSessionStore();
+  const store = getTerminalSessionStore(terminal.projectPath);
   store.saveSessionAsync(createSessionObject(terminal)).catch((error) => {
     debugError('[SessionHandler] Failed to persist session:', error);
   });
@@ -107,16 +106,25 @@ export function persistSessionAsync(terminal: TerminalProcess): void {
  * multiple sessions (e.g., on app quit).
  */
 export async function persistAllSessionsAsync(terminals: Map<string, TerminalProcess>): Promise<void> {
-  const store = getTerminalSessionStore();
-
   const savePromises: Promise<void>[] = [];
   terminals.forEach((terminal) => {
     if (terminal.projectPath) {
+      const store = getTerminalSessionStore(terminal.projectPath);
       savePromises.push(store.saveSessionAsync(createSessionObject(terminal)));
     }
   });
 
   await Promise.all(savePromises);
+}
+
+/**
+ * Wait until every session saved so far is on disk.
+ *
+ * Saves are queued, so the app quitting has to wait for the queue: without this the last window a
+ * user closed can stay in the file and come back on the next start.
+ */
+export async function flushSessions(): Promise<void> {
+  await flushTerminalSessionStores();
 }
 
 /**
@@ -126,9 +134,8 @@ export async function persistAllSessionsAsync(terminals: Map<string, TerminalPro
  * (e.g., worktree switching, terminal restart after shell exit). Without this,
  * the pendingDelete guard blocks persistence for the new terminal.
  */
-export function clearPendingDelete(terminalId: string): void {
-  const store = getTerminalSessionStore();
-  store.clearPendingDelete(terminalId);
+export function clearPendingDelete(projectPath: string, terminalId: string): void {
+  getTerminalSessionStore(projectPath).clearPendingDelete(terminalId);
 }
 
 /**
@@ -139,42 +146,22 @@ export function removePersistedSession(terminal: TerminalProcess): void {
     return;
   }
 
-  const store = getTerminalSessionStore();
-  store.removeSession(terminal.projectPath, terminal.id);
+  const store = getTerminalSessionStore(terminal.projectPath);
+  store.removeSession(terminal.id);
 }
 
 /**
  * Get saved sessions for a project
  */
 export function getSavedSessions(projectPath: string): TerminalSession[] {
-  const store = getTerminalSessionStore();
-  return store.getSessions(projectPath);
+  return getTerminalSessionStore(projectPath).getSessions();
 }
 
 /**
  * Clear all saved sessions for a project
  */
 export function clearSavedSessions(projectPath: string): void {
-  const store = getTerminalSessionStore();
-  store.clearProjectSessions(projectPath);
-}
-
-/**
- * Get available session dates
- */
-export function getAvailableSessionDates(
-  projectPath?: string
-): import('../terminal-session-store').SessionDateInfo[] {
-  const store = getTerminalSessionStore();
-  return store.getAvailableDates(projectPath);
-}
-
-/**
- * Get sessions for a specific date
- */
-export function getSessionsForDate(date: string, projectPath: string): TerminalSession[] {
-  const store = getTerminalSessionStore();
-  return store.getSessionsForDate(date, projectPath);
+  getTerminalSessionStore(projectPath).clearProjectSessions();
 }
 
 /**
@@ -184,6 +171,5 @@ export function updateDisplayOrders(
   projectPath: string,
   orders: Array<{ terminalId: string; displayOrder: number }>
 ): void {
-  const store = getTerminalSessionStore();
-  store.updateDisplayOrders(projectPath, orders);
+  getTerminalSessionStore(projectPath).updateDisplayOrders(orders);
 }

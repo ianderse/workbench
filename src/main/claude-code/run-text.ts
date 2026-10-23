@@ -31,6 +31,8 @@ export interface RunClaudeTextOptions {
   tools?: readonly string[];
   /** Extra allow rules, e.g. "Bash(git log *)" */
   allowedTools?: readonly string[];
+  /** Expand Claude Code's slash commands in the prompt (off by default, so prompts stay literal) */
+  slashCommands?: boolean;
   maxTurns?: number;
   timeoutMs?: number;
   abortSignal?: AbortSignal;
@@ -66,10 +68,10 @@ export async function runClaudeText(options: RunClaudeTextOptions): Promise<RunC
     '--permission-mode', 'dontAsk',
     '--permission-prompts', 'none',
     '--strict-mcp-config',
-    '--disable-slash-commands',
     '--model', options.model ?? 'haiku',
     '--tools', tools.length > 0 ? tools.join(',') : '',
   ];
+  if (!options.slashCommands) args.push('--disable-slash-commands');
   if (usesContentBlocks) args.push('--input-format', 'stream-json', '--verbose');
   if (options.effort) args.push('--effort', options.effort);
   if (options.allowedTools?.length) args.push('--allowedTools', ...options.allowedTools);

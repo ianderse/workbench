@@ -5,11 +5,17 @@
  * Turns a task's connector ids (Settings > Connectors defaults, or the task's own choice) into
  * the JSON accepted by `claude --mcp-config`. The servers are added on top of whatever the
  * user's own Claude Code configuration (.mcp.json, ~/.claude.json, plugins) already loads.
+ *
+ * When Claude Code runs in WSL it starts the servers inside the distribution: Windows paths in a
+ * custom server's command and arguments are translated, and the built-in servers need npx there.
  */
 
 import type { CustomMcpServer } from '../../shared/types/project';
 import type { McpConnectorSettings } from '../../shared/types/settings';
 import { getDefaultMcpConnectorIds, getUsableCustomServers } from '../../shared/utils/mcp-connectors';
+import { appLog } from '../app-logger';
+import { getWslInfo } from '../platform/shell-runtime';
+import { toRuntimeArg } from '../platform/runtime-exec';
 
 type McpServerEntry =
   | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
@@ -28,7 +34,10 @@ const BUILTIN_SERVERS: Record<string, McpServerEntry> = {
 
 function customServerEntry(server: CustomMcpServer): McpServerEntry | null {
   if (server.type === 'command') {
-    return server.command ? { type: 'stdio', command: server.command, args: server.args ?? [] } : null;
+    if (!server.command) return null;
+    // In WSL, whole-argument Windows paths become the distribution's paths (as for every tool launch)
+    const translate = getWslInfo() ? toRuntimeArg : (arg: string) => arg;
+    return { type: 'stdio', command: translate(server.command), args: (server.args ?? []).map(translate) };
   }
   return server.url ? { type: 'http', url: server.url, headers: server.headers } : null;
 }
@@ -36,6 +45,19 @@ function customServerEntry(server: CustomMcpServer): McpServerEntry | null {
 /** MCP server key accepted by Claude Code (letters, digits, `_` and `-`) */
 function serverKey(id: string): string {
   return id.replace(/[^A-Za-z0-9_-]/g, '_');
+}
+
+let warnedNoNpx = false;
+
+/** The built-in servers run with npx; in WSL that has to be the distribution's npx */
+function warnWhenNpxMissingInWsl(): void {
+  const wsl = getWslInfo();
+  if (!wsl || wsl.tools.npx.path || warnedNoNpx) return;
+  warnedNoNpx = true;
+  appLog.warn(
+    `[MCP] npx isn't installed in WSL (${wsl.distro}), so the built-in connectors (Context7, Electron, Puppeteer) ` +
+    "can't start in Claude Code runs there. Install Node.js inside WSL to use them"
+  );
 }
 
 /**
@@ -49,6 +71,7 @@ export function buildMcpConfig(ids: string[] | undefined, connectorSettings: Mcp
   for (const id of enabled) {
     const builtin = BUILTIN_SERVERS[id];
     if (builtin) {
+      warnWhenNpxMissingInWsl();
       mcpServers[id] = builtin;
       continue;
     }

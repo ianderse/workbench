@@ -80,10 +80,6 @@ function ProjectSettingsContentInner({
     versionInfo,
     isCheckingVersion,
     isUpdating,
-    envConfig,
-    isLoadingEnv,
-    envError,
-    updateEnvConfig,
     expandedSections: _expandedSections,
     toggleSection: _toggleSection,
     handleInitialize,
@@ -124,14 +120,10 @@ function ProjectSettingsContentInner({
         versionInfo={versionInfo}
         isCheckingVersion={isCheckingVersion}
         isUpdating={isUpdating}
-        envConfig={envConfig}
-        isLoadingEnv={isLoadingEnv}
-        envError={envError}
-        updateEnvConfig={updateEnvConfig}
         handleInitialize={handleInitialize}
       />
 
-      <ErrorDisplay error={error} envError={envError} />
+      <ErrorDisplay error={error} />
     </>
   );
 }

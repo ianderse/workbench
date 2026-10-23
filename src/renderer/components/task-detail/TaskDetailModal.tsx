@@ -24,6 +24,7 @@ import {
   GitPullRequest,
   GitPullRequestArrow,
   GitPullRequestCreate,
+  GitMerge,
   Play,
   RotateCcw
 } from 'lucide-react';
@@ -44,13 +45,17 @@ import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
+import { useTaskGitOptions } from '../task-form/TaskGitOptions';
 import { TaskWarnings } from './TaskWarnings';
-import { TaskLogs } from './TaskLogs';
+import { TaskLogs, isTaskRunSettled } from './TaskLogs';
+import { PreviousRuns } from './PreviousRuns';
+import { isTaskSessionActive } from '../../../shared/utils/claude-run';
 import { TaskAttachments } from './TaskAttachments';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
 import { MergePRDialog } from './task-review/MergePRDialog';
-import type { Task, WorktreeCreatePROptions, WorktreeMergePROptions, WorktreeMergePRResult } from '../../../shared/types';
+import { LocalMergeDialog } from './task-review/LocalMergeDialog';
+import type { Task, WorktreeCreatePROptions, WorktreeLocalMergeResult, WorktreeMergePROptions, WorktreeMergePRResult } from '../../../shared/types';
 
 // Status label colors: the top line color of each Kanban column (globals.css `--column-*`)
 const STATUS_BADGE_CLASSES: Record<TaskStatusColumn, string> = {
@@ -131,6 +136,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     if (result.success) {
       state.setIsStuck(false);
       state.setHasCheckedRunning(false);
+      void state.reloadPreviousRuns();
     } else {
       setActionError(result.error || t('tasks:wizard.errors.startFailed'));
     }
@@ -142,10 +148,13 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
       return;
     }
     state.setIsSubmitting(true);
-    await submitReview(task.id, false, state.feedback, state.feedbackImages);
+    const wasStartOver = state.startOver;
+    await submitReview(task.id, false, state.feedback, state.feedbackImages, { startOver: wasStartOver });
     state.setIsSubmitting(false);
+    if (wasStartOver) void state.reloadPreviousRuns();
     state.setFeedback('');
     state.setFeedbackImages([]);
+    state.setStartOver(false);
   };
 
   const handleDelete = async () => {
@@ -196,6 +205,16 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     return result.data;
   };
 
+  // A local merge (plain git, nothing pushed) moves the task to Done
+  const handleLocalMerge = async (): Promise<WorktreeLocalMergeResult> => {
+    const result = await window.electronAPI.mergeWorktreeLocal(task.id);
+    if (!result.success || !result.data) return { success: false, error: result.error };
+    if (result.data.success) {
+      useTaskStore.getState().updateTask(task.id, { status: 'done' });
+    }
+    return result.data;
+  };
+
   // The PR's state is stored with the task; read it from GitHub once when it never was
   const prStateRequested = useRef(false);
   const prUrl = task.metadata?.prUrl;
@@ -211,6 +230,15 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   }, [open, prUrl, prState, task.id]);
   // Only an open PR can be merged, and not while the task runs
   const canMergePR = !!prUrl && prState === 'open' && task.status !== 'in_progress' && task.status !== 'ai_review';
+
+  // Merging into the base branch, and opening a pull request against it, both need the project
+  // to still have it: the branch the task's Git options label "Not in the project"
+  const baseBranch = state.worktreeStatus?.baseBranch;
+  const { isMissingBranch } = useTaskGitOptions(task.projectId, baseBranch);
+  const baseBranchMissing = isMissingBranch(baseBranch);
+  const baseBranchMissingTitle = baseBranchMissing
+    ? t('taskReview:workspace.baseBranchMissing', { branch: baseBranch })
+    : undefined;
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -243,16 +271,20 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       <Badge variant="outline" className="text-xs font-mono">
                         {task.specId}
                       </Badge>
-                      {/* Branch the task's worktree merges into */}
+                      {/* The task's base branch: what it was branched from, and what it merges into */}
                       {state.worktreeStatus?.exists && (
                         <>
                           <span className="text-xs text-muted-foreground" aria-hidden="true">→</span>
                           <Badge
                             variant="outline"
                             className="text-xs font-mono"
-                            title={t('taskReview:workspace.targetBranch')}
+                            title={baseBranchMissingTitle ?? t('taskReview:workspace.targetBranch')}
                           >
-                            {state.worktreeStatus.currentProjectBranch || state.worktreeStatus.baseBranch || 'main'}
+                            {/* A branch the project no longer has reads as disabled, like the
+                                buttons that cannot use it; the tag itself keeps its look */}
+                            <span className={cn(baseBranchMissing && 'opacity-50')}>
+                              {state.worktreeStatus.baseBranch || 'main'}
+                            </span>
                           </Badge>
                         </>
                       )}
@@ -328,6 +360,22 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         worktreeAction={(task.claudeRun?.sessionId || task.metadata?.prUrl || (state.needsReview && state.worktreeStatus?.exists)) ? (
                           <>
                             <TaskOpenAgentButton task={task} />
+                            {/* Merge the task branch into its base branch with git, in the project.
+                                A disabled button gets no pointer events, so its reason sits on a wrapper */}
+                            {state.needsReview && state.worktreeStatus?.exists && (
+                              <span title={baseBranchMissingTitle} className="inline-flex">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1.5"
+                                  onClick={() => state.setShowLocalMergeDialog(true)}
+                                  disabled={baseBranchMissing}
+                                >
+                                  <GitMerge className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                  {t('common:buttons.localMerge')}
+                                </Button>
+                              </span>
+                            )}
                             {/* A PR that exists opens in the browser; otherwise create one (primary action) */}
                             {task.metadata?.prUrl ? (
                               <>
@@ -348,22 +396,31 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                                 )}
                               </>
                             ) : state.needsReview && state.worktreeStatus?.exists && (
-                              <Button
-                                size="sm"
-                                className="gap-1.5"
-                                onClick={() => state.setShowPRDialog(true)}
-                                disabled={state.isCreatingPR}
-                              >
-                                {state.isCreatingPR ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <GitPullRequestCreate className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
-                                )}
-                                {state.isCreatingPR ? t('taskReview:pr.actions.creating') : t('common:buttons.createPR')}
-                              </Button>
+                              <span title={baseBranchMissingTitle} className="inline-flex">
+                                <Button
+                                  size="sm"
+                                  className="gap-1.5"
+                                  onClick={() => state.setShowPRDialog(true)}
+                                  disabled={state.isCreatingPR || baseBranchMissing}
+                                >
+                                  {state.isCreatingPR ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <GitPullRequestCreate className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                                  )}
+                                  {state.isCreatingPR ? t('taskReview:pr.actions.creating') : t('common:buttons.createPR')}
+                                </Button>
+                              </span>
                             )}
                           </>
                         ) : undefined}
+                      />
+
+                      {/* Runs the task was started over from, above the change request */}
+                      <PreviousRuns
+                        runs={state.previousRuns}
+                        openRuns={state.openPreviousRuns}
+                        onToggleRun={state.togglePreviousRun}
                       />
 
                       {/* Human Review: request changes (Claude Code continues the same session) */}
@@ -375,6 +432,8 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                           onReject={handleReject}
                           images={state.feedbackImages}
                           onImagesChange={state.setFeedbackImages}
+                          startOver={state.startOver}
+                          onStartOverChange={state.setStartOver}
                         />
                       )}
 
@@ -396,15 +455,32 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         onMergePR={handleMergePR}
                       />
 
+                      {/* Opened by the Local merge button next to Open agent */}
+                      <LocalMergeDialog
+                        open={state.showLocalMergeDialog}
+                        task={task}
+                        worktreeStatus={state.worktreeStatus}
+                        onOpenChange={state.setShowLocalMergeDialog}
+                        onMerge={handleLocalMerge}
+                      />
+
                       {/* The description's attachments and the logs of all steps, under Request changes;
                           each dropdown shows only when it has something to show */}
                       <div className="space-y-1">
                         {task.metadata?.attachedImages && task.metadata.attachedImages.length > 0 && (
                           <TaskAttachments task={task} attachments={task.metadata.attachedImages} />
                         )}
+                        {/* With the Request changes section and the previous runs above them, the
+                            current run's logs need a heading of their own to stand apart */}
                         <TaskLogs
-                          task={task}
                           phaseLogs={state.phaseLogs}
+                          runPhases={task.claudeRun?.phases}
+                          legacyLogs={task.logs}
+                          isSettled={isTaskRunSettled(task.status)}
+                          heading={state.needsReview && state.previousRuns.length > 0 ? {
+                            title: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningTitle' : 'tasks:currentRun.title'),
+                            description: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningDescription' : 'tasks:currentRun.description')
+                          } : undefined}
                           isLoadingLogs={state.isLoadingLogs}
                           isExpanded={state.isLogsExpanded}
                           onToggle={state.toggleLogs}

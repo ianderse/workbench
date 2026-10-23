@@ -12,6 +12,13 @@ export interface Project {
   updatedAt: Date;
 }
 
+/** What a project spent on one calendar day */
+export interface ProjectDailyCost {
+  /** Local calendar day, `YYYY-MM-DD` */
+  date: string;
+  costUsd: number;
+}
+
 /** Spending of one initialized project (Settings > Accounts > Metrics) */
 export interface ProjectCostMetrics {
   projectId: string;
@@ -21,6 +28,8 @@ export interface ProjectCostMetrics {
   taskCount: number;
   /** Sum of the tasks' Claude Code run costs (USD) */
   totalCostUsd: number;
+  /** Spending per day, oldest first; days without spending are left out */
+  daily: ProjectDailyCost[];
 }
 
 export interface ProjectSettings {
@@ -38,6 +47,11 @@ export interface ProjectSettings {
   claudeProfileId?: string;
   /** Maximum parallel tasks allowed (default: 3) */
   maxParallelTasks?: number;
+  /**
+   * Let sessions save what they learn about this project (Claude Code's auto memory, relocated to
+   * `.workbench/compeng` so every session in the project shares it); off unless set
+   */
+  selfImprove?: boolean;
 }
 
 export interface NotificationSettings {
@@ -47,171 +61,12 @@ export interface NotificationSettings {
   sound: boolean;
 }
 
-// ============================================
-// Context Types (Project Index & Memories)
-// ============================================
-
-export interface ProjectIndex {
-  project_root: string;
-  project_type: 'single' | 'monorepo';
-  services: Record<string, ServiceInfo>;
-  infrastructure: InfrastructureInfo;
-  conventions: ConventionsInfo;
-}
-
-export interface ServiceInfo {
-  name: string;
-  path: string;
-  language?: string;
-  framework?: string;
-  type?: 'backend' | 'frontend' | 'worker' | 'scraper' | 'library' | 'proxy' | 'mobile' | 'desktop' | 'unknown';
-  package_manager?: string;
-  default_port?: number;
-  entry_point?: string;
-  key_directories?: Record<string, { path: string; purpose: string }>;
-  dependencies?: string[];
-  dev_dependencies?: string[];
-  testing?: string;
-  e2e_testing?: string;
-  test_directory?: string;
-  orm?: string;
-  task_queue?: string;
-  styling?: string;
-  state_management?: string;
-  build_tool?: string;
-  // iOS/Swift specific
-  apple_frameworks?: string[];
-  spm_dependencies?: string[];
-  dockerfile?: string;
-  consumes?: string[];
-  environment?: {
-    detected_count: number;
-    variables: Record<string, {
-      type: string;
-      sensitive: boolean;
-      required: boolean;
-    }>;
-  };
-  api?: {
-    total_routes: number;
-    routes: Array<{
-      path: string;
-      methods: string[];
-      requires_auth?: boolean;
-    }>;
-  };
-  database?: {
-    total_models: number;
-    model_names: string[];
-    models: Record<string, {
-      orm: string;
-      fields: Record<string, unknown>;
-    }>;
-  };
-  services?: {
-    databases?: Array<{
-      type?: string;
-      client?: string;
-    }>;
-    email?: Array<{
-      provider?: string;
-      client?: string;
-    }>;
-    payments?: Array<{
-      provider?: string;
-      client?: string;
-    }>;
-    cache?: Array<{
-      type?: string;
-      client?: string;
-    }>;
-  };
-  monitoring?: {
-    metrics_endpoint?: string;
-    metrics_type?: string;
-    health_checks?: string[];
-  };
-}
-
-export interface InfrastructureInfo {
-  docker_compose?: string;
-  docker_services?: string[];
-  dockerfile?: string;
-  docker_directory?: string;
-  dockerfiles?: string[];
-  ci?: string;
-  ci_workflows?: string[];
-  deployment?: string;
-}
-
-export interface ConventionsInfo {
-  python_linting?: string;
-  python_formatting?: string;
-  js_linting?: string;
-  formatting?: string;
-  typescript?: boolean;
-  git_hooks?: string;
-}
-
-export interface ProjectContextData {
-  projectIndex: ProjectIndex | null;
-  isLoading: boolean;
-  error?: string;
-}
-
-// Environment Configuration for project .env files
-export interface ProjectEnvConfig {
-  // Model Override
-  autoBuildModel?: string;
-
-  // Git/Worktree Settings
-  defaultBranch?: string; // Base branch for worktree creation (e.g., 'main', 'develop')
-
-  // UI Settings
-  enableFancyUi: boolean;
-
-  // MCP Server Configuration (per-project overrides)
-  mcpServers?: {
-    /** Context7 documentation lookup - default: true */
-    context7Enabled?: boolean;
-    /** Electron desktop automation (QA only) - default: false */
-    electronEnabled?: boolean;
-    /** Puppeteer browser automation (QA only) - default: false */
-    puppeteerEnabled?: boolean;
-  };
-
-  // Per-agent MCP overrides (add/remove MCPs from specific agents)
-  agentMcpOverrides?: AgentMcpOverrides;
-
-  // Custom MCP servers defined by the user
-  customMcpServers?: CustomMcpServer[];
-}
-
-/**
- * Per-agent MCP override configuration.
- * Stored in .workbench/.env as AGENT_MCP_<agent>_ADD and AGENT_MCP_<agent>_REMOVE
- */
-interface AgentMcpOverride {
-  /** MCP servers to add beyond the agent's defaults */
-  add?: string[];
-  /** MCP servers to remove from the agent's defaults */
-  remove?: string[];
-}
-
-/**
- * Map of agent type to their MCP overrides.
- * Agent types match backend AGENT_CONFIGS keys (e.g., 'planner', 'coder', 'qa_reviewer')
- */
-interface AgentMcpOverrides {
-  [agentType: string]: AgentMcpOverride;
-}
-
 /**
  * Custom MCP server configuration.
  * Users can add command-based (npx/npm) or HTTP-based servers.
  */
 export interface CustomMcpServer {
-  /** Unique identifier (used for agent overrides: AGENT_MCP_<agent>_ADD=myserver) */
+  /** Unique identifier */
   id: string;
   /** Display name shown in UI */
   name: string;

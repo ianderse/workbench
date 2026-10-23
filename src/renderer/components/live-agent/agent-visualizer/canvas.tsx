@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from 'react'
 import { type GraphState, agentsAwaitingSubagents, displayedState } from '../hooks/graph/types'
 import { getStateColor } from '../lib/colors'
 import { ANIM_SPEED } from '../lib/canvas-constants'
-import { BloomRenderer } from './bloom-renderer'
+import { BLOOM_INTENSITY, BloomRenderer } from './bloom-renderer'
 import { drawBackground } from './background-layer'
 import {
   type VisualEffect,
@@ -11,9 +11,15 @@ import {
   drawEdges,
   drawToolCalls,
   detectStateChanges as detectStateChangesPure,
+  createJellyField, resetJellyField, updateJelly,
 } from './canvas/index'
 import { useCanvasCamera } from '../hooks/use-canvas-camera'
 import type { FaceState } from './canvas/draw-face'
+
+/** The bloom for the app's current light/dark mode (the `dark` class on <html>) */
+function themeBloom(): number {
+  return document.documentElement.classList.contains('dark') ? BLOOM_INTENSITY.dark : BLOOM_INTENSITY.light
+}
 
 interface CanvasProps {
   /** Ref to the graph state — read every frame without React re-renders */
@@ -46,6 +52,10 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
   /** The main agent's face animation (eyes, blinks), kept between frames */
   const facesRef = useRef<Map<string, FaceState>>(new Map())
 
+  /** The nodes' jelly: where each one is on its way out of or back into its
+   *  parent, and the dents they are ringing from (see canvas/node-motion.ts) */
+  const jellyRef = useRef(createJellyField())
+
   // Effects system
   const effectsRef = useRef<VisualEffect[]>([])
   const prevAgentStatesRef = useRef<Map<string, string>>(new Map())
@@ -74,14 +84,22 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
   // ─── Setup ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const bloom = new BloomRenderer(0.5)
+    const bloom = new BloomRenderer(themeBloom())
     // Sized now if the canvas already is (e.g. this effect re-ran after a hot
     // reload): the draw loop resizes it only on its first frame and when the
     // canvas size changes
     const canvas = mainCanvasRef.current
     if (canvas) bloom.resize(canvas.width, canvas.height)
     bloomRef.current = bloom
-    return () => { bloomRef.current = null }
+
+    // The nodes keep their own colors in either mode; only the bloom comes
+    // down over a light window. The draw loop picks it up on its next frame.
+    const observer = new MutationObserver(() => bloom.setIntensity(themeBloom()))
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => {
+      observer.disconnect()
+      bloomRef.current = null
+    }
   }, [])
 
   useEffect(() => {
@@ -174,6 +192,7 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
         drawnViewKeyRef.current = viewKeyRef.current
         effectsRef.current.length = 0
         facesRef.current.clear()
+        resetJellyField(jellyRef.current)
         quietRef.current = true
         resetPlacement()
       }
@@ -187,6 +206,9 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
 
       // Detect state changes → visual effects
       detectStateChanges(awaiting)
+
+      // Advance the jelly: where every node is drawn this frame
+      const motions = updateJelly(jellyRef.current, agents, toolCalls, awaiting, timeRef.current, deltaTime)
 
       // Update effects (mutate in place to avoid GC pressure)
       {
@@ -219,9 +241,9 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       ctx.translate(transform.x, transform.y)
       ctx.scale(transform.scale, transform.scale)
 
-      drawEdges(ctx, edges, agents, toolCalls, awaiting, deltaTime)
-      drawToolCalls(ctx, toolCalls, timeRef.current)
-      drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, timeRef.current)
+      drawEdges(ctx, edges, agents, toolCalls, awaiting, motions, deltaTime)
+      drawToolCalls(ctx, toolCalls, motions, timeRef.current)
+      drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, motions, timeRef.current)
       drawEffects(ctx, effectsRef.current)
 
       ctx.restore()

@@ -19,6 +19,8 @@
  * hasHardcodedText('Expired') // true
  * hasHardcodedText('   ') // true (whitespace-only)
  * hasHardcodedText('Resets in 2h') // false
+ *
+ * @internal Test hook
  */
 export function hasHardcodedText(text?: string | null): boolean {
   // Trim whitespace before checking - whitespace-only strings are treated as empty

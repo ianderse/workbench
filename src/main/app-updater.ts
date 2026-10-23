@@ -19,6 +19,7 @@
 
 import { accessSync, constants as fsConstants } from 'fs';
 import { allowWindowClose } from './app-tray';
+import { safeSendToRenderer } from './ipc-handlers/utils';
 import path from 'path';
 import { autoUpdater } from 'electron-updater';
 import type { UpdateInfo } from 'electron-updater';
@@ -240,7 +241,16 @@ if (DEBUG_UPDATER) {
   };
 }
 
-let mainWindow: BrowserWindow | null = null;
+/** Where update events go; windows come and go, so they are resolved per event */
+let getUpdateWindow: () => BrowserWindow | null = () => null;
+
+/**
+ * Send an update event to every open window (an update is app-wide, and each window shows
+ * the notification for itself).
+ */
+function sendUpdateEvent(channel: string, payload?: unknown): void {
+  safeSendToRenderer(getUpdateWindow, channel, payload);
+}
 
 // Track downloaded update state so it persists across Settings page navigations
 let downloadedUpdateInfo: AppUpdateInfo | null = null;
@@ -254,11 +264,11 @@ let intentionalDowngrade = false;
  * Sets up event handlers and starts periodic update checks.
  * Should only be called in production (app.isPackaged).
  *
- * @param window - The main BrowserWindow for sending update events
+ * @param getWindow - Resolves the window update events go to
  * @param betaUpdates - Whether to receive beta/pre-release updates
  */
-export function initializeAppUpdater(window: BrowserWindow, betaUpdates = false): void {
-  mainWindow = window;
+export function initializeAppUpdater(getWindow: () => BrowserWindow | null, betaUpdates = false): void {
+  getUpdateWindow = getWindow;
 
   // The release repository is private: read releases with the build's GitHub token
   const token = getUpdaterGitHubToken();
@@ -303,13 +313,11 @@ export function initializeAppUpdater(window: BrowserWindow, betaUpdates = false)
       return;
     }
 
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_AVAILABLE, {
-        version: info.version,
-        releaseNotes: formatReleaseNotes(info.releaseNotes),
-        releaseDate: info.releaseDate
-      });
-    }
+    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_AVAILABLE, {
+      version: info.version,
+      releaseNotes: formatReleaseNotes(info.releaseNotes),
+      releaseDate: info.releaseDate
+    });
 
     // Download the update now that we've confirmed it's valid
     autoUpdater.downloadUpdate().catch((error) => {
@@ -339,9 +347,7 @@ export function initializeAppUpdater(window: BrowserWindow, betaUpdates = false)
     // Only notify renderer (and allow install-on-quit) if update is not suppressed
     syncInstallOnQuit();
     if (!shouldSuppressUpdate(info.version)) {
-      if (mainWindow) {
-        mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, downloadedUpdateInfo);
-      }
+      sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, downloadedUpdateInfo);
     } else {
       console.warn('[app-updater] Downloaded update suppressed (skipped or snoozed):', info.version);
     }
@@ -350,24 +356,20 @@ export function initializeAppUpdater(window: BrowserWindow, betaUpdates = false)
   // Download progress
   autoUpdater.on('download-progress', (progress) => {
     console.warn(`[app-updater] Download progress: ${progress.percent.toFixed(2)}%`);
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_PROGRESS, {
-        percent: progress.percent,
-        bytesPerSecond: progress.bytesPerSecond,
-        transferred: progress.transferred,
-        total: progress.total
-      });
-    }
+    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_PROGRESS, {
+      percent: progress.percent,
+      bytesPerSecond: progress.bytesPerSecond,
+      transferred: progress.transferred,
+      total: progress.total
+    });
   });
 
   // Error handling
   autoUpdater.on('error', (error) => {
     console.error('[app-updater] Update error:', error);
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_ERROR, {
-        message: error.message
-      });
-    }
+    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_ERROR, {
+      message: error.message
+    });
   });
 
   // No update available
@@ -532,11 +534,9 @@ export function quitAndInstall(): boolean {
   if (isRunningFromReadOnlyVolume()) {
     console.warn('[app-updater] Cannot install: running from read-only volume');
 
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_READONLY_VOLUME, {
-        appPath: app.getAppPath()
-      });
-    }
+    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_READONLY_VOLUME, {
+      appPath: app.getAppPath()
+    });
     return false;
   }
 
@@ -737,9 +737,9 @@ export async function setUpdateChannelWithDowngradeCheck(
   if (channel === 'latest' && triggerDowngradeCheck) {
     const stableVersion = await checkForStableDowngrade();
 
-    if (stableVersion && mainWindow) {
+    if (stableVersion) {
       // Notify the renderer about the available stable downgrade
-      mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_STABLE_DOWNGRADE, stableVersion);
+      sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_STABLE_DOWNGRADE, stableVersion);
     }
 
     return stableVersion;

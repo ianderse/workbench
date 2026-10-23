@@ -8,11 +8,17 @@
  * (CLAUDE_CODE_USE_BEDROCK, ...), ANTHROPIC_AUTH_TOKEN, ANTHROPIC_API_KEY, apiKeyHelper,
  * CLAUDE_CODE_OAUTH_TOKEN, then the subscription sign-in from /login. Values come from the
  * managed settings file, the dir's settings.json and the environment, in that order.
+ *
+ * When the app runs its tools in WSL, Claude Code runs inside the distribution: the dirs are the
+ * Linux home's (UNC paths) and the managed settings are the distribution's. The app's own (Windows)
+ * environment is not Claude Code's there, so environment-sourced setups only come from an
+ * environment the caller passes.
  */
 import { existsSync, readdirSync, readFileSync } from 'fs';
-import { homedir } from 'os';
 import path from 'path';
-import { isMacOS, isWindows } from '../platform';
+import { isMacOS } from '../platform';
+import { getClaudeHome, getClaudeManagedSettingsPath, isClaudeHomeInWsl } from '../platform/claude-home';
+import { toHostPath } from '../platform/shell-runtime';
 import type { ClaudeCodeProvider, DetectedClaudeCodeAccount, DetectedClaudeCodeValue } from '../../shared/types/agent';
 import { getClaudeGlobalConfigPath, getDefaultClaudeConfigDir, isDefaultClaudeConfigDir } from './config-dir-paths';
 
@@ -89,23 +95,29 @@ export interface DetectionOptions {
   keychainEntry?: (configDir: string) => string;
 }
 
+/** Path functions for the dirs: Windows ones for the UNC paths of the Linux home in WSL */
+function pathApi(): typeof path {
+  return isClaudeHomeInWsl() ? path.win32 : path;
+}
+
+/**
+ * The environment Claude Code runs with. In WSL that is the distribution's, not the app's
+ * (Windows) environment, so only an environment the caller passes counts.
+ */
+function claudeCodeEnv(options: DetectionOptions): NodeJS.ProcessEnv {
+  return options.env ?? (isClaudeHomeInWsl() ? {} : process.env);
+}
+
 /** A path with the home dir shortened to `~` */
 function tildify(file: string): string {
-  const home = homedir();
-  return file === home || file.startsWith(home + path.sep) ? `~${file.slice(home.length)}` : file;
+  const home = getClaudeHome();
+  return file === home || file.startsWith(home + pathApi().sep) ? `~${file.slice(home.length)}` : file;
 }
 
 interface Source {
   label: string;
   env: Record<string, string>;
   settings: Record<string, unknown>;
-}
-
-/** Claude Code's managed settings file for this OS */
-export function getManagedSettingsFile(): string {
-  if (isMacOS()) return '/Library/Application Support/ClaudeCode/managed-settings.json';
-  if (isWindows()) return 'C:\\Program Files\\ClaudeCode\\managed-settings.json';
-  return '/etc/claude-code/managed-settings.json';
 }
 
 function readJson(file: string): Record<string, unknown> | null {
@@ -141,11 +153,12 @@ function mask(key: string, value: string): string {
 /** The setup of one config dir, or null when it has nothing that reaches Claude */
 export function readClaudeCodeSetup(configDir: string, options: DetectionOptions): DetectedSetup | null {
   const isDefaultDir = isDefaultClaudeConfigDir(configDir);
-  const managed = settingsSource(options.managedSettingsFile ?? getManagedSettingsFile());
-  const user = settingsSource(path.join(configDir, 'settings.json'));
+  const managed = settingsSource(options.managedSettingsFile ?? getClaudeManagedSettingsPath());
+  const user = settingsSource(pathApi().join(configDir, 'settings.json'));
   const envVars: Record<string, string> = {};
+  const env = claudeCodeEnv(options);
   for (const name of SETUP_VARIABLES) {
-    const value = (options.env ?? process.env)[name];
+    const value = env[name];
     if (value) envVars[name] = value;
   }
   const environment: Source = { label: 'environment', env: envVars, settings: {} };
@@ -207,7 +220,7 @@ export function readClaudeCodeSetup(configDir: string, options: DetectionOptions
   // entry), or the file (or environment) that configures the provider
   let credentials: string;
   if (provider === 'subscription') {
-    const file = path.join(configDir, '.credentials.json');
+    const file = pathApi().join(configDir, '.credentials.json');
     credentials = existsSync(file) || !isMacOS()
       ? tildify(file)
       : `Keychain: ${options.keychainEntry?.(configDir) ?? 'Claude Code-credentials'}`;
@@ -228,20 +241,25 @@ export function readClaudeCodeSetup(configDir: string, options: DetectionOptions
 
 /** The config dirs Claude Code may use on this machine */
 function candidateConfigDirs(options: DetectionOptions): string[] {
-  const home = homedir();
+  const home = getClaudeHome();
+  const paths = pathApi();
   const dirs = new Set<string>([getDefaultClaudeConfigDir()]);
-  const fromEnv = (options.env ?? process.env).CLAUDE_CONFIG_DIR;
-  if (fromEnv) dirs.add(path.resolve(fromEnv.startsWith('~') ? path.join(home, fromEnv.slice(1)) : fromEnv));
+  const fromEnv = claudeCodeEnv(options).CLAUDE_CONFIG_DIR;
+  if (fromEnv) {
+    // In WSL the variable holds a Linux path
+    const hostDir = isClaudeHomeInWsl() && fromEnv.startsWith('/') ? toHostPath(fromEnv) : fromEnv;
+    dirs.add(paths.resolve(hostDir.startsWith('~') ? paths.join(home, hostDir.slice(1)) : hostDir));
+  }
   try {
     for (const entry of readdirSync(home, { withFileTypes: true })) {
-      if (entry.isDirectory() && /^\.claude[-_.].+/.test(entry.name)) dirs.add(path.join(home, entry.name));
+      if (entry.isDirectory() && /^\.claude[-_.].+/.test(entry.name)) dirs.add(paths.join(home, entry.name));
     }
   } catch {
     // An unreadable home dir leaves the default and CLAUDE_CONFIG_DIR
   }
-  const excluded = (options.excludeUnder ?? []).map((dir) => path.resolve(dir));
+  const excluded = (options.excludeUnder ?? []).map((dir) => paths.resolve(dir));
   return [...dirs].filter((dir) =>
-    existsSync(dir) && !excluded.some((root) => dir === root || dir.startsWith(root + path.sep))
+    existsSync(dir) && !excluded.some((root) => dir === root || dir.startsWith(root + paths.sep))
   );
 }
 
@@ -255,5 +273,6 @@ export function detectClaudeCodeSetups(options: DetectionOptions): DetectedSetup
 /** Name a detected setup gets until the user renames it */
 export function detectedAccountName(setup: DetectedSetup): string {
   if (setup.isDefaultDir) return 'Claude Code';
-  return `Claude Code (${path.basename(setup.configDir).replace(/^\.claude[-_.]?/, '') || path.basename(setup.configDir)})`;
+  const name = pathApi().basename(setup.configDir);
+  return `Claude Code (${name.replace(/^\.claude[-_.]?/, '') || name})`;
 }

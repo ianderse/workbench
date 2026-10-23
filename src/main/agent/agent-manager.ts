@@ -1,7 +1,5 @@
 import { EventEmitter } from 'events';
 import path from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import { AgentState } from './agent-state';
 import type { ExecutionProgressData, StartTaskOptions } from './types';
@@ -19,18 +17,20 @@ import { createOrGetWorktree } from '../worktree';
 import { addToWorktree } from '../live-agent/project-setup';
 import { readSettingsFile } from '../settings-utils';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
+import { isSelfImproveEnabled, SELF_IMPROVE_NUDGE } from '../self-improve';
 import { getAugmentedEnvAsync } from '../env-utils';
-import { getToolPath } from '../cli-tool-manager';
+import { isWslRuntime } from '../platform/shell-runtime';
+import { git } from '../utils/git-exec';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { getOperationRegistry } from '../claude-profile/operation-registry';
 import { getAPIProfileEnv } from '../services/profile';
 import { getSpecsDir } from '../../shared/constants';
 import type { AppSettings } from '../../shared/types/settings';
 import { appLog } from '../app-logger';
+import { resolveBaseBranch } from '../utils/base-branch';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 
-const execFileAsync = promisify(execFile);
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
 const MAX_SWAPS_PER_TASK = 2;
@@ -49,6 +49,7 @@ const IMAGE_MIME_TYPES: Record<string, string> = {
 interface RunEntry {
   options: StartTaskOptions;
   projectId: string;
+  taskId: string;
   /** Set once setup finished and the run was created */
   run?: ClaudeTaskRun;
   /** Claude profile the run was started on (undefined: best available at start) */
@@ -68,15 +69,37 @@ interface RunEntry {
  *   log, error, execution-progress, task-event (XState TaskEventPayload), run-info
  *   (claude_run.json), subtasks (Claude Code's task list), auth-failure, run-finished, exit
  */
+/**
+ * Runs are held per project and task: a task id is its spec id (`001-<slug>`), which each
+ * project numbers from its own start, so two projects can hold the same one. Keying by the
+ * task alone would let starting a task in one project stop a same-named run in another.
+ */
+const runKey = (projectId: string, taskId: string): string => `${projectId}\u0000${taskId}`;
+
 export class AgentManager extends EventEmitter {
   private state = new AgentState();
   private runs = new Map<string, RunEntry>();
-  /** Options of the latest run per task, for restarts after it ended */
+  /** Options of the latest run per project and task, for restarts after it ended */
   private lastOptions = new Map<string, StartTaskOptions>();
-  /** Automatic restarts (profile swaps) per task since the user last started it */
+  /** Automatic restarts (profile swaps) per project and task since the user last started it */
   private swapCounts = new Map<string, number>();
-  /** Last task event sequence per task (monotonic across runs and app restarts) */
+  /** Last task event sequence per project and task (monotonic across runs and app restarts) */
   private sequences = new Map<string, number>();
+
+  /**
+   * The key a task's run is held under. Callers that know the project get exactly it;
+   * the rest take the one run with that task id (projects rarely share one).
+   */
+  private keyOf(taskId: string, projectId?: string): string | undefined {
+    if (projectId) {
+      const key = runKey(projectId, taskId);
+      return this.runs.has(key) || this.lastOptions.has(key) ? key : undefined;
+    }
+    for (const [key, entry] of this.runs) {
+      if (entry.taskId === taskId) return key;
+    }
+    return undefined;
+  }
 
   // ============================================
   // Task lifecycle
@@ -100,26 +123,29 @@ export class AgentManager extends EventEmitter {
     };
     const { project } = options;
     const projectId = project.id;
+    const key = runKey(projectId, taskId);
 
-    // Only one run per task
-    const previous = this.runs.get(taskId);
+    // Only one run per task, in this project: a task of the same name in another project
+    // keeps its own run
+    const previous = this.runs.get(key);
     if (previous) {
-      this.killTask(taskId);
+      this.killTask(taskId, projectId);
       await previous.done;
     }
-    if (!isRestart) this.swapCounts.delete(taskId);
-    this.lastOptions.set(taskId, options);
+    if (!isRestart) this.swapCounts.delete(key);
+    this.lastOptions.set(key, options);
 
     let resolveDone!: () => void;
     const entry: RunEntry = {
       options,
       projectId,
+      taskId,
       profileId: options.profileId,
       apiProfileActive: false,
       killed: false,
       done: new Promise<void>((resolve) => { resolveDone = resolve; }),
     };
-    this.runs.set(taskId, entry);
+    this.runs.set(key, entry);
     this.state.addRunning(taskId, projectId);
 
     let config: TaskRunConfig;
@@ -129,8 +155,8 @@ export class AgentManager extends EventEmitter {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       appLog.error(`[AgentManager] Could not start task ${taskId}:`, message);
-      if (this.runs.get(taskId) === entry) {
-        this.runs.delete(taskId);
+      if (this.runs.get(key) === entry) {
+        this.runs.delete(key);
         this.state.removeRunning(taskId);
       }
       resolveDone();
@@ -200,12 +226,13 @@ export class AgentManager extends EventEmitter {
   /**
    * Stop a task's run. Its outcome is not reported (callers send USER_STOPPED themselves).
    */
-  killTask(taskId: string): boolean {
-    const entry = this.runs.get(taskId);
-    if (!entry) return false;
+  killTask(taskId: string, projectId?: string): boolean {
+    const key = this.keyOf(taskId, projectId);
+    const entry = key ? this.runs.get(key) : undefined;
+    if (!key || !entry) return false;
     entry.killed = true;
     entry.run?.stop();
-    this.runs.delete(taskId);
+    this.runs.delete(key);
     this.state.removeRunning(taskId);
     getOperationRegistry().unregisterOperation(taskId);
     return true;
@@ -213,10 +240,9 @@ export class AgentManager extends EventEmitter {
 
   /** Stop all runs and wait (bounded) for them to wind down */
   async killAll(): Promise<void> {
-    const pending = Array.from(this.runs.keys()).map((taskId) => {
-      const entry = this.runs.get(taskId);
-      this.killTask(taskId);
-      return entry?.done ?? Promise.resolve();
+    const pending = Array.from(this.runs.values()).map((entry) => {
+      this.killTask(entry.taskId, entry.projectId);
+      return entry.done;
     });
     if (pending.length === 0) return;
     await Promise.race([
@@ -226,36 +252,39 @@ export class AgentManager extends EventEmitter {
   }
 
   /** Check if a task is running */
-  isRunning(taskId: string): boolean {
-    return this.runs.has(taskId);
+  isRunning(taskId: string, projectId?: string): boolean {
+    const key = this.keyOf(taskId, projectId);
+    return key !== undefined && this.runs.has(key);
   }
 
   /** Session of a running task's Claude Code run (undefined until the run started) */
-  getRunSession(taskId: string): { sessionId?: string; profileId?: string; configDir?: string } | undefined {
-    return this.runs.get(taskId)?.run?.session;
+  getRunSession(taskId: string, projectId?: string): { sessionId?: string; profileId?: string; configDir?: string } | undefined {
+    const key = this.keyOf(taskId, projectId);
+    return key ? this.runs.get(key)?.run?.session : undefined;
   }
 
   /** All running task IDs */
   getRunningTasks(): string[] {
-    return Array.from(this.runs.keys());
+    return Array.from(this.runs.values()).map((entry) => entry.taskId);
   }
 
   /**
    * Restart a task's run on another Claude profile (rate limit or proactive swap). The run
    * continues from its saved state. Returns false when the task can't be restarted.
    */
-  restartTask(taskId: string, newProfileId?: string): boolean {
-    const options = this.runs.get(taskId)?.options ?? this.lastOptions.get(taskId);
-    if (!options) {
+  restartTask(taskId: string, newProfileId?: string, projectId?: string): boolean {
+    const key = this.keyOf(taskId, projectId);
+    const options = (key ? this.runs.get(key)?.options ?? this.lastOptions.get(key) : undefined);
+    if (!key || !options) {
       appLog.warn(`[AgentManager] restartTask: no run options for ${taskId}`);
       return false;
     }
-    const swaps = this.swapCounts.get(taskId) ?? 0;
+    const swaps = this.swapCounts.get(key) ?? 0;
     if (swaps >= MAX_SWAPS_PER_TASK) {
       appLog.warn(`[AgentManager] restartTask: ${taskId} already restarted ${swaps} times, not restarting again`);
       return false;
     }
-    this.swapCounts.set(taskId, swaps + 1);
+    this.swapCounts.set(key, swaps + 1);
 
     if (newProfileId) {
       const profileManager = getClaudeProfileManager();
@@ -264,8 +293,8 @@ export class AgentManager extends EventEmitter {
       }
     }
 
-    const previous = this.runs.get(taskId);
-    this.killTask(taskId);
+    const previous = this.runs.get(key);
+    this.killTask(taskId, options.project.id);
     const restartOptions: StartTaskOptions = { ...options, profileId: newProfileId ?? options.profileId };
     void (previous?.done ?? Promise.resolve()).then(() =>
       this.launch(taskId, restartOptions, true).catch((error) =>
@@ -316,7 +345,20 @@ export class AgentManager extends EventEmitter {
   private async buildRunConfig(taskId: string, options: StartTaskOptions): Promise<TaskRunConfig> {
     const { project, task, mode } = options;
     const specDir = path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId);
-    const baseBranch = task.metadata?.baseBranch || project.settings?.mainBranch || 'main';
+
+    // The base branch a task was created with may have been deleted or renamed since; stand in
+    // for it with a branch that still exists, so the task can still be started
+    const wantedBaseBranch = task.metadata?.baseBranch || project.settings?.mainBranch || 'main';
+    const { branch: baseBranch, missing } = await resolveBaseBranch(project.path, wantedBaseBranch, [
+      project.settings?.mainBranch,
+      'main',
+      await this.getCurrentBranch(project.path),
+    ]);
+    if (missing) {
+      const message = `Base branch "${missing}" no longer exists; starting from "${baseBranch}" instead.`;
+      appLog.warn(`[AgentManager] ${message}`);
+      this.emit('log', taskId, `${message}\n`, project.id);
+    }
 
     let worktreePath: string;
     let branch: string;
@@ -384,20 +426,26 @@ export class AgentManager extends EventEmitter {
       maxBudgetUsd: project.settings?.maxBudgetUsd,
       changelogPath: project.autoBuildPath ? getTaskChangelogPath(project.path, project.autoBuildPath) : undefined,
       mode,
-      ...(mode === 'revise' ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
+      // revise: the change to apply. start: what a discarded attempt got wrong, when the
+      // reviewer asked for the task to be started over
+      ...(mode === 'revise' || options.feedback ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
       profileId: options.profileId,
     };
+
+    if (isSelfImproveEnabled(project.settings)) config.selfImprovePrompt = SELF_IMPROVE_NUDGE;
 
     if (await isGraphifyEnabled(project.path)) {
       try {
         const graphify = await getGraphifyPromptContext(project.path);
         if (graphify) {
-          const augmented = await getAugmentedEnvAsync([path.dirname(graphify.cli)]);
           config.graphifyPrompt = graphify.commandPrompt;
-          config.extraEnv = {
-            GRAPHIFY_OUT: path.dirname(graphify.graph),
-            ...(augmented.PATH ? { PATH: augmented.PATH } : {}),
-          };
+          // GRAPHIFY_OUT is a host path (translated when the run starts in WSL). In WSL graphify
+          // comes from the distribution's login PATH, so no Windows PATH entry is added
+          config.extraEnv = { GRAPHIFY_OUT: path.dirname(graphify.graph) };
+          if (!isWslRuntime()) {
+            const augmented = await getAugmentedEnvAsync([path.dirname(graphify.cli)]);
+            if (augmented.PATH) config.extraEnv.PATH = augmented.PATH;
+          }
         }
       } catch (error) {
         appLog.warn(`[AgentManager] Graphify context unavailable for ${taskId}:`, error);
@@ -409,7 +457,7 @@ export class AgentManager extends EventEmitter {
 
   private async getCurrentBranch(cwd: string): Promise<string | null> {
     try {
-      const { stdout } = await execFileAsync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
+      const { stdout } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
       const branch = stdout.trim();
       return branch && branch !== 'HEAD' ? branch : null;
     } catch {
@@ -426,9 +474,10 @@ export class AgentManager extends EventEmitter {
   }
 
   /** Next task event sequence: increases per task, also across runs and app restarts */
-  private nextSequence(taskId: string): number {
-    const next = Math.max((this.sequences.get(taskId) ?? 0) + 1, Date.now());
-    this.sequences.set(taskId, next);
+  private nextSequence(taskId: string, projectId: string): number {
+    const key = runKey(projectId, taskId);
+    const next = Math.max((this.sequences.get(key) ?? 0) + 1, Date.now());
+    this.sequences.set(key, next);
     return next;
   }
 
@@ -441,7 +490,7 @@ export class AgentManager extends EventEmitter {
       projectId: options.project.id,
       timestamp: new Date().toISOString(),
       eventId: randomUUID(),
-      sequence: this.nextSequence(taskId),
+      sequence: this.nextSequence(taskId, options.project.id),
     };
     this.emit('task-event', taskId, event, options.project.id);
   }
@@ -500,8 +549,9 @@ export class AgentManager extends EventEmitter {
   }
 
   private handleRunFinished(taskId: string, entry: RunEntry, outcome: TaskRunOutcome): void {
-    if (this.runs.get(taskId) === entry) {
-      this.runs.delete(taskId);
+    const key = runKey(entry.projectId, taskId);
+    if (this.runs.get(key) === entry) {
+      this.runs.delete(key);
       this.state.removeRunning(taskId);
       getOperationRegistry().unregisterOperation(taskId);
     }

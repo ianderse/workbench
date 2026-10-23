@@ -20,6 +20,8 @@ export interface ToolDetectionResult {
     | 'nvm'
     | 'system-path'
     | 'bundled'
+    // Found inside WSL (the app runs its tools in WSL, Settings > General > Shell)
+    | 'wsl'
     | 'fallback';
   message: string;
 }
@@ -100,6 +102,24 @@ export interface GraphifyIndexInfo {
   builtAt: string;
   /** Graphify version that built it */
   version: string | null;
+}
+
+/** Stats of a project's index: the CLAUDE.md every session in the project reads */
+export interface ProjectIndexInfo {
+  /** Lines the file holds */
+  lines: number;
+  /** ISO timestamp of when it was last written */
+  builtAt: string;
+}
+
+/** Stats of a project's memory index: the memories built from its past Claude Code sessions */
+export interface SelfImproveIndexInfo {
+  /** Memories the project holds now, by its MEMORY.md index */
+  memories: number;
+  /** Sessions the last build read */
+  sessionsScanned: number;
+  /** ISO timestamp of the last build */
+  builtAt: string;
 }
 
 /** A node of a project's memory graph (Graphify's graph.json, trimmed for display) */

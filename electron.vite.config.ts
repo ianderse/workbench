@@ -1,24 +1,24 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
+import tailwindcss from '@tailwindcss/postcss';
 import { resolve } from 'path';
+import { existsSync } from 'fs';
 import { createCipheriv, randomBytes } from 'crypto';
-import { config as dotenvConfig } from 'dotenv';
 
 // Load .env file for build-time constants (embedded API keys)
-dotenvConfig({ path: resolve(__dirname, '.env') });
+const buildEnvPath = resolve(__dirname, '.env');
+if (existsSync(buildEnvPath)) process.loadEnvFile(buildEnvPath);
 
 /**
  * Build-time constants embedded via Vite `define`.
  *
  * In CI builds, these come from GitHub secrets.
- * In local development, these come from .env (loaded by dotenv).
+ * In local development, these come from .env (loaded above).
  *
  * The `define` option replaces these values at build time, so they're
  * embedded in the bundle and available at runtime in packaged apps.
  */
-/** Embedded API keys — search works out of the box, no user config needed. */
 const embeddedKeys = {
-  '__SERPER_API_KEY__': JSON.stringify(process.env.SERPER_API_KEY || ''),
   '__UPDATER_GH_TOKEN__': JSON.stringify(encryptToken(process.env.UPDATER_GH_TOKEN)),
 };
 
@@ -46,21 +46,16 @@ export default defineConfig({
     plugins: [externalizeDepsPlugin({
       // Bundle these packages into the main process (they won't be in node_modules in packaged app)
       exclude: [
-        'uuid',
         'chokidar',
-        'dotenv',
         'electron-log',
         'proper-lockfile',
         'semver',
-        'zod',
         '@anthropic-ai/sdk',
         'electron-updater',
         '@electron-toolkit/utils',
         // debug -> ms (used by bundled dependencies)
         'debug',
         'ms',
-        // Minimatch for glob pattern matching in worktree handlers
-        'minimatch',
         // XState for task state machine
         'xstate',
       ]
@@ -95,6 +90,12 @@ export default defineConfig({
       }
     },
     plugins: [react()],
+    // Inlined instead of a postcss.config file: Tailwind is only needed by the renderer
+    css: {
+      postcss: {
+        plugins: [tailwindcss()]
+      }
+    },
     resolve: {
       alias: {
         '@': resolve(__dirname, 'src/renderer'),

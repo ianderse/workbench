@@ -14,7 +14,7 @@
  * Response: { access_token, refresh_token, expires_in: 28800, token_type: "Bearer" }
  */
 
-import { homedir } from 'os';
+import { expandClaudeHome } from '../platform/claude-home';
 import {
   getFullCredentialsFromKeychain,
   updateKeychainCredentials,
@@ -325,9 +325,7 @@ export async function ensureValidToken(
   const isVerbose = process.env.VERBOSE === 'true';
 
   // Expand ~ in configDir if present
-  const expandedConfigDir = configDir?.startsWith('~')
-    ? configDir.replace(/^~/, homedir())
-    : configDir;
+  const expandedConfigDir = expandClaudeHome(configDir);
 
   if (isVerbose) {
     console.warn('[TokenRefresh:ensureValidToken] Checking token validity', {
@@ -488,9 +486,7 @@ export async function reactiveTokenRefresh(
 ): Promise<EnsureValidTokenResult> {
   const isDebug = process.env.DEBUG === 'true';
 
-  const expandedConfigDir = configDir?.startsWith('~')
-    ? configDir.replace(/^~/, homedir())
-    : configDir;
+  const expandedConfigDir = expandClaudeHome(configDir);
 
   if (isDebug) {
     console.warn('[TokenRefresh:reactive] Performing reactive token refresh (401 received)', {

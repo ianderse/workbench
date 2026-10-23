@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { arrayMove } from '@dnd-kit/sortable';
-import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft, ImageAttachment, TaskOrderState } from '../../shared/types';
+import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft, ImageAttachment, TaskOrderState, TaskReviewOptions } from '../../shared/types';
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
 import { useProjectStore } from './project-store';
 import { useSettingsStore } from './settings-store';
@@ -776,10 +776,11 @@ export async function submitReview(
   taskId: string,
   approved: boolean,
   feedback?: string,
-  images?: ImageAttachment[]
+  images?: ImageAttachment[],
+  options?: TaskReviewOptions
 ): Promise<boolean> {
   try {
-    const result = await window.electronAPI.submitReview(taskId, approved, feedback, images);
+    const result = await window.electronAPI.submitReview(taskId, approved, feedback, images, options);
     if (result.success) {
       return true;
     }

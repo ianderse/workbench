@@ -14,6 +14,7 @@ import { TranscriptParser, isActivityLine } from './lib/transcript-parser'
 import { readCompleteLines, readNewFileLines, foldPathCase } from './lib/fs-utils'
 import { createLogger } from './lib/logger'
 import { scanSubagentsDir, readSubagentNewLines, stopTailing } from './lib/subagent-watcher'
+import { isWslUncPath, windowsToWsl, wslToWindows, type WslPathOptions } from '../../platform/wsl-paths'
 import {
   INACTIVITY_TIMEOUT_MS, BUSY_INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, WORKSPACE_HASH_LENGTH, MAX_EVENT_BUFFER, HIDDEN_TOOLS,
@@ -24,6 +25,22 @@ const log = createLogger('Relay')
 /** The `projects` dirs of the Claude Code config dirs whose sessions are watched
  *  (~/.claude and each Claude account's CLAUDE_CONFIG_DIR) */
 const claudeProjectDirs: string[] = []
+
+/** The WSL distribution Claude Code runs in (Windows with the WSL shell), else null: its
+ *  sessions record Linux working directories and live in Linux-named project dirs */
+let wsl: WslPathOptions | null = null
+
+/** How often a session file is read when it can't be watched: fs.watch doesn't work on
+ *  \\wsl.localhost paths (the WSL Claude home), so those are polled, sooner than the fallback */
+const WSL_POLL_MS = 1000
+
+/** A session's recorded working directory as a host path: Claude Code inside WSL records Linux
+ *  paths (`/mnt/c/x` is `C:\x`, any other `/x` is `\\wsl.localhost\<distro>\x`) */
+export function sessionHostDir(cwd: string, runtime: WslPathOptions | null): string {
+  return runtime && cwd.startsWith('/') ? wslToWindows(cwd, runtime) : cwd
+}
+
+const hostDir = (cwd: string) => sessionHostDir(cwd, wsl)
 
 /** A path as compared with a session's working directory */
 function dirKey(p: string): string {
@@ -352,11 +369,14 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
   // and is watched again) replace that with it
   broadcast(sessionId, JSON.stringify(historyBatch(sessionId)))
 
-  try {
-    session.fileWatcher = fs.watch(filePath, (eventType) => {
-      if (eventType === 'change') readNewLines(sessionId)
-    }).on('error', () => { /* file removed; the poll loop covers the rest */ })
-  } catch { /* fs.watch unsupported; the poll loop covers it */ }
+  const watchable = !isWslUncPath(filePath)
+  if (watchable) {
+    try {
+      session.fileWatcher = fs.watch(filePath, (eventType) => {
+        if (eventType === 'change') readNewLines(sessionId)
+      }).on('error', () => { /* file removed; the poll loop covers the rest */ })
+    } catch { /* fs.watch unsupported; the poll loop covers it */ }
+  }
 
   session.pollTimer = setInterval(() => {
     readNewLines(sessionId)
@@ -364,7 +384,7 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
       readSubagentNewLines(watcherDelegate, parser, subPath, sessionId)
     }
     scanSubagentsDir(watcherDelegate, parser, sessionId)
-  }, POLL_FALLBACK_MS)
+  }, watchable ? POLL_FALLBACK_MS : WSL_POLL_MS)
 
   scanSubagentsDir(watcherDelegate, parser, sessionId)
   session.attachScanDone = true
@@ -536,8 +556,13 @@ const projectDirWatchers = new Map<string, fs.FSWatcher>()
  *  in an agent window's own directory are shown in it: one run in a
  *  subdirectory (e.g. a task's worktree under .workbench) belongs elsewhere. */
 function isWorkspaceDir(cwd: string, workspace: Workspace): boolean {
-  const dir = foldPathCase(cwd)
-  return dir === workspace.key || dir === foldPathCase(workspace.path) || dirKey(cwd) === workspace.key
+  const matches = (recorded: string) => {
+    const dir = foldPathCase(recorded)
+    return dir === workspace.key || dir === foldPathCase(workspace.path) || dirKey(recorded) === workspace.key
+  }
+  // A session of Claude Code inside WSL records its Linux working directory
+  const host = hostDir(cwd)
+  return matches(cwd) || (host !== cwd && matches(host))
 }
 
 function scanForActiveSessions(workspace: Workspace) {
@@ -605,7 +630,8 @@ function scanForActiveSessions(workspace: Workspace) {
 /** Scan the workspace as soon as a session file in its project dir changes
  *  (the periodic scan covers the rest) */
 function watchProjectDir(projectDir: string, workspace: Workspace) {
-  if (projectDirWatchers.has(projectDir)) return
+  // Not on \\wsl.localhost paths, where fs.watch doesn't work (the periodic scan covers them)
+  if (projectDirWatchers.has(projectDir) || isWslUncPath(projectDir)) return
   try {
     projectDirWatchers.set(projectDir, fs.watch(projectDir, (_eventType, filename) => {
       if (filename?.endsWith('.jsonl')) scanForActiveSessions(workspace)
@@ -662,9 +688,18 @@ interface RelayOptions {
    *  `projects` dir of session transcripts */
   claudeDirs: string[]
   send: SendFn
+  /** The WSL distribution Claude Code runs in, when it runs in one */
+  wsl?: WslPathOptions | null
 }
 
 const encodeProjectDir = (dir: string) => dir.replace(/[^a-zA-Z0-9]/g, '-')
+
+/** The names Claude Code may give a directory's project dir under `projects`: from its path,
+ *  and inside WSL from its Linux path (`C:\x` is `/mnt/c/x` there, `-mnt-c-x`) */
+export function projectDirNames(dirs: string[], runtime: WslPathOptions | null): string[] {
+  const runtimeDir = (dir: string) => (runtime && windowsToWsl(dir, runtime)) || dir
+  return [...new Set(dirs.flatMap(dir => [dir, runtimeDir(dir)]).map(encodeProjectDir))]
+}
 
 function addClaudeDirs(dirs: string[]) {
   for (const dir of dirs) {
@@ -675,6 +710,7 @@ function addClaudeDirs(dirs: string[]) {
 
 export async function createRelay(options: RelayOptions): Promise<Relay> {
   sendToClients = options.send
+  wsl = options.wsl ?? null
   addClaudeDirs(options.claudeDirs)
 
   const hookServer = new HookServer()
@@ -693,7 +729,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
     const resolved = normalizePath(dir)
     const workspace: Workspace = {
       path: given, resolved, key,
-      encodedNames: [...new Set([resolved, given].map(encodeProjectDir))],
+      encodedNames: projectDirNames([resolved, given], wsl),
       flowDir,
       discoveryFile: null,
     }

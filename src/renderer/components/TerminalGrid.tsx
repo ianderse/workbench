@@ -17,10 +17,10 @@ import {
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
 import { TerminalSquare } from 'lucide-react';
-import { AgentsIcon, SettingsIcon as Settings, TerminalPromptIcon } from './icons/app-icons';
+import { AgentNodeIcon, AgentsIcon, SettingsIcon as Settings, TerminalPromptIcon } from './icons/app-icons';
 import { SortableTerminalWrapper } from './SortableTerminalWrapper';
 import { Button } from './ui/button';
-import { useTerminalStore } from '../stores/terminal-store';
+import { useTerminalStore, getActiveProjectTerminalCount, isProjectTerminal } from '../stores/terminal-store';
 import { useTaskStore } from '../stores/task-store';
 import { useLiveAgentStore } from '../stores/live-agent-store';
 import { TERMINAL_DOM_UPDATE_DELAY_MS, PANEL_CLEANUP_GRACE_PERIOD_MS } from '../../shared/constants';
@@ -55,7 +55,7 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
   // Keep exited terminals in DOM during grace period to allow react-resizable-panels to reconcile
   const terminals = useMemo(() => {
     const filtered = projectPath
-      ? allTerminals.filter(t => t.projectPath === projectPath || !t.projectPath)
+      ? allTerminals.filter(t => isProjectTerminal(t, projectPath))
       : allTerminals;
 
     // Filter out exited terminals UNLESS they are still in the grace period
@@ -253,6 +253,11 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
 
   // Terminal IDs for SortableContext
   const terminalIds = useMemo(() => terminals.map(t => t.id), [terminals]);
+  // What the limit counts: a closing window still draws for its grace period but no longer counts
+  const activeCount = useMemo(
+    () => getActiveProjectTerminalCount(terminals, projectPath),
+    [terminals, projectPath]
+  );
 
   // Empty state
   if (terminals.length === 0) {
@@ -260,7 +265,7 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
       <div className="flex h-full flex-col items-center justify-center px-4 pb-[12vh]">
         <div className="flex max-w-[672px] flex-col items-center text-center">
           <h1 className="flex items-center justify-center gap-3 font-heading text-[2.125rem] font-normal! leading-tight tracking-tight text-foreground">
-            <AgentsIcon className="h-9 w-9 shrink-0 text-primary" />
+            <AgentNodeIcon className="h-9 w-9 shrink-0" />
             <span>{t('terminal:grid.emptyTitle')}</span>
           </h1>
           <p className="mt-3 max-w-md text-[0.9375rem] leading-relaxed text-muted-foreground">
@@ -293,7 +298,7 @@ export function TerminalGrid({ projectPath, onNewTaskClick }: TerminalGridProps)
         <div className="flex h-12 shrink-0 items-center justify-between px-3">
           <div className="flex items-center gap-1">
             <span className="px-1 text-[0.8125rem] text-muted-foreground">
-              {t('terminal:grid.count', { count: terminals.length, max: maxTerminals })}
+              {t('terminal:grid.count', { count: activeCount, max: maxTerminals })}
             </span>
             {/* Settings > Agents at the window limit */}
             <Button

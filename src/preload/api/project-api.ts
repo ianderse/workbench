@@ -6,7 +6,6 @@ import type {
   IPCResult,
   InitializationResult,
   AutoBuildVersionInfo,
-  ProjectEnvConfig,
   GitStatus,
   KanbanPreferences,
   GitBranchDetail,
@@ -26,6 +25,9 @@ export interface ProjectAPI {
   removeProject: (projectId: string) => Promise<IPCResult>;
   getProjects: () => Promise<IPCResult<Project[]>>;
   getProjectCostMetrics: () => Promise<IPCResult<ProjectCostMetrics[]>>;
+  watchProjectCostMetrics: () => Promise<IPCResult>;
+  unwatchProjectCostMetrics: () => Promise<IPCResult>;
+  onProjectCostMetricsChanged: (callback: () => void) => () => void;
   updateProjectSettings: (
     projectId: string,
     settings: Partial<ProjectSettings>
@@ -41,14 +43,6 @@ export interface ProjectAPI {
   getKanbanPreferences: (projectId: string) => Promise<IPCResult<KanbanPreferences | null>>;
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences) => Promise<IPCResult>;
 
-  // Context Operations
-  getProjectContext: (projectId: string) => Promise<IPCResult<unknown>>;
-  refreshProjectIndex: (projectId: string) => Promise<IPCResult<unknown>>;
-
-  // Environment Configuration
-  getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
-  updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
-
   // Dialog Operations
   selectDirectory: () => Promise<string | null>;
   createProjectFolder: (
@@ -57,6 +51,9 @@ export interface ProjectAPI {
     initGit: boolean
   ) => Promise<IPCResult<import('../../shared/types').CreateProjectFolderResult>>;
   getDefaultProjectLocation: () => Promise<string | null>;
+
+  /** A project was added or removed (in this window or another one) */
+  onProjectListChanged: (callback: () => void) => () => void;
 
   // Git Operations
   /** @deprecated Use getGitBranchesWithInfo for structured branch data with type indicators */
@@ -84,6 +81,23 @@ export const createProjectAPI = (): ProjectAPI => ({
   getProjectCostMetrics: (): Promise<IPCResult<ProjectCostMetrics[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.PROJECT_COST_METRICS),
 
+  // Only while the Metrics page is open: it reads the projects again on every change reported
+  watchProjectCostMetrics: (): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_METRICS_WATCH),
+
+  unwatchProjectCostMetrics: (): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.PROJECT_METRICS_UNWATCH),
+
+  onProjectCostMetricsChanged: (callback: () => void): (() => void) => {
+    const handler = (): void => {
+      callback();
+    };
+    ipcRenderer.on(IPC_CHANNELS.PROJECT_METRICS_CHANGED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PROJECT_METRICS_CHANGED, handler);
+    };
+  },
+
   updateProjectSettings: (
     projectId: string,
     settings: Partial<ProjectSettings>
@@ -110,21 +124,6 @@ export const createProjectAPI = (): ProjectAPI => ({
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.KANBAN_PREFS_SAVE, projectId, preferences),
 
-  // Context Operations
-  getProjectContext: (projectId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_GET, projectId),
-
-  refreshProjectIndex: (projectId: string) =>
-    ipcRenderer.invoke(IPC_CHANNELS.CONTEXT_REFRESH_INDEX, projectId),
-
-
-  // Environment Configuration
-  getProjectEnv: (projectId: string): Promise<IPCResult<ProjectEnvConfig>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.ENV_GET, projectId),
-
-  updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.ENV_UPDATE, projectId, config),
-
   // Dialog Operations
   selectDirectory: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_SELECT_DIRECTORY),
@@ -138,6 +137,14 @@ export const createProjectAPI = (): ProjectAPI => ({
 
   getDefaultProjectLocation: (): Promise<string | null> =>
     ipcRenderer.invoke(IPC_CHANNELS.DIALOG_GET_DEFAULT_PROJECT_LOCATION),
+
+  onProjectListChanged: (callback: () => void): (() => void) => {
+    const handler = (): void => callback();
+    ipcRenderer.on(IPC_CHANNELS.PROJECT_LIST_CHANGED, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.PROJECT_LIST_CHANGED, handler);
+    };
+  },
 
   // Git Operations
   getGitBranches: (projectPath: string): Promise<IPCResult<string[]>> =>

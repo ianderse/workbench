@@ -7,10 +7,14 @@ import type { InsightsAPI } from './modules/insights-api';
 import { AppUpdateAPI, createAppUpdateAPI } from './app-update-api';
 import { ClaudeCodeAPI, createClaudeCodeAPI } from './modules/claude-code-api';
 import { GraphifyAPI, createGraphifyAPI } from './modules/graphify-api';
+import { SelfImproveAPI, createSelfImproveAPI } from './modules/self-improve-api';
+import { ProjectIndexAPI, createProjectIndexAPI } from './modules/project-index-api';
 import { LiveAgentAPI, createLiveAgentAPI } from './modules/live-agent-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
 import { ProfileAPI, createProfileAPI } from './profile-api';
 import { QueueAPI, createQueueAPI } from './queue-api';
+import { WindowAPI, createWindowAPI } from './modules/window-api';
+import { ShellRuntimeAPI, createShellRuntimeAPI } from './modules/shell-runtime-api';
 
 export interface ElectronAPI extends
   ProjectAPI,
@@ -22,9 +26,13 @@ export interface ElectronAPI extends
   AppUpdateAPI,
   ClaudeCodeAPI,
   GraphifyAPI,
+  SelfImproveAPI,
+  ProjectIndexAPI,
   LiveAgentAPI,
   McpAPI,
-  ProfileAPI {
+  ProfileAPI,
+  WindowAPI,
+  ShellRuntimeAPI {
   /** Queue routing API for rate limit recovery */
   queue: QueueAPI;
 }
@@ -38,9 +46,13 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createAppUpdateAPI(),
   ...createClaudeCodeAPI(),
   ...createGraphifyAPI(),
+  ...createSelfImproveAPI(),
+  ...createProjectIndexAPI(),
   ...createLiveAgentAPI(),
   ...createMcpAPI(),
   ...createProfileAPI(),
+  ...createWindowAPI(),
+  ...createShellRuntimeAPI(),
   queue: createQueueAPI()  // Queue routing for rate limit recovery
 });
 

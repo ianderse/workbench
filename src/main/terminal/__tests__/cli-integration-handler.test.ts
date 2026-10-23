@@ -79,6 +79,28 @@ vi.mock('fs', async (importOriginal) => {
 
 vi.mock('../session-handler', () => ({
   persistSession: mockPersistSession,
+  persistSessionAsync: mockPersistSession,
+}));
+
+// Mock the store of the sessions agent windows start, so tests write nothing to disk
+const mockRecordAgentSession = vi.fn();
+const mockLastAgentSession: ReturnType<typeof vi.fn> = vi.fn(async () => undefined);
+const mockReadAgentSessions: ReturnType<typeof vi.fn> = vi.fn(async () => []);
+vi.mock('../../agent-session-store', () => ({
+  recordAgentSessionAsync: mockRecordAgentSession,
+  lastAgentSession: mockLastAgentSession,
+  readAgentSessions: mockReadAgentSessions,
+}));
+
+// Mock the transcript lookups a restored window uses: its own session, and the directory's latest
+const mockFindSessionTranscript: ReturnType<typeof vi.fn> = vi.fn(async () => null);
+const mockLatestTranscript: ReturnType<typeof vi.fn> = vi.fn(async () => null);
+vi.mock('../../claude-code/session-spending', () => ({
+  findSessionTranscript: mockFindSessionTranscript,
+  latestTranscript: mockLatestTranscript,
+}));
+vi.mock('../../claude-profile/profile-config-dirs', () => ({
+  claudeConfigDirs: () => ['/home/user/.claude'],
 }));
 
 // Mock PtyManager.writeToPty - the implementation now uses this instead of terminal.pty.write
@@ -90,6 +112,7 @@ vi.mock('../pty-manager', () => ({
 // Mock settings-utils so invokeCLIAsync defaults to claude-code in tests
 vi.mock('../../settings-utils', () => ({
   readSettingsFileAsync: vi.fn(async () => undefined),
+  readSettingsFile: vi.fn(() => undefined),
 }));
 
 vi.mock('os', async (importOriginal) => {
@@ -108,6 +131,14 @@ function mockPlatform(platform: 'win32' | 'darwin' | 'linux') {
   mockIsWindows.mockReturnValue(platform === 'win32');
 }
 
+/** PowerShell single-quoted literal, as the code under test writes it */
+const psQuote = (value: string): string => `'${value.replace(/'/g, "''")}'`;
+
+/** The shell agent windows run on each platform: PowerShell on Windows, POSIX elsewhere */
+function platformShellKind(platform: 'win32' | 'darwin' | 'linux'): 'powershell' | 'posix' {
+  return platform === 'win32' ? 'powershell' : 'posix';
+}
+
 /**
  * Helper to get platform-specific expectations for PATH prefix
  */
@@ -122,8 +153,8 @@ function getPathPrefixExpectation(
   }
 
   if (platform === 'win32') {
-    // Windows: set "PATH=value" &&
-    return `set "PATH=${pathValue}" && `;
+    // PowerShell: $env:PATH = 'value';
+    return `$env:PATH = ${psQuote(pathValue)}; `;
   }
   // Unix/macOS: PATH='value' '
   return `PATH='${pathValue}' `;
@@ -140,6 +171,7 @@ function expectPathPrefix(
     expect(written).toContain(expectedPrefix);
   } else {
     expect(written).not.toContain('PATH=');
+    expect(written).not.toContain('$env:PATH');
   }
 }
 
@@ -148,20 +180,18 @@ function expectPathPrefix(
  */
 function getQuotedCommand(platform: 'win32' | 'darwin' | 'linux', command: string): string {
   if (platform === 'win32') {
-    // Windows: double quotes, use escapeForWindowsDoubleQuote logic
-    // Inside double quotes, only " needs escaping (as "")
-    const escaped = command.replace(/"/g, '""');
-    return `"${escaped}"`;
+    // PowerShell: the call operator on a single-quoted path
+    return `& ${psQuote(command)}`;
   }
   // Unix/macOS: use escapeShellArg which properly handles embedded single quotes
   return escapeShellArg(command);
 }
 
 /**
- * Helper to get platform-specific clear command
+ * Helper to get platform-specific clear command, with the separator that follows it
  */
-function getClearCommand(platform: 'win32' | 'darwin' | 'linux'): string {
-  return platform === 'win32' ? 'cls' : 'clear';
+function getClearPrefix(platform: 'win32' | 'darwin' | 'linux'): string {
+  return platform === 'win32' ? 'Clear-Host; ' : 'clear && ';
 }
 
 /**
@@ -172,10 +202,10 @@ function getHistoryPrefix(platform: 'win32' | 'darwin' | 'linux'): string {
 }
 
 /**
- * Helper to get platform-specific temp file extension
+ * Helper to get platform-specific temp file extension (PowerShell reads a plain token file)
  */
-function getTempFileExtension(platform: 'win32' | 'darwin' | 'linux'): string {
-  return platform === 'win32' ? '.bat' : '';
+function getTempFileExtension(_platform: 'win32' | 'darwin' | 'linux'): string {
+  return '';
 }
 
 /**
@@ -183,7 +213,7 @@ function getTempFileExtension(platform: 'win32' | 'darwin' | 'linux'): string {
  */
 function getTokenFileContent(platform: 'win32' | 'darwin' | 'linux', token: string): string {
   if (platform === 'win32') {
-    return `@echo off\r\nset "CLAUDE_CODE_OAUTH_TOKEN=${token}"\r\n`;
+    return token;
   }
   return `export CLAUDE_CODE_OAUTH_TOKEN='${token}'\n`;
 }
@@ -193,7 +223,7 @@ function getTokenFileContent(platform: 'win32' | 'darwin' | 'linux', token: stri
  */
 function getTempFileInvocation(platform: 'win32' | 'darwin' | 'linux', tokenPath: string): string {
   if (platform === 'win32') {
-    return `call "${tokenPath}"`;
+    return `$env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -LiteralPath ${psQuote(tokenPath)} -Raw -ErrorAction Stop).Trim(); `;
   }
   return `source '${tokenPath}'`;
 }
@@ -201,12 +231,12 @@ function getTempFileInvocation(platform: 'win32' | 'darwin' | 'linux', tokenPath
 /**
  * Helper to get platform-specific temp file cleanup
  *
- * Note: Windows now deletes BEFORE the command runs (synchronous)
- * for security - environment variables persist in memory after deletion.
+ * Note: Windows deletes BEFORE the command runs, for security - environment
+ * variables persist in memory after deletion.
  */
 function getTempFileCleanup(platform: 'win32' | 'darwin' | 'linux', tokenPath: string): string {
   if (platform === 'win32') {
-    return `&& del "${tokenPath}" &&`;
+    return `Remove-Item -LiteralPath ${psQuote(tokenPath)} -Force -ErrorAction SilentlyContinue; `;
   }
   return `&& rm -f '${tokenPath}' &&`;
 }
@@ -226,7 +256,7 @@ function getExecCommand(platform: 'win32' | 'darwin' | 'linux', command: string)
  */
 function getConfigDirCommand(platform: 'win32' | 'darwin' | 'linux', configDir: string): string {
   if (platform === 'win32') {
-    return `set "CLAUDE_CONFIG_DIR=${configDir}"`;
+    return `$env:CLAUDE_CONFIG_DIR = ${psQuote(configDir)}; `;
   }
   return `CLAUDE_CONFIG_DIR='${configDir}'`;
 }
@@ -264,7 +294,7 @@ describe('cli-integration-handler', () => {
       invokeClaude(terminal, '/tmp/project', undefined, () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      expect(written).toContain(buildCdCommand('/tmp/project'));
+      expect(written).toContain(buildCdCommand('/tmp/project', platformShellKind(platform)));
       expectPathPrefix(written, platform, '/opt/claude/bin:/usr/bin', "/opt/claude bin/claude's");
       expect(written).toContain(getQuotedCommand(platform, "/opt/claude bin/claude's"));
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
@@ -306,15 +336,16 @@ describe('cli-integration-handler', () => {
       expect(tokenContents).toBe(getTokenFileContent(platform, 'token-value'));
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      const clearCmd = getClearCommand(platform);
+      const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
-      const cmdQuote = platform === 'win32' ? '"' : "'";
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(clearCmd);
-      expect(written).toContain(getTempFileInvocation(platform, tokenPath));
-      expect(written).toContain(getTempFileCleanup(platform, tokenPath));
-      expect(written).toContain(`${cmdQuote}${command}${cmdQuote}`);
+      // Inside bash -c "..." a backslash (a Windows host's temp path) is escaped
+      const shownPath = platform === 'win32' ? tokenPath : tokenPath.replace(/\\/g, '\\\\');
+      expect(written).toContain(getTempFileInvocation(platform, shownPath));
+      expect(written).toContain(getTempFileCleanup(platform, shownPath));
+      expect(written).toContain(getQuotedCommand(platform, command));
       expect(profileManager.getProfile).toHaveBeenCalledWith('prof-1');
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
 
@@ -354,7 +385,7 @@ describe('cli-integration-handler', () => {
       expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      const clearCmd = getClearCommand(platform);
+      const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
       const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
 
@@ -419,7 +450,7 @@ describe('cli-integration-handler', () => {
       invokeClaude(terminal, '/tmp/project', 'prof-2', () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      const clearCmd = getClearCommand(platform);
+      const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
       const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
 
@@ -673,7 +704,7 @@ describe('invokeCLIAsync', () => {
       await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      expect(written).toContain(buildCdCommand('/tmp/project'));
+      expect(written).toContain(buildCdCommand('/tmp/project', platformShellKind(platform)));
       expectPathPrefix(written, platform, '/opt/claude/bin:/usr/bin', '/opt/claude/bin/claude');
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
       expect(profileManager.markProfileUsed).toHaveBeenCalledWith('default');
@@ -705,7 +736,7 @@ describe('invokeCLIAsync', () => {
       await invokeCLIAsync(terminal, '/tmp/project', 'prof-config', () => null);
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      const clearCmd = getClearCommand(platform);
+      const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
       const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
 
@@ -811,7 +842,7 @@ describe('invokeCLIAsync', () => {
       });
 
       const written = mockWriteToPty.mock.calls[0][1] as string;
-      expect(written).toContain(buildCdCommand('/tmp/project/.workbench/worktrees/tasks/001-x'));
+      expect(written).toContain(buildCdCommand('/tmp/project/.workbench/worktrees/tasks/001-x', platformShellKind(platform)));
       // The config dir is resolved on the host (a drive letter on Windows)
       expect(written).toContain(getConfigDirCommand(platform, path.resolve('/tmp/task-config')));
       expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455 --dangerously-skip-permissions');
@@ -932,19 +963,20 @@ describe('cli-integration-handler - Helper Functions', () => {
           { method: 'temp-file', tempFile: '/tmp/.token-123' }
         );
 
-        const clearCmd = getClearCommand(platform);
+        const clearCmd = getClearPrefix(platform);
         const histPrefix = getHistoryPrefix(platform);
         const tempCmd = getTempFileInvocation(platform, '/tmp/.token-123');
         const cleanupCmd = getTempFileCleanup(platform, '/tmp/.token-123');
         const execCmd = getExecCommand(platform, "'/opt/bin/claude'");
 
-        expect(result).toContain(`${clearCmd} && `);
+        expect(result).toContain(clearCmd);
         expect(result).toContain("cd '/tmp/project' && ");
         if (platform !== 'win32') {
           expect(result).toContain(histPrefix);
         }
         expect(result).toContain("PATH='/opt/bin' ");
         expect(result).toContain(tempCmd);
+        expect(result.endsWith('\r')).toBe(true);
         expect(result).toContain(cleanupCmd);
         expect(result).toContain(execCmd);
       });
@@ -958,12 +990,12 @@ describe('cli-integration-handler - Helper Functions', () => {
           { method: 'config-dir', configDir: '/home/user/.claude-work' }
         );
 
-        const clearCmd = getClearCommand(platform);
+        const clearCmd = getClearPrefix(platform);
         const histPrefix = getHistoryPrefix(platform);
         const configDirVar = getConfigDirCommand(platform, '/home/user/.claude-work');
         const execCmd = getExecCommand(platform, "'/opt/bin/claude'");
 
-        expect(result).toContain(`${clearCmd} && `);
+        expect(result).toContain(clearCmd);
         expect(result).toContain("cd '/tmp/project' && ");
         if (platform !== 'win32') {
           expect(result).toContain(histPrefix);
@@ -982,17 +1014,129 @@ describe('cli-integration-handler - Helper Functions', () => {
           { method: 'temp-file', tempFile: '/tmp/.token' }
         );
 
-        const clearCmd = getClearCommand(platform);
+        const clearCmd = getClearPrefix(platform);
         const histPrefix = getHistoryPrefix(platform);
         const tempCmd = getTempFileInvocation(platform, '/tmp/.token');
 
-        expect(result).toContain(`${clearCmd} && `);
+        expect(result).toContain(clearCmd);
         if (platform !== 'win32') {
           expect(result).toContain(histPrefix);
         }
         expect(result).not.toContain('cd ');
         expect(result).toContain(tempCmd);
       });
+    });
+
+    it("takes the shell kind's syntax over the platform's", async () => {
+      const { buildClaudeShellCommand } = await import('../cli-integration-handler');
+      const config = { method: 'config-dir', configDir: '/home/user/.claude-work' } as const;
+
+      mockPlatform('win32');
+      expect(buildClaudeShellCommand('', '', "'/opt/bin/claude'", config, undefined, 'posix')).toContain(
+        "clear && HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR='/home/user/.claude-work'"
+      );
+      mockPlatform('linux');
+      expect(buildClaudeShellCommand('', '', '"claude"', config, undefined, 'cmd')).toBe(
+        'cls && set "CLAUDE_CONFIG_DIR=/home/user/.claude-work" && "claude"\r'
+      );
+      expect(buildClaudeShellCommand('', '', "& 'claude'", config, undefined, 'powershell')).toBe(
+        "Clear-Host; $env:CLAUDE_CONFIG_DIR = '/home/user/.claude-work'; & 'claude'\r"
+      );
+    });
+
+    it('builds PowerShell commands that Windows PowerShell 5.1 can run (no && anywhere)', async () => {
+      const { buildClaudeShellCommand } = await import('../cli-integration-handler');
+      const cd = buildCdCommand("C:\\Users\\O'Brien\\my repo", 'powershell');
+      const pathPrefix = "$env:PATH = 'C:\\tools;C:\\Program Files\\nodejs'; ";
+      const claude = "& 'C:\\Users\\O''Brien\\AppData\\Roaming\\npm\\claude.cmd'";
+
+      expect(buildClaudeShellCommand(cd, pathPrefix, claude, { method: 'default' }, ' --continue', 'powershell')).toBe(
+        "Set-Location -LiteralPath 'C:\\Users\\O''Brien\\my repo' -ErrorAction Stop; " +
+          "$env:PATH = 'C:\\tools;C:\\Program Files\\nodejs'; " +
+          "& 'C:\\Users\\O''Brien\\AppData\\Roaming\\npm\\claude.cmd' --continue\r"
+      );
+
+      const configDir = buildClaudeShellCommand(cd, pathPrefix, claude, { method: 'config-dir', configDir: "C:\\cfg\\it's" }, undefined, 'powershell');
+      expect(configDir).toBe(
+        "Clear-Host; Set-Location -LiteralPath 'C:\\Users\\O''Brien\\my repo' -ErrorAction Stop; " +
+          "$env:CLAUDE_CONFIG_DIR = 'C:\\cfg\\it''s'; " +
+          "$env:PATH = 'C:\\tools;C:\\Program Files\\nodejs'; " +
+          "& 'C:\\Users\\O''Brien\\AppData\\Roaming\\npm\\claude.cmd'\r"
+      );
+
+      const tempFile = buildClaudeShellCommand('', '', claude, { method: 'temp-file', tempFile: 'C:\\Temp\\.claude-token-1' }, undefined, 'powershell');
+      expect(tempFile).toBe(
+        'Clear-Host; ' +
+          "$env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -LiteralPath 'C:\\Temp\\.claude-token-1' -Raw -ErrorAction Stop).Trim(); " +
+          "Remove-Item -LiteralPath 'C:\\Temp\\.claude-token-1' -Force -ErrorAction SilentlyContinue; " +
+          "& 'C:\\Users\\O''Brien\\AppData\\Roaming\\npm\\claude.cmd'\r"
+      );
+      for (const command of [configDir, tempFile]) {
+        expect(command).not.toContain('&&');
+      }
+    });
+  });
+
+  describe("a terminal's shell kind", () => {
+    beforeEach(() => {
+      mockWriteToPty.mockClear();
+      mockGetClaudeCliInvocation.mockReturnValue({ command: '/opt/bin/claude', env: { PATH: '/usr/bin' } });
+      mockGetClaudeProfileManager.mockReturnValue({
+        getActiveProfile: vi.fn(() => ({ id: 'default', name: 'Default', isDefault: true })),
+        getProfile: vi.fn(),
+        getProfileToken: vi.fn(() => null),
+        markProfileUsed: vi.fn(),
+      });
+    });
+
+    it('decides the quoting and the exit marker, whatever the platform', async () => {
+      const { invokeClaude } = await import('../cli-integration-handler');
+
+      mockPlatform('win32');
+      invokeClaude(createMockTerminal({ shellKind: 'posix' }), undefined, undefined, () => null);
+      const posix = mockWriteToPty.mock.calls[0][1] as string;
+      expect(posix).toContain("'/opt/bin/claude'");
+      expect(posix).toContain("printf '\\033]777;workbench-cli-exit\\007'");
+
+      mockPlatform('linux');
+      invokeClaude(createMockTerminal({ shellKind: 'cmd' }), undefined, undefined, () => null);
+      const cmd = mockWriteToPty.mock.calls[1][1] as string;
+      expect(cmd).toContain('"/opt/bin/claude"');
+      expect(cmd).not.toContain('workbench-cli-exit');
+
+      invokeClaude(createMockTerminal({ shellKind: 'powershell' }), 'C:\\repo', undefined, () => null);
+      const powershell = mockWriteToPty.mock.calls[2][1] as string;
+      expect(powershell.startsWith("Set-Location -LiteralPath 'C:\\repo' -ErrorAction Stop; & '/opt/bin/claude' --session-id ")).toBe(true);
+      expect(powershell.endsWith('; [Console]::Write("$([char]27)]777;workbench-cli-exit$([char]7)")\r')).toBe(true);
+      // The typed line never holds the marker's escape characters, only the CLI's output can
+      expect(powershell).not.toContain('\x1b');
+    });
+
+    it('quotes the Graphify hint and the self-improve text for PowerShell', async () => {
+      const { invokeCLIAsync } = await import('../cli-integration-handler');
+      mockPlatform('win32');
+      mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: 'C:\\npm' } });
+      mockInitializeClaudeProfileManager.mockResolvedValue({
+        getActiveProfile: vi.fn(() => ({ id: 'default', name: 'Default', isDefault: true })),
+        getProfile: vi.fn(),
+        getProfileToken: vi.fn(() => null),
+        markProfileUsed: vi.fn(),
+      });
+
+      await invokeCLIAsync(
+        createMockTerminal({
+          shellKind: 'powershell',
+          graphifyOut: 'C:\\My Repo\\.workbench\\knowledge',
+          selfImprove: true,
+        }),
+        undefined,
+        undefined,
+        () => null
+      );
+      const written = mockWriteToPty.mock.calls[0][1] as string;
+      expect(written.startsWith("$env:PATH = 'C:\\npm'; & 'claude' --session-id ")).toBe(true);
+      expect(written).toMatch(/ --append-system-prompt 'The Graphify knowledge graph of this project is in C:\\My Repo\\\.workbench\\knowledge [^']*'/);
+      expect(written).toMatch(/ --append-system-prompt '## Project memory [^']*'/);
     });
   });
 
@@ -1170,5 +1314,186 @@ describe('cli-integration-handler - Helper Functions', () => {
       // Tab instead of space doesn't match
       expect(shouldAutoRenameTerminal('Terminal\t1')).toBe(false);
     });
+  });
+});
+
+describe('agent window sessions', () => {
+  beforeEach(() => {
+    mockWriteToPty.mockClear();
+    mockRecordAgentSession.mockClear();
+    mockPlatform('linux');
+  });
+
+  it('builds the new session flag only for plain session ids', async () => {
+    const { buildNewSessionFlag } = await import('../cli-integration-handler');
+    expect(buildNewSessionFlag('0b7c6c1e-1234-4abc-9def-001122334455')).toBe(
+      ' --session-id 0b7c6c1e-1234-4abc-9def-001122334455'
+    );
+    expect(() => buildNewSessionFlag('$(id)')).toThrow();
+  });
+
+  it('starts a window session under an id of its own and remembers it for the project', async () => {
+    mockGetClaudeCliInvocation.mockReturnValue({ command: 'claude', env: { PATH: '/usr/bin' } });
+    mockGetClaudeProfileManager.mockReturnValue({
+      getActiveProfile: vi.fn(() => ({
+        id: 'work',
+        name: 'Work',
+        isDefault: false,
+        configDir: '~/.claude-profiles/work',
+      })),
+      getProfile: vi.fn(),
+      getProfileToken: vi.fn(() => null),
+      markProfileUsed: vi.fn(),
+    });
+
+    const terminal = createMockTerminal({ projectPath: '/tmp/project' });
+    const { invokeClaude } = await import('../cli-integration-handler');
+    invokeClaude(terminal, '/tmp/project', undefined, () => null);
+
+    const written = mockWriteToPty.mock.calls[0][1] as string;
+    const sessionId = /--session-id ([0-9a-f-]{36})/.exec(written)?.[1];
+    expect(sessionId).toBeTruthy();
+    expect(mockRecordAgentSession).toHaveBeenCalledWith(
+      '/tmp/project',
+      expect.objectContaining({ sessionId, terminalId: terminal.id, configDir: expect.stringContaining('.claude-profiles') })
+    );
+  });
+
+  it('leaves a resumed task session its own id, and does not count it as a window session', async () => {
+    mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: '/usr/bin' } });
+    mockInitializeClaudeProfileManager.mockResolvedValue({
+      getActiveProfile: vi.fn(() => ({ id: 'default', name: 'Default', isDefault: true })),
+      getProfile: vi.fn(),
+      getProfileToken: vi.fn(() => null),
+      markProfileUsed: vi.fn(),
+    });
+
+    const terminal = createMockTerminal({ projectPath: '/tmp/project' });
+    const { invokeCLIAsync } = await import('../cli-integration-handler');
+    await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null, false, {
+      resumeSessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      configDir: '~/.claude-profiles/work',
+    });
+
+    const written = mockWriteToPty.mock.calls[0][1] as string;
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+    expect(written).not.toContain('--session-id');
+    expect(mockRecordAgentSession).not.toHaveBeenCalled();
+  });
+});
+
+describe('restoring an agent window', () => {
+  beforeEach(() => {
+    mockWriteToPty.mockClear();
+    mockLastAgentSession.mockReset();
+    mockFindSessionTranscript.mockReset();
+    mockLatestTranscript.mockReset();
+    mockRecordAgentSession.mockClear();
+    mockReadAgentSessions.mockReset();
+    mockReadAgentSessions.mockResolvedValue([]);
+    mockPlatform('linux');
+    mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: '/usr/bin' } });
+  });
+
+  const resume = async (terminal: TerminalProcess) => {
+    const { resumeClaudeAsync } = await import('../cli-integration-handler');
+    await resumeClaudeAsync(terminal, () => null);
+    return mockWriteToPty.mock.calls[0][1] as string;
+  };
+
+  it('picks the window\'s own session up again instead of the directory\'s latest', async () => {
+    mockLastAgentSession.mockResolvedValue({
+      sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      startedAt: '2026-10-21T09:00:00.000Z',
+      cwd: '/tmp/project',
+    });
+    mockFindSessionTranscript.mockResolvedValue({ file: '/t.jsonl', size: 10, modifiedMs: 1 });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+    expect(written).not.toContain('--continue');
+  });
+
+  it('adopts the session it would have continued when the window has none of its own', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockLatestTranscript.mockResolvedValue({
+      sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      configDir: '/home/user/.claude-profiles/work',
+      file: '/t.jsonl',
+      size: 10,
+      modifiedMs: 1,
+    });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+    expect(written).not.toContain('--continue');
+    // Recorded for the project, so what the conversation spends from here on reaches Metrics
+    expect(mockRecordAgentSession).toHaveBeenCalledWith(
+      '/tmp/project',
+      expect.objectContaining({
+        sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+        configDir: path.resolve('/home/user/.claude-profiles/work'),
+        cwd: '/tmp/project',
+      })
+    );
+  });
+
+  it('adopts the directory\'s latest session when its own session transcript is gone', async () => {
+    mockLastAgentSession.mockResolvedValue({
+      sessionId: 'c0ffee00-1234-4abc-9def-001122334455',
+      startedAt: '2026-10-21T09:00:00.000Z',
+    });
+    mockFindSessionTranscript.mockResolvedValue(null);
+    mockLatestTranscript.mockResolvedValue({
+      sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      configDir: '/home/user/.claude',
+      file: '/t.jsonl',
+      size: 10,
+      modifiedMs: 1,
+    });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+  });
+
+  it('leaves the conversation another window is in to that window', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockReadAgentSessions.mockResolvedValue([
+      { sessionId: 'owned-by-another', terminalId: 'other-window', startedAt: '2026-10-21T09:00:00.000Z' },
+    ]);
+    mockLatestTranscript.mockResolvedValue(null);
+
+    await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(mockLatestTranscript).toHaveBeenCalledWith(expect.anything(), '/tmp/project', new Set(['owned-by-another']));
+  });
+
+  it('continues when the directory holds no session at all', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockLatestTranscript.mockResolvedValue(null);
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--continue');
+    expect(mockRecordAgentSession).not.toHaveBeenCalled();
+  });
+
+  it('continues without adopting a transcript whose name is not a session id', async () => {
+    mockLastAgentSession.mockResolvedValue(undefined);
+    mockLatestTranscript.mockResolvedValue({
+      sessionId: '../../escape',
+      configDir: '/home/user/.claude',
+      file: '/t.jsonl',
+      size: 10,
+      modifiedMs: 1,
+    });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--continue');
+    expect(mockRecordAgentSession).not.toHaveBeenCalled();
   });
 });

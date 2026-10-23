@@ -15,9 +15,11 @@ import { migrateSession } from '../claude-profile/session-utils';
 import { findMostRecentClaudeSession } from '../terminal/session-handler';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
 import { isValidConfigDir } from '../utils/config-path-validator';
-import { getToolInfo } from '../cli-tool-manager';
+import { getToolInfoAsync } from '../cli-tool-manager';
 import { isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { getPathDelimiter, isWindows } from '../platform';
+import { isWslRuntime, toRuntimePath } from '../platform/shell-runtime';
+import { safeSendToRenderer } from './utils';
 import { openTerminalWithCommand } from './claude-code-handlers';
 
 
@@ -239,11 +241,12 @@ export function registerTerminalHandlers(
     IPC_CHANNELS.CLAUDE_ACCOUNTS_LOGIN,
     async (_, profileId?: string): Promise<IPCResult> => {
       try {
-        const claude = getToolInfo('claude');
+        const claude = await getToolInfoAsync('claude', { refreshIfMissing: true });
         if (!claude.found || !claude.path) return { success: false, error: 'Claude Code CLI not found' };
         const configDir = getClaudeProfileManager().getLoginConfigDir(profileId);
         const isDefault = isDefaultClaudeConfigDir(configDir);
-        if (isWindows()) {
+        // In WSL Claude Code runs in a WSL console (Linux paths, Unix syntax)
+        if (isWindows() && !isWslRuntime()) {
           // PowerShell: claude from its own folder, the config dir through the environment
           const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
           if (isDefault) delete env.CLAUDE_CONFIG_DIR;
@@ -253,7 +256,7 @@ export function registerTerminalHandlers(
           // The terminal starts its own shell, so `env` sets the config dir in the command
           // (Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR)
           const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
-          const configEnv = isDefault ? '-u CLAUDE_CONFIG_DIR' : `CLAUDE_CONFIG_DIR=${quote(configDir)}`;
+          const configEnv = isDefault ? '-u CLAUDE_CONFIG_DIR' : `CLAUDE_CONFIG_DIR=${quote(toRuntimePath(configDir))}`;
           await openTerminalWithCommand(`env ${configEnv} ${quote(claude.path)} auth login`);
         }
         return { success: true };
@@ -399,15 +402,13 @@ export function registerTerminalHandlers(
 
           debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Terminals needing refresh:', terminalsNeedingRefresh);
 
-          // Notify frontend that terminals need to be refreshed
+          // Notify every project window that its terminals need to be refreshed
           // Frontend will destroy and recreate terminals with new profile env vars
-          const mainWindow = getMainWindow();
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send(IPC_CHANNELS.TERMINAL_PROFILE_CHANGED, {
-              previousProfileId,
-              newProfileId: profileId,
-              terminals: terminalsNeedingRefresh
-            });
+          if (safeSendToRenderer(getMainWindow, IPC_CHANNELS.TERMINAL_PROFILE_CHANGED, {
+            previousProfileId,
+            newProfileId: profileId,
+            terminals: terminalsNeedingRefresh
+          })) {
             debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Sent TERMINAL_PROFILE_CHANGED event to frontend');
           }
         }
@@ -690,58 +691,6 @@ export function registerTerminalHandlers(
     }
   );
 
-  // Get available session dates for a project
-  ipcMain.handle(
-    IPC_CHANNELS.TERMINAL_GET_SESSION_DATES,
-    async (_, projectPath?: string) => {
-      try {
-        const dates = terminalManager.getAvailableSessionDates(projectPath);
-        return { success: true, data: dates };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to get session dates'
-        };
-      }
-    }
-  );
-
-  // Get sessions for a specific date and project
-  ipcMain.handle(
-    IPC_CHANNELS.TERMINAL_GET_SESSIONS_FOR_DATE,
-    async (_, date: string, projectPath: string) => {
-      try {
-        const sessions = terminalManager.getSessionsForDate(date, projectPath);
-        return { success: true, data: sessions };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to get sessions for date'
-        };
-      }
-    }
-  );
-
-  // Restore all sessions from a specific date
-  ipcMain.handle(
-    IPC_CHANNELS.TERMINAL_RESTORE_FROM_DATE,
-    async (_, date: string, projectPath: string, cols?: number, rows?: number) => {
-      try {
-        const result = await terminalManager.restoreSessionsFromDate(
-          date,
-          projectPath,
-          cols || 80,
-          rows || 24
-        );
-        return { success: true, data: result };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to restore sessions from date'
-        };
-      }
-    }
-  );
 
   // Check if a terminal's PTY process is alive
   ipcMain.handle(
@@ -784,21 +733,21 @@ export function registerTerminalHandlers(
  * Initialize usage monitor event forwarding to renderer process
  * Call this after mainWindow is created
  */
-export function initializeUsageMonitorForwarding(mainWindow: BrowserWindow): void {
+export function initializeUsageMonitorForwarding(getWindow: () => BrowserWindow | null): void {
   const monitor = getUsageMonitor();
 
-  // Forward usage updates to renderer
+  // Forward usage updates to every project window
   monitor.on('usage-updated', (usage: ClaudeUsageSnapshot) => {
-    mainWindow.webContents.send(IPC_CHANNELS.USAGE_UPDATED, usage);
+    safeSendToRenderer(getWindow, IPC_CHANNELS.USAGE_UPDATED, usage);
   });
 
   // Forward all profiles usage updates to renderer (for multi-profile display)
   monitor.on('all-profiles-usage-updated', (allProfilesUsage: AllProfilesUsage) => {
-    mainWindow.webContents.send(IPC_CHANNELS.ALL_PROFILES_USAGE_UPDATED, allProfilesUsage);
+    safeSendToRenderer(getWindow, IPC_CHANNELS.ALL_PROFILES_USAGE_UPDATED, allProfilesUsage);
   });
 
   // Forward proactive swap notifications to renderer
   monitor.on('show-swap-notification', (notification: unknown) => {
-    mainWindow.webContents.send(IPC_CHANNELS.PROACTIVE_SWAP_NOTIFICATION, notification);
+    safeSendToRenderer(getWindow, IPC_CHANNELS.PROACTIVE_SWAP_NOTIFICATION, notification);
   });
 }

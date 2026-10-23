@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useProjectStore } from '../../../stores/project-store';
 import { checkTaskRunning, isIncompleteHumanReview, getTaskProgress, useTaskStore, hasRecentActivity } from '../../../stores/task-store';
-import type { Task, TaskLogs, TaskLogPhase, WorktreeStatus, ImageAttachment } from '../../../../shared/types';
+import type { ArchivedTaskRun, Task, TaskLogs, TaskLogPhase, WorktreeStatus, ImageAttachment } from '../../../../shared/types';
 
 /**
  * Validates task subtasks structure to prevent infinite loops during resume.
@@ -58,6 +58,8 @@ function failedPhases(logs: TaskLogs): Set<TaskLogPhase> {
 export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [feedback, setFeedback] = useState('');
   const [feedbackImages, setFeedbackImages] = useState<ImageAttachment[]>([]);
+  // "Start over" in Request changes: off by default, so a revision keeps what the task built
+  const [startOver, setStartOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isStuck, setIsStuck] = useState(false);
   const [hasCheckedRunning, setHasCheckedRunning] = useState(false);
@@ -70,6 +72,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [worktreeStatus, setWorktreeStatus] = useState<WorktreeStatus | null>(null);
   const [phaseLogs, setPhaseLogs] = useState<TaskLogs | null>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  // The runs the task was started over from, oldest first, and which of them are open
+  const [previousRuns, setPreviousRuns] = useState<ArchivedTaskRun[]>([]);
+  const [openPreviousRuns, setOpenPreviousRuns] = useState<number[]>([]);
   // The Logs section (all steps in one list) opens by itself when a step runs or fails
   const [isLogsExpanded, setIsLogsExpanded] = useState(false);
   const failedPhasesRef = useRef<Set<TaskLogPhase>>(new Set());
@@ -78,6 +83,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const [showPRDialog, setShowPRDialog] = useState(false);
   const [isCreatingPR, setIsCreatingPR] = useState(false);
   const [showMergePRDialog, setShowMergePRDialog] = useState(false);
+  const [showLocalMergeDialog, setShowLocalMergeDialog] = useState(false);
 
   const currentProject = useProjectStore((state) => {
     const currentProjectId = state.activeProjectId || state.selectedProjectId;
@@ -147,7 +153,10 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setFeedbackImages([]);
   }, []);
 
-  // Load worktree status when task is in review (change summary, Create PR and Merge PR)
+  // Load worktree status when task is in review (change summary, Create PR and Merge PR).
+  // Its stats and branches are read against the task's base branch, so editing that branch
+  // reads the status again instead of leaving the dialog on the branch it opened with
+  const taskBaseBranch = task.metadata?.baseBranch;
   useEffect(() => {
     if (needsReview) {
       window.electronAPI.getWorktreeStatus(task.id).then((statusResult) => {
@@ -160,7 +169,27 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     } else {
       setWorktreeStatus(null);
     }
-  }, [task.id, needsReview]);
+  }, [task.id, needsReview, taskBaseBranch]);
+
+  // The task's earlier runs. Loaded once; starting the task over adds one, so the dialog
+  // reloads them after a retry (reloadPreviousRuns) rather than polling
+  const reloadPreviousRuns = useCallback(async () => {
+    if (!currentProject) return;
+    try {
+      const result = await window.electronAPI.getPreviousTaskRuns(currentProject.id, task.specId);
+      if (result.success && result.data) setPreviousRuns(result.data);
+    } catch (err) {
+      console.error('Failed to load the previous runs:', err);
+    }
+  }, [currentProject, task.specId]);
+
+  useEffect(() => {
+    void reloadPreviousRuns();
+  }, [reloadPreviousRuns]);
+
+  const togglePreviousRun = useCallback((index: number) => {
+    setOpenPreviousRuns((open) => (open.includes(index) ? open.filter((i) => i !== index) : [...open, index]));
+  }, []);
 
   // Load and watch phase logs
   useEffect(() => {
@@ -192,8 +221,9 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     window.electronAPI.watchTaskLogs(currentProject.id, task.specId);
 
     // Listen for log changes
-    const unsubscribe = window.electronAPI.onTaskLogsChanged((specId, logs) => {
-      if (specId === task.specId) {
+    const unsubscribe = window.electronAPI.onTaskLogsChanged((specId, logs, projectId) => {
+      // Spec ids repeat across projects, so the project decides whose logs these are
+      if (specId === task.specId && (!projectId || projectId === currentProject.id)) {
         setPhaseLogs(logs);
         // Open the logs when a step newly fails (a collapsed list stays collapsed otherwise)
         const failed = failedPhases(logs);
@@ -206,7 +236,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
 
     return () => {
       unsubscribe();
-      window.electronAPI.unwatchTaskLogs(task.specId);
+      window.electronAPI.unwatchTaskLogs(currentProject.id, task.specId);
     };
   }, [currentProject, task.specId]);
 
@@ -311,6 +341,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     // State
     feedback,
     feedbackImages,
+    startOver,
     isSubmitting,
     isStuck,
     hasCheckedRunning,
@@ -323,6 +354,8 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     worktreeStatus,
     phaseLogs,
     isLoadingLogs,
+    previousRuns,
+    openPreviousRuns,
     isLogsExpanded,
     selectedProject: currentProject,
     isRunning,
@@ -334,11 +367,13 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     showPRDialog,
     isCreatingPR,
     showMergePRDialog,
+    showLocalMergeDialog,
     isLoadingPlan,
 
     // Setters
     setFeedback,
     setFeedbackImages,
+    setStartOver,
     setIsSubmitting,
     setIsStuck,
     setHasCheckedRunning,
@@ -354,9 +389,12 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     setShowPRDialog,
     setIsCreatingPR,
     setShowMergePRDialog,
+    setShowLocalMergeDialog,
 
     // Handlers
     toggleLogs,
+    togglePreviousRun,
+    reloadPreviousRuns,
     addFeedbackImage,
     addFeedbackImages,
     removeFeedbackImage,

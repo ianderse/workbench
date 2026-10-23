@@ -3,12 +3,21 @@
  * Main process <-> Renderer process communication
  */
 
+/**
+ * Prefix of the Chromium argument that tells a window which project it was opened for
+ * (set as `additionalArguments`, read by the preload script).
+ */
+export const WINDOW_PROJECT_ARG = '--workbench-project=';
+
 export const IPC_CHANNELS = {
   // Project operations
   PROJECT_ADD: 'project:add',
   PROJECT_REMOVE: 'project:remove',
   PROJECT_LIST: 'project:list',
   PROJECT_COST_METRICS: 'project:costMetrics',  // Task count and total run cost per initialized project
+  PROJECT_METRICS_WATCH: 'project:metricsWatch',  // Report changes while the Metrics page is open
+  PROJECT_METRICS_UNWATCH: 'project:metricsUnwatch',
+  PROJECT_METRICS_CHANGED: 'project:metricsChanged',  // A window spent something, or a session was recorded
   PROJECT_UPDATE_SETTINGS: 'project:updateSettings',
   PROJECT_INITIALIZE: 'project:initialize',
   PROJECT_CHECK_VERSION: 'project:checkVersion',
@@ -44,6 +53,7 @@ export const IPC_CHANNELS = {
   TASK_WORKTREE_DISCARD: 'task:worktreeDiscard',
   TASK_WORKTREE_CREATE_PR: 'task:worktreeCreatePR',
   TASK_WORKTREE_MERGE_PR: 'task:worktreeMergePR',  // Pull the target into the task branch (Claude Code resolves conflicts), push, merge the PR
+  TASK_WORKTREE_MERGE_LOCAL: 'task:worktreeMergeLocal',  // Merge the task branch into its base branch with git, locally (no push)
   TASK_WORKTREE_PR_STATE: 'task:worktreePRState',  // Read a task's PR state from GitHub and store it in the task metadata
   TASK_MERGE_PR_PROGRESS: 'task:mergePRProgress',  // Event: merging a task's PR moved to another step (main -> renderer)
   TASK_LIST_WORKTREES: 'task:listWorktrees',
@@ -64,6 +74,7 @@ export const IPC_CHANNELS = {
 
   // Task phase logs (persistent, collapsible logs by phase)
   TASK_LOGS_GET: 'task:logsGet',           // Load logs from spec dir
+  TASK_PREVIOUS_RUNS_GET: 'task:previousRunsGet', // Load the runs the task was started over from
   TASK_LOGS_WATCH: 'task:logsWatch',       // Start watching for log changes
   TASK_LOGS_UNWATCH: 'task:logsUnwatch',   // Stop watching for log changes
   TASK_LOGS_CHANGED: 'task:logsChanged',   // Event: logs changed (main -> renderer)
@@ -87,9 +98,6 @@ export const IPC_CHANNELS = {
   TERMINAL_RESUME_CLAUDE: 'terminal:resumeClaude',
   TERMINAL_RESUME_TASK_SESSION: 'terminal:resumeTaskSession',  // Resume a task's Claude Code session in an agent window
   TERMINAL_ACTIVATE_DEFERRED_RESUME: 'terminal:activateDeferredResume',  // Resume a restored terminal's Claude Code session once its window is shown
-  TERMINAL_GET_SESSION_DATES: 'terminal:getSessionDates',
-  TERMINAL_GET_SESSIONS_FOR_DATE: 'terminal:getSessionsForDate',
-  TERMINAL_RESTORE_FROM_DATE: 'terminal:restoreFromDate',
   TERMINAL_CHECK_PTY_ALIVE: 'terminal:checkPtyAlive',
   TERMINAL_UPDATE_DISPLAY_ORDERS: 'terminal:updateDisplayOrders',  // Persist terminal display order after drag-drop reorder
 
@@ -174,17 +182,17 @@ export const IPC_CHANNELS = {
   APP_VERSION: 'app:version',
   WINDOW_SET_TITLE_BAR_COLORS: 'window:setTitleBarColors', // Match the window controls to the theme: ({ color, symbolColor }) (renderer -> main)
 
+  // Project windows (one window per project)
+  WINDOW_LIST_PROJECTS: 'window:listProjects',       // Every open window with the project it shows
+  WINDOW_REPORT_PROJECT: 'window:reportProject',     // The window tells main which project it shows (renderer -> main)
+  WINDOW_OPEN_PROJECT: 'window:openProject',         // Open a project in a new window (or focus the one showing it)
+  WINDOW_CLOSE_PROJECT: 'window:closeProject',       // Close the window showing a project ("Quit window")
+  WINDOW_PROJECTS_CHANGED: 'window:projectsChanged', // Event: the open windows changed (main -> renderer)
+  PROJECT_LIST_CHANGED: 'project:listChanged',       // Event: a project was added or removed (main -> renderer)
+
   // Shell operations
   SHELL_OPEN_EXTERNAL: 'shell:openExternal',
   SHELL_OPEN_TERMINAL: 'shell:openTerminal',
-
-  // Context operations
-  CONTEXT_GET: 'context:get',
-  CONTEXT_REFRESH_INDEX: 'context:refreshIndex',
-
-  // Environment configuration
-  ENV_GET: 'env:get',
-  ENV_UPDATE: 'env:update',
 
   // Insights operations
   INSIGHTS_GET_SESSION: 'insights:getSession',
@@ -216,6 +224,11 @@ export const IPC_CHANNELS = {
   GIT_DETECT_MAIN_BRANCH: 'git:detectMainBranch',
   GIT_CHECK_STATUS: 'git:checkStatus',
   GIT_INITIALIZE: 'git:initialize',
+
+  // Windows shell (Settings > General): runtime status, WSL availability, relaunch to apply
+  SHELL_RUNTIME_GET_STATUS: 'shellRuntime:getStatus',     // Saved value at startup, value in use, last WSL check
+  SHELL_RUNTIME_REFRESH_WSL: 'shellRuntime:refreshWsl',   // Check WSL availability again
+  APP_RELAUNCH: 'app:relaunch',                           // Restart the app (quits through the normal quit path)
 
   // App auto-update operations
   APP_UPDATE_CHECK: 'app-update:check',
@@ -251,6 +264,17 @@ export const IPC_CHANNELS = {
   GRAPHIFY_INSTALL: 'graphify:install',
   GRAPHIFY_GET_INDEX: 'graphify:getIndex',
   GRAPHIFY_BUILD_INDEX: 'graphify:buildIndex',
+
+  // Self-improve: the project's memory index, built from its past sessions
+  // Project index (the project's CLAUDE.md, written by /init)
+  PROJECT_INDEX_GET: 'projectIndex:get',
+  PROJECT_INDEX_BUILD: 'projectIndex:build',
+  PROJECT_INDEX_IS_BUILDING: 'projectIndex:isBuilding',
+  PROJECT_INDEX_DELETE: 'projectIndex:delete',
+
+  SELF_IMPROVE_GET_INDEX: 'selfImprove:getIndex',
+  SELF_IMPROVE_BUILD_INDEX: 'selfImprove:buildIndex',
+  SELF_IMPROVE_IS_BUILDING: 'selfImprove:isBuilding',
   GRAPHIFY_HAS_GRAPH: 'graphify:hasGraph',
   GRAPHIFY_IS_ENABLED: 'graphify:isEnabled',
   GRAPHIFY_SET_ENABLED: 'graphify:setEnabled',

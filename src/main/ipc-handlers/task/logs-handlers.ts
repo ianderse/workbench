@@ -1,18 +1,44 @@
 import { handleIpc } from '../ipc-registry';
 import { BrowserWindow } from 'electron';
 import { IPC_CHANNELS, getSpecsDir } from '../../../shared/constants';
-import type { IPCResult, TaskLogs, TaskLogStreamChunk } from '../../../shared/types';
+import type { ArchivedTaskRun, IPCResult, TaskLogs, TaskLogStreamChunk } from '../../../shared/types';
 import path from 'path';
 import { projectStore } from '../../project-store';
 import { taskLogService } from '../../task-log-service';
+import { listPreviousRuns } from '../../task-run-archive';
 import { isValidTaskId } from '../../utils/spec-path-helpers';
 import { debugLog } from '../../../shared/utils/debug-logger';
 import { ensureAbsolutePath } from '../../utils/path-helpers';
+import { safeSendToRenderer } from '../utils';
 
 /**
  * Register task logs handlers
  */
 export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | null): void {
+  /**
+   * The runs this task was started over from: their logs and the steps of their Claude Code
+   * run, oldest first. Empty for a task that was never started over.
+   */
+  handleIpc(
+    IPC_CHANNELS.TASK_PREVIOUS_RUNS_GET,
+    async (_, projectId: string, specId: string): Promise<IPCResult<ArchivedTaskRun[]>> => {
+      if (!isValidTaskId(specId)) {
+        return { success: false, error: 'Invalid spec ID' };
+      }
+      const project = projectStore.getProject(projectId);
+      if (!project) {
+        return { success: false, error: 'Project not found' };
+      }
+      try {
+        const specDir = path.join(ensureAbsolutePath(project.path), getSpecsDir(project.autoBuildPath), specId);
+        return { success: true, data: listPreviousRuns(specDir) };
+      } catch (error) {
+        console.error('[TASK_PREVIOUS_RUNS_GET] Failed to read the previous runs:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Failed to read the previous runs' };
+      }
+    }
+  );
+
   /**
    * Get task logs from spec directory
    * Returns logs organized by phase (planning, coding, validation)
@@ -101,7 +127,7 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
         // Start watching even if specDir doesn't exist yet — the poll loop
         // in TaskLogService handles missing files gracefully and will pick up
         // task_logs.json once the agent creates it during execution.
-        taskLogService.startWatching(specId, specDir, absoluteProjectPath, specsRelPath);
+        taskLogService.startWatching(specId, specDir, absoluteProjectPath, specsRelPath, projectId);
         return { success: true };
       } catch (error) {
         console.error('[TASK_LOGS_WATCH] Failed to start watching task logs:', error);
@@ -118,13 +144,28 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
    */
   handleIpc(
     IPC_CHANNELS.TASK_LOGS_UNWATCH,
-    async (_, specId: string): Promise<IPCResult> => {
+    async (_, projectId: string, specId: string): Promise<IPCResult> => {
       try {
         if (!isValidTaskId(specId)) {
           return { success: false, error: 'Invalid spec ID' };
         }
 
-        taskLogService.stopWatching(specId);
+        // Watches are counted per spec directory, so one window's unwatch leaves another
+        // window watching the same task alone
+        const project = projectStore.getProject(projectId);
+        if (!project) {
+          // The project is gone (removed while its task was open): nothing can be watching
+          // it any more, and its directory can no longer be worked out
+          taskLogService.stopWatchingSpec(specId);
+          return { success: true };
+        }
+        const specDir = path.join(
+          ensureAbsolutePath(project.path),
+          getSpecsDir(project.autoBuildPath),
+          specId
+        );
+
+        taskLogService.stopWatching(specDir);
         return { success: true };
       } catch (error) {
         console.error('Failed to stop watching task logs:', error);
@@ -139,17 +180,12 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
   /**
    * Setup task log service event forwarding to renderer
    */
-  taskLogService.on('logs-changed', (specId: string, logs: TaskLogs) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_LOGS_CHANGED, specId, logs);
-    }
+  // Every project window gets these; the project id keeps each window to its own task
+  taskLogService.on('logs-changed', (specId: string, logs: TaskLogs, projectId?: string) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_CHANGED, specId, logs, projectId);
   });
 
-  taskLogService.on('stream-chunk', (specId: string, chunk: TaskLogStreamChunk) => {
-    const mainWindow = getMainWindow();
-    if (mainWindow) {
-      mainWindow.webContents.send(IPC_CHANNELS.TASK_LOGS_STREAM, specId, chunk);
-    }
+  taskLogService.on('stream-chunk', (specId: string, chunk: TaskLogStreamChunk, projectId?: string) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LOGS_STREAM, specId, chunk, projectId);
   });
 }

@@ -13,23 +13,38 @@ import { getClaudeProfileManager, initializeClaudeProfileManager } from '../clau
 import { getFullCredentialsFromKeychain, clearKeychainCache, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getEmailFromConfigDir } from '../claude-profile/profile-utils';
 import { findStandaloneLimitReset } from '../claude-profile/rate-limit-manager';
+import { SELF_IMPROVE_NUDGE_ONE_LINE } from '../self-improve/nudge';
 import * as OutputParser from './output-parser';
 import * as SessionHandler from './session-handler';
 import * as PtyManager from './pty-manager';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
-import { escapeShellArg, escapeForWindowsDoubleQuote, buildCdCommand } from '../../shared/utils/shell-escape';
+import {
+  escapeShellArg,
+  escapeForWindowsDoubleQuote,
+  escapePowerShellArg,
+  buildCdCommand
+} from '../../shared/utils/shell-escape';
 import { getClaudeCliInvocation, getClaudeCliInvocationAsync } from '../cli-utils';
 import { isWindows } from '../platform';
+import { expandClaudeHome, isClaudeHomeInWsl } from '../platform/claude-home';
+import { getWslInfo, isWslRuntime, toHostPath, toRuntimePath } from '../platform/shell-runtime';
+import { wrapLineForFish } from './wsl-terminal';
 import { readSettingsFileAsync } from '../settings-utils';
 import type { SupportedCLI } from '../../shared/types/settings';
 import type {
+  ShellKind,
   TerminalProcess,
   WindowGetter,
   RateLimitEvent,
   OAuthTokenEvent
 } from './types';
-import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
+import { getClaudeGlobalConfigPath, isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
+import { lastAgentSession, readAgentSessions, recordAgentSessionAsync } from '../agent-session-store';
+import { findSessionTranscript, latestTranscript } from '../claude-code/session-spending';
+import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
+import { appLog } from '../app-logger';
+import { claudeThemeFlag } from '../claude-cli-theme';
 
 // ============================================================================
 // CLI DISPATCH UTILITIES
@@ -142,6 +157,22 @@ function normalizePathForBash(envPath: string): string {
 }
 
 /**
+ * The shell agent windows start on this platform: PowerShell on Windows, POSIX elsewhere and in
+ * the WSL runtime
+ */
+function platformShellKind(): ShellKind {
+  return isWindows() && !isWslRuntime() ? 'powershell' : 'posix';
+}
+
+/**
+ * The syntax a window's shell takes: the kind recorded when its shell started, else the
+ * platform's default agent window shell
+ */
+function shellKindOf(terminal: Pick<TerminalProcess, 'shellKind'>): ShellKind {
+  return terminal.shellKind ?? platformShellKind();
+}
+
+/**
  * Determine whether a command already resolves via an absolute executable path.
  *
  * When true, we should avoid prefixing PATH=... into the typed shell command because:
@@ -155,16 +186,22 @@ function isAbsoluteExecutableCommand(command: string): boolean {
 }
 
 /**
- * Generate temp file content for OAuth token based on platform
+ * Generate temp file content for OAuth token based on the shell
  *
- * On Windows, creates a .bat file with set command using double-quote syntax;
- * on Unix, creates a shell script with export.
+ * For cmd.exe, creates a .bat file with set command using double-quote syntax; for PowerShell,
+ * a plain file holding just the token, which the typed command reads with Get-Content (running a
+ * .ps1 would depend on the machine's execution policy, which blocks scripts by default on Windows
+ * PowerShell 5.1); for POSIX shells, a shell script with export.
  *
  * @param token - OAuth token value
+ * @param shellKind - The window's shell kind
  * @returns Content string for the temp file
  */
-function generateTokenTempFileContent(token: string): string {
-  if (isWindows()) {
+function generateTokenTempFileContent(token: string, shellKind: ShellKind): string {
+  if (shellKind === 'powershell') {
+    return token.replace(/[\r\n]/g, '');
+  }
+  if (shellKind === 'cmd') {
     // Windows: Use double-quote syntax for set command to handle special characters
     // Format: set "VARNAME=value" - quotes allow spaces and special chars in value
     // For values inside double quotes, use escapeForWindowsDoubleQuote() because
@@ -177,29 +214,34 @@ function generateTokenTempFileContent(token: string): string {
 }
 
 /**
- * Get the file extension for temp files based on platform
+ * Get the file extension for temp files based on the shell
  *
- * @returns File extension including the dot (e.g., '.bat' on Windows, '' on Unix)
+ * @returns File extension including the dot ('.bat' for cmd.exe, '' for PowerShell and POSIX shells)
  */
-function getTempFileExtension(): string {
-  return isWindows() ? '.bat' : '';
+function getTempFileExtension(shellKind: ShellKind): string {
+  return shellKind === 'cmd' ? '.bat' : '';
 }
 
 /**
  * Build PATH environment variable prefix for Claude CLI invocation.
  *
- * On Windows, uses semicolon separators and cmd.exe escaping.
- * On Unix/macOS, uses colon separators and bash escaping.
+ * For cmd.exe, `set "PATH=..." && `; for PowerShell, `$env:PATH = '...'; ` (both keep the
+ * semicolon separators). For POSIX shells, uses colon separators and bash escaping.
  *
  * @param pathEnv - PATH environment variable value
- * @returns Empty string if no PATH, otherwise platform-specific PATH prefix
+ * @param shellKind - The window's shell kind
+ * @returns Empty string if no PATH, otherwise the shell's PATH prefix
  */
-function buildPathPrefix(pathEnv: string): string {
+function buildPathPrefix(pathEnv: string, shellKind: ShellKind): string {
   if (!pathEnv) {
     return '';
   }
 
-  if (isWindows()) {
+  if (shellKind === 'powershell') {
+    return `$env:PATH = ${escapePowerShellArg(pathEnv)}; `;
+  }
+
+  if (shellKind === 'cmd') {
     // Windows: Use semicolon-separated PATH with double-quote escaping
     // Format: set "PATH=value" where value uses semicolons
     // For values inside double quotes, use escapeForWindowsDoubleQuote() because
@@ -217,16 +259,22 @@ function buildPathPrefix(pathEnv: string): string {
 /**
  * Escape a command for safe use in shell commands.
  *
- * On Windows, wraps in double quotes for cmd.exe. Since the value is inside
+ * For cmd.exe, wraps in double quotes. Since the value is inside
  * double quotes, we use escapeForWindowsDoubleQuote() (only escapes embedded
  * double quotes as ""). Caret escaping is NOT used inside double quotes.
- * On Unix/macOS, wraps in single quotes for bash.
+ * For PowerShell, a single-quoted string after the call operator (`& 'C:\path\claude.cmd'`):
+ * a quoted string alone would only be echoed back, not run.
+ * For POSIX shells, wraps in single quotes for bash.
  *
  * @param cmd - The command to escape
+ * @param shellKind - The window's shell kind
  * @returns The escaped command safe for use in shell commands
  */
-function escapeShellCommand(cmd: string): string {
-  if (isWindows()) {
+function escapeShellCommand(cmd: string, shellKind: ShellKind): string {
+  if (shellKind === 'powershell') {
+    return `& ${escapePowerShellArg(cmd)}`;
+  }
+  if (shellKind === 'cmd') {
     // Windows: Wrap in double quotes and escape only embedded double quotes
     // Inside double quotes, caret is literal, so use escapeForWindowsDoubleQuote()
     const escapedCmd = escapeForWindowsDoubleQuote(cmd);
@@ -234,6 +282,72 @@ function escapeShellCommand(cmd: string): string {
   }
   // Unix/macOS: Wrap in single quotes for bash
   return escapeShellArg(cmd);
+}
+
+/**
+ * Whether a window runs inside WSL: the app runs its tools there (shell-runtime.ts) and the
+ * window's shell is the distribution's (POSIX syntax)
+ */
+function isWslWindow(terminal: Pick<TerminalProcess, 'shellKind'>): boolean {
+  return isWindows() && isWslRuntime() && shellKindOf(terminal) === 'posix';
+}
+
+/** A host path as the window's shell sees it: the Linux path in a WSL window, unchanged otherwise */
+function windowPath(terminal: Pick<TerminalProcess, 'shellKind'>, hostPath: string): string;
+function windowPath(terminal: Pick<TerminalProcess, 'shellKind'>, hostPath: string | undefined): string | undefined;
+function windowPath(terminal: Pick<TerminalProcess, 'shellKind'>, hostPath: string | undefined): string | undefined {
+  return hostPath && isWslWindow(terminal) ? toRuntimePath(hostPath) : hostPath;
+}
+
+/** A Claude config dir as the window's shell sees it (`~` resolved against Claude Code's home in WSL) */
+function windowConfigDir(terminal: Pick<TerminalProcess, 'shellKind'>, configDir: string): string {
+  return isWslWindow(terminal) ? toRuntimePath(expandClaudeHome(configDir)) : configDir;
+}
+
+/** Variable that makes Claude Code bill an API key instead of the window's sign-in */
+const WSL_UNSET_API_KEY = 'env -u ANTHROPIC_API_KEY ';
+
+/**
+ * The `claude` command and the PATH prefix typed into a window.
+ *
+ * In a WSL window: the distribution's own claude (cli-tool-manager answers with its Linux path in
+ * the WSL runtime), no PATH prefix (the app's PATH is Windows'; the login shell has its own), and
+ * `env -u ANTHROPIC_API_KEY` first. Agent windows run on the account's sign-in: natively the key
+ * is removed from the window's environment, while in WSL the user's rc files can export one.
+ */
+function windowClaudeCommand(
+  terminal: Pick<TerminalProcess, 'shellKind'>,
+  claudeCmd: string,
+  claudeEnv: Record<string, string>
+): { escapedClaudeCmd: string; pathPrefix: string } {
+  const shellKind = shellKindOf(terminal);
+  const escapedClaudeCmd = escapeShellCommand(claudeCmd, shellKind);
+  if (isWslWindow(terminal)) {
+    return { escapedClaudeCmd: `${WSL_UNSET_API_KEY}${escapedClaudeCmd}`, pathPrefix: '' };
+  }
+  const pathPrefix = isAbsoluteExecutableCommand(claudeCmd) ? '' : buildPathPrefix(claudeEnv.PATH || '', shellKind);
+  return { escapedClaudeCmd, pathPrefix };
+}
+
+/**
+ * Where the temp token file goes. In a WSL window it is written into the Linux home through its
+ * UNC path: files the app writes there get mode 644 under the home's own permissions (750 on
+ * Ubuntu), while a file in the Windows temp dir shows up as 777 under /mnt/c for every Linux user,
+ * and chmod can't change that on a Windows drive. The typed command removes it before Claude
+ * starts, as natively. Natively, the OS temp dir.
+ */
+function tokenTempDir(terminal: Pick<TerminalProcess, 'shellKind'>): string {
+  const info = isWslWindow(terminal) ? getWslInfo() : null;
+  return info?.home ? toHostPath(info.home) : os.tmpdir();
+}
+
+/**
+ * Escape text for the inside of a POSIX double-quoted string (`bash -c "..."`): the outer shell
+ * expands `$`, backticks and `\` there even inside the single quotes the inner command uses, so
+ * e.g. the self-improve text's `type: feedback` would run as a command substitution.
+ */
+function escapeForPosixDoubleQuote(text: string): string {
+  return text.replace(/[\\$`"]/g, (char) => `\\${char}`);
 }
 
 /**
@@ -250,11 +364,6 @@ const YOLO_MODE_FLAG = ' --dangerously-skip-permissions';
  */
 export const CLI_EXIT_MARKER = '\x1b]777;workbench-cli-exit\x07';
 
-/**
- * Type a CLI launch command into the window's shell, followed (in POSIX shells: bash, zsh, fish)
- * by printing CLI_EXIT_MARKER once the CLI exits, whatever its exit code. cmd.exe cannot print it,
- * so on Windows the window stays open when the CLI exits.
- */
 /**
  * Whether this output finishes a CLI exit marker that should close the window. The marker can be
  * split across output chunks; an exit the app caused itself (cliRestarting) is consumed instead.
@@ -276,10 +385,38 @@ export function shouldCloseOnCliExit(
   return true;
 }
 
+/**
+ * What the shell runs after the CLI to print CLI_EXIT_MARKER, chained with ';' so it runs whatever
+ * the CLI's exit code. POSIX shells (bash, zsh, fish) use printf; PowerShell (7 and 5.1) writes
+ * the escape characters it builds with [char], so the typed line itself never holds them. cmd.exe
+ * cannot print it, so a cmd.exe window stays open when the CLI exits. A failed
+ * `Set-Location -ErrorAction Stop` earlier in a PowerShell line ends the line before the marker,
+ * which leaves the window open with the error on screen.
+ */
+function cliExitMarkerSuffix(shellKind: ShellKind): string {
+  switch (shellKind) {
+    case 'posix':
+      return `; printf '\\033]777;workbench-cli-exit\\007'`;
+    case 'powershell':
+      return `; [Console]::Write("$([char]27)]777;workbench-cli-exit$([char]7)")`;
+    default:
+      return '';
+  }
+}
+
+/**
+ * The line typed into the window's shell to launch a CLI: the command, then printing
+ * CLI_EXIT_MARKER once the CLI exits (see cliExitMarkerSuffix). A WSL window whose login shell is
+ * fish runs the whole POSIX line through `bash -c` (see wsl-terminal.ts).
+ */
+export function buildCliLine(terminal: Pick<TerminalProcess, 'shellKind' | 'wrapInBash'>, command: string): string {
+  const line = `${command.endsWith('\r') ? command.slice(0, -1) : command}${cliExitMarkerSuffix(shellKindOf(terminal))}`;
+  return `${terminal.wrapInBash && shellKindOf(terminal) === 'posix' ? wrapLineForFish(line) : line}\r`;
+}
+
+/** Type a CLI launch command into the window's shell (see buildCliLine) */
 function writeCliCommand(terminal: TerminalProcess, command: string): void {
-  const line = command.endsWith('\r') ? command.slice(0, -1) : command;
-  const withMarker = isWindows() ? line : `${line}; printf '\\033]777;workbench-cli-exit\\007'`;
-  PtyManager.writeToPty(terminal, `${withMarker}\r`);
+  PtyManager.writeToPty(terminal, buildCliLine(terminal, command));
 }
 
 /**
@@ -288,15 +425,38 @@ function writeCliCommand(terminal: TerminalProcess, command: string): void {
  * graph lives in .workbench/knowledge (the terminal's GRAPHIFY_OUT points there). Left out when the
  * path has characters that would need escaping inside the shell command.
  */
-function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut'>): string {
-  const out = terminal.graphifyOut;
-  if (!out || /["'$`%!]/.test(out) || (!isWindows() && out.includes('\\'))) return '';
-  const graph = path.join(out, 'graph.json');
+function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut' | 'shellKind'>): string {
+  // In a WSL window, the path inside WSL
+  const out = windowPath(terminal, terminal.graphifyOut);
+  const shellKind = shellKindOf(terminal);
+  const posix = shellKind === 'posix';
+  if (!out || /["'$`%!]/.test(out) || (posix && out.includes('\\'))) return '';
+  const graph = posix ? path.posix.join(out, 'graph.json') : path.join(out, 'graph.json');
   const text =
     `The Graphify knowledge graph of this project is in ${out} (GRAPHIFY_OUT points there), not in graphify-out ` +
     `under the working directory. For /graphify questions about the code, run graphify query, explain, path or ` +
     `affected with --graph ${graph}, and do not rebuild the graph.`;
-  return ` --append-system-prompt ${isWindows() ? `"${text}"` : `'${text}'`}`;
+  return ` --append-system-prompt ${quoteFlagText(text, shellKind)}`;
+}
+
+/**
+ * Quote the text of a flag for the window's shell: single quotes for POSIX shells and PowerShell
+ * (where nothing inside expands), double quotes for cmd.exe. The texts passed here hold no
+ * characters those quotes would need to escape.
+ */
+function quoteFlagText(text: string, shellKind: ShellKind): string {
+  if (shellKind === 'powershell') return escapePowerShellArg(text);
+  return shellKind === 'posix' ? `'${text}'` : `"${text}"`;
+}
+
+/**
+ * Claude Code flag telling an agent window's session to save what it learns about the project, when
+ * the project's self-improve switch is on. The project's own `.claude/MEMORY.md` carries the same
+ * text for sessions started outside the app; this covers the window Workbench launches.
+ */
+function selfImproveFlag(terminal: Pick<TerminalProcess, 'selfImprove' | 'shellKind'>): string {
+  if (!terminal.selfImprove) return '';
+  return ` --append-system-prompt ${quoteFlagText(SELF_IMPROVE_NUDGE_ONE_LINE, shellKindOf(terminal))}`;
 }
 
 /**
@@ -332,17 +492,99 @@ export function buildResumeSessionFlag(sessionId: string): string {
 }
 
 /**
- * Extra flags for an agent window's `claude` command: the resumed session (if any), YOLO mode,
- * and the Graphify hint
+ * Flags that start a new session under an id Workbench picked (` --session-id <uuid>`), so what
+ * the window spends can be read back from that session's transcript. Throws for ids that are not
+ * plain session ids.
+ */
+export function buildNewSessionFlag(sessionId: string): string {
+  if (!isValidClaudeSessionId(sessionId)) {
+    throw new Error(`Invalid Claude Code session id: ${sessionId}`);
+  }
+  return ` --session-id ${sessionId}`;
+}
+
+/**
+ * Keep the session an agent window is starting, so Settings > Accounts > Metrics can read what the
+ * window spent from Claude Code's transcript: a window runs Claude Code itself, so its cost
+ * reaches no task's run file. Windows without a project have nowhere to keep it.
+ */
+function trackAgentWindowSession(
+  terminal: Pick<TerminalProcess, 'id' | 'projectPath' | 'cwd'>,
+  sessionId: string,
+  configDir: string | undefined,
+  cwd: string | undefined
+): void {
+  if (!terminal.projectPath) return;
+  recordAgentSessionAsync(terminal.projectPath, {
+    sessionId,
+    configDir: resolveSessionConfigDir(configDir),
+    // Claude Code names the transcript's folder after the directory it runs in
+    cwd: cwd || terminal.cwd,
+    terminalId: terminal.id,
+    startedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * How a restored window picks Claude Code up again, and what that costs the project.
+ *
+ * Its own last session comes first, by id, so a window always continues its own conversation
+ * rather than whatever session in the directory was written to last. When it has none - the window
+ * was there before Workbench recorded sessions, or its session's transcript is gone - it picks up
+ * the session `claude --continue` would have picked, the directory's newest, and records it as the
+ * window's own. From then on that conversation's spending reaches Metrics, including what it had
+ * already spent on earlier days.
+ */
+async function resumeOwnSessionFlag(
+  terminal: Pick<TerminalProcess, 'id' | 'projectPath' | 'cwd'>
+): Promise<string> {
+  if (!terminal.projectPath) return ' --continue';
+  try {
+    const own = await lastAgentSession(terminal.projectPath, terminal.id);
+    if (own) {
+      // Claude Code names the transcript's folder after the directory as it sees it (in WSL, the
+      // Linux path; the translation leaves a path that is already one unchanged)
+      const transcript = await findSessionTranscript(
+        own.sessionId,
+        claudeConfigDirs([own.configDir]),
+        own.cwd ? toRuntimePath(own.cwd) : own.cwd
+      );
+      if (transcript) return buildResumeSessionFlag(own.sessionId);
+    }
+
+    // The window has no session of its own: adopt the one it would have continued anyway,
+    // leaving the conversations the project's other windows are in to those windows
+    const taken = new Set(
+      (await readAgentSessions(terminal.projectPath))
+        .filter((session) => session.terminalId && session.terminalId !== terminal.id)
+        .map((session) => session.sessionId)
+    );
+    const cwd = terminal.projectPath || terminal.cwd;
+    const latest = await latestTranscript(claudeConfigDirs([own?.configDir]), toRuntimePath(cwd), taken);
+    if (!latest || !isValidClaudeSessionId(latest.sessionId)) return ' --continue';
+    trackAgentWindowSession(terminal, latest.sessionId, latest.configDir, cwd);
+    return buildResumeSessionFlag(latest.sessionId);
+  } catch (error) {
+    appLog.warn('[ClaudeIntegration] Could not look up the window\'s own session:', error);
+    return ' --continue';
+  }
+}
+
+/**
+ * Extra flags for an agent window's `claude` command: the session it resumes or the id its new
+ * session gets, YOLO mode, the Graphify hint and the theme matching the app's
  */
 function buildClaudeExtraFlags(
-  terminal: Pick<TerminalProcess, 'graphifyOut'>,
+  terminal: Pick<TerminalProcess, 'graphifyOut' | 'selfImprove' | 'shellKind'>,
   dangerouslySkipPermissions: boolean | undefined,
-  resumeSessionId?: string
+  resumeSessionId?: string,
+  newSessionId?: string
 ): string | undefined {
   const flags =
     `${resumeSessionId ? buildResumeSessionFlag(resumeSessionId) : ''}` +
-    `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
+    `${!resumeSessionId && newSessionId ? buildNewSessionFlag(newSessionId) : ''}` +
+    `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` +
+    `${selfImproveFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
   return flags || undefined;
 }
 
@@ -353,10 +595,10 @@ function buildClaudeExtraFlags(
  */
 export function resolveSessionConfigDir(configDir: string | undefined): string | undefined {
   if (!configDir) return undefined;
-  const expanded = configDir.startsWith('~') ? path.join(os.homedir(), configDir.slice(1)) : configDir;
-  const normalized = path.resolve(expanded);
-  if (normalized === path.resolve(os.homedir(), '.claude')) return undefined;
-  return normalized;
+  // `~` is Claude Code's home: the Linux home (as a UNC path) when the app runs its tools in WSL
+  const expanded = expandClaudeHome(configDir);
+  if (isDefaultClaudeConfigDir(expanded)) return undefined;
+  return (isClaudeHomeInWsl() ? path.win32 : path).resolve(expanded);
 }
 
 // ============================================================================
@@ -385,14 +627,21 @@ type ClaudeCommandConfig =
  * All non-default methods include history-safe prefixes (HISTFILE=, HISTCONTROL=)
  * to prevent sensitive data from appearing in shell history (Unix/macOS only).
  *
- * On Windows, uses cmd.exe/PowerShell compatible syntax without bash-specific commands.
- * The temp file method on Windows uses a batch file approach with inline environment setup.
+ * For cmd.exe, the temp file method uses a batch file approach with inline environment setup.
+ *
+ * For PowerShell (7 and Windows PowerShell 5.1, which has no '&&'), statements are chained with
+ * ';': `Clear-Host`, `$env:NAME = '...'` for the variables, the token read from its plain temp
+ * file with Get-Content and the file removed before Claude starts. Commands whose failure must stop
+ * the line (changing directory, reading the token) use -ErrorAction Stop, which ends the whole
+ * typed line the way '&&' would. Variables set this way stay in the window's shell, as cmd.exe's
+ * `set` does.
  *
  * @param cwdCommand - Command to change directory (empty string if no change needed)
  * @param pathPrefix - PATH prefix for Claude CLI (empty string if not needed)
  * @param escapedClaudeCmd - Shell-escaped Claude CLI command
  * @param config - Configuration object with method and required options (discriminated union)
  * @param extraFlags - Optional extra flags to append to the command (e.g., '--dangerously-skip-permissions')
+ * @param shellKind - The window's shell kind (the platform's default agent window shell when not given)
  * @returns Complete shell command string ready for terminal.pty.write()
  *
  * @example
@@ -404,19 +653,44 @@ type ClaudeCommandConfig =
  * buildClaudeShellCommand('', '', 'claude', { method: 'temp-file', tempFile: '/tmp/token' });
  * // Returns: 'clear && HISTFILE= HISTCONTROL=ignorespace bash -c "source /tmp/token && rm -f /tmp/token && exec claude"\r'
  *
- * // Temp file method (Windows)
- * buildClaudeShellCommand('', '', 'claude.cmd', { method: 'temp-file', tempFile: 'C:\\Users\\...\\token.bat' });
- * // Returns: 'cls && call C:\\Users\\...\\token.bat && claude.cmd\r'
+ * // Temp file method (cmd.exe)
+ * buildClaudeShellCommand('', '', '"claude.cmd"', { method: 'temp-file', tempFile: 'C:\\Users\\...\\token.bat' }, undefined, 'cmd');
+ * // Returns: 'cls && call "C:\\Users\\...\\token.bat" && del "C:\\Users\\...\\token.bat" && "claude.cmd"\r'
+ *
+ * // Config dir method (PowerShell)
+ * buildClaudeShellCommand('', '', "& 'claude'", { method: 'config-dir', configDir: 'C:\\cfg' }, undefined, 'powershell');
+ * // Returns: "Clear-Host; $env:CLAUDE_CONFIG_DIR = 'C:\\cfg'; & 'claude'\r"
  */
 export function buildClaudeShellCommand(
   cwdCommand: string,
   pathPrefix: string,
   escapedClaudeCmd: string,
   config: ClaudeCommandConfig,
-  extraFlags?: string
+  extraFlags?: string,
+  shellKind: ShellKind = platformShellKind()
 ): string {
   const fullCmd = extraFlags ? `${escapedClaudeCmd}${extraFlags}` : escapedClaudeCmd;
-  const isWin = isWindows();
+  const isWin = shellKind === 'cmd';
+
+  if (shellKind === 'powershell') {
+    switch (config.method) {
+      case 'temp-file': {
+        // The token is read into the window's environment and the file removed before Claude
+        // starts, like the cmd.exe flow's call + del. A token file that can't be read ends the
+        // line; one that can't be removed doesn't keep Claude from starting.
+        const tempFile = escapePowerShellArg(config.tempFile);
+        return (
+          `Clear-Host; ${cwdCommand}${pathPrefix}` +
+          `$env:CLAUDE_CODE_OAUTH_TOKEN = (Get-Content -LiteralPath ${tempFile} -Raw -ErrorAction Stop).Trim(); ` +
+          `Remove-Item -LiteralPath ${tempFile} -Force -ErrorAction SilentlyContinue; ${fullCmd}\r`
+        );
+      }
+      case 'config-dir':
+        return `Clear-Host; ${cwdCommand}$env:CLAUDE_CONFIG_DIR = ${escapePowerShellArg(config.configDir)}; ${pathPrefix}${fullCmd}\r`;
+      default:
+        return `${cwdCommand}${pathPrefix}${fullCmd}\r`;
+    }
+  }
 
   switch (config.method) {
     case 'temp-file':
@@ -437,7 +711,7 @@ export function buildClaudeShellCommand(
       } else {
         // Unix/macOS: Use bash with source command and history-safe prefixes
         const escapedTempFile = escapeShellArg(config.tempFile);
-        return `clear && ${cwdCommand}HISTFILE= HISTCONTROL=ignorespace ${pathPrefix}bash -c "source ${escapedTempFile} && rm -f ${escapedTempFile} && exec ${fullCmd}"\r`;
+        return `clear && ${cwdCommand}HISTFILE= HISTCONTROL=ignorespace ${pathPrefix}bash -c "${escapeForPosixDoubleQuote(`source ${escapedTempFile} && rm -f ${escapedTempFile} && exec ${fullCmd}`)}"\r`;
       }
 
     case 'config-dir':
@@ -451,7 +725,7 @@ export function buildClaudeShellCommand(
       } else {
         // Unix/macOS: Use bash with config dir and history-safe prefixes
         const escapedConfigDir = escapeShellArg(config.configDir);
-        return `clear && ${cwdCommand}HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR=${escapedConfigDir} ${pathPrefix}bash -c "exec ${fullCmd}"\r`;
+        return `clear && ${cwdCommand}HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR=${escapedConfigDir} ${pathPrefix}bash -c "${escapeForPosixDoubleQuote(`exec ${fullCmd}`)}"\r`;
       }
 
     default:
@@ -888,7 +1162,7 @@ export function handleClaudeExit(
 export function ensureOnboardingComplete(configDir: string): void {
   try {
     const expandedDir = path.resolve(
-      configDir.startsWith('~') ? configDir.replace(/^~/, os.homedir()) : configDir
+      expandClaudeHome(configDir)
     );
     const claudeJsonPath = getClaudeGlobalConfigPath(expandedDir);
 
@@ -976,8 +1250,9 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
       cwdCommand,
       pathPrefix,
       escapedClaudeCmd,
-      { method: 'config-dir', configDir: activeProfile.configDir },
-      extraFlags
+      { method: 'config-dir', configDir: windowConfigDir(terminal, activeProfile.configDir) },
+      extraFlags,
+      shellKindOf(terminal)
     );
     debugLog(`${logPrefix} Executing command (configDir method, history-safe)`);
     writeCliCommand(terminal, command);
@@ -996,18 +1271,19 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
   if (token) {
     const nonce = crypto.randomBytes(8).toString('hex');
     const tempFile = path.join(
-      os.tmpdir(),
-      `.claude-token-${Date.now()}-${nonce}${getTempFileExtension()}`
+      tokenTempDir(terminal),
+      `.claude-token-${Date.now()}-${nonce}${getTempFileExtension(shellKindOf(terminal))}`
     );
     debugLog(`${logPrefix} Writing token to temp file:`, tempFile);
-    fs.writeFileSync(tempFile, generateTokenTempFileContent(token), { mode: 0o600 });
+    fs.writeFileSync(tempFile, generateTokenTempFileContent(token, shellKindOf(terminal)), { mode: 0o600 });
 
     const command = buildClaudeShellCommand(
       cwdCommand,
       pathPrefix,
       escapedClaudeCmd,
-      { method: 'temp-file', tempFile },
-      extraFlags
+      { method: 'temp-file', tempFile: windowPath(terminal, tempFile) },
+      extraFlags,
+      shellKindOf(terminal)
     );
     debugLog(`${logPrefix} Executing command (temp file method, history-safe)`);
     writeCliCommand(terminal, command);
@@ -1054,8 +1330,9 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
       cwdCommand,
       pathPrefix,
       escapedClaudeCmd,
-      { method: 'config-dir', configDir: activeProfile.configDir },
-      extraFlags
+      { method: 'config-dir', configDir: windowConfigDir(terminal, activeProfile.configDir) },
+      extraFlags,
+      shellKindOf(terminal)
     );
     debugLog(`${logPrefix} Executing command (configDir method, history-safe)`);
     writeCliCommand(terminal, command);
@@ -1074,18 +1351,19 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
   if (token) {
     const nonce = crypto.randomBytes(8).toString('hex');
     const tempFile = path.join(
-      os.tmpdir(),
-      `.claude-token-${Date.now()}-${nonce}${getTempFileExtension()}`
+      tokenTempDir(terminal),
+      `.claude-token-${Date.now()}-${nonce}${getTempFileExtension(shellKindOf(terminal))}`
     );
     debugLog(`${logPrefix} Writing token to temp file:`, tempFile);
-    await fsPromises.writeFile(tempFile, generateTokenTempFileContent(token), { mode: 0o600 });
+    await fsPromises.writeFile(tempFile, generateTokenTempFileContent(token, shellKindOf(terminal)), { mode: 0o600 });
 
     const command = buildClaudeShellCommand(
       cwdCommand,
       pathPrefix,
       escapedClaudeCmd,
-      { method: 'temp-file', tempFile },
-      extraFlags
+      { method: 'temp-file', tempFile: windowPath(terminal, tempFile) },
+      extraFlags,
+      shellKindOf(terminal)
     );
     debugLog(`${logPrefix} Executing command (temp file method, history-safe)`);
     writeCliCommand(terminal, command);
@@ -1115,8 +1393,13 @@ export function invokeClaude(
   debugLog('[ClaudeIntegration:invokeClaude] CWD:', cwd);
   debugLog('[ClaudeIntegration:invokeClaude] Dangerously skip permissions:', dangerouslySkipPermissions);
 
-  // Compute extra flags for YOLO mode
-  const extraFlags = `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` || undefined;
+  // A new session gets an id of Workbench's own, so its spending can be read back later
+  const newSessionId = crypto.randomUUID();
+
+  // Compute extra flags for the new session and YOLO mode
+  const extraFlags =
+    `${buildNewSessionFlag(newSessionId)}${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}` +
+    `${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
 
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
@@ -1136,6 +1419,7 @@ export function invokeClaude(
       : profileManager.getActiveProfile();
 
     terminal.claudeProfileId = activeProfile?.id;
+    trackAgentWindowSession(terminal, newSessionId, activeProfile?.configDir, cwd);
 
     debugLog('[ClaudeIntegration:invokeClaude] Profile resolution:', {
       previousProfileId,
@@ -1145,12 +1429,9 @@ export function invokeClaude(
       isDefault: activeProfile?.isDefault
     });
 
-    const cwdCommand = buildCdCommand(cwd, terminal.shellType);
+    const cwdCommand = buildCdCommand(windowPath(terminal, cwd), shellKindOf(terminal));
     const { command: claudeCmd, env: claudeEnv } = getClaudeCliInvocation();
-    const escapedClaudeCmd = escapeShellCommand(claudeCmd);
-    const pathPrefix = isAbsoluteExecutableCommand(claudeCmd)
-      ? ''
-      : buildPathPrefix(claudeEnv.PATH || '');
+    const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
     const needsEnvOverride: boolean = !!(profileId && profileId !== previousProfileId);
 
     debugLog('[ClaudeIntegration:invokeClaude] Environment override check:', {
@@ -1184,7 +1465,7 @@ export function invokeClaude(
       debugLog('[ClaudeIntegration:invokeClaude] Using terminal environment for non-default profile:', activeProfile.name);
     }
 
-    const command = buildClaudeShellCommand(cwdCommand, pathPrefix, escapedClaudeCmd, { method: 'default' }, extraFlags);
+    const command = buildClaudeShellCommand(cwdCommand, pathPrefix, escapedClaudeCmd, { method: 'default' }, extraFlags, shellKindOf(terminal));
     debugLog('[ClaudeIntegration:invokeClaude] Executing command (default method):', command);
     writeCliCommand(terminal, command);
 
@@ -1227,16 +1508,13 @@ export function resumeClaude(
     terminal.isCLIMode = true;
 
     const { command: claudeCmd, env: claudeEnv } = getClaudeCliInvocation();
-    const escapedClaudeCmd = escapeShellCommand(claudeCmd);
-    const pathPrefix = isAbsoluteExecutableCommand(claudeCmd)
-      ? ''
-      : buildPathPrefix(claudeEnv.PATH || '');
+    const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
 
     // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
+    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
 
     // Go to the project directory, then pick up its latest Claude session
-    const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);
+    const cdCommand = buildCdCommand(windowPath(terminal, terminal.projectPath || terminal.cwd), shellKindOf(terminal));
     const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
@@ -1296,8 +1574,11 @@ export async function invokeCLIAsync(
 
     debugLog('[ClaudeIntegration:invokeCLIAsync] Resume session:', resumeSessionId);
 
-    // Extra flags: the resumed session, YOLO mode and the Graphify hint
-    const extraFlags = buildClaudeExtraFlags(terminal, dangerouslySkipPermissions, resumeSessionId);
+    // A new session gets an id of Workbench's own, so its spending can be read back later
+    const newSessionId = resumeSessionId ? undefined : crypto.randomUUID();
+
+    // Extra flags: the session, YOLO mode, the Graphify hint and the matching theme
+    const extraFlags = buildClaudeExtraFlags(terminal, dangerouslySkipPermissions, resumeSessionId, newSessionId);
 
     terminal.isCLIMode = true;
     // Store YOLO mode setting so it persists across profile switches
@@ -1312,14 +1593,17 @@ export async function invokeCLIAsync(
     // A resumed task session is always a Claude Code session, whatever the preferred CLI
     if (preferredCLI !== 'claude-code' && !resumeSessionId) {
       // Non-Claude CLI: change directory if needed, then run the CLI command directly
-      const cwdCommand = buildCdCommand(cwd, terminal.shellType);
+      // The cd command ends in its own separator
+      const cwdCommand = buildCdCommand(windowPath(terminal, cwd), shellKindOf(terminal));
       const command = getCLICommand(preferredCLI, settings?.customCLIPath as string | undefined);
       debugLog('[ClaudeIntegration:invokeCLIAsync] Non-Claude CLI dispatch:', { preferredCLI, command });
-      if (cwdCommand) {
-        writeCliCommand(terminal, `${cwdCommand} && ${command}`);
-      } else {
-        writeCliCommand(terminal, command);
-      }
+      // PowerShell runs a (possibly quoted) path only through the call operator; a WSL window runs
+      // a custom CLI's Windows path through its /mnt path
+      const wslPath = isWslWindow(terminal) && /^[A-Za-z]:[\\/]|^\\\\/.test(command) ? toRuntimePath(command) : undefined;
+      const shellCommand = shellKindOf(terminal) === 'powershell'
+        ? escapeShellCommand(command, 'powershell')
+        : wslPath ? escapeShellArg(wslPath) : command;
+      writeCliCommand(terminal, `${cwdCommand}${shellCommand}`);
       return;
     }
 
@@ -1330,6 +1614,7 @@ export async function invokeCLIAsync(
       : profileManager.getActiveProfile();
 
     terminal.claudeProfileId = activeProfile?.id;
+    if (newSessionId) trackAgentWindowSession(terminal, newSessionId, activeProfile?.configDir, cwd);
 
     debugLog('[ClaudeIntegration:invokeCLIAsync] Profile resolution:', {
       previousProfileId,
@@ -1340,7 +1625,7 @@ export async function invokeCLIAsync(
     });
 
     // Async CLI invocation - non-blocking
-    const cwdCommand = buildCdCommand(cwd, terminal.shellType);
+    const cwdCommand = buildCdCommand(windowPath(terminal, cwd), shellKindOf(terminal));
 
     // Add timeout protection for CLI detection (10s timeout)
     const cliInvocationPromise = getClaudeCliInvocationAsync();
@@ -1353,10 +1638,7 @@ export async function invokeCLIAsync(
         if (timeoutId) clearTimeout(timeoutId);
       });
 
-    const escapedClaudeCmd = escapeShellCommand(claudeCmd);
-    const pathPrefix = isAbsoluteExecutableCommand(claudeCmd)
-      ? ''
-      : buildPathPrefix(claudeEnv.PATH || '');
+    const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
     const needsEnvOverride: boolean = !!(profileId && profileId !== previousProfileId);
 
     debugLog('[ClaudeIntegration:invokeCLIAsync] Environment override check:', {
@@ -1376,8 +1658,9 @@ export async function invokeCLIAsync(
         cwdCommand,
         pathPrefix,
         escapedClaudeCmd,
-        { method: 'config-dir', configDir: sessionConfigDir },
-        extraFlags
+        { method: 'config-dir', configDir: windowConfigDir(terminal, sessionConfigDir) },
+        extraFlags,
+        shellKindOf(terminal)
       );
       debugLog('[ClaudeIntegration:invokeCLIAsync] Resuming session (configDir method, history-safe)');
       writeCliCommand(terminal, command);
@@ -1413,7 +1696,7 @@ export async function invokeCLIAsync(
       debugLog('[ClaudeIntegration:invokeCLIAsync] Using terminal environment for non-default profile:', activeProfile.name);
     }
 
-    const command = buildClaudeShellCommand(cwdCommand, pathPrefix, escapedClaudeCmd, { method: 'default' }, extraFlags);
+    const command = buildClaudeShellCommand(cwdCommand, pathPrefix, escapedClaudeCmd, { method: 'default' }, extraFlags, shellKindOf(terminal));
     debugLog('[ClaudeIntegration:invokeCLIAsync] Executing command (default method):', command);
     writeCliCommand(terminal, command);
 
@@ -1446,7 +1729,8 @@ export async function invokeCLIAsync(
  *
  * Safe to call from Electron main process without blocking the event loop.
  * Uses async CLI detection which doesn't block on subprocess calls.
- * Changes to the project directory and runs `claude --continue` (its latest Claude session).
+ * Changes to the project directory and picks the window's own Claude Code session up again,
+ * falling back to `claude --continue` (the directory's latest session) when it has none.
  */
 export async function resumeClaudeAsync(
   terminal: TerminalProcess,
@@ -1471,17 +1755,15 @@ export async function resumeClaudeAsync(
         if (timeoutId) clearTimeout(timeoutId);
       });
 
-    const escapedClaudeCmd = escapeShellCommand(claudeCmd);
-    const pathPrefix = isAbsoluteExecutableCommand(claudeCmd)
-      ? ''
-      : buildPathPrefix(claudeEnv.PATH || '');
+    const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
 
     // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}`;
+    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
 
-    // Go to the project directory, then pick up its latest Claude session
-    const cdCommand = buildCdCommand(terminal.projectPath || terminal.cwd, terminal.shellType);
-    const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd} --continue${extraFlags}`;
+    // Go to the project directory, then pick the window's own session up again
+    const cdCommand = buildCdCommand(windowPath(terminal, terminal.projectPath || terminal.cwd), shellKindOf(terminal));
+    const sessionFlag = await resumeOwnSessionFlag(terminal);
+    const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd}${sessionFlag}${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
     writeCliCommand(terminal, command);

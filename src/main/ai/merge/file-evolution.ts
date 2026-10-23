@@ -14,7 +14,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawnSync } from 'child_process';
+import { git } from '../../utils/git-exec';
 
 import { SemanticAnalyzer } from './semantic-analyzer';
 import {
@@ -138,28 +138,29 @@ class EvolutionStorage {
 // Git helpers
 // =============================================================================
 
-function runGit(args: string[], cwd: string): string {
-  const result = spawnSync('git', args, { cwd, encoding: 'utf8' });
-  if (result.status !== 0) {
-    throw new Error(`git ${args.join(' ')} failed: ${result.stderr}`);
+async function runGit(args: string[], cwd: string): Promise<string> {
+  try {
+    return (await git(args, { cwd, encoding: 'utf8' })).stdout.trim();
+  } catch (error) {
+    const stderr = (error as { stderr?: unknown }).stderr;
+    throw new Error(`git ${args.join(' ')} failed: ${typeof stderr === 'string' ? stderr : ''}`);
   }
-  return result.stdout.trim();
 }
 
-function tryRunGit(args: string[], cwd: string): string | null {
+async function tryRunGit(args: string[], cwd: string): Promise<string | null> {
   try {
-    return runGit(args, cwd);
+    return await runGit(args, cwd);
   } catch {
     return null;
   }
 }
 
-function getCurrentCommit(cwd: string): string {
-  return tryRunGit(['rev-parse', 'HEAD'], cwd) ?? 'unknown';
+async function getCurrentCommit(cwd: string): Promise<string> {
+  return (await tryRunGit(['rev-parse', 'HEAD'], cwd)) ?? 'unknown';
 }
 
-function discoverTrackableFiles(projectDir: string, extensions: Set<string>): string[] {
-  const output = tryRunGit(['ls-files'], projectDir);
+async function discoverTrackableFiles(projectDir: string, extensions: Set<string>): Promise<string[]> {
+  const output = await tryRunGit(['ls-files'], projectDir);
   if (!output) return [];
 
   return output
@@ -167,9 +168,9 @@ function discoverTrackableFiles(projectDir: string, extensions: Set<string>): st
     .filter((f) => f && extensions.has(path.extname(f).toLowerCase()));
 }
 
-function detectTargetBranch(worktreePath: string): string {
+async function detectTargetBranch(worktreePath: string): Promise<string> {
   for (const branch of ['main', 'master', 'develop']) {
-    const result = tryRunGit(['merge-base', branch, 'HEAD'], worktreePath);
+    const result = await tryRunGit(['merge-base', branch, 'HEAD'], worktreePath);
     if (result !== null) return branch;
   }
   return 'main';
@@ -211,16 +212,16 @@ export class FileEvolutionTracker {
   /**
    * Capture baseline state of files for a task.
    */
-  captureBaselines(
+  async captureBaselines(
     taskId: string,
     files?: string[],
     intent = '',
-  ): Map<string, FileEvolution> {
-    const commit = getCurrentCommit(this.storage.projectDir);
+  ): Promise<Map<string, FileEvolution>> {
+    const commit = await getCurrentCommit(this.storage.projectDir);
     const capturedAt = new Date();
     const captured = new Map<string, FileEvolution>();
 
-    const fileList = files ?? discoverTrackableFiles(this.storage.projectDir, DEFAULT_EXTENSIONS);
+    const fileList = files ?? await discoverTrackableFiles(this.storage.projectDir, DEFAULT_EXTENSIONS);
 
     for (const filePath of fileList) {
       const relPath = this.storage.getRelativePath(filePath);
@@ -305,24 +306,24 @@ export class FileEvolutionTracker {
   /**
    * Refresh task snapshots by analyzing git diff from worktree.
    */
-  refreshFromGit(
+  async refreshFromGit(
     taskId: string,
     worktreePath: string,
     targetBranch?: string,
     analyzeOnlyFiles?: Set<string>,
-  ): void {
-    const branch = targetBranch ?? detectTargetBranch(worktreePath);
+  ): Promise<void> {
+    const branch = targetBranch ?? await detectTargetBranch(worktreePath);
 
     let mergeBase: string;
     try {
-      mergeBase = runGit(['merge-base', branch, 'HEAD'], worktreePath);
+      mergeBase = await runGit(['merge-base', branch, 'HEAD'], worktreePath);
     } catch (err) {
       // merge-base failed — the target branch may not exist in this repo.
       // Fallback: use the main project's HEAD as the comparison base.
       // This works because worktrees share the same git object store.
       console.warn(`[FileEvolutionTracker] merge-base '${branch}' failed in ${worktreePath}: ${err instanceof Error ? err.message : err}`);
       try {
-        mergeBase = runGit(['rev-parse', 'HEAD'], this.storage.projectDir);
+        mergeBase = await runGit(['rev-parse', 'HEAD'], this.storage.projectDir);
         console.warn(`[FileEvolutionTracker] Falling back to project HEAD: ${mergeBase.slice(0, 8)}`);
       } catch (fallbackErr) {
         console.warn(`[FileEvolutionTracker] Fallback also failed:`, fallbackErr);
@@ -336,19 +337,19 @@ export class FileEvolutionTracker {
     const changedFileSet = new Set<string>();
 
     // 1. Committed changes between merge base and HEAD
-    const committedOutput = tryRunGit(['diff', '--name-only', `${mergeBase}..HEAD`], worktreePath);
+    const committedOutput = await tryRunGit(['diff', '--name-only', `${mergeBase}..HEAD`], worktreePath);
     if (committedOutput) {
       for (const f of committedOutput.split('\n')) { if (f) changedFileSet.add(f); }
     }
 
     // 2. Uncommitted changes (working tree vs HEAD)
-    const unstaged = tryRunGit(['diff', '--name-only', 'HEAD'], worktreePath);
+    const unstaged = await tryRunGit(['diff', '--name-only', 'HEAD'], worktreePath);
     if (unstaged) {
       for (const f of unstaged.split('\n')) { if (f) changedFileSet.add(f); }
     }
 
     // 3. Staged but not yet committed changes
-    const staged = tryRunGit(['diff', '--name-only', '--cached', 'HEAD'], worktreePath);
+    const staged = await tryRunGit(['diff', '--name-only', '--cached', 'HEAD'], worktreePath);
     if (staged) {
       for (const f of staged.split('\n')) { if (f) changedFileSet.add(f); }
     }
@@ -358,11 +359,11 @@ export class FileEvolutionTracker {
     for (const filePath of changedFiles) {
       try {
         // Use mergeBase comparison against working tree to capture all changes
-        const diffOutput = tryRunGit(['diff', mergeBase, '--', filePath], worktreePath) ?? '';
+        const diffOutput = (await tryRunGit(['diff', mergeBase, '--', filePath], worktreePath)) ?? '';
 
         let oldContent = '';
         try {
-          oldContent = runGit(['show', `${mergeBase}:${filePath}`], worktreePath);
+          oldContent = await runGit(['show', `${mergeBase}:${filePath}`], worktreePath);
         } catch {
           // File is new
         }

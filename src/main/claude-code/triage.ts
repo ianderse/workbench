@@ -13,6 +13,8 @@
  *   unfamiliar; "if you could describe the diff in one sentence, skip the plan")
  */
 
+import { readFileSync } from 'fs';
+import path from 'path';
 import { runClaudeText, READ_ONLY_TOOLS } from './run-text';
 import type {
   ClaudeCodeTaskSettings,
@@ -108,6 +110,33 @@ function isOneOf<T extends string>(value: unknown, options: readonly T[]): value
   return typeof value === 'string' && (options as readonly string[]).includes(value);
 }
 
+/** The scripts a project's package.json defines, or null when there is no readable one */
+function packageScripts(cwd: string): Set<string> | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path.join(cwd, 'package.json'), 'utf-8')) as {
+      scripts?: Record<string, unknown>;
+    };
+    return new Set(parsed.scripts && typeof parsed.scripts === 'object' ? Object.keys(parsed.scripts) : []);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Drop `npm run <script>` commands the project doesn't define. Triage is told to list only
+ * commands it found evidence for, but it does sometimes name a conventional script that isn't
+ * there (`npm run typecheck`); the run then treats that command as a check and can report it
+ * as passing although it only ever printed "Missing script".
+ */
+function keepRunnableChecks(verification: string[], cwd: string): string[] {
+  const scripts = packageScripts(cwd);
+  if (!scripts) return verification;
+  return verification.filter((command) => {
+    const script = /^\s*(?:npm|yarn|pnpm|bun)\s+run\s+([\w:.-]+)/.exec(command)?.[1];
+    return !script || scripts.has(script);
+  });
+}
+
 /** Assess a task and pick model, effort and planning */
 export async function triageTask(input: TriageInput): Promise<{ triage: TaskTriage; costUsd?: number }> {
   const { settings } = input;
@@ -139,9 +168,12 @@ export async function triageTask(input: TriageInput): Promise<{ triage: TaskTria
   const effort: ClaudeEffort = isOneOf(raw.effort, CLAUDE_EFFORTS) ? raw.effort : settings.fixedEffort;
   const scope: TaskScope = isOneOf(raw.scope, ['trivial', 'small', 'medium', 'large'] as const) ? raw.scope : 'medium';
   const title = typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim().replace(/\.$/, '') : '';
-  const verification = Array.isArray(raw.verification)
-    ? raw.verification.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
-    : [];
+  const verification = keepRunnableChecks(
+    Array.isArray(raw.verification)
+      ? raw.verification.filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      : [],
+    input.cwd,
+  );
 
   const triage = applyPlanningPolicy({
     model,

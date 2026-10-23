@@ -24,9 +24,6 @@ import type {
   AutoBuildVersionInfo,
   InitializationResult,
   CreateProjectFolderResult,
-  ProjectContextData,
-  ProjectIndex,
-  ProjectEnvConfig,
   GitStatus,
   CustomMcpServer,
   McpHealthCheckResult,
@@ -37,6 +34,8 @@ import type {
   TaskStatus,
   RateLimitHold,
   TaskStartOptions,
+  TaskReviewOptions,
+  ArchivedTaskRun,
   ImplementationPlan,
   ExecutionProgress,
   WorktreeStatus,
@@ -47,6 +46,7 @@ import type {
   WorktreeCreatePRResult,
   WorktreeMergePROptions,
   WorktreeMergePRResult,
+  WorktreeLocalMergeResult,
   MergePRProgress,
   PullRequestState,
   TaskRecoveryResult,
@@ -62,8 +62,6 @@ import type {
   TerminalCreateOptions,
   TerminalSession,
   TerminalRestoreResult,
-  SessionDateInfo,
-  SessionDateRestoreResult,
   AuthFailureInfo,
   RetryWithProfileRequest,
   CreateTerminalWorktreeRequest,
@@ -132,6 +130,9 @@ export interface ElectronAPI {
   removeProject: (projectId: string) => Promise<IPCResult>;
   getProjects: () => Promise<IPCResult<Project[]>>;
   getProjectCostMetrics: () => Promise<IPCResult<import('./project').ProjectCostMetrics[]>>;
+  watchProjectCostMetrics: () => Promise<IPCResult>;
+  unwatchProjectCostMetrics: () => Promise<IPCResult>;
+  onProjectCostMetricsChanged: (callback: () => void) => () => void;
   updateProjectSettings: (projectId: string, settings: Partial<ProjectSettings>) => Promise<IPCResult>;
   initializeProject: (projectId: string) => Promise<IPCResult<InitializationResult>>;
   checkProjectVersion: (projectId: string) => Promise<IPCResult<AutoBuildVersionInfo>>;
@@ -139,6 +140,9 @@ export interface ElectronAPI {
   // Tab State (persisted in main process for reliability)
   getTabState: () => Promise<IPCResult<TabState>>;
   saveTabState: (tabState: TabState) => Promise<IPCResult>;
+
+  /** A project was added or removed (in this window or another one) */
+  onProjectListChanged: (callback: () => void) => () => void;
 
   // Kanban preferences (per-project column collapse state)
   getKanbanPreferences: (projectId: string) => Promise<IPCResult<KanbanPreferences | null>>;
@@ -152,7 +156,7 @@ export interface ElectronAPI {
   startTask: (taskId: string, options?: TaskStartOptions) => void;
   stopTask: (taskId: string) => void;
   retryTask: (taskId: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
-  submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[]) => Promise<IPCResult>;
+  submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[], options?: TaskReviewOptions) => Promise<IPCResult>;
   updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean }) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
   recoverStuckTask: (taskId: string, options?: TaskRecoveryOptions) => Promise<IPCResult<TaskRecoveryResult>>;
   checkTaskRunning: (taskId: string) => Promise<IPCResult<boolean>>;
@@ -170,6 +174,7 @@ export interface ElectronAPI {
   mergeWorktreePreview: (taskId: string) => Promise<IPCResult<WorktreeMergeResult>>;
   createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
   mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
+  mergeWorktreeLocal: (taskId: string) => Promise<IPCResult<WorktreeLocalMergeResult>>;
   getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
   discardWorktree: (taskId: string, skipStatusChange?: boolean) => Promise<IPCResult<WorktreeDiscardResult>>;
   clearStagedState: (taskId: string) => Promise<IPCResult<{ cleared: boolean }>>;
@@ -206,9 +211,6 @@ export interface ElectronAPI {
   clearTerminalSessions: (projectPath: string) => Promise<IPCResult>;
   resumeClaudeInTerminal: (id: string, options?: { dangerouslySkipPermissions?: boolean }) => void;
   activateDeferredClaudeResume: (id: string) => void;
-  getTerminalSessionDates: (projectPath?: string) => Promise<IPCResult<SessionDateInfo[]>>;
-  getTerminalSessionsForDate: (date: string, projectPath: string) => Promise<IPCResult<TerminalSession[]>>;
-  restoreTerminalSessionsFromDate: (date: string, projectPath: string, cols?: number, rows?: number) => Promise<IPCResult<SessionDateRestoreResult>>;
   saveTerminalBuffer: (terminalId: string, serialized: string) => Promise<void>;
   checkTerminalPtyAlive: (terminalId: string) => Promise<IPCResult<{ alive: boolean }>>;
   updateTerminalDisplayOrders: (
@@ -351,14 +353,6 @@ export interface ElectronAPI {
   // App info
   getAppVersion: () => Promise<string>;
 
-  // Context operations
-  getProjectContext: (projectId: string) => Promise<IPCResult<ProjectContextData>>;
-  refreshProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndex>>;
-
-  // Environment configuration operations
-  getProjectEnv: (projectId: string) => Promise<IPCResult<ProjectEnvConfig>>;
-  updateProjectEnv: (projectId: string, config: Partial<ProjectEnvConfig>) => Promise<IPCResult>;
-
   // Electron app update operations
   checkAppUpdate: () => Promise<IPCResult<AppUpdateCheckResult>>;
   downloadAppUpdate: () => Promise<IPCResult>;
@@ -434,15 +428,16 @@ export interface ElectronAPI {
 
   // Task logs operations
   getTaskLogs: (projectId: string, specId: string) => Promise<IPCResult<TaskLogs | null>>;
+  getPreviousTaskRuns: (projectId: string, specId: string) => Promise<IPCResult<ArchivedTaskRun[]>>;
   watchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
-  unwatchTaskLogs: (specId: string) => Promise<IPCResult>;
+  unwatchTaskLogs: (projectId: string, specId: string) => Promise<IPCResult>;
 
   // Task logs event listeners
   onTaskLogsChanged: (
-    callback: (specId: string, logs: TaskLogs) => void
+    callback: (specId: string, logs: TaskLogs, projectId?: string) => void
   ) => () => void;
   onTaskLogsStream: (
-    callback: (specId: string, chunk: TaskLogStreamChunk) => void
+    callback: (specId: string, chunk: TaskLogStreamChunk, projectId?: string) => void
   ) => () => void;
   onMergeProgress: (
     callback: (taskId: string, progress: MergeProgress) => void
@@ -476,6 +471,20 @@ export interface ElectronAPI {
   installGraphify: () => Promise<IPCResult<{ command: string }>>;
   getGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo | null>>;
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
+  /** The project's CLAUDE.md stats, or null when it has none */
+  getProjectIndex: (projectId: string) => Promise<IPCResult<import('./cli').ProjectIndexInfo | null>>;
+  /** Write (or rewrite) the project's CLAUDE.md with a short `/init` run */
+  buildProjectIndex: (projectId: string) => Promise<IPCResult<import('./cli').ProjectIndexInfo>>;
+  /** Whether a project index build is running for the project */
+  isProjectIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
+  /** Remove the project's CLAUDE.md, which is what switching Use CLAUDE.md off does */
+  deleteProjectIndex: (projectId: string) => Promise<IPCResult>;
+  /** The project's memory index stats, or null when it has never been built */
+  getMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo | null>>;
+  /** Build (or rebuild) the project's memories from its past Claude Code sessions */
+  buildMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo>>;
+  /** Whether a memory index build is running for the project */
+  isMemoryIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   isGraphifyEnabled: (projectId: string) => Promise<IPCResult<boolean>>;
   setGraphifyEnabled: (projectId: string, enabled: boolean) => Promise<IPCResult>;
@@ -486,7 +495,7 @@ export interface ElectronAPI {
   getLiveAgentStatus: () => Promise<IPCResult<import('./live-agent').LiveAgentStatus>>;
   getLiveAgentProject: (projectPath: string) => Promise<IPCResult<boolean>>;
   setLiveAgentProject: (projectPath: string, enabled: boolean) => Promise<IPCResult<{ hooksError?: string }>>;
-  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string) => Promise<IPCResult>;
+  subscribeLiveAgent: (clientId: string, cwd: string, projectPath: string, terminalId: string) => Promise<IPCResult>;
   unsubscribeLiveAgent: (clientId: string) => Promise<IPCResult>;
   onLiveAgentStatus: (callback: (status: import('./live-agent').LiveAgentStatus) => void) => () => void;
   onLiveAgentMessage: (callback: (clientId: string, data: string) => void) => () => void;
@@ -494,6 +503,23 @@ export interface ElectronAPI {
   // MCP Server health check operations
   checkMcpHealth: (server: CustomMcpServer) => Promise<IPCResult<McpHealthCheckResult>>;
   testMcpConnection: (server: CustomMcpServer) => Promise<IPCResult<McpTestConnectionResult>>;
+
+  // Project windows (one project per window)
+  /** Project this window was opened for (null for the first window) */
+  assignedProjectId: string | null;
+  listProjectWindows: () => Promise<IPCResult<import('./window').ProjectWindowInfo[]>>;
+  reportWindowProject: (projectId: string | null) => void;
+  openProjectWindow: (projectId: string) => Promise<IPCResult<{ focused: boolean }>>;
+  closeProjectWindow: (projectId: string) => Promise<IPCResult>;
+  onProjectWindowsChanged: (callback: (windows: import('./window').ProjectWindowInfo[]) => void) => () => void;
+
+  // Windows shell setting (Settings > General)
+  /** The value the app started with, the one it runs with, and the last WSL availability check */
+  getShellRuntimeStatus: () => Promise<IPCResult<import('./settings').ShellRuntimeStatus>>;
+  /** Check WSL availability again */
+  refreshWslAvailability: () => Promise<IPCResult<import('./settings').ShellRuntimeStatus>>;
+  /** Restart the app (applies a changed shell setting) */
+  relaunchApp: () => Promise<IPCResult>;
 
   // Queue Routing API (rate limit recovery)
   queue: import('../../preload/api/queue-api').QueueAPI;
