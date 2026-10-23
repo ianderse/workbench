@@ -151,6 +151,12 @@
       "icon": "resources/icon.ico",
       "target": [
         "nsis"
+      ],
+      "extraResources": [
+        {
+          "from": "node_modules/.cache/node-pty-win32/node_modules/@lydell/node-pty-win32-x64",
+          "to": "node_modules/@lydell/node-pty-win32-x64"
+        }
       ]
     },
     "linux": {

@@ -140,6 +140,43 @@ function isNodePtyBuilt() {
 }
 
 /**
+ * Not on Windows: install node-pty's Windows binary into node_modules/.cache/node-pty-win32, which
+ * `npm run package:win` ships with the app (the `win.extraResources` entry in package.json). npm
+ * only installs the binary of the machine it runs on, so a Windows package built on Linux or in
+ * WSL otherwise has no Windows terminal binary. Release builds package Windows on Windows, so CI
+ * skips this.
+ */
+function installWindowsPtyBinary() {
+  if (isWindows || process.env.CI) return;
+
+  const root = path.join(__dirname, '..', '..');
+  let version;
+  try {
+    version = JSON.parse(fs.readFileSync(path.join(root, 'node_modules', '@lydell', 'node-pty', 'package.json'), 'utf8')).version;
+  } catch {
+    return; // node-pty isn't installed
+  }
+
+  const prefix = path.join(root, 'node_modules', '.cache', 'node-pty-win32');
+  const installed = path.join(prefix, 'node_modules', '@lydell', 'node-pty', 'package.json');
+  try {
+    if (JSON.parse(fs.readFileSync(installed, 'utf8')).version === version) return;
+  } catch {
+    // Not installed yet
+  }
+
+  console.log(`[postinstall] Installing node-pty ${version}'s Windows binary for Windows packages...`);
+  const result = spawnSync(
+    'npm',
+    ['install', '--prefix', prefix, '--os=win32', '--cpu=x64', '--no-save', '--no-package-lock', '--no-audit', '--no-fund', `@lydell/node-pty@${version}`],
+    { cwd: root, stdio: 'inherit' }
+  );
+  if (result.status !== 0) {
+    console.warn('[postinstall] Could not install the Windows terminal binary; Windows packages built here will have no terminals.\n');
+  }
+}
+
+/**
  * Main postinstall logic
  */
 async function main() {
@@ -148,6 +185,8 @@ async function main() {
   if (isLinux) {
     fixChromeSandbox();
   }
+
+  installWindowsPtyBinary();
 
   // If node-pty is already built (e.g., from a previous successful install), skip
   if (isNodePtyBuilt()) {
