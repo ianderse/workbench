@@ -301,6 +301,37 @@ Supports Windows, macOS, and Linux; CI runs tests on all three. Use `src/main/pl
 | `requiresShell(command)`                  | `.cmd/.bat` shell detection (Win) |
 | `joinPaths(...parts)`                     | Platform-correct path joining     |
 
+### Shell runtime (Windows: PWSH or WSL)
+
+On Windows, Settings > General > Shell (`AppSettings.windowsShell`, `'pwsh'` by default, applied after a restart)
+chooses where Workbench runs everything: natively with PowerShell agent windows (`pwsh.exe`, falling back to
+Windows PowerShell 5.1), or inside WSL (the default distro). `src/main/platform/shell-runtime.ts`
+(`initShellRuntime()` at startup, `whenShellRuntimeReady()`, `isWslRuntime()`, `getWslInfo()`,
+`toRuntimePath()` / `toHostPath()`) holds the active runtime; `wsl-detect.ts` checks availability and probes the
+distro once (user, home, login shell and PATH, mount root, networking, interop, tool paths). When WSL can't
+start, the session runs natively and the Settings row says why. These modules are not re-exported from `platform/index.ts`.
+
+- **Start tools through `runTool` / `spawnTool` / `killRuntimeProcess`** (`platform/runtime-exec.ts`) and git
+  through `git()` (`utils/git-exec.ts`), never `execFile(getToolPath(...))` or a literal `'git'` spawn (an
+  architecture test fails on those). In WSL mode they run `wsl.exe -d <distro> --cd <dir> --exec ...`, translate
+  whole-argument Windows paths, and pass changed env vars through `WSLENV` (never PATH); in pwsh mode they behave
+  as a plain spawn. `getToolPath()` and `getToolInfoAsync()` describe tools (Linux paths in WSL mode), they don't
+  run them.
+- **Stored paths stay Windows paths** (projects, worktrees, profile config dirs, the WSL Claude home as
+  `\\wsl.localhost\<distro>\home\<user>`); translate only at process boundaries (args, cwd, env, prompt text,
+  git output such as `worktree list --porcelain`).
+- **Claude home:** use `getClaudeHome()` / `expandClaudeHome()` / `joinClaudeHome()` / `claudeProjectSlug()`
+  (`platform/claude-home.ts`), not `os.homedir()`. WSL accounts live in the Linux home with file-only credentials
+  and their own profile store (`claude-profiles.wsl.json`).
+- **Agent windows** know their `shellKind` (`'cmd' | 'powershell' | 'posix'`); command builders in
+  `terminal/cli-integration-handler.ts` and `shared/utils/shell-escape.ts` choose syntax from it, not from
+  `isWindows()`. WSL windows type bash syntax (wrapped in `bash -c` when the login shell is fish).
+- **WSL2 NAT networking** can't reach the app's `127.0.0.1`: Insights task tools go through a stdio bridge
+  (`insights/task-tools-bridge.cjs`) run as a Windows process through interop, and the Live agent hook command has
+  a WSL branch. Watchers poll `\\wsl.localhost` paths (`fs.watch` fails there).
+- **Worktrees** use relative links only when both runtimes' git is 2.48 or newer; on a runtime switch,
+  `worktree/runtime-switch.ts` repairs every project's worktrees in the background.
+
 ## Known Gotchas
 
 **Electron path resolution** — Paths often differ between dev and packaged builds (`app.isPackaged`,
