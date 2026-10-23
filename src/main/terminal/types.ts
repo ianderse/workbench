@@ -1,9 +1,8 @@
 import type * as pty from '@lydell/node-pty';
 import type { BrowserWindow } from 'electron';
-import type { TerminalWorktreeConfig, WindowsShellType } from '../../shared/types';
+import type { ShellKind, TerminalWorktreeConfig } from '../../shared/types';
 
-// Re-export WindowsShellType for backwards compatibility
-export type { WindowsShellType } from '../../shared/types';
+export type { ShellKind } from '../../shared/types';
 
 /**
  * Terminal process tracking
@@ -27,8 +26,10 @@ export interface TerminalProcess {
   graphifyOut?: string;
   /** Whether the project learns from its sessions, so Claude is told to save what it learns */
   selfImprove?: boolean;
-  /** Shell type for Windows (affects command chaining syntax) */
-  shellType?: WindowsShellType;
+  /** The shell the window runs, which decides the syntax of the commands typed into it */
+  shellKind?: ShellKind;
+  /** A WSL window whose login shell is fish: the POSIX lines the app types run through `bash -c` */
+  wrapInBash?: boolean;
   /** Whether PTY has emitted exit; used to avoid writes/resizes on dead PTYs */
   hasExited?: boolean;
   /**

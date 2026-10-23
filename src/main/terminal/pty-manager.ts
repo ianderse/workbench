@@ -5,15 +5,16 @@
 
 import * as pty from '@lydell/node-pty';
 import * as os from 'os';
+import * as path from 'path';
 import { existsSync } from 'fs';
-import type { TerminalProcess, WindowGetter, WindowsShellType } from './types';
-import { isWindows, getWindowsShellPaths } from '../platform';
+import type { ShellKind, TerminalProcess, WindowGetter } from './types';
+import { isWindows, getWindowsShellPaths, getPathDelimiter } from '../platform';
+import { getWslInfo } from '../platform/shell-runtime';
+import { buildWslPtyLaunch } from './wsl-terminal';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeProfileManager } from '../claude-profile-manager';
-import { readSettingsFile } from '../settings-utils';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
-import type { SupportedTerminal } from '../../shared/types/settings';
 import { withClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { noteTerminalWrite } from '../live-agent/terminal-activity';
 
@@ -50,8 +51,10 @@ export function getIsShuttingDown(): boolean {
  */
 export interface SpawnPtyResult {
   pty: pty.IPty;
-  /** Shell type for Windows (affects command chaining syntax) */
-  shellType?: WindowsShellType;
+  /** The shell's kind (decides the syntax of the commands typed into it) */
+  shellKind: ShellKind;
+  /** A WSL window whose login shell is fish: the lines the app types run through `bash -c` */
+  wrapInBash?: boolean;
 }
 
 /**
@@ -59,7 +62,8 @@ export interface SpawnPtyResult {
  */
 interface WindowsShellResult {
   shell: string;
-  shellType: WindowsShellType;
+  shellKind: ShellKind;
+  args: string[];
 }
 
 /**
@@ -100,51 +104,71 @@ function waitForPtyExit(terminalId: string, timeoutMs?: number): Promise<void> {
 }
 
 /**
- * Determine shell type from shell path.
- * Only PowerShell 5.1 (powershell.exe) needs special handling with ';' separator.
- * PowerShell 7+ (pwsh.exe) supports '&&' like cmd.exe.
+ * Determine a Windows shell's kind from its path: PowerShell 7 (pwsh.exe) and Windows PowerShell
+ * 5.1 (powershell.exe) take PowerShell syntax, bash-style shells POSIX syntax, the rest (cmd.exe)
+ * cmd.exe syntax.
  */
-function detectShellType(shellPath: string): WindowsShellType {
-  // Extract just the filename from the path
+export function detectWindowsShellKind(shellPath: string): ShellKind {
   const filename = shellPath.split(/[/\\]/).pop()?.toLowerCase() || '';
-  // Only powershell.exe (PS 5.1) needs ';' separator
-  // pwsh.exe (PS 7+) supports '&&' so we treat it like cmd
-  if (filename === 'powershell.exe') {
+  if (filename === 'pwsh.exe' || filename === 'pwsh' || filename === 'powershell.exe' || filename === 'powershell') {
     return 'powershell';
   }
-  // Everything else (cmd, pwsh, bash, etc.) uses && syntax
+  if (filename === 'bash.exe' || filename === 'sh.exe' || filename === 'zsh.exe') {
+    return 'posix';
+  }
   return 'cmd';
 }
 
-/**
- * Get the Windows shell executable based on preferred terminal setting
- */
-function getWindowsShell(preferredTerminal: SupportedTerminal | undefined): WindowsShellResult {
-  // If no preference or 'system', use COMSPEC (usually cmd.exe)
-  if (!preferredTerminal || preferredTerminal === 'system') {
-    const shell = process.env.COMSPEC || 'cmd.exe';
-    return { shell, shellType: detectShellType(shell) };
+/** pwsh.exe in a folder on PATH (e.g. a winget, Store or scoop install outside Program Files) */
+function findPwshOnPath(): string | null {
+  for (const dir of (process.env.PATH || process.env.Path || '').split(getPathDelimiter())) {
+    if (!dir.trim()) continue;
+    const candidate = path.win32.join(dir.trim(), 'pwsh.exe');
+    if (existsSync(candidate)) return candidate;
   }
-
-  // Check if we have paths defined for this terminal type (from platform module)
-  const windowsShellPaths = getWindowsShellPaths();
-  const paths = windowsShellPaths[preferredTerminal];
-  if (paths) {
-    // Find the first existing shell
-    for (const shellPath of paths) {
-      if (existsSync(shellPath)) {
-        return { shell: shellPath, shellType: detectShellType(shellPath) };
-      }
-    }
-  }
-
-  // Fallback to COMSPEC for unrecognized terminals
-  const shell = process.env.COMSPEC || 'cmd.exe';
-  return { shell, shellType: detectShellType(shell) };
+  return null;
 }
 
 /**
- * Spawn a new PTY process with appropriate shell and environment
+ * The PowerShell agent windows run on Windows: PowerShell 7 (pwsh.exe in Program Files, then on
+ * PATH), else Windows PowerShell 5.1, which every Windows has. Only existsSync checks: nothing is
+ * started to find it.
+ */
+export function findWindowsPowerShell(): string {
+  const candidates = getWindowsShellPaths().powershell ?? [];
+  const isPwsh = (shellPath: string) => /pwsh\.exe$/i.test(shellPath);
+
+  const pwsh = candidates.find((shellPath) => isPwsh(shellPath) && existsSync(shellPath)) ?? findPwshOnPath();
+  if (pwsh) return pwsh;
+
+  const windowsPowerShell = candidates.find((shellPath) => !isPwsh(shellPath) && existsSync(shellPath));
+  return windowsPowerShell ?? 'powershell.exe';
+}
+
+/**
+ * The shell agent windows and terminals start on Windows.
+ *
+ * Native tools ('pwsh' runtime): PowerShell, whatever the hidden `preferredTerminal` setting says
+ * (that setting only picks the external terminal for openTerminalWithCommand). `-NoLogo` hides the
+ * banner. The user's PowerShell profile still loads, like in any terminal they open: the commands
+ * the app types use only built-in cmdlets by their full names (Set-Location, Clear-Host,
+ * Get-Content, Remove-Item), `$env:` and the call operator, which a profile's aliases and prompt
+ * don't change, and keystrokes typed while the profile loads wait in the console's input buffer.
+ *
+ * The WSL runtime starts wsl.exe instead (see spawnPtyProcess and wsl-terminal.ts).
+ */
+function getWindowsShell(): WindowsShellResult {
+  const shell = findWindowsPowerShell();
+  return { shell, shellKind: detectWindowsShellKind(shell), args: ['-NoLogo'] };
+}
+
+/**
+ * Spawn a new PTY process with appropriate shell and environment.
+ *
+ * In the WSL runtime the window runs the user's login shell inside the distribution
+ * (`wsl.exe -d <distro> --cd <cwd inside WSL>`, shellKind 'posix'), with the variables the app adds
+ * for the window passed through WSLENV (see wsl-terminal.ts). Callers wait for
+ * whenShellRuntimeReady() first, so a window opened at startup doesn't start in the wrong runtime.
  */
 export function spawnPtyProcess(
   cwd: string,
@@ -152,27 +176,6 @@ export function spawnPtyProcess(
   rows: number,
   profileEnv?: Record<string, string>
 ): SpawnPtyResult {
-  // Read user's preferred terminal setting
-  const settings = readSettingsFile();
-  const preferredTerminal = settings?.preferredTerminal as SupportedTerminal | undefined;
-
-  let shell: string;
-  let shellType: WindowsShellType | undefined;
-
-  if (isWindows()) {
-    const windowsShell = getWindowsShell(preferredTerminal);
-    shell = windowsShell.shell;
-    shellType = windowsShell.shellType;
-  } else {
-    shell = process.env.SHELL || '/bin/zsh';
-    shellType = undefined; // Not applicable on Unix
-  }
-
-  const shellArgs = isWindows() ? [] : ['-l'];
-
-  debugLog('[PtyManager] Spawning shell:', shell, shellArgs, '(preferred:', preferredTerminal || 'system', ', shellType:', shellType, ')');
-  debugLog('[PtyManager] PTY dimensions requested - cols:', cols, 'rows:', rows, 'cwd:', cwd || os.homedir());
-
   // Create a clean environment without DEBUG to prevent Claude Code from
   // enabling debug mode when the Electron app is run in development mode.
   // Also remove ANTHROPIC_API_KEY to ensure Claude Code uses OAuth tokens
@@ -181,26 +184,61 @@ export function spawnPtyProcess(
   // show "Claude API" instead of "Claude Max" when ANTHROPIC_API_KEY is set.
   // Remove CLAUDECODE to allow launching Claude Code inside agent terminals —
   // without this, inherited CLAUDECODE triggers the nested session guard.
+  // (In WSL, a key the user's rc files export is removed by the `env -u` the claude command starts with.)
   const { DEBUG: _DEBUG, ANTHROPIC_API_KEY: _ANTHROPIC_API_KEY, CLAUDECODE: _CLAUDECODE, ...cleanEnv } = process.env;
+
+  // Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR
+  const env = withClaudeConfigDir({
+    ...cleanEnv,
+    ...profileEnv,
+    TERM: 'xterm-256color',
+    COLORTERM: 'truecolor',
+    // Suppress zsh's partial line indicator (%) that appears when output
+    // doesn't end with a newline. This prevents rendering artifacts in the terminal.
+    PROMPT_EOL_MARK: '',
+  });
+
+  const wslInfo = isWindows() ? getWslInfo() : null;
+  if (wslInfo) {
+    const launch = buildWslPtyLaunch(cwd, env, wslInfo, os.homedir());
+    debugLog('[PtyManager] Spawning WSL shell:', launch.file, launch.args, '(login shell:', wslInfo.loginShell, ')');
+    const ptyProcess = pty.spawn(launch.file, launch.args, {
+      name: 'xterm-256color',
+      cols,
+      rows,
+      cwd: launch.cwd,
+      env: launch.env,
+    });
+    return { pty: ptyProcess, shellKind: 'posix', ...(launch.wrapInBash ? { wrapInBash: true } : {}) };
+  }
+
+  let shell: string;
+  let shellKind: ShellKind;
+  let shellArgs: string[];
+
+  if (isWindows()) {
+    const windowsShell = getWindowsShell();
+    shell = windowsShell.shell;
+    shellKind = windowsShell.shellKind;
+    shellArgs = windowsShell.args;
+  } else {
+    shell = process.env.SHELL || '/bin/zsh';
+    shellKind = 'posix';
+    shellArgs = ['-l'];
+  }
+
+  debugLog('[PtyManager] Spawning shell:', shell, shellArgs, '(shellKind:', shellKind, ')');
+  debugLog('[PtyManager] PTY dimensions requested - cols:', cols, 'rows:', rows, 'cwd:', cwd || os.homedir());
 
   const ptyProcess = pty.spawn(shell, shellArgs, {
     name: 'xterm-256color',
     cols,
     rows,
     cwd: cwd || os.homedir(),
-    // Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR
-    env: withClaudeConfigDir({
-      ...cleanEnv,
-      ...profileEnv,
-      TERM: 'xterm-256color',
-      COLORTERM: 'truecolor',
-      // Suppress zsh's partial line indicator (%) that appears when output
-      // doesn't end with a newline. This prevents rendering artifacts in the terminal.
-      PROMPT_EOL_MARK: '',
-    }),
+    env,
   });
 
-  return { pty: ptyProcess, shellType };
+  return { pty: ptyProcess, shellKind };
 }
 
 /**

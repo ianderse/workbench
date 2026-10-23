@@ -3,12 +3,14 @@
  */
 
 /**
- * Shell type for Windows terminals.
- * Used to determine correct command chaining syntax:
- * - 'powershell': Uses ';' (PowerShell 5.1 doesn't support '&&')
- * - 'cmd': Uses '&&' (cmd.exe, PowerShell 7+, bash, etc.)
+ * The kind of shell an agent window runs, which decides the syntax of every command the app types
+ * into it (changing directory, quoting, environment variables, chaining):
+ * - 'posix': bash, zsh, fish and other Unix shells (single quotes, `VAR=value cmd`, `&&`)
+ * - 'cmd': cmd.exe and the other Windows shells that accept its syntax (`cd /d "..."`, `set "VAR=..."`, `&&`)
+ * - 'powershell': PowerShell 7 (pwsh.exe) and Windows PowerShell 5.1 (`Set-Location -LiteralPath '...'`,
+ *   `$env:VAR = '...'`, `& 'cmd'`; chained with ';' since 5.1 has no '&&')
  */
-export type WindowsShellType = 'powershell' | 'cmd';
+export type ShellKind = 'cmd' | 'powershell' | 'posix';
 
 export interface TerminalCreateOptions {
   id: string;

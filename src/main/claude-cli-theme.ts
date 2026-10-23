@@ -13,11 +13,17 @@
 import { app, nativeTheme } from 'electron';
 import { existsSync, writeFileSync } from 'fs';
 import path from 'path';
-import { isWindows } from './platform';
-import { escapeShellArg, escapeForWindowsDoubleQuote } from '../shared/utils/shell-escape';
+import {
+  defaultShellKind,
+  escapeForWindowsDoubleQuote,
+  escapePowerShellArg,
+  escapeShellArg
+} from '../shared/utils/shell-escape';
+import type { ShellKind } from '../shared/types/terminal';
 import { readSettingsFile } from './settings-utils';
 import { DEFAULT_APP_SETTINGS } from '../shared/constants/config';
 import { appLog } from './app-logger';
+import { isWslRuntime, toRuntimePath } from './platform/shell-runtime';
 
 /** Claude Code's two base themes; both files are written at startup */
 const CLAUDE_THEMES = ['dark', 'light'] as const;
@@ -56,10 +62,14 @@ function isAppDark(): boolean {
 
 /**
  * The ` --settings <file>` flag giving Claude Code the theme that matches the app's, or an empty
- * string when the file isn't there (the session then keeps the user's own theme).
+ * string when the file isn't there (the session then keeps the user's own theme). Quoted for the
+ * window's shell (the platform's default agent window shell when it isn't given). A POSIX window
+ * in the WSL runtime gets the file's path inside WSL (`/mnt/c/...`).
  */
-export function claudeThemeFlag(): string {
+export function claudeThemeFlag(shellKind: ShellKind = defaultShellKind()): string {
   const file = themeSettingsPath(isAppDark() ? 'dark' : 'light');
   if (!existsSync(file)) return '';
-  return ` --settings ${isWindows() ? `"${escapeForWindowsDoubleQuote(file)}"` : escapeShellArg(file)}`;
+  if (shellKind === 'powershell') return ` --settings ${escapePowerShellArg(file)}`;
+  if (shellKind === 'cmd') return ` --settings "${escapeForWindowsDoubleQuote(file)}"`;
+  return ` --settings ${escapeShellArg(isWslRuntime() ? toRuntimePath(file) : file)}`;
 }

@@ -5,26 +5,25 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { claudeProjectSlug, expandClaudeHome, joinClaudeHome } from '../platform/claude-home';
+import { toHostPath, toRuntimePath } from '../platform/shell-runtime';
 import type { TerminalProcess } from './types';
 import { getTerminalSessionStore, flushTerminalSessionStores, type TerminalSession } from '../terminal-session-store';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 
 /**
- * Get the Claude project slug from a project path.
- * Claude uses the full path with forward slashes replaced by dashes.
- */
-function getClaudeProjectSlug(projectPath: string): string {
-  return projectPath.replace(/[/\\]/g, '-');
-}
-
-/**
- * Find the most recent Claude session file for a project (the one `claude --continue` picks up)
+ * Find the most recent Claude session file for a project (the one `claude --continue` picks up).
+ *
+ * Claude Code names the project's folder after the path as it sees it: in the WSL runtime the
+ * Linux path (`/mnt/c/...`), under the Linux home's config dir, which the app reads through its
+ * UNC path.
  */
 export function findMostRecentClaudeSession(projectPath: string, configDir?: string): string | null {
-  const slug = getClaudeProjectSlug(projectPath);
-  // Claude writes sessions under its config dir (CLAUDE_CONFIG_DIR of the profile, else ~/.claude)
-  const claudeProjectDir = path.join(configDir || path.join(os.homedir(), '.claude'), 'projects', slug);
+  const slug = claudeProjectSlug(toRuntimePath(projectPath));
+  // Claude writes sessions under its config dir (CLAUDE_CONFIG_DIR of the profile, else ~/.claude);
+  // a Linux path of one is read through its UNC path
+  const configRoot = configDir ? toHostPath(expandClaudeHome(configDir)) : joinClaudeHome('.claude');
+  const claudeProjectDir = path.join(configRoot, 'projects', slug);
 
   try {
     if (!fs.existsSync(claudeProjectDir)) {

@@ -6,10 +6,18 @@
  */
 
 import { isWindows } from '../platform';
-import type { WindowsShellType } from '../types/terminal';
+import type { ShellKind } from '../types/terminal';
 
 // Re-export for convenience
-export type { WindowsShellType };
+export type { ShellKind };
+
+/**
+ * The shell kind to assume when a terminal doesn't say: PowerShell on Windows, POSIX elsewhere
+ * (the shells agent windows start by default)
+ */
+export function defaultShellKind(): ShellKind {
+  return isWindows() ? 'powershell' : 'posix';
+}
 
 /**
  * Escape a string for safe use as a shell argument.
@@ -35,6 +43,27 @@ export function escapeShellArg(arg: string): string {
 }
 
 /**
+ * Quote a string as a PowerShell single-quoted literal, for both PowerShell 7 and Windows
+ * PowerShell 5.1.
+ *
+ * Nothing expands inside single quotes (no `$`, backtick or subexpression), so only the quote
+ * characters need escaping, by doubling. PowerShell also ends a single-quoted string at the
+ * typographic quotes U+2018-U+201B, so those are doubled too. Line breaks are dropped: typed into a
+ * terminal they would submit the line early.
+ *
+ * Examples:
+ * - "C:\Program Files" -> 'C:\Program Files'
+ * - "it's" -> 'it''s'
+ * - '$env:X; rm' -> '$env:X; rm'
+ */
+export function escapePowerShellArg(arg: string): string {
+  const escaped = arg
+    .replace(/[\r\n]/g, '')
+    .replace(/['\u2018\u2019\u201A\u201B]/g, (quote) => quote + quote);
+  return `'${escaped}'`;
+}
+
+/**
  * Escape a path for use in a cd command.
  *
  * @param path - The path to escape
@@ -45,32 +74,33 @@ function escapeShellPath(path: string): string {
 }
 
 /**
- * Build a safe cd command from a path.
- * Uses platform-appropriate quoting (double quotes on Windows, single quotes on Unix).
+ * Build a safe cd command from a path, in the syntax of the terminal's shell, ending in the
+ * separator that chains the next command.
  *
- * On Windows, uses the /d flag to allow changing drives (e.g., from C: to D:)
- * and uses escapeForWindowsDoubleQuote for proper escaping inside double quotes.
+ * - posix: `cd '<path>' && `
+ * - cmd: `cd /d "<path>" && ` (/d also changes the drive; escapeForWindowsDoubleQuote inside the quotes)
+ * - powershell: `Set-Location -LiteralPath '<path>' -ErrorAction Stop; ` - Windows PowerShell 5.1
+ *   has no '&&', and -ErrorAction Stop makes a failed cd end the whole typed line, like '&&' would,
+ *   so nothing chained after it runs in the wrong directory. -LiteralPath keeps '[' and ']' in
+ *   folder names from being read as wildcards.
  *
  * @param path - The directory path
- * @param shellType - On Windows, specify 'powershell' or 'cmd' for correct command chaining.
- *                    PowerShell 5.1 doesn't support '&&', so ';' is used instead.
- * @returns A safe "cd '<path>' && " or "cd '<path>'; " string, or empty string if path is undefined
+ * @param shellKind - The terminal's shell kind (defaults to defaultShellKind())
+ * @returns The cd command with its separator, or an empty string if path is undefined
  */
-export function buildCdCommand(path: string | undefined, shellType?: WindowsShellType): string {
+export function buildCdCommand(path: string | undefined, shellKind: ShellKind = defaultShellKind()): string {
   if (!path) {
     return '';
   }
 
-  // Windows cmd.exe uses double quotes, Unix shells use single quotes
-  if (isWindows()) {
-    // On Windows, use cd /d to change drives and directories simultaneously.
+  if (shellKind === 'powershell') {
+    return `Set-Location -LiteralPath ${escapePowerShellArg(path)} -ErrorAction Stop; `;
+  }
+
+  if (shellKind === 'cmd') {
     // For values inside double quotes, use escapeForWindowsDoubleQuote() because
     // caret is literal inside double quotes in cmd.exe (only double quotes need escaping).
-    const escaped = escapeForWindowsDoubleQuote(path);
-    // PowerShell 5.1 doesn't support '&&' - use ';' instead
-    // cmd.exe uses '&&' for conditional execution
-    const separator = shellType === 'powershell' ? '; ' : ' && ';
-    return `cd /d "${escaped}"${separator}`;
+    return `cd /d "${escapeForWindowsDoubleQuote(path)}" && `;
   }
 
   return `cd ${escapeShellPath(path)} && `;

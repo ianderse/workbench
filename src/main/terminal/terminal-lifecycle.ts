@@ -16,6 +16,7 @@ import type {
   TerminalOperationResult
 } from './types';
 import { isWindows } from '../platform';
+import { whenShellRuntimeReady } from '../platform/shell-runtime';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeCodeEnv } from '../claude-code-settings';
@@ -108,14 +109,19 @@ export async function createTerminal(
       effectiveCwd = projectPath || os.homedir();
     }
 
-    const { pty: ptyProcess, shellType } = PtyManager.spawnPtyProcess(
+    // The window's shell depends on the runtime (WSL or native), decided at startup: a window
+    // restored right after launch waits for it. In WSL, PtyManager translates the path values
+    // (CLAUDE_CONFIG_DIR, GRAPHIFY_OUT) to Linux paths and passes the window's variables through WSLENV.
+    await whenShellRuntimeReady();
+
+    const { pty: ptyProcess, shellKind, wrapInBash } = PtyManager.spawnPtyProcess(
       effectiveCwd || os.homedir(),
       cols,
       rows,
       mergedEnv
     );
 
-    debugLog('[TerminalLifecycle] PTY process spawned, pid:', ptyProcess.pid, 'shellType:', shellType);
+    debugLog('[TerminalLifecycle] PTY process spawned, pid:', ptyProcess.pid, 'shellKind:', shellKind);
 
     const terminalCwd = effectiveCwd || os.homedir();
     const terminal: TerminalProcess = {
@@ -127,7 +133,8 @@ export async function createTerminal(
       cwd: terminalCwd,
       outputBuffer: '',
       title: `Terminal ${terminals.size + 1}`,
-      shellType,
+      shellKind,
+      ...(wrapInBash ? { wrapInBash } : {}),
       graphifyOut,
       selfImprove,
     };

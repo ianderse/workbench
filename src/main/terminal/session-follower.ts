@@ -10,9 +10,10 @@
  * normal resume), and Ctrl+C stops following and leaves the shell.
  */
 
-import os from 'os';
 import path from 'path';
 import { promises as fsp } from 'fs';
+import { expandClaudeHome, isClaudeHomeInWsl, joinClaudeHome } from '../platform/claude-home';
+import { toHostPath } from '../platform/shell-runtime';
 
 /** What the follower needs to know about the task run */
 export interface FollowedRun {
@@ -185,9 +186,15 @@ export class SessionFollower {
   }
 }
 
-/** `<configDir>/projects/<any project>/<sessionId>.jsonl` */
+/**
+ * `<configDir>/projects/<any project>/<sessionId>.jsonl`. In the WSL runtime the config dir is in
+ * the Linux home, read through its UNC path (a Linux path is translated), and the app's own
+ * CLAUDE_CONFIG_DIR (a Windows setting Claude Code in WSL doesn't see) is left out.
+ */
 async function findTranscript(sessionId: string, configDir: string | undefined): Promise<string | null> {
-  const projectsDir = path.join(configDir || process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects');
+  const appConfigDir = isClaudeHomeInWsl() ? undefined : process.env.CLAUDE_CONFIG_DIR;
+  const root = configDir ? toHostPath(expandClaudeHome(configDir)) : appConfigDir || joinClaudeHome('.claude');
+  const projectsDir = path.join(root, 'projects');
   let projects: string[];
   try {
     projects = await fsp.readdir(projectsDir);
@@ -263,9 +270,12 @@ function summarizeInput(name: string, input: unknown, cwd: string): string {
     for (const key of keys) if (typeof value[key] === 'string' && value[key]) return value[key] as string;
     return '';
   };
+  // Claude Code in WSL writes Linux paths (/mnt/c/..., /home/...): compared as host paths, and
+  // shown as host paths when outside the working directory
   const relative = (file: string) => {
-    const rel = path.relative(cwd, file);
-    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : file;
+    const hostFile = toHostPath(file);
+    const rel = path.relative(toHostPath(cwd), hostFile);
+    return rel && !rel.startsWith('..') && !path.isAbsolute(rel) ? rel : hostFile;
   };
   switch (name) {
     case 'Read':
