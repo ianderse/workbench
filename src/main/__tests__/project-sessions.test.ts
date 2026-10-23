@@ -93,7 +93,7 @@ describe('finding a project\'s sessions', () => {
   it('leaves out a transcript that says nothing about where it ran, and an empty one', async () => {
     const empty = givenSession('.claude', 'empty', project);
     writeFileSync(empty, '');
-    const dir = path.join(root, '.claude', 'projects', project.replace(/[/.]/g, '-'));
+    const dir = path.dirname(empty);
     writeFileSync(path.join(dir, 'no-cwd.jsonl'), '{"type":"user","timestamp":"2026-10-20T09:00:00.000Z"}\n');
 
     expect(await ids()).toEqual([]);
