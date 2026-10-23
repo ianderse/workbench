@@ -12,7 +12,7 @@ import path from 'path';
 import type { Project, Task } from '../../shared/types';
 
 vi.mock('../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
-vi.mock('../cli-tool-manager', () => ({ getToolPath: () => 'git' }));
+vi.mock('../cli-tool-manager', () => ({ getToolPath: () => 'git', getToolPathAsync: async () => 'git' }));
 const worktrees = new Map<string, string>();
 vi.mock('../worktree-paths', () => ({ findTaskWorktree: (_projectPath: string, specId: string) => worktrees.get(specId) ?? null }));
 

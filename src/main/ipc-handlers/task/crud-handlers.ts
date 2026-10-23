@@ -3,8 +3,6 @@ import { nativeImage } from 'electron';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, Task, TaskMetadata } from '../../../shared/types';
 import path from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, Dirent } from 'fs';
 import { projectStore } from '../../project-store';
 import { titleGenerator } from '../../title-generator';
@@ -13,13 +11,11 @@ import { findTaskAndProject } from './shared';
 import { findAllSpecPaths, isValidTaskId } from '../../utils/spec-path-helpers';
 import { isPathWithinBase, findTaskWorktree } from '../../worktree-paths';
 import { cleanupWorktree } from '../../utils/worktree-cleanup';
-import { getToolPath } from '../../cli-tool-manager';
-import { getIsolatedGitEnv } from '../../utils/git-isolation';
+import { git } from '../../utils/git-exec';
 import { taskStateManager } from '../../task-state-manager';
 import { buildInitialPlan } from './plan-file-utils';
 import { taskQueue } from '../../services/task-queue';
 
-const execFileAsync = promisify(execFile);
 
 /**
  * Generate a title from a description using AI, with a fallback.
@@ -611,9 +607,9 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       }
 
       try {
-        const { stdout } = await execFileAsync(getToolPath('git'), ['status', '--porcelain'], {
+        const { stdout } = await git(['status', '--porcelain'], {
           cwd: worktreePath,
-          env: getIsolatedGitEnv(),
+          isolated: true,
           timeout: 5000
         });
         const status = stdout.trim();

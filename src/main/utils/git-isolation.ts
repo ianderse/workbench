@@ -13,8 +13,7 @@
  * TS equivalent: src/main/utils/git-isolation.ts:getIsolatedGitEnv()
  */
 
-import { execFileSync } from 'child_process';
-import { getToolPath } from '../cli-tool-manager';
+import { runTool } from '../platform/runtime-exec';
 
 /**
  * Git environment variables that can cause cross-contamination between worktrees.
@@ -56,10 +55,10 @@ export const GIT_ENV_VARS_TO_CLEAR = [
  *
  * @example
  * ```typescript
- * import { spawn } from 'child_process';
+ * import { runTool } from '../platform/runtime-exec';
  * import { getIsolatedGitEnv } from './git-isolation';
  *
- * spawn('git', ['status'], {
+ * await runTool('git', ['status'], {
  *   cwd: worktreePath,
  *   env: getIsolatedGitEnv(),
  * });
@@ -106,32 +105,31 @@ export interface WorktreeBranchDetectionResult {
  * @example
  * ```typescript
  * import { detectWorktreeBranch } from './utils/git-isolation';
- * import { getToolPath } from './cli-tool-manager';
  *
- * const { branch, usingFallback } = detectWorktreeBranch(
+ * const { branch, usingFallback } = await detectWorktreeBranch(
  *   worktreePath,
  *   task.specId,
  *   { timeout: 30000, logPrefix: '[TASK_WORKTREE_DISCARD]' }
  * );
  * ```
  */
-export function detectWorktreeBranch(
+export async function detectWorktreeBranch(
   worktreePath: string,
   specId: string,
   options: { timeout?: number; logPrefix?: string } = {}
-): WorktreeBranchDetectionResult {
+): Promise<WorktreeBranchDetectionResult> {
   const { timeout = 30000, logPrefix = '[WORKTREE_BRANCH_DETECTION]' } = options;
   const expectedBranch = `workbench/${specId}`;
   let branch = expectedBranch;
   let usingFallback = false;
 
   try {
-    const detectedBranch = execFileSync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    const detectedBranch = (await runTool('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: worktreePath,
       encoding: 'utf-8',
       timeout,
       env: getIsolatedGitEnv()
-    }).trim();
+    })).stdout.trim();
 
     // SECURITY: Use strict exact-match validation (not prefix matching) to prevent
     // accidentally deleting a different task's workbench branch. When git rev-parse
@@ -170,16 +168,15 @@ export function detectWorktreeBranch(
  * import { refreshGitIndex } from './git-isolation';
  *
  * // Call before git status to ensure accurate results
- * refreshGitIndex(projectPath);
- * const status = execFileSync('git', ['status', '--porcelain'], { cwd: projectPath });
+ * await refreshGitIndex(projectPath);
+ * const { stdout: status } = await git(['status', '--porcelain'], { cwd: projectPath });
  * ```
  */
-export function refreshGitIndex(cwd: string): void {
+export async function refreshGitIndex(cwd: string): Promise<void> {
   try {
-    execFileSync(getToolPath('git'), ['update-index', '--refresh'], {
+    await runTool('git', ['update-index', '--refresh'], {
       cwd,
       encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
       env: getIsolatedGitEnv(),
     });
   } catch {

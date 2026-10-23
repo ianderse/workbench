@@ -4,11 +4,13 @@
  * - a project on another branch, or with uncommitted changes, is left alone
  * - a conflict is undone, so the project stays as it was
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
 import { execFileSync } from 'child_process';
 import os from 'os';
 import path from 'path';
+
+vi.mock('../../cli-tool-manager', () => ({ getToolPathAsync: async () => 'git' }));
 
 import { localMerge, type LocalMergeConfig } from '../local-merge';
 
@@ -47,7 +49,6 @@ const config = (overrides: Partial<LocalMergeConfig> = {}): LocalMergeConfig => 
   projectDir: project,
   worktreePath: worktree,
   targetBranch: 'main',
-  gitPath: 'git',
   ...overrides,
 });
 

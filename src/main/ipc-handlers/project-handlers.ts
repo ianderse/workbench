@@ -1,7 +1,5 @@
 import { ipcMain } from 'electron';
 import { existsSync } from 'fs';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type {
   Project,
@@ -26,11 +24,10 @@ import {
   checkGitStatus,
   initializeGit
 } from '../project-initializer';
-import { getToolPath } from '../cli-tool-manager';
+import { git } from '../utils/git-exec';
 import { safeSendToRenderer } from './utils';
 import type { BrowserWindow } from 'electron';
 
-const execFileAsync = promisify(execFile);
 
 // ============================================
 // Git Helper Functions
@@ -43,7 +40,7 @@ const execFileAsync = promisify(execFile);
 async function getGitBranches(projectPath: string): Promise<string[]> {
   try {
     // Get all branches (local + remote) using --all flag
-    const { stdout: result } = await execFileAsync(getToolPath('git'), ['branch', '--all', '--format=%(refname:short)'], {
+    const { stdout: result } = await git(['branch', '--all', '--format=%(refname:short)'], {
       cwd: projectPath,
       encoding: 'utf-8'
     });
@@ -89,13 +86,13 @@ async function getGitBranches(projectPath: string): Promise<string[]> {
  * only updated with `git fetch` when asked (a refresh button), never just to list branches.
  */
 async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false): Promise<GitBranchDetail[]> {
-  const git = (args: string[], timeout?: number) =>
-    execFileAsync(getToolPath('git'), args, { cwd: projectPath, encoding: 'utf-8', timeout }).then((r) => r.stdout);
+  const run = (args: string[], timeout?: number) =>
+    git(args, { cwd: projectPath, encoding: 'utf-8', timeout }).then((r) => r.stdout);
 
   try {
     if (fetchRemote) {
       try {
-        await git(['fetch', '--prune'], 10000);
+        await run(['fetch', '--prune'], 10000);
       } catch {
         // Fetch may fail if offline or no remote, continue with local refs
       }
@@ -103,10 +100,10 @@ async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false):
 
     // Current branch (isCurrent indicator), local and remote branches, in parallel
     const [currentResult, localResult, remoteResult] = await Promise.all([
-      git(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
-      git(['branch', '--format=%(refname:short)']),
+      run(['rev-parse', '--abbrev-ref', 'HEAD']).catch(() => ''),
+      run(['branch', '--format=%(refname:short)']),
       // %(symref) marks pointers like origin/HEAD (short name "origin"), which aren't branches
-      git(['for-each-ref', '--format=%(refname:short)%09%(symref)', 'refs/remotes']).catch(() => ''),
+      run(['for-each-ref', '--format=%(refname:short)%09%(symref)', 'refs/remotes']).catch(() => ''),
     ]);
     const currentBranch = currentResult.trim() || null;
 
@@ -146,7 +143,7 @@ async function getGitBranchesWithInfo(projectPath: string, fetchRemote = false):
  */
 async function getCurrentGitBranch(projectPath: string): Promise<string | null> {
   try {
-    const { stdout: result } = await execFileAsync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    const { stdout: result } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: projectPath,
       encoding: 'utf-8'
     });
@@ -174,7 +171,7 @@ async function detectMainBranch(projectPath: string): Promise<string | null> {
 
   // If none of the common names found, check for origin/HEAD reference
   try {
-    const { stdout: result } = await execFileAsync(getToolPath('git'), ['symbolic-ref', 'refs/remotes/origin/HEAD'], {
+    const { stdout: result } = await git(['symbolic-ref', 'refs/remotes/origin/HEAD'], {
       cwd: projectPath,
       encoding: 'utf-8'
     });
@@ -402,7 +399,7 @@ export function registerProjectHandlers(
           return { success: false, error: 'Project not found' };
         }
 
-        const result = initializeProject(project.path);
+        const result = await initializeProject(project.path);
 
         if (result.success) {
           // Update project's autoBuildPath
@@ -553,7 +550,7 @@ export function registerProjectHandlers(
         if (!existsSync(projectPath)) {
           return { success: false, error: 'Directory does not exist' };
         }
-        const gitStatus = checkGitStatus(projectPath);
+        const gitStatus = await checkGitStatus(projectPath);
         return { success: true, data: gitStatus };
       } catch (error) {
         return {
@@ -572,7 +569,7 @@ export function registerProjectHandlers(
         if (!existsSync(projectPath)) {
           return { success: false, error: 'Directory does not exist' };
         }
-        const result = initializeGit(projectPath);
+        const result = await initializeGit(projectPath);
         return { success: result.success, data: result, error: result.error };
       } catch (error) {
         return {

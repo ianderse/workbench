@@ -2,6 +2,7 @@ import path from 'path';
 import { getAugmentedEnv, getAugmentedEnvAsync } from './env-utils';
 import { getToolPath, getToolPathAsync } from './cli-tool-manager';
 import { isWindows, getPathDelimiter } from './platform';
+import { isWslRuntime, whenShellRuntimeReady } from './platform/shell-runtime';
 
 export type ClaudeCliInvocation = {
   command: string;
@@ -37,6 +38,15 @@ function ensureCommandDirInPath(command: string, env: Record<string, string>): R
 }
 
 /**
+ * In WSL (Settings > General > Shell): the distribution's claude, from the startup probe or the
+ * user's WSL path (no process is started), and the app's environment as it is. Windows PATH
+ * changes don't apply: the command runs inside the distribution with its own login PATH.
+ */
+function wslClaudeInvocation(command: string): ClaudeCliInvocation {
+  return { command, env: { ...process.env } as Record<string, string> };
+}
+
+/**
  * Returns the Claude CLI command path and an environment with PATH updated to include the CLI directory.
  *
  * WARNING: This function uses synchronous subprocess calls that block the main process.
@@ -44,6 +54,7 @@ function ensureCommandDirInPath(command: string, env: Record<string, string>): R
  */
 export function getClaudeCliInvocation(): ClaudeCliInvocation {
   const command = getToolPath('claude');
+  if (isWslRuntime()) return wslClaudeInvocation(command);
   const env = getAugmentedEnv();
 
   return {
@@ -65,6 +76,8 @@ export function getClaudeCliInvocation(): ClaudeCliInvocation {
  * ```
  */
 export async function getClaudeCliInvocationAsync(): Promise<ClaudeCliInvocation> {
+  await whenShellRuntimeReady();
+  if (isWslRuntime()) return wslClaudeInvocation(await getToolPathAsync('claude'));
   // Run both detections in parallel for efficiency
   const [command, env] = await Promise.all([
     getToolPathAsync('claude'),

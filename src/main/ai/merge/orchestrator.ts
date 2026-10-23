@@ -16,7 +16,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { spawnSync } from 'child_process';
+import { git } from '../../utils/git-exec';
 
 import { AutoMerger, type MergeContext } from './auto-merger';
 import { ConflictDetector } from './conflict-detector';
@@ -94,17 +94,16 @@ export type AiResolverFn = (
 // Git utility
 // =============================================================================
 
-function getFileFromBranch(
+async function getFileFromBranch(
   projectDir: string,
   filePath: string,
   branch: string,
-): string | undefined {
-  const result = spawnSync('git', ['show', `${branch}:${filePath}`], {
-    cwd: projectDir,
-    encoding: 'utf8',
-  });
-  if (result.status === 0) return result.stdout;
-  return undefined;
+): Promise<string | undefined> {
+  try {
+    return (await git(['show', `${branch}:${filePath}`], { cwd: projectDir, encoding: 'utf8' })).stdout;
+  } catch {
+    return undefined;
+  }
 }
 
 function findWorktree(projectDir: string, taskId: string): string | undefined {
@@ -303,7 +302,7 @@ export class MergeOrchestrator {
       }
 
       emit('analyzing', 5, 'Loading file evolution data');
-      this.evolutionTracker.refreshFromGit(taskId, resolvedWorktreePath, targetBranch);
+      await this.evolutionTracker.refreshFromGit(taskId, resolvedWorktreePath, targetBranch);
 
       emit('analyzing', 15, 'Running semantic analysis');
       const modifications = this.evolutionTracker.getTaskModifications(taskId);
@@ -408,7 +407,7 @@ export class MergeOrchestrator {
       emit('analyzing', 5, 'Loading file evolution data');
       for (const request of sorted) {
         if (request.worktreePath && fs.existsSync(request.worktreePath)) {
-          this.evolutionTracker.refreshFromGit(request.taskId, request.worktreePath, targetBranch);
+          await this.evolutionTracker.refreshFromGit(request.taskId, request.worktreePath, targetBranch);
         }
       }
 
@@ -509,7 +508,7 @@ export class MergeOrchestrator {
     // Get baseline content
     let baselineContent = this.evolutionTracker.getBaselineContent(filePath);
     if (!baselineContent) {
-      baselineContent = getFileFromBranch(this.projectDir, filePath, targetBranch);
+      baselineContent = await getFileFromBranch(this.projectDir, filePath, targetBranch);
     }
     if (!baselineContent) {
       baselineContent = '';

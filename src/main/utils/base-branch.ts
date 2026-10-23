@@ -7,20 +7,13 @@
  * still exists keeps it runnable, and the caller says which branch it actually used.
  */
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import { getToolPath } from '../cli-tool-manager';
-import { getIsolatedGitEnv } from './git-isolation';
-
-const execFileAsync = promisify(execFile);
+import { git } from './git-exec';
 
 /** Whether a branch resolves in the repo, as a local branch or on origin */
 export async function branchExists(cwd: string, branch: string): Promise<boolean> {
-  const git = getToolPath('git');
-  const env = getIsolatedGitEnv();
   for (const ref of [`refs/heads/${branch}`, `refs/remotes/origin/${branch}`]) {
     try {
-      await execFileAsync(git, ['rev-parse', '--verify', '--quiet', ref], { cwd, env });
+      await git(['rev-parse', '--verify', '--quiet', ref], { cwd, isolated: true });
       return true;
     } catch {
       // Not this one; try the next ref

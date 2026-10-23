@@ -13,12 +13,10 @@
  *   doesn't start.
  */
 
-import { execFile } from 'child_process';
 import { mkdir, readdir, readFile, rm, writeFile } from 'fs/promises';
 import path from 'path';
-import { promisify } from 'util';
 import { appLog } from '../app-logger';
-import { getIsolatedGitEnv } from '../utils/git-isolation';
+import { git as runGit } from '../utils/git-exec';
 import { waitForMemoryIndexBuild } from './backfill';
 import { MEMORY_INDEX_STUB } from './memory-writer';
 import { getCompengDir, getMemoryIndexImportPath, getMemoryIndexPath, getStashedCompengDir } from './paths';
@@ -37,8 +35,6 @@ const PROJECT_MEMORY_FILE = path.join('.claude', SELF_IMPROVE_MEMORY_FILENAME);
  */
 const IMPORT_START = '<!-- workbench:project-memory:start -->';
 const IMPORT_END = '<!-- workbench:project-memory:end -->';
-
-const execFileAsync = promisify(execFile);
 
 /**
  * Everything the store holds: the memories, the index, and the build's own stats.
@@ -64,7 +60,7 @@ async function listStoreFiles(dir: string): Promise<string[]> {
  * the recoverable mistake.
  */
 async function isTrackedByGit(dir: string, projectPath: string): Promise<boolean> {
-  const git = (args: string[]) => execFileAsync('git', args, { cwd: projectPath, env: getIsolatedGitEnv() });
+  const git = (args: string[]) => runGit(args, { cwd: projectPath, isolated: true });
   try {
     const { stdout } = await git(['ls-files', '--', dir]);
     return stdout.trim() !== '';

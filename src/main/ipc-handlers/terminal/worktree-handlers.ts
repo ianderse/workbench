@@ -9,25 +9,22 @@ import type {
 } from '../../../shared/types';
 import path from 'path';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, readdirSync, rmSync, symlinkSync, lstatSync, copyFileSync, cpSync, statSync, readlinkSync } from 'fs';
-import { execFileSync, execFile } from 'child_process';
-import { promisify } from 'util';
 import { matchesExtensionGlob } from '../../utils/glob-markers';
 import { debugLog, debugError } from '../../../shared/utils/debug-logger';
 import { projectStore } from '../../project-store';
 import { isWindows } from '../../platform';
+import { runTool } from '../../platform/runtime-exec';
+import { repairForeignWorktrees, worktreeGitArgs } from '../../worktree/runtime-worktrees';
 import {
   getTerminalWorktreeDir,
   getTerminalWorktreePath,
   getTerminalWorktreeMetadataDir,
   getTerminalWorktreeMetadataPath,
 } from '../../worktree-paths';
-import { getIsolatedGitEnv } from '../../utils/git-isolation';
-import { getToolPath } from '../../cli-tool-manager';
+import { git } from '../../utils/git-exec';
+import { isWslRuntime, toHostPath, toRuntimePath } from '../../platform/shell-runtime';
 import { cleanupWorktree } from '../../utils/worktree-cleanup';
 import { addToWorktree } from '../../live-agent/project-setup';
-
-// Promisify execFile for async operations
-const execFileAsync = promisify(execFile);
 
 // Shared validation regex for worktree names - lowercase alphanumeric with dashes/underscores
 // Must start and end with alphanumeric character
@@ -79,14 +76,13 @@ function isSymlinkOrJunction(targetPath: string): boolean {
  *
  * Returns true if a fix was applied, false otherwise.
  */
-function fixMisconfiguredBareRepo(projectPath: string): boolean {
+async function fixMisconfiguredBareRepo(projectPath: string): Promise<boolean> {
   try {
     // Check if bare=true is set
-    const bareConfig = execFileSync(
-      getToolPath('git'),
+    const bareConfig = (await git(
       ['config', '--get', 'core.bare'],
-      { cwd: projectPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], env: getIsolatedGitEnv() }
-    ).trim().toLowerCase();
+      { cwd: projectPath, encoding: 'utf-8', isolated: true }
+    )).stdout.trim().toLowerCase();
 
     if (bareConfig !== 'true') {
       return false; // Not marked as bare, nothing to fix
@@ -162,10 +158,9 @@ function fixMisconfiguredBareRepo(projectPath: string): boolean {
 
     // Fix the misconfiguration
     debugLog('[TerminalWorktree] Detected misconfigured bare repository with source files. Auto-fixing by unsetting core.bare...');
-    execFileSync(
-      getToolPath('git'),
+    await git(
       ['config', '--unset', 'core.bare'],
-      { cwd: projectPath, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], env: getIsolatedGitEnv() }
+      { cwd: projectPath, encoding: 'utf-8', isolated: true }
     );
     debugLog('[TerminalWorktree] Fixed: core.bare has been unset. Git operations should now work correctly.');
     return true;
@@ -187,7 +182,7 @@ function isValidProjectPath(projectPath: string): boolean {
 /**
  * Get the default branch from project settings
  */
-function getDefaultBranch(projectPath: string): string {
+async function getDefaultBranch(projectPath: string): Promise<string> {
   const project = projectStore.getProjects().find(p => p.path === projectPath);
   if (project?.settings?.mainBranch) {
     debugLog('[TerminalWorktree] Using mainBranch from project settings:', project.settings.mainBranch);
@@ -196,11 +191,10 @@ function getDefaultBranch(projectPath: string): string {
 
   for (const branch of ['main', 'master']) {
     try {
-      execFileSync(getToolPath('git'), ['rev-parse', '--verify', branch], {
+      await git(['rev-parse', '--verify', branch], {
         cwd: projectPath,
         encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: getIsolatedGitEnv(),
+        isolated: true,
       });
       debugLog('[TerminalWorktree] Auto-detected branch:', branch);
       return branch;
@@ -211,12 +205,11 @@ function getDefaultBranch(projectPath: string): string {
 
   // Fallback to current branch - wrap in try-catch
   try {
-    const currentBranch = execFileSync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    const currentBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd: projectPath,
       encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env: getIsolatedGitEnv(),
-    }).trim();
+      isolated: true,
+    })).stdout.trim();
     debugLog('[TerminalWorktree] Falling back to current branch:', currentBranch);
     return currentBranch;
   } catch (error) {
@@ -280,11 +273,8 @@ async function setupWorktreeDependencies(projectPath: string, worktreePath: stri
             const venvPath = path.join(worktreePath, config.sourceRelPath);
             // Check if venv path exists (as symlink or otherwise)
             if (existsSync(venvPath) || isSymlinkOrJunction(venvPath)) {
-              const pythonBin = isWindows()
-                ? path.join(venvPath, 'Scripts', 'python.exe')
-                : path.join(venvPath, 'bin', 'python');
               try {
-                await execFileAsync(pythonBin, ['-c', 'import sys; print(sys.prefix)'], {
+                await runVenvTool(venvExecutable(venvPath, 'python'), ['-c', 'import sys; print(sys.prefix)'], {
                   timeout: 10000,
                 });
                 debugLog('[TerminalWorktree] Symlinked venv health check passed:', config.sourceRelPath);
@@ -372,6 +362,33 @@ function applySymlinkStrategy(projectPath: string, worktreePath: string, config:
   }
 }
 
+/**
+ * Whether venvs follow the Windows layout (`Scripts\python.exe`) rather than the POSIX one
+ * (`bin/python`): the layout of the OS the tools run on, so Linux venvs in WSL
+ */
+export function usesWindowsVenvLayout(): boolean {
+  return isWindows() && !isWslRuntime();
+}
+
+/** A venv's python or pip (host path) for the OS the tools run on */
+export function venvExecutable(venvPath: string, name: 'python' | 'pip'): string {
+  return usesWindowsVenvLayout()
+    ? path.join(venvPath, 'Scripts', `${name}.exe`)
+    : path.join(venvPath, 'bin', name);
+}
+
+/**
+ * Run a venv executable (or the detected Python when none is given) through the runtime layer:
+ * in WSL the venv's Linux executable runs inside the distribution, path arguments translated
+ */
+function runVenvTool(executable: string | undefined, args: string[], options: { timeout: number }) {
+  return runTool('python', args, {
+    ...options,
+    encoding: 'utf-8',
+    ...(executable ? { command: isWslRuntime() ? toRuntimePath(executable) : executable } : {}),
+  });
+}
+
 /** Marker file written inside a recreated venv to indicate setup completed successfully. */
 const VENV_SETUP_COMPLETE_MARKER = '.setup_complete';
 
@@ -399,25 +416,15 @@ async function applyRecreateStrategy(projectPath: string, worktreePath: string, 
     try { rmSync(venvPath, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 
-  // Detect Python executable from the source venv or fall back to system Python
+  // Python from the source venv (when it was made for the OS the tools run on) or the detected Python
   const sourceVenv = path.join(projectPath, config.sourceRelPath);
-  let pythonExec = isWindows() ? 'python' : 'python3';
-
-  if (existsSync(sourceVenv)) {
-    const unixCandidate = path.join(sourceVenv, 'bin', 'python');
-    const winCandidate = path.join(sourceVenv, 'Scripts', 'python.exe');
-    if (existsSync(unixCandidate)) {
-      pythonExec = unixCandidate;
-    } else if (existsSync(winCandidate)) {
-      pythonExec = winCandidate;
-    }
-  }
+  const sourcePython = venvExecutable(sourceVenv, 'python');
+  const pythonExec = existsSync(sourcePython) ? sourcePython : undefined;
 
   // Create the venv
   try {
     debugLog('[TerminalWorktree] Creating venv at', config.sourceRelPath);
-    await execFileAsync(pythonExec, ['-m', 'venv', venvPath], {
-      encoding: 'utf-8',
+    await runVenvTool(pythonExec, ['-m', 'venv', venvPath], {
       timeout: 120000,
     });
   } catch (error) {
@@ -439,9 +446,7 @@ async function applyRecreateStrategy(projectPath: string, worktreePath: string, 
   if (config.requirementsFile) {
     const reqPath = path.join(projectPath, config.requirementsFile);
     if (existsSync(reqPath)) {
-      const pipExec = isWindows()
-        ? path.join(venvPath, 'Scripts', 'pip.exe')
-        : path.join(venvPath, 'bin', 'pip');
+      const pipExec = venvExecutable(venvPath, 'pip');
 
       // Build install command based on file type
       const reqBasename = path.basename(config.requirementsFile);
@@ -462,8 +467,7 @@ async function applyRecreateStrategy(projectPath: string, worktreePath: string, 
       if (installArgs) {
         try {
           debugLog('[TerminalWorktree] Installing deps from', config.requirementsFile);
-          await execFileAsync(pipExec, installArgs, {
-            encoding: 'utf-8',
+          await runVenvTool(pipExec, installArgs, {
             timeout: 300000,
           });
         } catch (error) {
@@ -663,7 +667,7 @@ async function createTerminalWorktree(
 
   // Auto-fix any misconfigured bare repo before worktree operations
   // This prevents crashes when git worktree operations have incorrectly set bare=true
-  if (fixMisconfiguredBareRepo(projectPath)) {
+  if (await fixMisconfiguredBareRepo(projectPath)) {
     debugLog('[TerminalWorktree] Fixed misconfigured bare repository at:', projectPath);
   }
 
@@ -680,7 +684,7 @@ async function createTerminalWorktree(
     directoryCreated = true;
 
     // Use custom base branch if provided, otherwise detect default
-    const baseBranch = customBaseBranch || getDefaultBranch(projectPath);
+    const baseBranch = customBaseBranch || await getDefaultBranch(projectPath);
     debugLog('[TerminalWorktree] Using base branch:', baseBranch, customBaseBranch ? '(custom)' : '(default)');
 
     // Check if baseBranch is already a remote ref (e.g., "origin/feature-x")
@@ -689,11 +693,11 @@ async function createTerminalWorktree(
 
     // Fetch the branch from remote (async to avoid blocking main process)
     try {
-      await execFileAsync(getToolPath('git'), ['fetch', 'origin', remoteBranchName], {
+      await git(['fetch', 'origin', remoteBranchName], {
         cwd: projectPath,
         encoding: 'utf-8',
         timeout: 30000,
-        env: getIsolatedGitEnv(),
+        isolated: true,
       });
       debugLog('[TerminalWorktree] Fetched latest from origin/' + remoteBranchName);
     } catch {
@@ -714,11 +718,11 @@ async function createTerminalWorktree(
     } else {
       // Default behavior: check if remote version exists and use it for latest code
       try {
-        await execFileAsync(getToolPath('git'), ['rev-parse', '--verify', `origin/${baseBranch}`], {
+        await git(['rev-parse', '--verify', `origin/${baseBranch}`], {
           cwd: projectPath,
           encoding: 'utf-8',
           timeout: 10000,
-          env: getIsolatedGitEnv(),
+          isolated: true,
         });
         baseRef = `origin/${baseBranch}`;
         debugLog('[TerminalWorktree] Using remote ref:', baseRef);
@@ -735,11 +739,11 @@ async function createTerminalWorktree(
       // from the base ref (e.g., origin/main). This ensures users can push with -u
       // to correctly set up tracking to their own remote branch.
       // Use async to avoid blocking the main process on large repos.
-      await execFileAsync(getToolPath('git'), ['worktree', 'add', '-b', branchName, '--no-track', worktreePath, baseRef], {
+      await git(await worktreeGitArgs(['worktree', 'add', '-b', branchName, '--no-track', worktreePath, baseRef]), {
         cwd: projectPath,
         encoding: 'utf-8',
         timeout: 60000,
-        env: getIsolatedGitEnv(),
+        isolated: true,
       });
       debugLog('[TerminalWorktree] Created worktree with branch:', branchName, 'from', baseRef);
 
@@ -750,11 +754,11 @@ async function createTerminalWorktree(
       // Check if 'origin' remote exists — silently skip for local-only repos
       let hasOrigin = false;
       try {
-        await execFileAsync(getToolPath('git'), ['remote', 'get-url', 'origin'], {
+        await git(['remote', 'get-url', 'origin'], {
           cwd: projectPath,
           encoding: 'utf-8',
           timeout: 5000,
-          env: getIsolatedGitEnv(),
+          isolated: true,
         });
         hasOrigin = true;
       } catch {
@@ -764,11 +768,11 @@ async function createTerminalWorktree(
 
       if (hasOrigin && shouldPushNewBranches(projectPath)) {
         try {
-          await execFileAsync(getToolPath('git'), ['push', '-u', 'origin', branchName], {
+          await git(['push', '-u', 'origin', branchName], {
             cwd: worktreePath,
             encoding: 'utf-8',
             timeout: 30000,
-            env: getIsolatedGitEnv(),
+            isolated: true,
           });
           remoteTrackingSetUp = true;
           debugLog('[TerminalWorktree] Pushed branch to remote with tracking:', branchName);
@@ -784,11 +788,11 @@ async function createTerminalWorktree(
       }
     } else {
       // Use async to avoid blocking the main process on large repos.
-      await execFileAsync(getToolPath('git'), ['worktree', 'add', '--detach', worktreePath, baseRef], {
+      await git(await worktreeGitArgs(['worktree', 'add', '--detach', worktreePath, baseRef]), {
         cwd: projectPath,
         encoding: 'utf-8',
         timeout: 60000,
-        env: getIsolatedGitEnv(),
+        isolated: true,
       });
       debugLog('[TerminalWorktree] Created worktree in detached HEAD mode from', baseRef);
     }
@@ -840,11 +844,11 @@ async function createTerminalWorktree(
         debugLog('[TerminalWorktree] Cleaned up failed worktree directory:', worktreePath);
         // Also prune stale worktree registrations in case git worktree add partially succeeded
         try {
-          execFileSync(getToolPath('git'), ['worktree', 'prune'], {
+          await repairForeignWorktrees(projectPath);
+          await git(['worktree', 'prune'], {
             cwd: projectPath,
             encoding: 'utf-8',
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: getIsolatedGitEnv(),
+            isolated: true,
           });
           debugLog('[TerminalWorktree] Pruned stale worktree registrations');
         } catch {
@@ -964,11 +968,11 @@ async function listOtherWorktrees(projectPath: string): Promise<OtherWorktreeInf
   ];
 
   try {
-    const { stdout: output } = await execFileAsync(getToolPath('git'), ['worktree', 'list', '--porcelain'], {
+    const { stdout: output } = await git(['worktree', 'list', '--porcelain'], {
       cwd: projectPath,
       encoding: 'utf-8',
       timeout: 30000,
-      env: getIsolatedGitEnv(),
+      isolated: true,
     });
 
     // Parse porcelain output
@@ -986,7 +990,8 @@ async function listOtherWorktrees(projectPath: string): Promise<OtherWorktreeInf
         if (currentWorktree.path && currentWorktree.head) {
           processOtherWorktree(currentWorktree, normalizedProjectPath, excludePrefixes, results);
         }
-        currentWorktree = { path: line.substring(GIT_PORCELAIN.WORKTREE_PREFIX.length) };
+        // git in WSL lists Linux paths
+        currentWorktree = { path: toHostPath(line.substring(GIT_PORCELAIN.WORKTREE_PREFIX.length)) };
       } else if (line.startsWith(GIT_PORCELAIN.HEAD_PREFIX)) {
         currentWorktree.head = line.substring(GIT_PORCELAIN.HEAD_PREFIX.length);
       } else if (line.startsWith(GIT_PORCELAIN.BRANCH_PREFIX)) {
@@ -1060,7 +1065,7 @@ async function removeTerminalWorktree(
   }
 
   // Auto-fix any misconfigured bare repo before worktree operations
-  if (fixMisconfiguredBareRepo(projectPath)) {
+  if (await fixMisconfiguredBareRepo(projectPath)) {
     debugLog('[TerminalWorktree] Fixed misconfigured bare repository at:', projectPath);
   }
 

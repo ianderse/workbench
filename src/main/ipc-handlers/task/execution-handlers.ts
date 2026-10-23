@@ -4,9 +4,7 @@ import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir, resolveMaxParallelTasks } 
 import type { IPCResult, TaskStartOptions, TaskStatus, TaskReviewOptions, ImageAttachment, Task, Project, TaskLogs, TaskLogPhase, TaskPhaseLog } from '../../../shared/types';
 import path from 'path';
 import { existsSync, readFileSync, mkdirSync } from 'fs';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import { getToolPath } from '../../cli-tool-manager';
+import { git } from '../../utils/git-exec';
 import { AgentManager } from '../../agent';
 import { fileWatcher } from '../../file-watcher';
 import { findTaskAndProject } from './shared';
@@ -26,7 +24,7 @@ import { archiveCurrentRun } from '../../task-run-archive';
 import { writeFileAtomicSync } from '../../utils/atomic-file';
 import { findTaskWorktree } from '../../worktree-paths';
 import { projectStore } from '../../project-store';
-import { getIsolatedGitEnv, detectWorktreeBranch } from '../../utils/git-isolation';
+import { detectWorktreeBranch } from '../../utils/git-isolation';
 import { cancelFallbackTimer } from '../agent-events-handlers';
 import { safeSendToRenderer } from '../utils';
 import { readSettingsFile } from '../../settings-utils';
@@ -39,7 +37,6 @@ import { taskQueueOrder } from '../../services/task-queue-order';
 import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
 
-const execFileAsync = promisify(execFile);
 
 /**
  * Feedback typed in "Request changes" with "Start over" ticked, held until the task that was
@@ -252,7 +249,7 @@ export function registerTaskExecutionHandlers(
       : foundProject;
 
     // Git is required for worktree-based runs
-    const gitStatus = checkGitStatus(project.path);
+    const gitStatus = await checkGitStatus(project.path);
     if (!gitStatus.isGitRepo) {
       sendTaskError(
         taskId,
@@ -355,7 +352,7 @@ export function registerTaskExecutionHandlers(
     }
 
     // Check that the task can start before throwing its work away
-    const gitStatus = checkGitStatus(project.path);
+    const gitStatus = await checkGitStatus(project.path);
     if (!gitStatus.isGitRepo || !gitStatus.hasCommits) {
       return { success: false, error: gitStatus.error || 'Git repository with commits required to run tasks.' };
     }
@@ -529,13 +526,12 @@ export function registerTaskExecutionHandlers(
       // continues in the task's worktree (a fresh one with "Start over")
       const worktreePath = findTaskWorktree(project.path, task.specId);
       if (worktreePath && task.stagedInMainProject) {
-        const git = getToolPath('git');
-        const gitOptions = { cwd: project.path, env: getIsolatedGitEnv() };
+        const gitOptions = { cwd: project.path, isolated: true };
         try {
-          await execFileAsync(git, ['reset', 'HEAD'], gitOptions);
-          await execFileAsync(git, ['checkout', '--', '.'], gitOptions);
+          await git(['reset', 'HEAD'], gitOptions);
+          await git(['checkout', '--', '.'], gitOptions);
           // Exclude .workbench to preserve specs and worktree data
-          await execFileAsync(git, ['clean', '-fd', '-e', '.workbench'], gitOptions);
+          await git(['clean', '-fd', '-e', '.workbench'], gitOptions);
           console.warn('[TASK_REVIEW] Main project restored to pre-merge state');
         } catch (error) {
           console.warn('[TASK_REVIEW] Could not discard staged changes in the main project:', error);
@@ -591,23 +587,22 @@ export function registerTaskExecutionHandlers(
             try {
               // Validate the detected branch matches the expected pattern, so a corrupted
               // or orphaned worktree can't make us delete the wrong branch
-              const { branch, usingFallback: usingFallbackBranch } = detectWorktreeBranch(
+              const { branch, usingFallback: usingFallbackBranch } = await detectWorktreeBranch(
                 worktreePath,
                 task.specId,
                 { timeout: 30000, logPrefix: '[TASK_UPDATE_STATUS]' }
               );
-              const git = getToolPath('git');
-              await execFileAsync(git, ['worktree', 'remove', '--force', worktreePath], {
+              await git(['worktree', 'remove', '--force', worktreePath], {
                 cwd: project.path,
                 timeout: 30000,
-                env: getIsolatedGitEnv()
+                isolated: true
               });
               console.warn(`[TASK_UPDATE_STATUS] Worktree removed: ${worktreePath}`);
               try {
-                await execFileAsync(git, ['branch', '-D', branch], {
+                await git(['branch', '-D', branch], {
                   cwd: project.path,
                   timeout: 30000,
-                  env: getIsolatedGitEnv()
+                  isolated: true
                 });
                 console.warn(`[TASK_UPDATE_STATUS] Branch deleted: ${branch}`);
               } catch (branchDeleteError) {
@@ -655,7 +650,7 @@ export function registerTaskExecutionHandlers(
 
         if (status === 'in_progress' && !agentManager.isRunning(taskId, project.id)) {
           // Check git status and auth before the card moves
-          const gitStatusCheck = checkGitStatus(project.path);
+          const gitStatusCheck = await checkGitStatus(project.path);
           if (!gitStatusCheck.isGitRepo || !gitStatusCheck.hasCommits) {
             const error = gitStatusCheck.error || 'Git repository with commits required to run tasks.';
             sendTaskError(taskId, error, project.id);
@@ -801,7 +796,7 @@ export function registerTaskExecutionHandlers(
         let autoRestarted = false;
         let restartProblem: string | undefined;
         if (autoRestart) {
-          const gitStatusForRestart = checkGitStatus(project.path);
+          const gitStatusForRestart = await checkGitStatus(project.path);
           const auth = gitStatusForRestart.isGitRepo && gitStatusForRestart.hasCommits
             ? await checkClaudeCodeAuth()
             : { ok: false as const, error: gitStatusForRestart.error || 'Git repository with commits required.' };

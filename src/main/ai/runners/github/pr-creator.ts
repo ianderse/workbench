@@ -14,14 +14,10 @@
  * All git/gh calls are async so the main process never blocks.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
+import { runTool } from '../../../platform/runtime-exec';
 import { loadClaudeRunInfo } from '../../../claude-code/task-runner';
 import { runClaudeText, READ_ONLY_TOOLS } from '../../../claude-code/run-text';
 import type { ClaudeEffort } from '../../../../shared/types/claude-code';
-
-const execFileAsync = promisify(execFile);
 
 // =============================================================================
 // Constants
@@ -84,10 +80,6 @@ export interface CreatePRConfig {
   title?: string;
   /** Whether to create as a draft PR */
   draft?: boolean;
-  /** Path to the gh CLI executable */
-  ghPath: string;
-  /** Path to the git CLI executable */
-  gitPath: string;
   /** Claude model alias (defaults to 'sonnet') */
   model?: string;
   /** Reasoning effort (defaults to 'low') */
@@ -111,16 +103,16 @@ interface PRText {
 // Helpers
 // =============================================================================
 
-async function run(command: string, args: string[], cwd: string): Promise<string> {
-  const { stdout } = await execFileAsync(command, args, { cwd, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+async function run(tool: 'git' | 'gh', args: string[], cwd: string): Promise<string> {
+  const { stdout } = await runTool(tool, args, { cwd, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
   return stdout;
 }
 
 /** First git command that succeeds, or an empty string */
-async function firstOutput(gitPath: string, cwd: string, attempts: string[][], limit: number): Promise<string> {
+async function firstOutput(cwd: string, attempts: string[][], limit: number): Promise<string> {
   for (const args of attempts) {
     try {
-      return (await run(gitPath, args, cwd)).slice(0, limit);
+      return (await run('git', args, cwd)).slice(0, limit);
     } catch {
       // Try the next form
     }
@@ -131,16 +123,15 @@ async function firstOutput(gitPath: string, cwd: string, attempts: string[][], l
 /** Gather diff and commit log context for the PR */
 async function gatherPRContext(
   worktreePath: string,
-  gitPath: string,
   baseBranch: string,
 ): Promise<{ diffSummary: string; commitLog: string }> {
   const base = baseBranch.startsWith('origin/') ? baseBranch.slice('origin/'.length) : baseBranch;
   const [diffSummary, commitLog] = await Promise.all([
-    firstOutput(gitPath, worktreePath, [
+    firstOutput(worktreePath, [
       ['diff', '--stat', `origin/${base}...HEAD`],
       ['diff', '--stat', `${base}...HEAD`],
     ], 4000),
-    firstOutput(gitPath, worktreePath, [
+    firstOutput(worktreePath, [
       ['log', '--oneline', `origin/${base}..HEAD`],
       ['log', '--oneline', `${base}..HEAD`],
     ], 3000),
@@ -220,9 +211,9 @@ You can inspect the changes with \`git diff ${config.baseBranch}...HEAD\` or by 
 }
 
 /** Push the worktree branch to origin; returns an error string on failure */
-async function pushBranch(worktreePath: string, gitPath: string, branchName: string): Promise<string | undefined> {
+async function pushBranch(worktreePath: string, branchName: string): Promise<string | undefined> {
   try {
-    await run(gitPath, ['push', '--set-upstream', 'origin', branchName], worktreePath);
+    await run('git', ['push', '--set-upstream', 'origin', branchName], worktreePath);
     return undefined;
   } catch (err: unknown) {
     const stderr = (err as { stderr?: string }).stderr;
@@ -233,19 +224,18 @@ async function pushBranch(worktreePath: string, gitPath: string, branchName: str
 /** URL of an existing PR for the branch */
 async function getExistingPRUrl(
   projectDir: string,
-  ghPath: string,
   branchName: string,
   baseBranch: string,
 ): Promise<string | undefined> {
   try {
-    const output = (await run(ghPath, ['pr', 'view', branchName, '--json', 'url', '--jq', '.url'], projectDir)).trim();
+    const output = (await run('gh', ['pr', 'view', branchName, '--json', 'url', '--jq', '.url'], projectDir)).trim();
     if (output.startsWith('http')) return output;
   } catch {
     // Fall through to listing
   }
   try {
     const listOutput = (await run(
-      ghPath,
+      'gh',
       ['pr', 'list', '--head', branchName, '--base', baseBranch, '--json', 'url', '--jq', '.[0].url'],
       projectDir,
     )).trim();
@@ -261,10 +251,10 @@ async function getExistingPRUrl(
 
 /** Push a worktree branch and create a GitHub PR with a Claude-written title and description */
 export async function createPR(config: CreatePRConfig): Promise<CreatePRResult> {
-  const { projectDir, worktreePath, branchName, baseBranch, draft = false, ghPath, gitPath } = config;
+  const { projectDir, worktreePath, branchName, baseBranch, draft = false } = config;
 
   // Step 1: Push the branch to origin
-  const pushError = await pushBranch(worktreePath, gitPath, branchName);
+  const pushError = await pushBranch(worktreePath, branchName);
   if (pushError) {
     const isUpToDate = pushError.includes('Everything up-to-date') || pushError.includes('up to date');
     if (!isUpToDate) {
@@ -273,7 +263,7 @@ export async function createPR(config: CreatePRConfig): Promise<CreatePRResult> 
   }
 
   // Step 2-3: Gather context and generate the PR text
-  const { diffSummary, commitLog } = await gatherPRContext(worktreePath, gitPath, baseBranch);
+  const { diffSummary, commitLog } = await gatherPRContext(worktreePath, baseBranch);
   const generated = await generatePRText(config, diffSummary, commitLog);
   const fallback = fallbackPRText(config, commitLog);
   const title = config.title?.trim() || generated?.title || fallback.title;
@@ -286,7 +276,7 @@ export async function createPR(config: CreatePRConfig): Promise<CreatePRResult> 
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const output = (await run(ghPath, ghArgs, projectDir)).trim();
+      const output = (await run('gh', ghArgs, projectDir)).trim();
       let prUrl: string | undefined;
       if (output.startsWith('http')) {
         prUrl = output;
@@ -301,7 +291,7 @@ export async function createPR(config: CreatePRConfig): Promise<CreatePRResult> 
       const stdout = String(spawnErr.stdout ?? '');
 
       if (stderr.toLowerCase().includes('already exists') || stdout.toLowerCase().includes('already exists')) {
-        const existingUrl = await getExistingPRUrl(projectDir, ghPath, branchName, effectiveBase);
+        const existingUrl = await getExistingPRUrl(projectDir, branchName, effectiveBase);
         return { success: true, prUrl: existingUrl, alreadyExists: true };
       }
 

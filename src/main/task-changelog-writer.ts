@@ -3,19 +3,17 @@
  * for every state a task enters (with the files its branch changes so far) and, while it runs,
  * for the files its Claude Code session starts editing.
  */
-import { execFile } from 'child_process';
 import { appendFile, mkdir, readFile, stat, writeFile } from 'fs/promises';
 import path from 'path';
-import { promisify } from 'util';
 import type { Project, Task } from '../shared/types';
 import { taskHooks, type TaskHookEvents } from './task-hooks';
 import { getTaskChangelogPath, type TaskChangelogEntry } from './task-changelog';
 import { findTaskWorktree } from './worktree-paths';
-import { getToolPath } from './cli-tool-manager';
+import { git as runGit } from './utils/git-exec';
 import { getIsolatedGitEnv } from './utils/git-isolation';
+import { runToolScript } from './platform/runtime-exec';
+import { isWslRuntime } from './platform/shell-runtime';
 import { appLog } from './app-logger';
-
-const execFileAsync = promisify(execFile);
 
 /** Edits are collected for a moment and written as one entry */
 const EDIT_FLUSH_MS = 3000;
@@ -55,12 +53,36 @@ function enqueue(file: string, build: () => Promise<TaskChangelogEntry | null>):
   return next;
 }
 
+const GIT_TIMEOUT_MS = 15000;
+
+function outputLines(stdout: string): string[] {
+  return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+}
+
 async function git(cwd: string, args: string[]): Promise<string[]> {
   try {
-    const { stdout } = await execFileAsync(getToolPath('git'), args, { cwd, env: getIsolatedGitEnv(), timeout: 15000 });
-    return stdout.split('\n').map((line) => line.trim()).filter(Boolean);
+    const { stdout } = await runGit(args, { cwd, isolated: true, timeout: GIT_TIMEOUT_MS });
+    return outputLines(stdout);
   } catch {
     return [];
+  }
+}
+
+/**
+ * Output lines of each git command (empty for a failed one): natively in parallel, in WSL in one
+ * launch (starting wsl.exe costs more than these commands themselves)
+ */
+async function gitAll(cwd: string, commands: string[][]): Promise<string[][]> {
+  if (!isWslRuntime()) return Promise.all(commands.map((args) => git(cwd, args)));
+  try {
+    const results = await runToolScript('git', commands, {
+      cwd,
+      env: getIsolatedGitEnv(process.env),
+      timeout: GIT_TIMEOUT_MS * 2,
+    });
+    return results.map((result) => (result.code === 0 ? outputLines(result.stdout) : []));
+  } catch {
+    return commands.map(() => []);
   }
 }
 
@@ -70,11 +92,11 @@ async function branchChanges(project: Project, task: Task): Promise<{ branch?: s
   const worktree = findTaskWorktree(project.path, task.specId);
   if (!worktree) return { files: [] };
   const base = task.metadata?.baseBranch || project.settings?.mainBranch || 'main';
-  const [branch, committed, uncommitted, untracked] = await Promise.all([
-    git(worktree, ['rev-parse', '--abbrev-ref', 'HEAD']),
-    git(worktree, ['diff', '--name-only', `${base}...HEAD`]),
-    git(worktree, ['diff', '--name-only', 'HEAD']),
-    git(worktree, ['ls-files', '--others', '--exclude-standard']),
+  const [branch, committed, uncommitted, untracked] = await gitAll(worktree, [
+    ['rev-parse', '--abbrev-ref', 'HEAD'],
+    ['diff', '--name-only', `${base}...HEAD`],
+    ['diff', '--name-only', 'HEAD'],
+    ['ls-files', '--others', '--exclude-standard'],
   ]);
   const dataDir = `${(project.autoBuildPath || '.workbench').replace(/\\/g, '/')}/`;
   const files = [...new Set([...committed, ...uncommitted, ...untracked])].filter((file) => !file.startsWith(dataDir)).sort();

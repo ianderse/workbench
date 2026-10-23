@@ -12,13 +12,8 @@
  * was and the conflicted files are reported. All git calls are async.
  */
 
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-import { getIsolatedGitEnv } from '../utils/git-isolation';
+import { git as runGit } from '../utils/git-exec';
 import type { WorktreeLocalMergeResult } from '../../shared/types/task';
-
-const execFileAsync = promisify(execFile);
 
 export interface LocalMergeConfig {
   /** Project root directory (the merge runs here, so the base branch must be checked out) */
@@ -27,7 +22,6 @@ export interface LocalMergeConfig {
   worktreePath: string;
   /** Branch to merge into: the base branch chosen for the task */
   targetBranch: string;
-  gitPath: string;
   /** Workbench's data folder, ignored when checking for uncommitted changes */
   dataDir?: string;
 }
@@ -42,7 +36,7 @@ function errorText(error: unknown): string {
 export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLocalMergeResult> {
   const { projectDir, worktreePath, targetBranch } = config;
   const run = (cwd: string) => async (args: string[]) =>
-    (await execFileAsync(config.gitPath, args, { cwd, env: getIsolatedGitEnv(), encoding: 'utf-8', maxBuffer: 20 * 1024 * 1024 })).stdout;
+    (await runGit(args, { cwd, isolated: true, encoding: 'utf-8', maxBuffer: 20 * 1024 * 1024 })).stdout;
   const git = run(projectDir);
   const worktreeGit = run(worktreePath);
   const dataDir = `${(config.dataDir || '.workbench').replace(/\\/g, '/')}/`;

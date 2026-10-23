@@ -10,7 +10,8 @@ import os from 'os';
 import path from 'path';
 
 vi.mock('../../cli-tool-manager', () => ({
-  getToolPath: () => 'git'
+  getToolPath: () => 'git',
+  getToolPathAsync: async () => 'git'
 }));
 
 import { branchExists, resolveBaseBranch } from '../base-branch';

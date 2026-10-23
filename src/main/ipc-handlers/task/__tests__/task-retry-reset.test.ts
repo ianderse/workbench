@@ -14,7 +14,8 @@ vi.mock('../../../project-store', () => ({
   projectStore: { invalidateTasksCache: vi.fn() }
 }));
 vi.mock('../../../cli-tool-manager', () => ({
-  getToolPath: () => 'git'
+  getToolPath: () => 'git',
+  getToolPathAsync: async () => 'git'
 }));
 
 import { resetSpecDirToInitialState } from '../plan-file-utils';
