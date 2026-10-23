@@ -7,23 +7,28 @@
  * itself and gets a keychain entry keyed to the dir. Runs on the default dir must leave
  * CLAUDE_CONFIG_DIR unset, or Claude Code would look in the other places.
  */
-import { homedir } from 'os';
 import path from 'path';
 import { isWindows } from '../platform';
+import { expandClaudeHome, isClaudeHomeInWsl, joinClaudeHome } from '../platform/claude-home';
 
-/** Claude Code's default config dir */
+/** Claude Code's default config dir (in WSL the Linux home's, as a UNC path) */
 export function getDefaultClaudeConfigDir(): string {
-  return path.join(homedir(), '.claude');
+  return joinClaudeHome('.claude');
 }
 
 function expand(dir: string): string {
-  return dir.startsWith('~') ? path.join(homedir(), dir.slice(1)) : dir;
+  return expandClaudeHome(dir);
+}
+
+/** Path functions for config dirs: Windows ones for the UNC paths of the Linux home in WSL */
+function pathApi(): typeof path {
+  return isClaudeHomeInWsl() ? path.win32 : path;
 }
 
 /** Whether a config dir is Claude Code's default `~/.claude` */
 export function isDefaultClaudeConfigDir(dir: string | undefined): boolean {
   if (!dir) return false;
-  const normalize = (value: string) => path.resolve(expand(value)).replace(/[\\/]+$/, '');
+  const normalize = (value: string) => pathApi().resolve(expand(value)).replace(/[\\/]+$/, '');
   const a = normalize(dir);
   const b = normalize(getDefaultClaudeConfigDir());
   return isWindows() ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -32,8 +37,8 @@ export function isDefaultClaudeConfigDir(dir: string | undefined): boolean {
 /** The global config (`.claude.json`: sign-in account, onboarding) of a config dir */
 export function getClaudeGlobalConfigPath(configDir: string): string {
   return isDefaultClaudeConfigDir(configDir)
-    ? path.join(homedir(), '.claude.json')
-    : path.join(expand(configDir), '.claude.json');
+    ? joinClaudeHome('.claude.json')
+    : pathApi().join(expand(configDir), '.claude.json');
 }
 
 /**

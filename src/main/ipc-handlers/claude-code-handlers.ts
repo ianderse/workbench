@@ -9,7 +9,7 @@
 
 import { ipcMain } from 'electron';
 import { execFileSync, spawn, execFile, type ChildProcess } from 'child_process';
-import { existsSync, readFileSync, promises as fsPromises } from 'fs';
+import { existsSync, lstatSync, readFileSync, promises as fsPromises } from 'fs';
 import { mkdir, rename, unlink } from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -17,19 +17,30 @@ import { promisify } from 'util';
 import { IPC_CHANNELS, DEFAULT_APP_SETTINGS } from '../../shared/constants';
 import type { IPCResult } from '../../shared/types';
 import type { ClaudeCodeVersionInfo, ClaudeInstallationList, ClaudeInstallationInfo } from '../../shared/types/cli';
-import { getToolInfo, configureTools, sortNvmVersionDirs, getClaudeDetectionPaths, type ExecFileAsyncOptionsWithVerbatim } from '../cli-tool-manager';
+import { getToolInfoAsync, configureTools, sortNvmVersionDirs, getClaudeDetectionPaths, isWslToolPath, type ExecFileAsyncOptionsWithVerbatim } from '../cli-tool-manager';
 import { readSettingsFile, writeSettingsFile } from '../settings-utils';
 import { isSecurePath, getWhereExePath, getTaskkillExePath } from '../utils/windows-paths';
-import { isWindows, isMacOS, isLinux, killProcessGracefully } from '../platform';
+import { isWindows, isMacOS, isLinux } from '../platform';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { isValidConfigDir } from '../utils/config-path-validator';
 import { clearKeychainCache, getCredentialsFromKeychain, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import semver from 'semver';
-import { getClaudeGlobalConfigPath } from '../claude-profile/config-dir-paths';
+import { getClaudeGlobalConfigPath, isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
+import { expandClaudeHome } from '../platform/claude-home';
+import { getWslInfo, isWslRuntime } from '../platform/shell-runtime';
+import { killRuntimeProcess, runTool, spawnTool } from '../platform/runtime-exec';
+import { execInWsl } from '../platform/wsl-exec-basic';
+import { getWslExePath } from '../platform/wsl-detect';
+import type { WslToolPaths } from '../../shared/types';
 
 /** Running `claude auth login` processes by profile id, so a sign-in can be cancelled */
 const authLogins = new Map<string, { child: ChildProcess; cancelled: boolean }>();
+
+/** Stop a `claude auth login` (in WSL also the Linux process, not only wsl.exe) */
+function stopAuthLogin(child: ChildProcess): void {
+  killRuntimeProcess(child, { debugPrefix: '[Claude Code] auth login' });
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -46,6 +57,7 @@ const VERSION_LIST_CACHE_DURATION_MS = 60 * 60 * 1000; // 1 hour for version lis
  * @returns Tuple of [isValid, version or null]
  */
 async function validateClaudeCliAsync(cliPath: string): Promise<[boolean, string | null]> {
+  if (isWslRuntime()) return validateWslClaudeCli(cliPath);
   try {
     // Security validation: reject paths with shell metacharacters or directory traversal
     if (isWindows() && !isSecurePath(cliPath)) {
@@ -99,6 +111,82 @@ async function validateClaudeCliAsync(cliPath: string): Promise<[boolean, string
   }
 }
 
+/** First version number in `--version` output */
+function parseClaudeVersion(output: string): string | null {
+  const text = String(output).trim();
+  if (!text) return null;
+  return text.match(/(\d+\.\d+\.\d+)/)?.[1] ?? text.split('\n')[0];
+}
+
+/** `<linux path> --version` inside WSL (the app runs its tools there) */
+async function validateWslClaudeCli(cliPath: string): Promise<[boolean, string | null]> {
+  if (!isWslToolPath(cliPath)) return [false, null];
+  try {
+    const { stdout } = await runTool('claude', ['--version'], { command: cliPath, timeout: 15_000 });
+    return [true, parseClaudeVersion(stdout)];
+  } catch (error) {
+    console.warn('[Claude Code] CLI validation in WSL failed for', cliPath, ':', error);
+    return [false, null];
+  }
+}
+
+/**
+ * Lists every `claude` found inside WSL with its version, in one launch: the configured path, the
+ * ones on the login PATH (`which -a`) and the usual install locations. Windows shims (under the
+ * mount root) are skipped. Each output line is `<path>\t<version line>`.
+ */
+const WSL_CLAUDE_SCAN_SCRIPT = [
+  'm=$1; shift',
+  '{ for p in "$@"; do printf "%s\\n" "$p"; done; which -a claude 2>/dev/null; } | while IFS= read -r p; do',
+  '  case "$p" in /*) ;; *) continue;; esac',
+  '  case "$p" in "$m"*) continue;; esac',
+  '  [ -f "$p" ] && [ -x "$p" ] || continue',
+  '  v=$("$p" --version </dev/null 2>/dev/null | head -n 1)',
+  '  printf "%s\\t%s\\n" "$p" "$v"',
+  'done',
+].join('\n');
+
+/** Claude CLI installations inside WSL (Settings > Developer), the configured one first */
+async function scanWslClaudeInstallations(activePath: string | null): Promise<ClaudeInstallationInfo[]> {
+  const info = getWslInfo();
+  if (!info) return [];
+  const configured = activePath && isWslToolPath(activePath) ? activePath : null;
+  const home = info.home.replace(/\/+$/, '');
+  const candidates = [
+    ...(configured ? [configured] : []),
+    ...(info.tools.claude.path ? [info.tools.claude.path] : []),
+    `${home}/.local/bin/claude`,
+    `${home}/.claude/local/claude`,
+    `${home}/.npm-global/bin/claude`,
+    '/usr/local/bin/claude',
+    '/usr/bin/claude',
+  ];
+
+  let stdout = '';
+  try {
+    ({ stdout } = await execInWsl('/bin/sh', ['-c', WSL_CLAUDE_SCAN_SCRIPT, 'sh', info.mountRoot, ...candidates], { timeout: 30_000 }));
+  } catch (error) {
+    console.warn('[Claude Code] Scanning for Claude CLI installations in WSL failed:', error);
+    return [];
+  }
+
+  const installations: ClaudeInstallationInfo[] = [];
+  for (const line of stdout.split(/\r?\n/)) {
+    const [cliPath, versionLine = ''] = line.split('\t');
+    if (!cliPath || !isWslToolPath(cliPath) || installations.some((i) => i.path === cliPath)) continue;
+    installations.push({
+      path: cliPath,
+      version: parseClaudeVersion(versionLine),
+      source: cliPath === configured ? 'user-config' : 'wsl',
+      isActive: configured ? cliPath === configured : false,
+    });
+  }
+  if (installations.length > 0 && !installations.some((i) => i.isActive)) {
+    installations[0].isActive = true;
+  }
+  return installations;
+}
+
 /**
  * Scan all known locations for Claude CLI installations.
  * Returns all found installations with their paths, versions, and sources.
@@ -109,6 +197,7 @@ async function validateClaudeCliAsync(cliPath: string): Promise<[boolean, string
  * @see cli-tool-manager.ts getClaudeDetectionPaths() for path configuration
  */
 async function scanClaudeInstallations(activePath: string | null): Promise<ClaudeInstallationInfo[]> {
+  if (isWslRuntime()) return scanWslClaudeInstallations(activePath);
   const installations: ClaudeInstallationInfo[] = [];
   const seenPaths = new Set<string>();
   const homeDir = os.homedir();
@@ -344,7 +433,8 @@ async function fetchAvailableVersions(): Promise<{ versions: string[]; distTags:
  * @param version - The version to install (e.g., "1.0.5")
  */
 function getInstallVersionCommand(version: string): string {
-  if (isWindows()) {
+  // In WSL the command runs in a WSL console (Linux syntax)
+  if (isWindows() && !isWslRuntime()) {
     // Windows: kill running Claude processes first, then install specific version
     return `"${getTaskkillExePath()}" /IM claude.exe /F 2>nul; claude install --force ${version}`;
   } else {
@@ -358,7 +448,8 @@ function getInstallVersionCommand(version: string): string {
  * @param isUpdate - If true, Claude is already installed and we just need to update
  */
 function getInstallCommand(isUpdate: boolean): string {
-  if (isWindows()) {
+  // In WSL the command runs in a WSL console: the Linux installer
+  if (isWindows() && !isWslRuntime()) {
     if (isUpdate) {
       // Update: kill running Claude processes first, then update with --force
       return `"${getTaskkillExePath()}" /IM claude.exe /F 2>nul; claude install --force latest`;
@@ -423,15 +514,90 @@ function escapeGitBashCommand(str: string): string {
     .replace(/!/g, '\\!');    // Escape exclamation marks (history expansion)
 }
 
+/** Windows Terminal (its app execution alias), or null when it isn't installed */
+function findWindowsTerminal(): string | null {
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) return null;
+  const alias = path.join(localAppData, 'Microsoft', 'WindowsApps', 'wt.exe');
+  try {
+    // An app execution alias is a reparse point that existsSync() reports as missing
+    lstatSync(alias);
+    return alias;
+  } catch {
+    return null;
+  }
+}
+
+export interface WslConsoleLaunch {
+  file: string;
+  args: string[];
+}
+
+/**
+ * How to open a WSL console running a command (Linux syntax) in the login shell, which then stays
+ * open (`exec bash`): a Windows Terminal tab when it is installed, else a console window of its
+ * own (`start` from cmd.exe). wsl.exe runs bash directly (`--exec`), so the command is parsed by
+ * bash only.
+ */
+export function buildWslConsoleLaunch(
+  command: string,
+  options: { distro: string; wslExe: string; windowsTerminal: string | null; comSpec: string }
+): WslConsoleLaunch {
+  const script = `${command}; exec bash`;
+  const wslArgs = [options.wslExe, '-d', options.distro, '--exec', 'bash', '-lic'];
+  if (options.windowsTerminal) {
+    // wt.exe splits its command line at `;` (new-tab ; split-pane ...): literal ones are escaped
+    return { file: options.windowsTerminal, args: ['new-tab', '--', ...wslArgs, script.replace(/;/g, '\\;')] };
+  }
+  // cmd.exe expands %VAR% even inside quotes, and a quote would end the argument
+  if (/["%]/.test(script)) {
+    throw new Error('The command cannot be passed to a WSL console window');
+  }
+  // `start` opens a console window of its own; the empty argument is the window title
+  return { file: options.comSpec, args: ['/d', '/c', 'start', '', ...wslArgs, script] };
+}
+
+/** Open a WSL console running a command (the app runs its tools in WSL) */
+async function openWslConsoleWithCommand(command: string): Promise<void> {
+  const info = getWslInfo();
+  if (!info) throw new Error('The app does not run its tools in WSL');
+  const launch = buildWslConsoleLaunch(command, {
+    distro: info.distro,
+    wslExe: getWslExePath(),
+    windowsTerminal: findWindowsTerminal(),
+    comSpec: process.env.ComSpec || path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'cmd.exe'),
+  });
+  console.warn('[Claude Code] Opening a WSL console:', launch.file, launch.args);
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(launch.file, launch.args, { detached: true, stdio: 'ignore', windowsHide: false });
+    child.unref();
+    const timer = setTimeout(() => {
+      child.removeListener('error', onError);
+      resolve();
+    }, 300);
+    const onError = (error: Error) => {
+      clearTimeout(timer);
+      reject(new Error(`Failed to open a WSL console: ${error.message}`));
+    };
+    child.on('error', onError);
+  });
+}
+
 /**
  * Open a terminal with the given command
  * Uses the user's preferred terminal from settings
- * Supports macOS, Windows, and Linux terminals
+ * Supports macOS, Windows, and Linux terminals. When the app runs its tools in WSL, the command
+ * (Linux syntax) runs in a WSL console instead.
  *
  * @param env Environment for the terminal on Windows (on macOS and Linux the terminal starts its
- *   own shell environment, so variables go in the command)
+ *   own shell environment, so variables go in the command; the same for a WSL console)
  */
 export async function openTerminalWithCommand(command: string, env?: NodeJS.ProcessEnv): Promise<void> {
+  if (isWslRuntime()) {
+    await openWslConsoleWithCommand(command);
+    return;
+  }
+
   const settings = readSettingsFile();
   const preferredTerminal = settings?.preferredTerminal as string | undefined;
 
@@ -866,10 +1032,8 @@ function checkProfileAuthentication(configDir: string): AuthCheckResult {
     return { authenticated: false };
   }
 
-  // Expand ~ to home directory
-  const expandedConfigDir = configDir.startsWith('~')
-    ? path.join(os.homedir(), configDir.slice(1))
-    : configDir;
+  // Expand ~ to Claude Code's home directory (the Linux home in WSL)
+  const expandedConfigDir = expandClaudeHome(configDir);
 
   const claudeJsonPath = getClaudeGlobalConfigPath(expandedConfigDir);
   const credentialsJsonPath = path.join(expandedConfigDir, '.credentials.json');
@@ -951,6 +1115,42 @@ function checkProfileAuthentication(configDir: string): AuthCheckResult {
   }
 }
 
+/** Every tool path from settings, as the CLI tool manager is configured with (settings-handlers does the same) */
+function toolConfigFromSettings(settings: Record<string, unknown>): Parameters<typeof configureTools>[0] {
+  const str = (value: unknown) => (typeof value === 'string' ? value : undefined);
+  return {
+    pythonPath: str(settings.pythonPath),
+    gitPath: str(settings.gitPath),
+    githubCLIPath: str(settings.githubCLIPath),
+    gitlabCLIPath: str(settings.gitlabCLIPath),
+    claudePath: str(settings.claudePath),
+    wslToolPaths: settings.wslToolPaths as WslToolPaths | undefined,
+  };
+}
+
+/** Set the Claude CLI used inside WSL (a Linux path), kept in wslToolPaths.claude */
+async function setActiveWslClaudePath(cliPath: string): Promise<IPCResult<{ path: string }>> {
+  if (!isWslToolPath(cliPath)) {
+    throw new Error('Invalid path: expected an absolute Linux path inside WSL');
+  }
+  const [isValid, version] = await validateWslClaudeCli(cliPath);
+  if (!isValid) {
+    throw new Error('Claude CLI at specified path is not valid or not executable in WSL');
+  }
+
+  const currentSettings = readSettingsFile() || {};
+  const mergedSettings = {
+    ...DEFAULT_APP_SETTINGS,
+    ...currentSettings,
+    wslToolPaths: { ...(currentSettings.wslToolPaths as WslToolPaths | undefined), claude: cliPath },
+  } as Record<string, unknown>;
+  writeSettingsFile(mergedSettings);
+  configureTools(toolConfigFromSettings(mergedSettings));
+
+  console.log('[Claude Code] Active WSL path set:', cliPath, 'version:', version);
+  return { success: true, data: { path: cliPath } };
+}
+
 /**
  * Register Claude Code IPC handlers
  */
@@ -965,7 +1165,7 @@ export function registerClaudeCodeHandlers(): void {
         // Get installed version via cli-tool-manager
         let detectionResult;
         try {
-          detectionResult = getToolInfo('claude');
+          detectionResult = await getToolInfoAsync('claude', { refresh: forceRefresh === true, refreshIfMissing: true });
           console.warn('[Claude Code] Detection result:', JSON.stringify(detectionResult, null, 2));
         } catch (detectionError) {
           console.error('[Claude Code] Detection error:', detectionError);
@@ -1041,7 +1241,7 @@ export function registerClaudeCodeHandlers(): void {
         // Check if Claude is already installed to determine if this is an update
         let isUpdate = false;
         try {
-          const detectionResult = getToolInfo('claude');
+          const detectionResult = await getToolInfoAsync('claude', { refreshIfMissing: true });
           isUpdate = detectionResult.found && !!detectionResult.version;
           console.warn('[Claude Code] Is update:', isUpdate, 'detected version:', detectionResult.version);
         } catch {
@@ -1137,9 +1337,11 @@ export function registerClaudeCodeHandlers(): void {
       try {
         console.log('[Claude Code] Scanning for installations...');
 
-        // Get current active path from settings
+        // Get current active path from settings (the WSL one while the app runs its tools in WSL)
         const settings = readSettingsFile();
-        const activePath = settings?.claudePath as string | undefined;
+        const activePath = isWslRuntime()
+          ? (settings?.wslToolPaths as WslToolPaths | undefined)?.claude
+          : settings?.claudePath as string | undefined;
 
         const installations = await scanClaudeInstallations(activePath || null);
         console.log('[Claude Code] Found', installations.length, 'installations');
@@ -1169,6 +1371,10 @@ export function registerClaudeCodeHandlers(): void {
       try {
         console.log('[Claude Code] Setting active path:', cliPath);
 
+        if (isWslRuntime()) {
+          return await setActiveWslClaudePath(cliPath);
+        }
+
         // Security validation: reject paths with shell metacharacters or directory traversal
         if (!isSecurePath(cliPath)) {
           throw new Error('Invalid path: contains potentially unsafe characters');
@@ -1196,8 +1402,8 @@ export function registerClaudeCodeHandlers(): void {
         } as Record<string, unknown>;
         writeSettingsFile(mergedSettings);
 
-        // Update CLI tool manager cache
-        configureTools({ claudePath: normalizedPath });
+        // Update CLI tool manager cache (with every tool path, not only Claude's)
+        configureTools(toolConfigFromSettings(mergedSettings));
 
         console.log('[Claude Code] Active path set:', normalizedPath, 'version:', version);
 
@@ -1247,9 +1453,7 @@ export function registerClaudeCodeHandlers(): void {
         }
 
         // Ensure the config directory exists
-        const expandedConfigDir = configDir.startsWith('~')
-          ? path.join(os.homedir(), configDir.slice(1))
-          : configDir;
+        const expandedConfigDir = expandClaudeHome(configDir);
 
         // Create directory if it doesn't exist
         await mkdir(expandedConfigDir, { recursive: true });
@@ -1343,9 +1547,7 @@ export function registerClaudeCodeHandlers(): void {
         console.warn('[Claude Code] Auth verification result:', result);
 
         // Expand configDir for backup restoration check
-        const expandedConfigDir = configDir.startsWith('~')
-          ? path.join(os.homedir(), configDir.slice(1))
-          : configDir;
+        const expandedConfigDir = expandClaudeHome(configDir);
 
         const claudeJsonPath = path.join(expandedConfigDir, '.claude.json');
         const claudeJsonBakPath = path.join(expandedConfigDir, '.claude.json.bak');
@@ -1443,7 +1645,7 @@ export function registerClaudeCodeHandlers(): void {
       const login = authLogins.get(profileId);
       if (login) {
         login.cancelled = true;
-        killProcessGracefully(login.child, { debugPrefix: '[Claude Code] auth login' });
+        stopAuthLogin(login.child);
       }
       return { success: true };
     }
@@ -1471,9 +1673,7 @@ export function registerClaudeCodeHandlers(): void {
           return { success: false, error: `Invalid config directory path: ${configDir}` };
         }
 
-        const expandedConfigDir = configDir.startsWith('~')
-          ? path.join(os.homedir(), configDir.slice(1))
-          : configDir;
+        const expandedConfigDir = expandClaudeHome(configDir);
 
         await mkdir(expandedConfigDir, { recursive: true });
 
@@ -1497,13 +1697,14 @@ export function registerClaudeCodeHandlers(): void {
           }
         }
 
-        // Resolve the claude binary path
-        const claudeInfo = getToolInfo('claude');
+        // Resolve the claude binary path (in WSL the distribution's own)
+        const claudeInfo = await getToolInfoAsync('claude', { refreshIfMissing: true });
         if (!claudeInfo.found || !claudeInfo.path) {
           return { success: false, error: 'Claude CLI not found. Please install Claude Code first.' };
         }
 
         const claudePath = claudeInfo.path;
+        const inWsl = isWslRuntime();
 
         // Send progress: opening browser
         const sender = event.sender;
@@ -1523,14 +1724,22 @@ export function registerClaudeCodeHandlers(): void {
           const previous = authLogins.get(profileId);
           if (previous) {
             previous.cancelled = true;
-            killProcessGracefully(previous.child, { debugPrefix: '[Claude Code] auth login' });
+            stopAuthLogin(previous.child);
           }
-          const child = spawn(claudePath, args, {
-            env,
-            stdio: ['ignore', 'pipe', 'pipe'],
-            // On Windows, .cmd files need shell: true
-            shell: isWindows() && claudePath.endsWith('.cmd'),
-          });
+          if (inWsl) {
+            // Claude Code inside WSL: the app's CLAUDE_CONFIG_DIR is a Windows setting, and the
+            // default ~/.claude runs without one; runtime-exec sends the Linux path through WSLENV
+            delete env.CLAUDE_CONFIG_DIR;
+            if (!isDefaultClaudeConfigDir(expandedConfigDir)) env.CLAUDE_CONFIG_DIR = expandedConfigDir;
+          }
+          const child = inWsl
+            ? spawnTool('claude', args, { env, stdio: ['ignore', 'pipe', 'pipe'], command: claudePath })
+            : spawn(claudePath, args, {
+              env,
+              stdio: ['ignore', 'pipe', 'pipe'],
+              // On Windows, .cmd files need shell: true
+              shell: isWindows() && claudePath.endsWith('.cmd'),
+            });
           const login = { child, cancelled: false };
           authLogins.set(profileId, login);
           const forget = () => {
@@ -1562,7 +1771,8 @@ export function registerClaudeCodeHandlers(): void {
 
           // Timeout after 5 minutes
           const timeout = setTimeout(() => {
-            child.kill();
+            if (inWsl) stopAuthLogin(child);
+            else child.kill();
             sender.send(IPC_CHANNELS.CLAUDE_AUTH_LOGIN_PROGRESS, {
               status: 'error',
               message: 'Authentication timed out'

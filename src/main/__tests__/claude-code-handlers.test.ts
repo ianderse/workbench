@@ -24,6 +24,7 @@ vi.mock('electron', () => ({
 const mockGetToolInfo = vi.fn();
 vi.mock('../cli-tool-manager', () => ({
   getToolInfo: mockGetToolInfo,
+  getToolInfoAsync: async (...args: unknown[]) => mockGetToolInfo(...args),
   configureTools: vi.fn(),
   getClaudeDetectionPaths: vi.fn(() => ({
     homebrewPaths: [],

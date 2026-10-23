@@ -12,10 +12,9 @@
  */
 
 import { app } from 'electron';
-import { join, resolve } from 'path';
+import path, { join } from 'path';
 import { mkdir } from 'fs/promises';
 import { existsSync } from 'fs';
-import { homedir } from 'os';
 import type {
   ClaudeProfile,
   ClaudeProfileSettings,
@@ -51,7 +50,7 @@ import {
 import { getCredentialsFromKeychain, getKeychainServiceName, normalizeWindowsPath, updateProfileSubscriptionMetadata } from './claude-profile/credential-utils';
 import { loadProfilesFile } from './services/profile/profile-manager';
 import {
-  CLAUDE_PROFILES_DIR,
+  getClaudeProfilesDir,
   generateProfileId as generateProfileIdImpl,
   createProfileDirectory as createProfileDirectoryImpl,
   isProfileAuthenticated as isProfileAuthenticatedImpl,
@@ -63,13 +62,25 @@ import {
 } from './claude-profile/profile-utils';
 import { debugLog } from '../shared/utils/debug-logger';
 import { isWindows } from './platform';
+import { expandClaudeHome, isClaudeHomeInWsl, joinClaudeHome } from './platform/claude-home';
+import { whenShellRuntimeReady } from './platform/shell-runtime';
 import { detectClaudeCodeSetups, detectedAccountName, type DetectedSetup } from './claude-profile/claude-code-detection';
 import { getDefaultClaudeConfigDir } from './claude-profile/config-dir-paths';
 
 /** Normalize a profile configDir for comparison (~ expansion, resolution, Windows case). */
 function normalizeConfigDir(configDir: string): string {
-  const resolved = resolve(expandHomePath(configDir));
+  // In WSL the dirs are the Linux home's UNC paths
+  const resolved = (isClaudeHomeInWsl() ? path.win32 : path).resolve(expandHomePath(configDir));
   return isWindows() ? resolved.toLowerCase() : resolved;
+}
+
+/**
+ * The profile store file. Claude Code inside WSL has its own accounts (in the Linux home), so
+ * they are kept in a store of their own: switching between native and WSL keeps each side's
+ * accounts, active account and usage instead of dropping or remapping them.
+ */
+export function getProfileStoreFileName(inWsl: boolean): string {
+  return inWsl ? 'claude-profiles.wsl.json' : 'claude-profiles.json';
 }
 
 /** Copy of an object without its undefined-valued keys. */
@@ -105,10 +116,12 @@ export class ClaudeProfileManager {
   private configDir: string;
   private data: ProfileStoreData;
   private initialized: boolean = false;
+  /** Set once the store for this session's runtime (native or WSL) is chosen; nothing is saved before */
+  private storeReady: boolean = false;
 
   constructor() {
     this.configDir = join(app.getPath('userData'), 'config');
-    this.storePath = join(this.configDir, 'claude-profiles.json');
+    this.storePath = join(this.configDir, getProfileStoreFileName(false));
 
     // DON'T do file I/O here - defer to async initialize()
     // Start with default data until initialized
@@ -126,6 +139,13 @@ export class ClaudeProfileManager {
 
     console.log('[ClaudeProfileManager] Starting initialization...');
 
+    // Claude Code's accounts live where it runs (natively or inside WSL), known once startup
+    // detection of the shell runtime has finished
+    await whenShellRuntimeReady();
+    const inWsl = isClaudeHomeInWsl();
+    this.storePath = join(this.configDir, getProfileStoreFileName(inWsl));
+    this.storeReady = true;
+
     // Ensure directory exists (async) - mkdir with recursive:true is idempotent
     await mkdir(this.configDir, { recursive: true });
 
@@ -135,6 +155,8 @@ export class ClaudeProfileManager {
       this.data = loadedData;
       debugLog('[ClaudeProfileManager] Loaded profile store with', this.data.profiles.length, 'profiles');
     } else {
+      // Defaults for this runtime (the ones from the constructor point at the native home)
+      if (inWsl) this.data = this.createDefaultData();
       debugLog('[ClaudeProfileManager] No existing profile store found, using defaults');
     }
 
@@ -176,7 +198,7 @@ export class ClaudeProfileManager {
     let setups: DetectedSetup[];
     try {
       setups = detectClaudeCodeSetups({
-        excludeUnder: [CLAUDE_PROFILES_DIR],
+        excludeUnder: [getClaudeProfilesDir()],
         hasSubscriptionCredentials: (dir) => !!getCredentialsFromKeychain(dir).token,
         keychainEntry: (dir) => getKeychainServiceName(dir),
       });
@@ -276,7 +298,7 @@ export class ClaudeProfileManager {
     const defaultDir = getDefaultClaudeConfigDir();
     if (!used.has(normalizeConfigDir(defaultDir))) return defaultDir;
     for (let n = 2; ; n++) {
-      const dir = join(homedir(), `.claude-${n}`);
+      const dir = joinClaudeHome(`.claude-${n}`);
       if (!used.has(normalizeConfigDir(dir)) && !existsSync(dir)) return dir;
     }
   }
@@ -527,9 +549,7 @@ export class ClaudeProfileManager {
 
       // Expand ~ to home directory
       const expandedConfigDir = normalizeWindowsPath(
-        profile.configDir.startsWith('~')
-          ? profile.configDir.replace(/^~/, homedir())
-          : profile.configDir
+        expandClaudeHome(profile.configDir)
       );
 
       // Use helper with onlyIfMissing option to preserve existing values
@@ -577,7 +597,7 @@ export class ClaudeProfileManager {
     // This prevents interference with external Claude Code CLI which uses ~/.claude
     const initialProfileName = 'Primary';
     const sanitizedName = initialProfileName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    const isolatedConfigDir = join(CLAUDE_PROFILES_DIR, sanitizedName);
+    const isolatedConfigDir = join(getClaudeProfilesDir(), sanitizedName);
 
     const defaultProfile: ClaudeProfile = {
       id: sanitizedName,  // Use sanitized name as ID (e.g., 'primary')
@@ -600,6 +620,8 @@ export class ClaudeProfileManager {
    * Save profiles to disk
    */
   private save(): void {
+    // Before initialize() picks this runtime's store, the data are only defaults
+    if (!this.storeReady) return;
     saveProfileStore(this.storePath, this.data);
   }
 
@@ -921,9 +943,7 @@ export class ClaudeProfileManager {
     if (profile?.configDir) {
       // Expand ~ to home directory for the environment variable
       const expandedConfigDir = normalizeWindowsPath(
-        profile.configDir.startsWith('~')
-          ? profile.configDir.replace(/^~/, homedir())
-          : profile.configDir
+        expandClaudeHome(profile.configDir)
       );
 
       env.CLAUDE_CONFIG_DIR = expandedConfigDir;
@@ -1237,9 +1257,7 @@ export class ClaudeProfileManager {
 
     // Expand ~ to home directory for the environment variable
     const expandedConfigDir = normalizeWindowsPath(
-      profile.configDir.startsWith('~')
-        ? profile.configDir.replace(/^~/, require('os').homedir())
-        : profile.configDir
+      expandClaudeHome(profile.configDir)
     );
 
     if (process.env.VERBOSE === 'true') {

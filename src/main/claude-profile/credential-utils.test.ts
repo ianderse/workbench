@@ -22,6 +22,7 @@ vi.mock('fs', () => ({
 
 vi.mock('child_process', () => ({
   execFileSync: vi.fn(() => ''),
+  execFile: vi.fn(),
 }));
 
 vi.mock('os', () => ({

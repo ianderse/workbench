@@ -10,7 +10,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { homedir } from 'os';
+import { expandClaudeHome } from '../platform/claude-home';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { ClaudeUsageSnapshot, ProfileUsageSummary, AllProfilesUsage } from '../../shared/types/agent';
 import { loadProfilesFile } from '../services/profile/profile-manager';
@@ -400,9 +400,7 @@ export class UsageMonitor extends EventEmitter {
       // Check all OAuth profiles for missing credentials
       for (const profile of settings.profiles) {
         if (profile.configDir && usesClaudeSubscription(profile)) {
-          const expandedConfigDir = profile.configDir.startsWith('~')
-            ? profile.configDir.replace(/^~/, homedir())
-            : profile.configDir;
+          const expandedConfigDir = expandClaudeHome(profile.configDir);
           const creds = getCredentialsFromKeychain(expandedConfigDir);
           if (!creds.token) {
             // Credentials are missing - mark for re-auth
@@ -742,9 +740,7 @@ export class UsageMonitor extends EventEmitter {
 
     try {
       // Get credentials from keychain for this profile's configDir
-      const expandedConfigDir = profile.configDir.startsWith('~')
-        ? profile.configDir.replace(/^~/, homedir())
-        : profile.configDir;
+      const expandedConfigDir = expandClaudeHome(profile.configDir);
 
       // Use ensureValidToken to proactively refresh the token if near expiry
       // This is critical for inactive profiles whose tokens may have expired

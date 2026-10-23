@@ -15,9 +15,10 @@ import { migrateSession } from '../claude-profile/session-utils';
 import { findMostRecentClaudeSession } from '../terminal/session-handler';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
 import { isValidConfigDir } from '../utils/config-path-validator';
-import { getToolInfo } from '../cli-tool-manager';
+import { getToolInfoAsync } from '../cli-tool-manager';
 import { isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { getPathDelimiter, isWindows } from '../platform';
+import { isWslRuntime, toRuntimePath } from '../platform/shell-runtime';
 import { safeSendToRenderer } from './utils';
 import { openTerminalWithCommand } from './claude-code-handlers';
 
@@ -240,11 +241,12 @@ export function registerTerminalHandlers(
     IPC_CHANNELS.CLAUDE_ACCOUNTS_LOGIN,
     async (_, profileId?: string): Promise<IPCResult> => {
       try {
-        const claude = getToolInfo('claude');
+        const claude = await getToolInfoAsync('claude', { refreshIfMissing: true });
         if (!claude.found || !claude.path) return { success: false, error: 'Claude Code CLI not found' };
         const configDir = getClaudeProfileManager().getLoginConfigDir(profileId);
         const isDefault = isDefaultClaudeConfigDir(configDir);
-        if (isWindows()) {
+        // In WSL Claude Code runs in a WSL console (Linux paths, Unix syntax)
+        if (isWindows() && !isWslRuntime()) {
           // PowerShell: claude from its own folder, the config dir through the environment
           const env: NodeJS.ProcessEnv = { ...process.env, CLAUDE_CONFIG_DIR: configDir };
           if (isDefault) delete env.CLAUDE_CONFIG_DIR;
@@ -254,7 +256,7 @@ export function registerTerminalHandlers(
           // The terminal starts its own shell, so `env` sets the config dir in the command
           // (Claude Code's default ~/.claude runs without CLAUDE_CONFIG_DIR)
           const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`;
-          const configEnv = isDefault ? '-u CLAUDE_CONFIG_DIR' : `CLAUDE_CONFIG_DIR=${quote(configDir)}`;
+          const configEnv = isDefault ? '-u CLAUDE_CONFIG_DIR' : `CLAUDE_CONFIG_DIR=${quote(toRuntimePath(configDir))}`;
           await openTerminalWithCommand(`env ${configEnv} ${quote(claude.path)} auth login`);
         }
         return { success: true };
