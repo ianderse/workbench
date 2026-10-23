@@ -12,10 +12,16 @@ const refs = vi.hoisted(() => ({ porcelain: '', root: '', wsl: false }));
 vi.mock('../../utils/git-exec', () => ({
   git: vi.fn(async () => ({ stdout: refs.porcelain, stderr: '' })),
 }));
-vi.mock('../../platform/shell-runtime', () => ({
-  // The distribution sees the temp folder as /mnt/host
-  toHostPath: (p: string) => (refs.wsl ? p.replace(/^\/mnt\/host(?=\/|$)/, refs.root) : p),
-}));
+vi.mock('../../platform/shell-runtime', async () => {
+  const { join } = await import('path');
+  return {
+    // The distribution sees the temp folder as /mnt/host
+    toHostPath: (p: string) => {
+      const rest = refs.wsl ? /^\/mnt\/host(\/.*)?$/.exec(p) : null;
+      return rest ? join(refs.root, rest[1] ?? '') : p;
+    },
+  };
+});
 
 import { listWorktrees } from '../project-setup';
 

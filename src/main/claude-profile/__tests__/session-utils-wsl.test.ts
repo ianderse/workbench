@@ -3,6 +3,7 @@
  * Claude Code sees (/mnt/c/... for a Windows project), under the config dir in the Linux home.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import path from 'path';
 
 const wslRef = vi.hoisted(() => ({ on: true }));
 vi.mock('../../platform/shell-runtime', async (importOriginal) => {
@@ -35,6 +36,6 @@ describe('session files in WSL', () => {
 
   it('keeps the native folder name natively', () => {
     wslRef.on = false;
-    expect(getSessionFilePath('/home/me/.claude', '/Users/me/app', 'abc')).toBe('/home/me/.claude/projects/-Users-me-app/abc.jsonl');
+    expect(getSessionFilePath('/home/me/.claude', '/Users/me/app', 'abc')).toBe(path.join('/home/me/.claude', 'projects', '-Users-me-app', 'abc.jsonl'));
   });
 });

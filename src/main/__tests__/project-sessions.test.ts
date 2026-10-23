@@ -25,8 +25,8 @@ describe('finding a project\'s sessions', () => {
 
   /** A transcript Claude Code wrote for a session that ran in `cwd` */
   const givenSession = (configDir: string, sessionId: string, cwd: string, writtenMs = Date.now()): string => {
-    // Claude Code replaces both separators and dots in the directory name
-    const folder = cwd.replace(/[/.]/g, '-');
+    // Claude Code drops the drive letter and replaces both separators and dots in the directory name
+    const folder = cwd.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, '').replace(/[/.]/g, '-');
     const dir = path.join(root, configDir, 'projects', folder);
     mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${sessionId}.jsonl`);

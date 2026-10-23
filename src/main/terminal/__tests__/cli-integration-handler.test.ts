@@ -341,8 +341,10 @@ describe('cli-integration-handler', () => {
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(clearCmd);
-      expect(written).toContain(getTempFileInvocation(platform, tokenPath));
-      expect(written).toContain(getTempFileCleanup(platform, tokenPath));
+      // Inside bash -c "..." a backslash (a Windows host's temp path) is escaped
+      const shownPath = platform === 'win32' ? tokenPath : tokenPath.replace(/\\/g, '\\\\');
+      expect(written).toContain(getTempFileInvocation(platform, shownPath));
+      expect(written).toContain(getTempFileCleanup(platform, shownPath));
       expect(written).toContain(getQuotedCommand(platform, command));
       expect(profileManager.getProfile).toHaveBeenCalledWith('prof-1');
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
@@ -1432,7 +1434,7 @@ describe('restoring an agent window', () => {
       '/tmp/project',
       expect.objectContaining({
         sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-        configDir: '/home/user/.claude-profiles/work',
+        configDir: path.resolve('/home/user/.claude-profiles/work'),
         cwd: '/tmp/project',
       })
     );
