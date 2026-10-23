@@ -1,7 +1,5 @@
 import { EventEmitter } from 'events';
 import path from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import { randomUUID } from 'crypto';
 import { AgentState } from './agent-state';
 import type { ExecutionProgressData, StartTaskOptions } from './types';
@@ -21,7 +19,8 @@ import { readSettingsFile } from '../settings-utils';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { isSelfImproveEnabled, SELF_IMPROVE_NUDGE } from '../self-improve';
 import { getAugmentedEnvAsync } from '../env-utils';
-import { getToolPath } from '../cli-tool-manager';
+import { isWslRuntime } from '../platform/shell-runtime';
+import { git } from '../utils/git-exec';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { getOperationRegistry } from '../claude-profile/operation-registry';
 import { getAPIProfileEnv } from '../services/profile';
@@ -32,7 +31,6 @@ import { resolveBaseBranch } from '../utils/base-branch';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 
-const execFileAsync = promisify(execFile);
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
 const MAX_SWAPS_PER_TASK = 2;
@@ -440,12 +438,14 @@ export class AgentManager extends EventEmitter {
       try {
         const graphify = await getGraphifyPromptContext(project.path);
         if (graphify) {
-          const augmented = await getAugmentedEnvAsync([path.dirname(graphify.cli)]);
           config.graphifyPrompt = graphify.commandPrompt;
-          config.extraEnv = {
-            GRAPHIFY_OUT: path.dirname(graphify.graph),
-            ...(augmented.PATH ? { PATH: augmented.PATH } : {}),
-          };
+          // GRAPHIFY_OUT is a host path (translated when the run starts in WSL). In WSL graphify
+          // comes from the distribution's login PATH, so no Windows PATH entry is added
+          config.extraEnv = { GRAPHIFY_OUT: path.dirname(graphify.graph) };
+          if (!isWslRuntime()) {
+            const augmented = await getAugmentedEnvAsync([path.dirname(graphify.cli)]);
+            if (augmented.PATH) config.extraEnv.PATH = augmented.PATH;
+          }
         }
       } catch (error) {
         appLog.warn(`[AgentManager] Graphify context unavailable for ${taskId}:`, error);
@@ -457,7 +457,7 @@ export class AgentManager extends EventEmitter {
 
   private async getCurrentBranch(cwd: string): Promise<string | null> {
     try {
-      const { stdout } = await execFileAsync(getToolPath('git'), ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
+      const { stdout } = await git(['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
       const branch = stdout.trim();
       return branch && branch !== 'HEAD' ? branch : null;
     } catch {

@@ -7,7 +7,6 @@
  * unsubscribe: opening or closing them never starts, stops or restarts it.
  */
 
-import os from 'os';
 import path from 'path';
 import { BrowserWindow, type WebContents } from 'electron';
 import type { Worker } from 'worker_threads';
@@ -16,7 +15,9 @@ import type { LiveAgentStatus } from '../../shared/types';
 import { appLog } from '../app-logger';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { expandHomePath } from '../claude-profile/profile-utils';
+import { getDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { isWindows } from '../platform';
+import { getWslInfo } from '../platform/shell-runtime';
 import { createRelayWorker } from './create-relay-worker';
 import { getTerminalWriteTime } from './terminal-activity';
 import type { RelayWorkerMessage, RelayWorkerRequest } from './relay-worker-protocol';
@@ -68,7 +69,7 @@ interface SessionMessage {
  * (~/.claude) and each Claude profile's own (agent windows run with CLAUDE_CONFIG_DIR set to it)
  */
 function getClaudeConfigDirs(): string[] {
-  const dirs = [path.join(os.homedir(), '.claude')];
+  const dirs = [getDefaultClaudeConfigDir()];
   try {
     // Only the stored dirs: getSettings() checks each profile's credentials (keychain), which can block
     for (const configDir of getClaudeProfileManager().getProfileConfigDirs()) {
@@ -275,7 +276,9 @@ export class LiveAgentRelay {
 
     let worker: Worker;
     try {
-      worker = createRelayWorker();
+      // Claude Code inside WSL: the relay maps its Linux paths
+      const wsl = getWslInfo();
+      worker = createRelayWorker({ wsl: wsl ? { distro: wsl.distro, mountRoot: wsl.mountRoot } : null });
     } catch (error) {
       appLog.error('[LiveAgent] Could not start the relay:', error);
       this.setStatus({ state: 'error', error: errorMessage(error) });

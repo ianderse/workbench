@@ -8,22 +8,22 @@
  * CLI.
  */
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-import os from 'os';
 import path from 'path';
 import { promises as fs } from 'fs';
 import semver from 'semver';
 import { findExecutableAsync, getAugmentedEnvAsync } from './env-utils';
-import { isWindows, requiresShell } from './platform';
+import { isWindows } from './platform';
 import { appLog } from './app-logger';
+import { getWslInfo, isWslRuntime, toRuntimePath, whenShellRuntimeReady } from './platform/shell-runtime';
+import { runTool } from './platform/runtime-exec';
+import { execInWsl } from './platform/wsl-exec-basic';
+import { isUnderMountRoot } from './platform/wsl-detect';
+import { getClaudeHome, joinClaudeHome } from './platform/claude-home';
 import { getClaudeProfileManager } from './claude-profile-manager';
 import { expandHomePath } from './claude-profile/profile-utils';
 import { getGraphifyGraphPath, getGraphifyMemoryDir, getGraphifyOutDir, hasGraphifyGraph, isGraphifyEnabled } from './graphify-paths';
 import type { GraphifyGraph, GraphifyIndexInfo, GraphifyVersionInfo } from '../shared/types/cli';
 import { formatDateTime } from '../shared/utils/format-date-time';
-
-const execFileAsync = promisify(execFile);
 
 /** PyPI package that provides the `graphify` command */
 const GRAPHIFY_PACKAGE = 'graphifyy';
@@ -48,6 +48,11 @@ const buildAborts = new Map<string, AbortController>();
 
 export { hasGraphifyGraph, isGraphifyEnabled };
 
+/**
+ * Run graphify through the runtime layer: natively the installed command (Windows shims through
+ * a shell), in WSL the distribution's graphify with path arguments and cwd translated and
+ * GRAPHIFY_OUT / CLAUDE_CONFIG_DIR sent as Linux paths
+ */
 async function runGraphify(
   executable: string,
   args: string[],
@@ -56,23 +61,46 @@ async function runGraphify(
   extraEnv: Record<string, string | undefined> = {},
   signal?: AbortSignal
 ) {
-  const env: Record<string, string | undefined> = { ...(await getAugmentedEnvAsync()), ...extraEnv };
+  await whenShellRuntimeReady();
+  // In WSL the app's own environment stays on Windows (the runtime layer sends what is added)
+  const baseEnv = isWslRuntime() ? { ...process.env } : await getAugmentedEnvAsync();
+  const env: Record<string, string | undefined> = { ...baseEnv, ...extraEnv };
   for (const key of Object.keys(env)) {
     if (env[key] === undefined) delete env[key];
   }
-  return execFileAsync(executable, args, {
+  return runTool('python', args, {
+    command: executable,
     cwd,
     env: env as NodeJS.ProcessEnv,
     timeout,
     maxBuffer: 20 * 1024 * 1024,
     windowsHide: true,
-    shell: requiresShell(executable),
     signal,
   });
 }
 
+/** `command -v <name>` inside WSL (login PATH), ignoring Windows programs on the appended Windows PATH */
+async function findInWsl(name: string): Promise<string | null> {
+  const wsl = getWslInfo();
+  if (!wsl) return null;
+  try {
+    const { stdout } = await execInWsl('/bin/sh', ['-c', 'command -v "$1"', 'sh', name]);
+    const found = stdout.trim().split(/\r?\n/)[0]?.trim() ?? '';
+    return found.startsWith('/') && !isUnderMountRoot(found, wsl.mountRoot) ? found : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The graphify command: in WSL the distribution's own (looked up again, it may have been installed since startup) */
+async function findGraphify(): Promise<string | null> {
+  await whenShellRuntimeReady();
+  if (isWslRuntime()) return findInWsl('graphify');
+  return findExecutableAsync('graphify');
+}
+
 async function detect(): Promise<GraphifyInstallation | null> {
-  const executable = await findExecutableAsync('graphify');
+  const executable = await findGraphify();
   if (!executable) return null;
   try {
     const { stdout } = await runGraphify(executable, ['--version']);
@@ -115,7 +143,8 @@ export async function checkGraphifyVersion(forceRefresh = false): Promise<Graphi
  * Claude profile's own (Claude Code runs with CLAUDE_CONFIG_DIR set to it)
  */
 function getClaudeConfigDirs(): string[] {
-  const dirs = [path.join(os.homedir(), '.claude')];
+  // In WSL Claude Code keeps its config in the Linux home (a UNC path from Windows)
+  const dirs = [joinClaudeHome('.claude')];
   try {
     for (const profile of getClaudeProfileManager().getSettings().profiles) {
       if (profile.configDir) dirs.push(path.resolve(expandHomePath(profile.configDir)));
@@ -147,12 +176,12 @@ async function getConfigDirsMissingCommand(): Promise<{ dirs: string[]; missing:
 async function installGraphifyClaudeCommand(): Promise<{ configDirs: number; missing: number }> {
   const installation = await detectGraphify();
   if (!installation) throw new Error('Graphify is not installed');
-  const defaultDir = path.join(os.homedir(), '.claude');
+  const defaultDir = joinClaudeHome('.claude');
   const { dirs, missing } = await getConfigDirsMissingCommand();
   const failed: string[] = [];
   for (const dir of missing) {
     try {
-      await runGraphify(installation.path, ['install', '--platform', 'claude'], os.homedir(), VERSION_TIMEOUT_MS * 4, {
+      await runGraphify(installation.path, ['install', '--platform', 'claude'], getClaudeHome(), VERSION_TIMEOUT_MS * 4, {
         // The default directory is used when CLAUDE_CONFIG_DIR isn't set
         CLAUDE_CONFIG_DIR: dir === defaultDir ? undefined : dir,
         PYTHONIOENCODING: 'utf-8',
@@ -195,15 +224,21 @@ export function setUpClaudeCommandAfterInstall(previousVersion: string | null): 
   installWatch = setTimeout(() => void check(), INSTALL_WATCH_INTERVAL_MS);
 }
 
-/** Shell command that installs (or updates) Graphify with uv, pipx or pip, whichever is available */
+/**
+ * Shell command that installs (or updates) Graphify with uv, pipx or pip, whichever is available
+ * (inside WSL when the app runs its tools there: the command then runs in a WSL terminal)
+ */
 export async function getGraphifyInstallCommand(isUpdate: boolean): Promise<string> {
-  if (await findExecutableAsync('uv')) {
+  await whenShellRuntimeReady();
+  const inWsl = isWslRuntime();
+  const has = (name: string) => (inWsl ? findInWsl(name) : findExecutableAsync(name));
+  if (await has('uv')) {
     return isUpdate ? `uv tool upgrade ${GRAPHIFY_PACKAGE}` : `uv tool install ${GRAPHIFY_PACKAGE}`;
   }
-  if (await findExecutableAsync('pipx')) {
+  if (await has('pipx')) {
     return isUpdate ? `pipx upgrade ${GRAPHIFY_PACKAGE}` : `pipx install ${GRAPHIFY_PACKAGE}`;
   }
-  const python = isWindows() ? 'py' : 'python3';
+  const python = isWindows() && !inWsl ? 'py' : 'python3';
   return `${python} -m pip install --user --upgrade ${GRAPHIFY_PACKAGE}`;
 }
 
@@ -355,19 +390,27 @@ export interface GraphifyAgentContext {
 
 /**
  * The project's memory graph for agents (the CodebaseGraph tool and a prompt section about it), or
- * null when Graphify isn't installed or the project has no graph yet
+ * null when Graphify isn't installed or the project has no graph yet. When Claude Code runs in
+ * WSL, its graphify commands need graphify inside the distribution, and the paths in the command
+ * prompt are the distribution's.
  */
 export async function getGraphifyPromptContext(projectPath: string): Promise<GraphifyAgentContext | null> {
-  const [installation, index] = await Promise.all([detectGraphify(), readGraphifyIndex(projectPath)]);
-  if (!installation || !index) return null;
+  // In WSL the detection finds the distribution's graphify
+  const [installation, index] = await Promise.all([
+    detectGraphify(),
+    readGraphifyIndex(projectPath),
+  ]);
+  const cli = installation?.path;
+  if (!cli || !index) return null;
   const graph = getGraphifyGraphPath(projectPath);
   const report = path.join(path.dirname(graph), 'GRAPH_REPORT.md');
   const intro = `A knowledge graph of this project's code (${index.nodes} nodes, ${index.edges} edges) is available`;
-  const outro = [
+  const outroFor = (reportPath: string) => [
     '',
-    `For an overview of the main modules, read \`${report}\`. The graph was built ${formatDateTime(index.builtAt)}; code changed`,
+    `For an overview of the main modules, read \`${reportPath}\`. The graph was built ${formatDateTime(index.builtAt)}; code changed`,
     'since then is not in it, so confirm details in the files it points to.',
   ];
+  const outro = outroFor(report);
   const prompt = [
     '## PROJECT CODE GRAPH (GRAPHIFY)',
     '',
@@ -392,7 +435,7 @@ export async function getGraphifyPromptContext(projectPath: string): Promise<Gra
     '- `graphify path "SymbolA" "SymbolB"`: how two symbols connect',
     '- `graphify affected "SymbolName"`: what a change to a symbol can impact',
     '- `graphify god-nodes`: the most connected symbols, the core of the architecture',
-    ...outro,
+    ...outroFor(toRuntimePath(report)),
   ].join('\n');
-  return { prompt, commandPrompt, cli: installation.path, graph };
+  return { prompt, commandPrompt, cli, graph };
 }

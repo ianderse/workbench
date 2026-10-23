@@ -10,19 +10,19 @@
  */
 import * as fs from 'fs'
 import * as path from 'path'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import { isWindows } from '../platform'
 import { appLog } from '../app-logger'
-import { getToolPath } from '../cli-tool-manager'
-import { getIsolatedGitEnv } from '../utils/git-isolation'
-
-const execFileAsync = promisify(execFile)
+import { git } from '../utils/git-exec'
+import { getWslInfo, toHostPath } from '../platform/shell-runtime'
+import { isWslUncPath, normalizeMountRoot, windowsToWsl } from '../platform/wsl-paths'
 
 /** Set in each agent window's shell to its terminal id. Claude Code passes it on to its hooks,
  *  and the hook script adds it to what it forwards, so the relay knows which window each session
  *  runs in (each window's graph shows only its own sessions) */
 export const LIVE_AGENT_TERMINAL_ENV = 'WORKBENCH_TERMINAL_ID'
+
+/** Where WSL mounts Windows drives, for the hook script run by Claude Code inside WSL */
+const WSL_MOUNT_ROOT_ENV = 'WORKBENCH_WSL_MOUNT_ROOT'
 
 /** A project's Live agent directory: the hook script and the relay's discovery files */
 export function getFlowDir(projectPath: string): string {
@@ -40,8 +40,8 @@ const HOOK_COMMAND_MARKER = '/.workbench/flow/hook.cjs'
 
 // ─── Hook script content ────────────────────────────────────────────────────
 
-// .cjs: a project whose package.json says "type": "module" would load a .js as ESM
-function getHookScriptContent() {
+// .cjs: a project whose package.json says "type": "module" would load a .js as ESM (exported for tests)
+export function getHookScriptContent(): string {
   return `#!/usr/bin/env node
 // Agent Flow hook forwarder — installed by Workbench (Live agent).
 // Claude Code invokes this as a command hook. It reads the discovery files next
@@ -56,6 +56,20 @@ const http = require('http');
 setTimeout(() => process.exit(0), ${HOOK_TIMEOUT_S * 1000 - HOOK_SAFETY_MARGIN_MS});
 
 const DIR = __dirname;
+// Claude Code inside WSL runs this through WSL interop (a Windows process) and
+// reports Linux paths: /mnt/c/x is C:\\x, any other /x is the distribution's
+// \\\\wsl.localhost\\<distro>\\x (${WSL_MOUNT_ROOT_ENV}: where Windows drives are mounted)
+const WSL_DISTRO = process.env.WSL_DISTRO_NAME;
+const MOUNT_ROOT = (process.env.${WSL_MOUNT_ROOT_ENV} || '/mnt/').replace(/\\/+$/, '') + '/';
+function hostPath(p) {
+  if (process.platform !== 'win32' || typeof p !== 'string' || !p.startsWith('/')) return p;
+  if (p.startsWith(MOUNT_ROOT)) {
+    const m = /^([A-Za-z])(?:\\/(.*))?$/s.exec(p.slice(MOUNT_ROOT.length));
+    if (m) return m[1].toUpperCase() + ':\\\\' + (m[2] || '').replace(/\\//g, '\\\\');
+  }
+  return WSL_DISTRO ? '\\\\\\\\wsl.localhost\\\\' + WSL_DISTRO + p.replace(/\\/+$/, '').replace(/\\//g, '\\\\') : p;
+}
+
 // Case-folded on Windows, where shells and Claude Code disagree on drive-letter
 // case (\`c:\\...\` vs \`C:\\...\`)
 function normPath(p) {
@@ -76,8 +90,12 @@ process.stdin.on('data', c => { input += c; });
 process.stdin.on('end', () => {
   let payload;
   try { payload = JSON.parse(input); } catch { process.exit(0); }
-  const cwd = payload && payload.cwd;
-  if (!cwd) process.exit(0);
+  if (!payload || !payload.cwd) process.exit(0);
+  // The relay reads these on Windows
+  for (const key of ['cwd', 'transcript_path', 'agent_transcript_path']) {
+    if (payload[key]) payload[key] = hostPath(payload[key]);
+  }
+  const cwd = payload.cwd;
   const terminalId = process.env.${LIVE_AGENT_TERMINAL_ENV};
   if (terminalId) payload.workbench_terminal_id = terminalId;
   const body = JSON.stringify(payload);
@@ -165,12 +183,37 @@ interface CommandHook { type?: string; command?: string; url?: string; timeout?:
 interface HookEntry { matcher?: string; hooks?: CommandHook[] }
 type Settings = Record<string, unknown> & { hooks?: Record<string, HookEntry[]> }
 
-/** Our hook entry for an event. Workbench's own executable runs the hook as
- *  Node (Claude Code's PATH may have no node); hook commands run in a POSIX
- *  shell (Git Bash on Windows), so the variable prefix works everywhere. */
+/** POSIX shell single quoting */
+const shellQuote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
+
+/**
+ * The command Claude Code runs for our hooks. Workbench's own executable runs
+ * the hook script as Node (Claude Code's PATH may have no node). Claude Code
+ * runs hook commands with /bin/sh on macOS and Linux and with Git Bash on
+ * Windows, so the variable prefix works everywhere.
+ *
+ * On Windows the command also works for Claude Code inside WSL (WSL_DISTRO_NAME
+ * is set there): it starts the same Windows executable by its Linux path through
+ * WSL interop, with WSLENV taking the variables the hook script needs across to
+ * the Windows process (and its script path stays a Windows path, which that
+ * process reads). `mountRoot`: where WSL mounts Windows drives.
+ */
+export function buildHookCommand(execPath: string, scriptPath: string, mountRoot = '/mnt/'): string {
+  if (!isWindows()) return `ELECTRON_RUN_AS_NODE=1 "${execPath}" "${scriptPath}"`
+  const slashes = (p: string) => p.replace(/\\/g, '/')
+  const native = `ELECTRON_RUN_AS_NODE=1 "${slashes(execPath)}" "${slashes(scriptPath)}"`
+  // The distribution is only needed for paths inside it, which the executable's never is
+  const linuxExecPath = windowsToWsl(execPath, { distro: '', mountRoot })
+  if (!linuxExecPath?.startsWith('/') || isWslUncPath(execPath)) return native
+  const forwarded = ['ELECTRON_RUN_AS_NODE', LIVE_AGENT_TERMINAL_ENV, 'WSL_DISTRO_NAME', WSL_MOUNT_ROOT_ENV].join(':')
+  const wsl = `WSLENV="${forwarded}\${WSLENV:+:$WSLENV}" ${WSL_MOUNT_ROOT_ENV}=${shellQuote(normalizeMountRoot(mountRoot))} `
+    + `ELECTRON_RUN_AS_NODE=1 ${shellQuote(linuxExecPath)} ${shellQuote(slashes(scriptPath))}`
+  return `if [ -n "$WSL_DISTRO_NAME" ]; then ${wsl}; else ${native}; fi`
+}
+
+/** Our hook entry for an event (see buildHookCommand) */
 function ourHookEntry(projectPath: string, event: string): HookEntry {
-  const slashes = (p: string) => (isWindows() ? p.replace(/\\/g, '/') : p)
-  const command = `ELECTRON_RUN_AS_NODE=1 "${slashes(process.execPath)}" "${slashes(hookScriptPath(projectPath))}"`
+  const command = buildHookCommand(process.execPath, hookScriptPath(projectPath), getWslInfo()?.mountRoot)
   const hook: CommandHook = { type: 'command', command, timeout: HOOK_TIMEOUT_S }
   if (ASYNC_HOOK_EVENTS.includes(event)) hook.async = true
   return { hooks: [hook] }
@@ -424,17 +467,18 @@ export function removeFromWorktree(projectPath: string, worktreePath: string): v
 export async function listWorktrees(projectPath: string): Promise<string[]> {
   let stdout: string
   try {
-    ({ stdout } = await execFileAsync(getToolPath('git'), ['worktree', 'list', '--porcelain'], {
+    ({ stdout } = await git(['worktree', 'list', '--porcelain'], {
       cwd: projectPath,
       encoding: 'utf-8',
       timeout: 10000,
-      env: getIsolatedGitEnv(),
+      isolated: true,
     }))
   } catch {
     return []
   }
   const worktrees = stdout.split(/\r?\n/)
     .filter(line => line.startsWith('worktree '))
-    .map(line => line.slice('worktree '.length).trim())
+    // git in WSL lists Linux paths
+    .map(line => toHostPath(line.slice('worktree '.length).trim()))
   return worktrees.filter(worktree => !isSameFile(worktree, projectPath) && fs.existsSync(worktree))
 }

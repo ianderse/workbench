@@ -29,6 +29,9 @@ vi.mock('child_process', () => ({
 vi.mock('../env-utils', () => ({
   findExecutableAsync: async () => '/usr/bin/graphify',
   getAugmentedEnvAsync: async () => ({ PATH: '/usr/bin', GRAPHIFY_OUT: INHERITED_OUT }),
+  // graphify runs through the runtime layer (native launch)
+  shouldUseShell: () => false,
+  getSpawnCommand: (command: string) => command,
 }));
 
 vi.mock('../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));

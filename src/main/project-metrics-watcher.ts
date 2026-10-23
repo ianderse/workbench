@@ -11,14 +11,16 @@
  *
  * The watch costs one file watcher per session and is dropped as soon as the page is closed.
  * Watchers never keep the app alive (`persistent: false`), and a window that starts a new session
- * joins the watch when the list is armed again.
+ * joins the watch when the list is armed again. Paths inside WSL (`\\wsl.localhost\...`, a
+ * project there or the WSL Claude home) are polled: fs.watch doesn't work on them.
  */
 import path from 'path';
-import { watch, type FSWatcher } from 'fs';
+import { unwatchFile, watch, watchFile, type Stats } from 'fs';
 import { readAgentSessions, type AgentSessionRecord } from './agent-session-store';
 import { findSessionTranscript } from './claude-code/session-spending';
 import { claudeConfigDirs } from './claude-profile/profile-config-dirs';
 import { appLog } from './app-logger';
+import { isWslUncPath } from './platform/wsl-paths';
 import type { Project } from '../shared/types';
 
 /** One answer causes a burst of writes; report the change once they settle */
@@ -27,13 +29,18 @@ const SETTLE_MS = 1500;
 const WATCHED_SESSIONS = 24;
 /** How often the list of watched files may be built again */
 const REARM_MS = 60_000;
+/** How often a path inside WSL is checked for changes */
+const POLL_MS = 2000;
+/** What a project's windows record their sessions in, inside its `.workbench` (agent-session-store.ts) */
+const AGENT_SESSIONS_FILE = 'agent-sessions.json';
 
 interface Watch {
   projects: Project[];
   onChange: () => void;
 }
 
-let watchers: FSWatcher[] = [];
+/** Stops each watcher */
+let watchers: Array<() => void> = [];
 let settling: NodeJS.Timeout | null = null;
 let armedAt = 0;
 let active: Watch | null = null;
@@ -54,9 +61,9 @@ export function stopWatchingProjectMetrics(): void {
 }
 
 function closeWatchers(): void {
-  for (const watcher of watchers) {
+  for (const close of watchers) {
     try {
-      watcher.close();
+      close();
     } catch {
       // Already closed
     }
@@ -72,7 +79,10 @@ async function arm(): Promise<void> {
 
   for (const project of watched.projects) {
     if (active !== watched) return;
-    addWatcher(path.join(project.path, project.autoBuildPath || '.workbench'));
+    const dataDir = path.join(project.path, project.autoBuildPath || '.workbench');
+    addWatcher(dataDir);
+    // Polling a directory only sees entries come and go, not a file in it being rewritten
+    if (isWslUncPath(dataDir)) addWatcher(path.join(dataDir, AGENT_SESSIONS_FILE));
 
     const sessions = recentSessions(await readAgentSessions(project.path));
     if (sessions.length === 0) continue;
@@ -96,6 +106,14 @@ function recentSessions(sessions: AgentSessionRecord[]): AgentSessionRecord[] {
 }
 
 function addWatcher(target: string): void {
+  if (isWslUncPath(target)) {
+    const listener = (current: Stats, previous: Stats) => {
+      if (current.mtimeMs !== previous.mtimeMs || current.size !== previous.size) reportChange();
+    };
+    watchFile(target, { persistent: false, interval: POLL_MS }, listener);
+    watchers.push(() => unwatchFile(target, listener));
+    return;
+  }
   try {
     const watcher = watch(target, { persistent: false }, () => reportChange());
     // A watched file that is replaced or removed takes its watcher with it
@@ -106,7 +124,7 @@ function addWatcher(target: string): void {
         // Already closed
       }
     });
-    watchers.push(watcher);
+    watchers.push(() => watcher.close());
   } catch {
     // Nothing to watch here yet (a project that was never initialized, a transcript just moved)
   }

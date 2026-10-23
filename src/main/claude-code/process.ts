@@ -7,9 +7,8 @@
  * Never blocks the main process: everything is async child-process I/O.
  */
 
-import { spawn, type ChildProcess } from 'child_process';
-import { getSpawnCommand, getSpawnOptions } from '../env-utils';
-import { killProcessGracefully } from '../platform';
+import type { ChildProcess } from 'child_process';
+import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from './stream-types';
 
 export interface ClaudeProcessOptions {
@@ -42,11 +41,6 @@ interface ClaudeProcessResult {
   timedOut: boolean;
 }
 
-/** Quote arguments containing spaces when the command runs through a shell (Windows .cmd shims) */
-function quoteForShell(args: string[], useShell: boolean | string | undefined): string[] {
-  return useShell ? args.map((a) => (a === '' || /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
-}
-
 /** Handle on a running Claude Code process */
 export interface ClaudeProcessHandle {
   child: ChildProcess;
@@ -57,19 +51,19 @@ export interface ClaudeProcessHandle {
 
 /** Spawn the Claude Code CLI and collect its output */
 export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcessHandle {
-  const spawnOptions = getSpawnOptions(options.command, {
+  const child = spawnTool('claude', options.args, {
+    command: options.command,
     cwd: options.cwd,
     env: options.env,
     windowsHide: true,
     stdio: 'pipe',
   });
-  const child = spawn(getSpawnCommand(options.command), quoteForShell(options.args, spawnOptions.shell), spawnOptions);
 
   let aborted = false;
   let timedOut = false;
   const stop = () => {
     if (child.exitCode !== null || child.killed) return;
-    killProcessGracefully(child, { debugPrefix: '[ClaudeCode]' });
+    killRuntimeProcess(child, { debugPrefix: '[ClaudeCode]' });
   };
 
   const done = new Promise<ClaudeProcessResult>((resolve) => {

@@ -133,6 +133,9 @@ export interface ValidationReport {
   findings: ValidationFinding[];
 }
 
+/** Where Claude Code ran: natively on the host OS, or inside WSL (Windows, wsl shell) */
+export type ClaudeRuntime = 'native' | 'wsl';
+
 /** Persisted run state of a task (`<specDir>/claude_run.json`) */
 export interface ClaudeRunInfo {
   version: 1;
@@ -143,8 +146,14 @@ export interface ClaudeRunInfo {
    * resuming the session (e.g. from an agent window) must use the same profile.
    */
   profileId?: string;
-  /** Claude config dir of that profile (where the session transcript is stored) */
+  /** Claude config dir of that profile (where the session transcript is stored), as a host path */
   configDir?: string;
+  /**
+   * Where the session ran (unset = native). A session can't be resumed in the other runtime (its
+   * transcript lives in that runtime's config dir, under that runtime's project path), so a
+   * change of runtime starts a new session.
+   */
+  runtime?: ClaudeRuntime;
   triage?: TaskTriage;
   /** Approved plan (Markdown), when the task was planned */
   plan?: string;

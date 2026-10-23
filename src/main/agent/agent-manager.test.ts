@@ -55,6 +55,7 @@ vi.mock('../env-utils', () => ({
 
 vi.mock('../cli-tool-manager', () => ({
   getToolPath: vi.fn(() => 'git'),
+  getToolPathAsync: vi.fn(async () => 'git'),
 }));
 
 const profileManager = {
