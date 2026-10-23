@@ -14,6 +14,7 @@ const fs = require('fs');
 
 const isWindows = os.platform() === 'win32';
 const isLinux = os.platform() === 'linux';
+const isWsl = isLinux && (Boolean(process.env.WSL_DISTRO_NAME) || /microsoft/i.test(os.release()));
 
 /**
  * Linux only: Electron's chrome-sandbox has to be owned by root with the setuid bit set, or
@@ -140,14 +141,13 @@ function isNodePtyBuilt() {
 }
 
 /**
- * Not on Windows: install node-pty's Windows binary into node_modules/.cache/node-pty-win32, which
+ * WSL only: install node-pty's Windows binary into node_modules/.cache/node-pty-win32, which
  * `npm run package:win` ships with the app (the `win.extraResources` entry in package.json). npm
- * only installs the binary of the machine it runs on, so a Windows package built on Linux or in
- * WSL otherwise has no Windows terminal binary. Release builds package Windows on Windows, so CI
- * skips this.
+ * only installs the binary of the machine it runs on, so a Windows package built in WSL otherwise
+ * has no Windows terminal binary. Release builds package Windows on Windows, so CI skips this.
  */
 function installWindowsPtyBinary() {
-  if (isWindows || process.env.CI) return;
+  if (!isWsl || process.env.CI) return;
 
   const root = path.join(__dirname, '..', '..');
   let version;
