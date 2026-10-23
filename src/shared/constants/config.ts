@@ -58,6 +58,8 @@ export const DEFAULT_APP_SETTINGS = {
   interfaceFont: 'anthropic-sans' as const,
   // Graph page colors: one muted color (Graphify's community colors with 'colorful')
   graphStyle: 'plain' as const,
+  // Windows shell: native tools with PowerShell agent windows ('wsl' runs everything in WSL)
+  windowsShell: 'pwsh' as const,
   // Log order setting for task detail view (default chronological - oldest first)
   logOrder: 'chronological' as const,
   // Beta updates opt-in (receive pre-release versions)

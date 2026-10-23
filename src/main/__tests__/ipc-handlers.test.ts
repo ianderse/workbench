@@ -83,6 +83,7 @@ vi.mock("electron-log/main.js", () => ({
 // Mock cli-tool-manager to avoid blocking tool detection on Windows
 vi.mock("../cli-tool-manager", () => ({
   getToolInfo: vi.fn(() => ({ found: false, path: null, source: "mock" })),
+  getToolInfoAsync: vi.fn(() => Promise.resolve({ found: false, path: null, source: "mock" })),
   getToolPath: vi.fn((tool: string) => tool),
   deriveGitBashPath: vi.fn(() => null),
   clearCache: vi.fn(),

@@ -74,6 +74,8 @@ export interface SegmentedOption<T extends string> {
   value: T;
   label: React.ReactNode;
   icon?: React.ElementType;
+  /** Shown but not selectable (e.g. a choice this machine can't use) */
+  disabled?: boolean;
 }
 
 interface SegmentedControlProps<T extends string> {
@@ -145,7 +147,16 @@ export function SegmentedControl<T extends string>({
     const step = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0;
     if (!step) return;
     e.preventDefault();
-    const next = options[(index + step + options.length) % options.length];
+    // Skip disabled options
+    let next = options[index];
+    for (let i = 1; i <= options.length; i++) {
+      const candidate = options[(((index + step * i) % options.length) + options.length) % options.length];
+      if (!candidate.disabled) {
+        next = candidate;
+        break;
+      }
+    }
+    if (!next || next.value === value) return;
     onValueChange(next.value);
     itemRefs.current.get(next.value)?.focus();
   };
@@ -179,12 +190,17 @@ export function SegmentedControl<T extends string>({
             aria-checked={isSelected}
             aria-label={iconOnly && typeof option.label === 'string' ? option.label : undefined}
             tabIndex={isSelected ? 0 : -1}
-            onClick={() => onValueChange(option.value)}
+            disabled={option.disabled}
+            onClick={() => {
+              if (!option.disabled) onValueChange(option.value);
+            }}
             className={cn(
               'relative z-[1] inline-flex h-full items-center justify-center gap-1.5 rounded-md text-sm outline-none',
               'transition-[color,box-shadow] duration-75 focus-visible:shadow-(--shadow-focus)',
               iconOnly ? 'aspect-square' : 'px-3',
-              isSelected ? 'text-foreground' : 'text-muted-foreground hover:text-foreground'
+              isSelected ? 'text-foreground' : 'text-muted-foreground',
+              !isSelected && !option.disabled && 'hover:text-foreground',
+              option.disabled && 'cursor-not-allowed opacity-50'
             )}
           >
             {Icon && <Icon className={iconOnly ? 'h-[1.125rem] w-[1.125rem]' : 'h-4 w-4'} strokeWidth={1.75} />}

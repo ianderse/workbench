@@ -5,7 +5,9 @@ import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
 import type {
   AppSettings,
-  ToolDetectionResult
+  ShellRuntimeStatus,
+  ToolDetectionResult,
+  WslToolPaths
 } from '../../../shared/types';
 
 interface GeneralSettingsProps {
@@ -15,16 +17,41 @@ interface GeneralSettingsProps {
   section: 'paths';
 }
 
+type PathsTool = keyof WslToolPaths;
+
+interface ToolsInfo {
+  python: ToolDetectionResult;
+  git: ToolDetectionResult;
+  gh: ToolDetectionResult;
+  glab: ToolDetectionResult;
+  claude: ToolDetectionResult;
+}
+
+/** One row per tool: its native settings key and translation keys, and an example Linux path */
+const PATH_TOOLS: Array<{
+  tool: PathsTool;
+  field: 'pythonPath' | 'gitPath' | 'githubCLIPath' | 'gitlabCLIPath' | 'claudePath';
+  wslExample: string;
+}> = [
+  { tool: 'python', field: 'pythonPath', wslExample: '/usr/bin/python3' },
+  { tool: 'git', field: 'gitPath', wslExample: '/usr/bin/git' },
+  { tool: 'gh', field: 'githubCLIPath', wslExample: '/usr/bin/gh' },
+  { tool: 'glab', field: 'gitlabCLIPath', wslExample: '/usr/bin/glab' },
+  { tool: 'claude', field: 'claudePath', wslExample: '/usr/local/bin/claude' }
+];
+
 /**
  * Helper component to display auto-detected CLI tool information
  */
 interface ToolDetectionDisplayProps {
   info: ToolDetectionResult | null;
   isLoading: boolean;
-  t: (key: string) => string;
+  /** Tools run inside WSL in this session */
+  inWsl: boolean;
 }
 
-function ToolDetectionDisplay({ info, isLoading, t }: ToolDetectionDisplayProps) {
+function ToolDetectionDisplay({ info, isLoading, inWsl }: ToolDetectionDisplayProps) {
+  const { t } = useTranslation('settings');
   const className = 'text-xs text-(--nav-label-color)';
 
   if (isLoading) {
@@ -32,7 +59,7 @@ function ToolDetectionDisplay({ info, isLoading, t }: ToolDetectionDisplayProps)
   }
 
   if (!info || !info.found) {
-    return <div className={className}>{t('general.notDetected')}</div>;
+    return <div className={className}>{t(inWsl ? 'general.notDetectedWsl' : 'general.notDetected')}</div>;
   }
 
   const getSourceLabel = (source: ToolDetectionResult['source']): string => {
@@ -43,6 +70,7 @@ function ToolDetectionDisplay({ info, isLoading, t }: ToolDetectionDisplayProps)
       'nvm': t('general.sourceNvm'),
       'system-path': t('general.sourceSystemPath'),
       'bundled': t('general.sourceBundled'),
+      'wsl': t('general.sourceWsl'),
       'fallback': t('general.sourceFallback'),
     };
     return sourceMap[source] || source;
@@ -59,36 +87,61 @@ function ToolDetectionDisplay({ info, isLoading, t }: ToolDetectionDisplayProps)
 }
 
 /**
- * Paths settings (Developer page): CLI tool and framework paths
+ * Paths settings (Developer page): CLI tool and framework paths. While the app runs its tools in
+ * WSL (Settings > General > Shell), the page shows the tools found inside WSL and the inputs edit
+ * the Linux paths (`wslToolPaths`), so the Windows paths stay as they are for PWSH.
  */
 export function GeneralSettings({ settings, onSettingsChange }: GeneralSettingsProps) {
   const { t } = useTranslation('settings');
-  const [toolsInfo, setToolsInfo] = useState<{
-    python: ToolDetectionResult;
-    git: ToolDetectionResult;
-    gh: ToolDetectionResult;
-    glab: ToolDetectionResult;
-    claude: ToolDetectionResult;
-  } | null>(null);
+  const [toolsInfo, setToolsInfo] = useState<ToolsInfo | null>(null);
+  const [runtime, setRuntime] = useState<ShellRuntimeStatus | null>(null);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
 
-  // Detect the CLI tools once when the page opens
+  // Detection runs once at app start in the main process and is reused there, so asking again
+  // when the page opens doesn't detect again. The runtime status is read after the tools info,
+  // which waits for WSL detection when WSL is configured.
   useEffect(() => {
+    let cancelled = false;
     setIsLoadingTools(true);
     window.electronAPI
       .getCliToolsInfo()
-      .then((result: { success: boolean; data?: { python: ToolDetectionResult; git: ToolDetectionResult; gh: ToolDetectionResult; glab: ToolDetectionResult; claude: ToolDetectionResult } }) => {
-        if (result.success && result.data) {
+      .then((result: { success: boolean; data?: ToolsInfo }) => {
+        if (!cancelled && result.success && result.data) {
           setToolsInfo(result.data);
         }
       })
       .catch((error: unknown) => {
         console.error('Failed to fetch CLI tools info:', error);
       })
+      .then(() => window.electronAPI.getShellRuntimeStatus())
+      .then((result) => {
+        if (!cancelled && result?.success && result.data) {
+          setRuntime(result.data);
+        }
+      })
+      .catch(() => {
+        // Without the status the page shows the native paths
+      })
       .finally(() => {
-        setIsLoadingTools(false);
+        if (!cancelled) setIsLoadingTools(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
+  const inWsl = runtime?.supported === true && runtime.active === 'wsl';
+  const wslToolPaths = settings.wslToolPaths ?? {};
+
+  const setWslToolPath = (tool: PathsTool, value: string) => {
+    const next: WslToolPaths = { ...wslToolPaths };
+    if (value) {
+      next[tool] = value;
+    } else {
+      delete next[tool];
+    }
+    onSettingsChange({ ...settings, wslToolPaths: next });
+  };
 
   return (
     <SettingsSection
@@ -96,111 +149,38 @@ export function GeneralSettings({ settings, onSettingsChange }: GeneralSettingsP
       description={t('general.pathsDescription')}
     >
       <SettingsRows>
-        <SettingsRow
-          label={t('general.pythonPath')}
-          description={t('general.pythonPathDescription')}
-          htmlFor="pythonPath"
-          stacked
-          footer={!settings.pythonPath ? (
-            <ToolDetectionDisplay
-              info={toolsInfo?.python || null}
-              isLoading={isLoadingTools}
-              t={t}
-            />
-          ) : undefined}
-        >
-          <Input
-            id="pythonPath"
-            placeholder={t('general.pythonPathPlaceholder')}
-            className="w-full"
-            value={settings.pythonPath || ''}
-            onChange={(e) => onSettingsChange({ ...settings, pythonPath: e.target.value })}
-          />
-        </SettingsRow>
-        <SettingsRow
-          label={t('general.gitPath')}
-          description={t('general.gitPathDescription')}
-          htmlFor="gitPath"
-          stacked
-          footer={!settings.gitPath ? (
-            <ToolDetectionDisplay
-              info={toolsInfo?.git || null}
-              isLoading={isLoadingTools}
-              t={t}
-            />
-          ) : undefined}
-        >
-          <Input
-            id="gitPath"
-            placeholder={t('general.gitPathPlaceholder')}
-            className="w-full"
-            value={settings.gitPath || ''}
-            onChange={(e) => onSettingsChange({ ...settings, gitPath: e.target.value })}
-          />
-        </SettingsRow>
-        <SettingsRow
-          label={t('general.githubCLIPath')}
-          description={t('general.githubCLIPathDescription')}
-          htmlFor="githubCLIPath"
-          stacked
-          footer={!settings.githubCLIPath ? (
-            <ToolDetectionDisplay
-              info={toolsInfo?.gh || null}
-              isLoading={isLoadingTools}
-              t={t}
-            />
-          ) : undefined}
-        >
-          <Input
-            id="githubCLIPath"
-            placeholder={t('general.githubCLIPathPlaceholder')}
-            className="w-full"
-            value={settings.githubCLIPath || ''}
-            onChange={(e) => onSettingsChange({ ...settings, githubCLIPath: e.target.value })}
-          />
-        </SettingsRow>
-        <SettingsRow
-          label={t('general.gitlabCLIPath')}
-          description={t('general.gitlabCLIPathDescription')}
-          htmlFor="gitlabCLIPath"
-          stacked
-          footer={!settings.gitlabCLIPath ? (
-            <ToolDetectionDisplay
-              info={toolsInfo?.glab || null}
-              isLoading={isLoadingTools}
-              t={t}
-            />
-          ) : undefined}
-        >
-          <Input
-            id="gitlabCLIPath"
-            placeholder={t('general.gitlabCLIPathPlaceholder')}
-            className="w-full"
-            value={settings.gitlabCLIPath || ''}
-            onChange={(e) => onSettingsChange({ ...settings, gitlabCLIPath: e.target.value })}
-          />
-        </SettingsRow>
-        <SettingsRow
-          label={t('general.claudePath')}
-          description={t('general.claudePathDescription')}
-          htmlFor="claudePath"
-          stacked
-          footer={!settings.claudePath ? (
-            <ToolDetectionDisplay
-              info={toolsInfo?.claude || null}
-              isLoading={isLoadingTools}
-              t={t}
-            />
-          ) : undefined}
-        >
-          <Input
-            id="claudePath"
-            placeholder={t('general.claudePathPlaceholder')}
-            className="w-full"
-            value={settings.claudePath || ''}
-            onChange={(e) => onSettingsChange({ ...settings, claudePath: e.target.value })}
-          />
-        </SettingsRow>
+        {PATH_TOOLS.map(({ tool, field, wslExample }) => {
+          const value = inWsl ? wslToolPaths[tool] ?? '' : settings[field] ?? '';
+          const id = inWsl ? `wsl-${field}` : field;
+          return (
+            <SettingsRow
+              key={field}
+              label={t(`general.${field}`)}
+              description={inWsl ? t('general.wslPathDescription') : t(`general.${field}Description`)}
+              htmlFor={id}
+              stacked
+              footer={!value ? (
+                <ToolDetectionDisplay
+                  info={toolsInfo?.[tool] || null}
+                  isLoading={isLoadingTools}
+                  inWsl={inWsl}
+                />
+              ) : undefined}
+            >
+              <Input
+                id={id}
+                placeholder={inWsl
+                  ? t('general.wslPathPlaceholder', { example: wslExample })
+                  : t(`general.${field}Placeholder`)}
+                className="w-full"
+                value={value}
+                onChange={(e) => inWsl
+                  ? setWslToolPath(tool, e.target.value)
+                  : onSettingsChange({ ...settings, [field]: e.target.value })}
+              />
+            </SettingsRow>
+          );
+        })}
       </SettingsRows>
     </SettingsSection>
   );

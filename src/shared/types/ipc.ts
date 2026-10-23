@@ -513,6 +513,14 @@ export interface ElectronAPI {
   closeProjectWindow: (projectId: string) => Promise<IPCResult>;
   onProjectWindowsChanged: (callback: (windows: import('./window').ProjectWindowInfo[]) => void) => () => void;
 
+  // Windows shell setting (Settings > General)
+  /** The value the app started with, the one it runs with, and the last WSL availability check */
+  getShellRuntimeStatus: () => Promise<IPCResult<import('./settings').ShellRuntimeStatus>>;
+  /** Check WSL availability again */
+  refreshWslAvailability: () => Promise<IPCResult<import('./settings').ShellRuntimeStatus>>;
+  /** Restart the app (applies a changed shell setting) */
+  relaunchApp: () => Promise<IPCResult>;
+
   // Queue Routing API (rate limit recovery)
   queue: import('../../preload/api/queue-api').QueueAPI;
 }

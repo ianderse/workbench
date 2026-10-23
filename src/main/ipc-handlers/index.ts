@@ -24,6 +24,7 @@ import { registerProjectIndexHandlers } from './project-index-handlers';
 import { registerLiveAgentHandlers } from './live-agent-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
 import { registerProfileHandlers } from './profile-handlers';
+import { registerShellRuntimeHandlers } from './shell-runtime-handlers';
 import { registerWindowHandlers, type WindowHandlerDeps } from './window-handlers';
 import { registerTerminalWorktreeIpcHandlers } from './terminal';
 import { notificationService } from '../notification-service';
@@ -92,6 +93,9 @@ export function setupIpcHandlers(
 
   // API Profile handlers (custom Anthropic-compatible endpoints)
   registerProfileHandlers();
+
+  // Windows shell setting (runtime status, WSL availability, relaunch to apply)
+  registerShellRuntimeHandlers();
 
   console.warn('[IPC] All handler modules registered successfully');
 }

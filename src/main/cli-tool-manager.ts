@@ -28,8 +28,11 @@ import { promisify } from 'util';
 import { app } from 'electron';
 import { findExecutable, findExecutableAsync, getAugmentedEnv, getAugmentedEnvAsync, shouldUseShell, existsAsync } from './env-utils';
 import { isWindows, isMacOS, isUnix, joinPaths, getExecutableExtension } from './platform';
-import type { ToolDetectionResult } from '../shared/types';
+import type { ToolDetectionResult, WslToolPaths } from '../shared/types';
 import { findHomebrewPython as findHomebrewPythonUtil } from './utils/homebrew-python';
+import { getShellRuntimeStatus, getWslInfo, isWslRuntime, whenShellRuntimeReady } from './platform/shell-runtime';
+import { execInWsl } from './platform/wsl-exec-basic';
+import { isUnderMountRoot, type WslProbeTool } from './platform/wsl-detect';
 
 const execFileAsync = promisify(execFile);
 
@@ -67,6 +70,57 @@ export interface ToolConfig {
   githubCLIPath?: string;
   gitlabCLIPath?: string;
   claudePath?: string;
+  /** Linux paths used instead of the ones above while the app runs its tools in WSL */
+  wslToolPaths?: WslToolPaths;
+}
+
+/** Program name of each tool inside WSL (the startup probe looks these up) */
+const WSL_TOOL_NAMES: Record<CLITool, WslProbeTool> = {
+  python: 'python3',
+  git: 'git',
+  gh: 'gh',
+  glab: 'glab',
+  claude: 'claude',
+};
+
+const TOOL_LABELS: Record<CLITool, string> = {
+  python: 'Python',
+  git: 'Git',
+  gh: 'GitHub CLI',
+  glab: 'GitLab CLI',
+  claude: 'Claude CLI',
+};
+
+const PYTHON_MINIMUM_VERSION = '3.10.0';
+
+/** Whether a Python version (x.y[.z]) meets PYTHON_MINIMUM_VERSION */
+function meetsPythonMinimum(version: string): boolean {
+  const [major, minor] = version.split('.').map(Number);
+  const [reqMajor, reqMinor] = PYTHON_MINIMUM_VERSION.split('.').map(Number);
+  return major > reqMajor || (major === reqMajor && minor >= reqMinor);
+}
+
+/**
+ * Whether a user-configured WSL tool path can be used: an absolute Linux path without
+ * backslashes or shell metacharacters
+ */
+export function isWslToolPath(pathStr: string | undefined): boolean {
+  if (!pathStr) return false;
+  return pathStr.startsWith('/') && !pathStr.startsWith('//') && !/[\\\0\r\n"'`$;&|<>]/.test(pathStr);
+}
+
+/** WSL is configured for this session but startup detection hasn't finished */
+function isRuntimePending(): boolean {
+  const status = getShellRuntimeStatus();
+  return status.supported && status.configured === 'wsl' && !status.ready;
+}
+
+/** Options for getToolInfoAsync() */
+export interface ToolInfoOptions {
+  /** Detect again instead of reusing this session's result */
+  refresh?: boolean;
+  /** Detect again when the stored result says the tool wasn't found */
+  refreshIfMissing?: boolean;
 }
 
 /**
@@ -283,6 +337,8 @@ class CLIToolManager {
   /** Full detection results for Settings > Developer > Paths, detected without blocking */
   private infoCache: Map<CLITool, Promise<ToolDetectionResult>> = new Map();
   private userConfig: ToolConfig = {};
+  /** Runtime the caches were filled for */
+  private cacheRuntime: 'native' | 'wsl' = 'native';
 
   /**
    * Configure the tool manager with user settings
@@ -299,6 +355,148 @@ class CLIToolManager {
     console.warn('[CLI Tools] Configuration updated, cache cleared');
   }
 
+  /** Drop results found for another runtime (native results kept from before WSL was ready) */
+  private syncRuntime(): void {
+    const runtime = isWslRuntime() ? 'wsl' : 'native';
+    if (runtime === this.cacheRuntime) return;
+    this.cacheRuntime = runtime;
+    this.cache.clear();
+    this.infoCache.clear();
+  }
+
+  // ==========================================================================
+  // WSL - the tools found inside WSL by the startup probe, or the user's WSL paths
+  // ==========================================================================
+
+  /** Where the tool was looked for, for messages ("WSL (Ubuntu)") */
+  private wslLabel(): string {
+    const info = getWslInfo();
+    return info ? `WSL (${info.distro})` : 'WSL';
+  }
+
+  /** The tool as the startup probe found it inside WSL */
+  private wslProbeResult(tool: CLITool): ToolDetectionResult {
+    const label = TOOL_LABELS[tool];
+    const where = this.wslLabel();
+    const probe = getWslInfo()?.tools[WSL_TOOL_NAMES[tool]];
+    if (!probe?.path) {
+      return { found: false, source: 'wsl', message: `${label} not installed in ${where}` };
+    }
+    if (tool === 'python' && probe.version && !meetsPythonMinimum(probe.version)) {
+      return {
+        found: false,
+        version: probe.version,
+        source: 'wsl',
+        message: `Python ${probe.version} in ${where} is too old. Requires ${PYTHON_MINIMUM_VERSION}+`,
+      };
+    }
+    return {
+      found: true,
+      path: probe.path,
+      ...(probe.version ? { version: probe.version } : {}),
+      source: 'wsl',
+      message: `Found ${label} in ${where}: ${probe.path}`,
+    };
+  }
+
+  /** The user's WSL path for a tool, when it is a usable Linux path */
+  private wslUserPath(tool: CLITool): string | undefined {
+    const configured = this.userConfig.wslToolPaths?.[tool]?.trim();
+    if (!configured) return undefined;
+    if (!isWslToolPath(configured)) {
+      console.warn(`[CLI Tools] User-configured WSL path for ${tool} is not a Linux path, ignoring: ${configured}`);
+      return undefined;
+    }
+    return configured;
+  }
+
+  /** Sync detection in WSL: what is known without running anything (the user's path isn't checked) */
+  private detectWslToolSync(tool: CLITool): ToolDetectionResult {
+    const userPath = this.wslUserPath(tool);
+    if (userPath) {
+      return {
+        found: true,
+        path: userPath,
+        source: 'user-config',
+        message: `Using user-configured ${TOOL_LABELS[tool]} in ${this.wslLabel()}: ${userPath}`,
+      };
+    }
+    return this.wslProbeResult(tool);
+  }
+
+  /**
+   * Async detection in WSL: the user's path (checked with `--version` inside WSL), else the probe's
+   * result, or with `fresh` a new lookup inside WSL (the tool may have been installed since)
+   */
+  private async detectWslToolAsync(tool: CLITool, fresh = false): Promise<ToolDetectionResult> {
+    const userPath = this.wslUserPath(tool);
+    if (userPath) {
+      const validation = await this.validateWslTool(tool, userPath);
+      if (validation.valid) {
+        return {
+          found: true,
+          path: userPath,
+          ...(validation.version ? { version: validation.version } : {}),
+          source: 'user-config',
+          message: `Using user-configured ${TOOL_LABELS[tool]} in ${this.wslLabel()}: ${userPath}`,
+        };
+      }
+      console.warn(`[CLI Tools] User-configured WSL path for ${tool} invalid: ${validation.message}`);
+    }
+    if (fresh) return this.lookUpWslTool(tool);
+    return this.wslProbeResult(tool);
+  }
+
+  /** `command -v <tool>` inside WSL (login PATH without Windows directories), then `--version` */
+  private async lookUpWslTool(tool: CLITool): Promise<ToolDetectionResult> {
+    const label = TOOL_LABELS[tool];
+    const where = this.wslLabel();
+    const notFound: ToolDetectionResult = { found: false, source: 'wsl', message: `${label} not installed in ${where}` };
+    const info = getWslInfo();
+    if (!info) return notFound;
+    let found = '';
+    try {
+      const { stdout } = await execInWsl('/bin/sh', ['-c', 'command -v "$1"', 'sh', WSL_TOOL_NAMES[tool]]);
+      found = stdout.trim().split(/\r?\n/)[0]?.trim() ?? '';
+    } catch {
+      return notFound;
+    }
+    if (!found.startsWith('/') || isUnderMountRoot(found, info.mountRoot)) return notFound;
+    const validation = await this.validateWslTool(tool, found);
+    if (!validation.valid) {
+      return { found: false, ...(validation.version ? { version: validation.version } : {}), source: 'wsl', message: validation.message };
+    }
+    return {
+      found: true,
+      path: found,
+      ...(validation.version ? { version: validation.version } : {}),
+      source: 'wsl',
+      message: `Found ${label} in ${where}: ${found}`,
+    };
+  }
+
+  /** Run `<path> --version` inside WSL */
+  private async validateWslTool(tool: CLITool, toolPath: string): Promise<ToolValidation> {
+    const label = TOOL_LABELS[tool];
+    try {
+      const { stdout, stderr } = await execInWsl(toolPath, ['--version']);
+      const line = (stdout.trim() || stderr.trim()).split(/\r?\n/)[0] ?? '';
+      const version = line.match(/\d+(?:\.\d+)+/)?.[0];
+      if (tool === 'python') {
+        if (!version) return { valid: false, message: 'Unable to detect Python version' };
+        if (!meetsPythonMinimum(version)) {
+          return { valid: false, version, message: `Python ${version} is too old. Requires ${PYTHON_MINIMUM_VERSION}+` };
+        }
+      }
+      return { valid: true, version, message: `${label} ${version ?? ''} is available in WSL`.replace(/\s+/g, ' ') };
+    } catch (error) {
+      return {
+        valid: false,
+        message: `Failed to validate ${label} in WSL: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
   /**
    * Get the path for a specific CLI tool
    *
@@ -309,6 +507,10 @@ class CLIToolManager {
    * @returns The resolved path to the tool executable
    */
   getToolPath(tool: CLITool): string {
+    // WSL is still being checked: don't run Windows detection, don't cache
+    if (isRuntimePending()) return tool;
+    this.syncRuntime();
+
     // Check cache first
     const cached = this.cache.get(tool);
     if (cached) {
@@ -316,6 +518,17 @@ class CLIToolManager {
         `[CLI Tools] Using cached ${tool}: ${cached.path} (${cached.source})`
       );
       return cached.path;
+    }
+
+    // In WSL: what the startup probe found (or the user's WSL path); the program name otherwise
+    if (isWslRuntime()) {
+      const wslResult = this.detectWslToolSync(tool);
+      if (!wslResult.found || !wslResult.path) return WSL_TOOL_NAMES[tool];
+      // The user's path is checked by the async detection, which fills the cache
+      if (wslResult.source === 'wsl') {
+        this.cache.set(tool, { path: wslResult.path, version: wslResult.version, source: wslResult.source });
+      }
+      return wslResult.path;
     }
 
     // Detect and cache
@@ -1171,6 +1384,10 @@ class CLIToolManager {
    * @returns Promise resolving to the tool path
    */
   async getToolPathAsync(tool: CLITool): Promise<string> {
+    // In WSL mode, wait for the startup probe (instant otherwise)
+    await whenShellRuntimeReady();
+    this.syncRuntime();
+
     // Check cache first (instant return if cached)
     const cached = this.cache.get(tool);
     if (cached) {
@@ -1193,8 +1410,9 @@ class CLIToolManager {
     }
 
     // Fallback to tool name (let system PATH resolve it)
-    console.warn(`[CLI Tools] ${tool} not found, using fallback: "${tool}"`);
-    return tool;
+    const fallback = isWslRuntime() ? WSL_TOOL_NAMES[tool] : tool;
+    console.warn(`[CLI Tools] ${tool} not found, using fallback: "${fallback}"`);
+    return fallback;
   }
 
   /**
@@ -1228,7 +1446,11 @@ class CLIToolManager {
    * @param tool - The tool to detect
    * @returns Promise resolving to detection result
    */
-  private async detectToolPathAsync(tool: CLITool): Promise<ToolDetectionResult> {
+  private async detectToolPathAsync(tool: CLITool, fresh = false): Promise<ToolDetectionResult> {
+    // In WSL mode the tools are the ones inside WSL; Windows detection doesn't run
+    await whenShellRuntimeReady();
+    if (isWslRuntime()) return this.detectWslToolAsync(tool, fresh);
+
     switch (tool) {
       case 'claude':
         return this.detectClaudeAsync();
@@ -2048,6 +2270,10 @@ class CLIToolManager {
    * @returns Detection result with full metadata
    */
   getToolInfo(tool: CLITool): ToolDetectionResult {
+    if (isRuntimePending()) {
+      return { found: false, source: 'wsl', message: `Still checking WSL for ${TOOL_LABELS[tool]}` };
+    }
+    if (isWslRuntime()) return this.detectWslToolSync(tool);
     return this.detectToolPath(tool);
   }
 
@@ -2055,10 +2281,24 @@ class CLIToolManager {
    * Tool detection info without blocking the main process (async version checks), detected
    * once per session (or after the tool configuration changes) and then reused
    */
-  getToolInfoAsync(tool: CLITool): Promise<ToolDetectionResult> {
+  async getToolInfoAsync(tool: CLITool, options: ToolInfoOptions = {}): Promise<ToolDetectionResult> {
+    // In WSL mode, wait for the startup probe (instant otherwise)
+    await whenShellRuntimeReady();
+    this.syncRuntime();
+    if (options.refresh) this.infoCache.delete(tool);
+    const stored = this.infoCache.has(tool);
+    const result = await this.cachedToolInfo(tool, options.refresh === true);
+    if (result.found || !options.refreshIfMissing || !stored) return result;
+    // Not found earlier in the session: look again (the tool may have been installed since)
+    this.infoCache.delete(tool);
+    return this.cachedToolInfo(tool, true);
+  }
+
+  /** `fresh`: in WSL, look the tool up again instead of using the startup probe's result */
+  private cachedToolInfo(tool: CLITool, fresh = false): Promise<ToolDetectionResult> {
     let pending = this.infoCache.get(tool);
     if (!pending) {
-      pending = this.detectToolPathAsync(tool);
+      pending = this.detectToolPathAsync(tool, fresh);
       this.infoCache.set(tool, pending);
       // A failed detection is retried next time
       pending.catch(() => this.infoCache.delete(tool));
@@ -2143,8 +2383,8 @@ export function getToolInfo(tool: CLITool): ToolDetectionResult {
 }
 
 /** Tool detection info, detected asynchronously once per session and then reused */
-export function getToolInfoAsync(tool: CLITool): Promise<ToolDetectionResult> {
-  return cliToolManager.getToolInfoAsync(tool);
+export function getToolInfoAsync(tool: CLITool, options?: ToolInfoOptions): Promise<ToolDetectionResult> {
+  return cliToolManager.getToolInfoAsync(tool, options);
 }
 
 /** Tools shown in Settings > Developer > Paths */

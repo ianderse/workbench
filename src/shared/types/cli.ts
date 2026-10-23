@@ -20,6 +20,8 @@ export interface ToolDetectionResult {
     | 'nvm'
     | 'system-path'
     | 'bundled'
+    // Found inside WSL (the app runs its tools in WSL, Settings > General > Shell)
+    | 'wsl'
     | 'fallback';
   message: string;
 }

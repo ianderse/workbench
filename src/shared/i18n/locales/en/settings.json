@@ -206,7 +206,11 @@
     "sourceSystemPath": "System PATH",
     "sourceBundled": "Bundled",
     "sourceFallback": "Fallback",
+    "sourceWsl": "WSL",
     "notDetected": "Not detected",
+    "notDetectedWsl": "Not installed in WSL",
+    "wslPathDescription": "Linux path inside WSL (leave empty for auto-detection)",
+    "wslPathPlaceholder": "For example {{example}}",
     "detecting": "Detecting..."
   },
   "theme": {
@@ -220,7 +224,22 @@
     "graphStyle": "Graph style",
     "graphStyleDescription": "Use plain or colorful mode for showing your project's knowledge graph",
     "graphPlain": "Plain",
-    "graphColorful": "Colorful"
+    "graphColorful": "Colorful",
+    "windowsShell": "Shell",
+    "windowsShellDescription": "Run agent windows, tasks and tools with PowerShell or inside WSL",
+    "windowsShellPwsh": "PWSH",
+    "windowsShellWsl": "WSL",
+    "restartToApply": "Restart to apply",
+    "wslChecking": "Checking WSL",
+    "wslCheckAgain": "Check WSL again",
+    "wslFallback": "WSL could not start, so this session uses PWSH",
+    "wslUnavailable": {
+      "not-windows": "WSL is only available on Windows",
+      "not-installed": "WSL is not installed",
+      "no-distro": "WSL has no Linux distribution installed",
+      "timeout": "WSL did not respond in time",
+      "error": "WSL could not be checked"
+    }
   },
   "fonts": {
     "interfaceFont": "Interface font",

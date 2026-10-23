@@ -225,6 +225,11 @@ export const IPC_CHANNELS = {
   GIT_CHECK_STATUS: 'git:checkStatus',
   GIT_INITIALIZE: 'git:initialize',
 
+  // Windows shell (Settings > General): runtime status, WSL availability, relaunch to apply
+  SHELL_RUNTIME_GET_STATUS: 'shellRuntime:getStatus',     // Saved value at startup, value in use, last WSL check
+  SHELL_RUNTIME_REFRESH_WSL: 'shellRuntime:refreshWsl',   // Check WSL availability again
+  APP_RELAUNCH: 'app:relaunch',                           // Restart the app (quits through the normal quit path)
+
   // App auto-update operations
   APP_UPDATE_CHECK: 'app-update:check',
   APP_UPDATE_DOWNLOAD: 'app-update:download',

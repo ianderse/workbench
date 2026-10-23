@@ -52,6 +52,8 @@ import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
 import { isProfileAuthenticated, getPlanFromConfigDir } from './claude-profile/profile-utils';
 import { isLinux, isMacOS, isWindows, isWSL } from './platform';
+import { initShellRuntime } from './platform/shell-runtime';
+import { checkRuntimeAtStartup } from './worktree/runtime-switch';
 import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
 import { AppTray, isWindowCloseAllowed, type TrayStatus } from './app-tray';
@@ -614,6 +616,10 @@ app.whenReady().then(async () => {
   // Set app user model id for Windows
   electronApp.setAppUserModelId(is.dev ? 'com.workbench.app.dev' : 'com.workbench.app');
 
+  // Decide where tools run on Windows (native, or WSL with the windowsShell setting) before the
+  // tool cache and Claude accounts are read; detection runs in the background, windows don't wait
+  void initShellRuntime(readSettingsFile()?.windowsShell);
+
   // Linux shells take the dock/taskbar icon from a desktop entry matching the window class; give the
   // development build ("Workbench Dev") its own one, or it shows a generic icon
   if (is.dev && isLinux()) {
@@ -749,6 +755,8 @@ app.whenReady().then(async () => {
     });
     // Detection details for Settings > Developer > Paths, so the page opens instantly
     warmToolInfo();
+    // Windows: worktrees repaired when tools run in another runtime (native / WSL) than last time
+    void checkRuntimeAtStartup();
   });
 
   // Initialize Claude profile manager, then start usage monitor

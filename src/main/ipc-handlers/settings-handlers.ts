@@ -1,6 +1,6 @@
 import { ipcMain, dialog, app, shell, session, BrowserWindow } from 'electron';
 import { existsSync, writeFileSync, mkdirSync, statSync } from 'fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import path from 'path';
 
 import { IPC_CHANNELS, DEFAULT_APP_SETTINGS, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, sanitizeColorTheme } from '../../shared/constants';
@@ -13,7 +13,10 @@ import { AgentManager } from '../agent';
 import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { taskQueue } from '../services/task-queue';
-import { configureTools, getToolPath, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache } from '../cli-tool-manager';
+import { configureTools, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache, type ToolConfig } from '../cli-tool-manager';
+import { git } from '../utils/git-exec';
+import { getWslInfo, reprobeWslTools } from '../platform/shell-runtime';
+import { getWslExePath } from '../platform/wsl-detect';
 
 const settingsPath = getSettingsPath();
 
@@ -29,6 +32,17 @@ const LEGACY_PROVIDER_SETTING_KEYS = [
   '_migratedToPerProviderConfig',
 ] as const;
 
+/** CLI tool paths from settings: both sets, the tool manager uses the WSL set while tools run in WSL */
+function toolConfigFromSettings(settings: Partial<AppSettings>): ToolConfig {
+  return {
+    pythonPath: settings.pythonPath,
+    gitPath: settings.gitPath,
+    githubCLIPath: settings.githubCLIPath,
+    gitlabCLIPath: settings.gitlabCLIPath,
+    claudePath: settings.claudePath,
+    wslToolPaths: settings.wslToolPaths,
+  };
+}
 
 /**
  * Register all settings-related IPC handlers
@@ -81,6 +95,24 @@ export function registerSettingsHandlers(
         }
       }
 
+      // Migration: WSL tool paths are Linux paths (used while tools run in WSL); drop Windows
+      // paths and empty values so the two sets never mix
+      if (settings.wslToolPaths) {
+        const wslToolPaths = { ...settings.wslToolPaths };
+        for (const [tool, value] of Object.entries(wslToolPaths) as [keyof typeof wslToolPaths, string | undefined][]) {
+          if (!value?.trim() || /^[A-Za-z]:|\\/.test(value)) {
+            delete wslToolPaths[tool];
+            needsSave = true;
+          }
+        }
+        if (Object.keys(wslToolPaths).length > 0) {
+          settings.wslToolPaths = wslToolPaths;
+        } else {
+          delete settings.wslToolPaths;
+          needsSave = true;
+        }
+      }
+
       // Persist migration changes
       if (needsSave) {
         try {
@@ -91,14 +123,8 @@ export function registerSettingsHandlers(
         }
       }
 
-      // Configure CLI tools with current settings
-      configureTools({
-        pythonPath: settings.pythonPath,
-        gitPath: settings.gitPath,
-        githubCLIPath: settings.githubCLIPath,
-        gitlabCLIPath: settings.gitlabCLIPath,
-        claudePath: settings.claudePath,
-      });
+      // Configure CLI tools with current settings (the WSL set is used while tools run in WSL)
+      configureTools(toolConfigFromSettings(settings));
 
       // Re-warm cache asynchronously after configuring (non-blocking)
       preWarmToolCache(['claude']).catch((error) => {
@@ -133,15 +159,10 @@ export function registerSettingsHandlers(
           settings.gitPath !== undefined ||
           settings.githubCLIPath !== undefined ||
           settings.gitlabCLIPath !== undefined ||
-          settings.claudePath !== undefined
+          settings.claudePath !== undefined ||
+          settings.wslToolPaths !== undefined
         ) {
-          configureTools({
-            pythonPath: newSettings.pythonPath,
-            gitPath: newSettings.gitPath,
-            githubCLIPath: newSettings.githubCLIPath,
-            gitlabCLIPath: newSettings.gitlabCLIPath,
-            claudePath: newSettings.claudePath,
-          });
+          configureTools(toolConfigFromSettings(newSettings));
 
           // Re-warm cache asynchronously after configuring (non-blocking)
           preWarmToolCache(['claude']).catch((error) => {
@@ -180,7 +201,7 @@ export function registerSettingsHandlers(
 
   ipcMain.handle(
     IPC_CHANNELS.SETTINGS_GET_CLI_TOOLS_INFO,
-    async (): Promise<IPCResult<{
+    async (_event, options?: { refresh?: boolean }): Promise<IPCResult<{
       python: ReturnType<typeof getToolInfo>;
       git: ReturnType<typeof getToolInfo>;
       gh: ReturnType<typeof getToolInfo>;
@@ -188,13 +209,17 @@ export function registerSettingsHandlers(
       claude: ReturnType<typeof getToolInfo>;
     }>> => {
       try {
-        // Detected asynchronously at app start (warmToolInfo) and reused, so this doesn't block
+        // Detected asynchronously at app start (warmToolInfo) and reused, so this doesn't block.
+        // A refresh (tools installed since) detects again; in WSL it also looks the tools up in
+        // the distribution again, which is what Claude Code runs and MCP checks use
+        const refresh = options?.refresh === true;
+        if (refresh) await reprobeWslTools();
         const [python, git, gh, glab, claude] = await Promise.all([
-          getToolInfoAsync('python'),
-          getToolInfoAsync('git'),
-          getToolInfoAsync('gh'),
-          getToolInfoAsync('glab'),
-          getToolInfoAsync('claude'),
+          getToolInfoAsync('python', { refresh }),
+          getToolInfoAsync('git', { refresh }),
+          getToolInfoAsync('gh', { refresh }),
+          getToolInfoAsync('glab', { refresh }),
+          getToolInfoAsync('claude', { refresh }),
         ]);
         return { success: true, data: { python, git, gh, glab, claude } };
       } catch (error) {
@@ -270,7 +295,7 @@ export function registerSettingsHandlers(
         let gitInitialized = false;
         if (initGit) {
           try {
-            execFileSync(getToolPath('git'), ['init'], { cwd: projectPath, stdio: 'ignore' });
+            await git(['init'], { cwd: projectPath });
             gitInitialized = true;
           } catch {
             // Git init failed, but folder was created - continue without git
@@ -402,6 +427,14 @@ export function registerSettingsHandlers(
         if (platform === 'darwin') {
           // macOS: Use execFileSync with argument array to prevent injection
           execFileSync('open', ['-a', 'Terminal', resolvedPath], { stdio: 'ignore' });
+        } else if (platform === 'win32' && getWslInfo()) {
+          // Tools run in WSL: a WSL console in that folder (its own window, not waited for)
+          const wsl = getWslInfo()!;
+          spawn(getWslExePath(), ['-d', wsl.distro, '--cd', resolvedPath], {
+            detached: true,
+            stdio: 'ignore',
+            windowsHide: false,
+          }).unref();
         } else if (platform === 'win32') {
           // Windows: Use cmd.exe directly with argument array
           // /C tells cmd to execute the command and terminate

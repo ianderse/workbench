@@ -27,6 +27,23 @@ export const settingsMock = {
     }
   }),
 
+  // Windows shell setting (browser mode: native, WSL not checked)
+  getShellRuntimeStatus: async () => ({
+    success: true,
+    data: { supported: false, ready: true, configured: 'pwsh' as const, active: 'pwsh' as const, wsl: null }
+  }),
+  refreshWslAvailability: async () => ({
+    success: true,
+    data: {
+      supported: false,
+      ready: true,
+      configured: 'pwsh' as const,
+      active: 'pwsh' as const,
+      wsl: { available: false, reason: 'not-windows' as const, distros: [], checkedAt: Date.now() }
+    }
+  }),
+  relaunchApp: async () => ({ success: true }),
+
   // App Info
   getAppVersion: async () => '0.1.0-browser',
 
