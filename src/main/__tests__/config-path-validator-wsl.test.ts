@@ -43,7 +43,8 @@ describe('isValidConfigDir in WSL', () => {
     expect(isValidConfigDir('~/../other')).toBe(false);
   });
 
-  test("natively the Linux home isn't a valid place", () => {
+  // UNC paths exist only on Windows; elsewhere the string is a relative path under the cwd
+  test.runIf(process.platform === 'win32')("natively the Linux home isn't a valid place", () => {
     wslRef.on = false;
     expect(isValidConfigDir(`${HOME}\\.claude`)).toBe(false);
   });
