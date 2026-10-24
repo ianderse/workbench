@@ -74,15 +74,25 @@ export function resolveOmpAdvisor(settings: OmpBackendSettings, oneShot?: boolea
 }
 
 /**
- * Text of the `--config` overlay an advisor choice needs, or undefined when the flags alone do it
+ * Text of the `--config` overlay the advisor and fallback-model choices need, or undefined when the flags alone do it
  * (`on` without a model, or `inherit` without a model). OMP merges overlays over its config.
  * JSON strings are valid YAML scalars, so model ids are quoted with JSON.stringify.
  */
-export function buildOmpAdvisorOverlay(advisor: { mode: OmpAdvisorMode; model?: string }): string | undefined {
-  if (advisor.mode === 'off') return 'advisor:\n  enabled: false\n';
-  if (!advisor.model) return undefined;
-  const enable = advisor.mode === 'on' ? 'advisor:\n  enabled: true\n' : '';
-  return `modelRoles:\n  advisor: ${JSON.stringify(advisor.model)}\n${enable}`;
+export function buildOmpAdvisorOverlay(
+  advisor: { mode: OmpAdvisorMode; model?: string },
+  allowFallbackModels = true,
+): string | undefined {
+  let advisorPart = '';
+  if (advisor.mode === 'off') {
+    advisorPart = 'advisor:\n  enabled: false\n';
+  } else if (advisor.model) {
+    const enable = advisor.mode === 'on' ? 'advisor:\n  enabled: true\n' : '';
+    advisorPart = `modelRoles:\n  advisor: ${JSON.stringify(advisor.model)}\n${enable}`;
+  }
+  // `retry.modelFallback: false` stops OMP switching to the models of `retry.fallbackChains`
+  // (verified against omp 18.11.0: a failing local model then surfaces its own error)
+  const fallbackPart = allowFallbackModels ? '' : 'retry:\n  modelFallback: false\n';
+  return `${advisorPart}${fallbackPart}` || undefined;
 }
 
 export interface OmpArgsOptions {

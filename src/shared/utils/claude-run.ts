@@ -43,7 +43,7 @@ export type TaskLogPhase = 'planning' | 'coding' | 'validation';
 const RUN_PHASES_BY_LOG_PHASE: Record<TaskLogPhase, ClaudeRunPhaseName[]> = {
   planning: ['triage', 'plan'],
   coding: ['implement', 'revise'],
-  validation: ['validate']
+  validation: ['review', 'validate']
 };
 
 /**

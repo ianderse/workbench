@@ -85,12 +85,16 @@ export interface TriageInput {
   profileId?: string;
 }
 
-/** Decision used when triage is off or fails */
+/**
+ * Decision used when triage is off or fails. A failed triage ('fallback') knows nothing about the
+ * task's size, so with the 'auto' planning policy it plans first; 'always' / 'never' are explicit
+ * choices. A fixed triage is the user's own choice of model and effort and does not plan on 'auto'.
+ */
 export function fixedTriage(settings: ClaudeCodeTaskSettings, title: string, source: 'fixed' | 'fallback', reasoning: string): TaskTriage {
   return {
     model: settings.fixedModel,
     effort: settings.fixedEffort,
-    needsPlan: settings.planning === 'always',
+    needsPlan: settings.planning === 'always' || (source === 'fallback' && settings.planning === 'auto'),
     scope: 'medium',
     title,
     reasoning,

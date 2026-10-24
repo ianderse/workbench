@@ -29,6 +29,21 @@ export interface OmpTextDeltaMessage {
   text: string;
 }
 
+/**
+ * Custom message: a streamed chunk of the reply in progress (only with `emitProgress`), for a
+ * "model is writing" indicator. Carries sizes only, not the text.
+ */
+export interface OmpProgressMessage {
+  type: 'system';
+  subtype: 'omp_progress';
+  kind: 'text' | 'thinking' | 'toolcall';
+  chars: number;
+}
+
+export function isOmpProgress(message: ClaudeStreamMessage): message is ClaudeStreamMessage & OmpProgressMessage {
+  return message.type === 'system' && (message as { subtype?: string }).subtype === 'omp_progress';
+}
+
 /** Custom message: the whole todo list after a `todo` tool call (mirrored as the task's subtasks) */
 export interface OmpTodosMessage {
   type: 'system';
@@ -225,6 +240,8 @@ export interface OmpTranslatorOptions {
   model?: string;
   /** Also emit `omp_text_delta` messages for streamed text (Insights) */
   emitDeltas?: boolean;
+  /** Emit `omp_progress` messages (sizes only) for text, thinking and tool-call deltas */
+  emitProgress?: boolean;
 }
 
 export interface OmpTranslator {
@@ -239,6 +256,15 @@ export interface OmpTranslator {
   readonly sessionId: string | undefined;
   /** Text of the last assistant message so far */
   readonly lastText: string;
+  /** Every failed assistant message so far, oldest first, with the model that failed */
+  readonly errors: ReadonlyArray<OmpModelError>;
+}
+
+/** A failed model reply; `fallback` when OMP had switched to a fallback model by then */
+export interface OmpModelError {
+  text: string;
+  model?: string;
+  fallback: boolean;
 }
 
 export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTranslator {
@@ -250,6 +276,8 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
   let turns = 0;
   let resultEmitted = false;
   let lastText = '';
+  let onFallback = false;
+  const errors: OmpModelError[] = [];
 
   const buildResult = (extra?: { error?: string }): ClaudeResultMessage => {
     const stopReason = asString(lastAssistant?.stopReason);
@@ -261,6 +289,7 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
       session_id: sessionId ?? '',
       is_error: failed,
       result: lastText,
+      omp_errors: errors.map((e) => ({ ...e })),
       total_cost_usd: totalCost,
       duration_ms: Date.now() - startedAt,
       num_turns: turns,
@@ -304,6 +333,7 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
     }
     lastText = texts.join('\n').trim();
     const error = message.stopReason === 'error' ? asString(message.errorMessage) || 'OMP request failed' : undefined;
+    if (error) errors.push({ text: error, ...(model ? { model } : {}), fallback: onFallback });
     if (blocks.length === 0 && !error) return [];
     const out: ClaudeStreamMessage = {
       type: 'assistant',
@@ -340,6 +370,7 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
   return {
     get sessionId() { return sessionId; },
     get lastText() { return lastText; },
+    get errors() { return errors; },
 
     translate(event: unknown): ClaudeStreamMessage[] {
       const e = asRecord(event);
@@ -366,12 +397,36 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
           return [];
         }
         case 'message_update': {
-          if (!options.emitDeltas) return [];
+          if (!options.emitDeltas && !options.emitProgress) return [];
           const inner = asRecord(e.assistantMessageEvent);
+          if (options.emitProgress) {
+            const kind = inner?.type === 'text_delta' ? 'text'
+              : inner?.type === 'thinking_delta' ? 'thinking'
+                : inner?.type === 'toolcall_delta' ? 'toolcall' : undefined;
+            const delta = typeof inner?.delta === 'string' ? inner.delta : '';
+            const out: ClaudeStreamMessage[] = [];
+            if (kind && delta) out.push({ type: 'system', subtype: 'omp_progress', kind, chars: delta.length } as OmpProgressMessage as unknown as ClaudeStreamMessage);
+            if (options.emitDeltas && inner?.type === 'text_delta' && delta) {
+              out.push({ type: 'omp_text_delta', text: delta } as OmpTextDeltaMessage as unknown as ClaudeStreamMessage);
+            }
+            return out;
+          }
           if (inner?.type === 'text_delta' && typeof inner.delta === 'string' && inner.delta) {
             return [{ type: 'omp_text_delta', text: inner.delta } as OmpTextDeltaMessage as unknown as ClaudeStreamMessage];
           }
           return [];
+        }
+        case 'model_change': {
+          // OMP switched models on its own after a provider error (`role: 'fallback'`)
+          if (e.role !== 'fallback') return [];
+          onFallback = true;
+          const target = asString(e.model) ?? 'another model';
+          const cause = errors.at(-1)?.text;
+          return [noticeMessage({
+            level: 'warning',
+            source: 'omp',
+            text: `OMP switched to fallback model ${target}${cause ? ` after: ${cause}` : ''}`,
+          })];
         }
         case 'notice': {
           const text = (asString(e.message) ?? '').trim();

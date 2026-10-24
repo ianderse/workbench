@@ -191,10 +191,14 @@ describe('ClaudeTaskRun', () => {
 
   it('falls back to the default model when triage fails', async () => {
     triageMock.mockRejectedValue(new Error('boom'));
-    scripts.push({ messages: [result('s4')] });
+    // An unknown-size task is planned first under the 'auto' policy
+    scripts.push({ messages: [result('s4', { structured_output: { plan: '# Plan' } })] }, { messages: [result('s4')] });
     const outcome = await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
     expect(outcome.status).toBe('completed');
-    expect(loadClaudeRunInfo(specDir)?.triage?.source).toBe('fallback');
+    const info = loadClaudeRunInfo(specDir);
+    expect(info?.triage?.source).toBe('fallback');
+    expect(info?.triage?.needsPlan).toBe(true);
+    expect(info?.phases.map((p) => p.name)).toEqual(['triage', 'plan', 'implement']);
   });
 
   it('puts the task on hold when Claude reports a usage limit', async () => {

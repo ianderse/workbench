@@ -71,7 +71,7 @@ export interface TaskTriage {
 }
 
 /** Steps of a task run */
-export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise';
+export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise' | 'review';
 
 export interface ClaudeRunPhase {
   name: ClaudeRunPhaseName;

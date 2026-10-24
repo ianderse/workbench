@@ -691,6 +691,9 @@
     },
     "advisorModel": "Advisor model",
     "advisorModelDescription": "OMP default uses the advisor model set in the OMP config",
+    "fallbackTitle": "Fallback models",
+    "allowFallbackModels": "Allow fallback models",
+    "allowFallbackModelsDescription": "When the local model fails, let OMP switch to the fallback models in its config. This may use cloud quota",
     "thinkingTitle": "Thinking",
     "thinkingDescription": "OMP thinking level for each effort level",
     "thinkingLevels": {

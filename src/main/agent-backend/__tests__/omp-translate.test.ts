@@ -118,6 +118,32 @@ describe('omp translator', () => {
     expect(run([event]).out).toEqual([]);
     expect(run([event], { emitDeltas: true }).out).toEqual([{ type: 'omp_text_delta', text: 'He' }]);
   });
+
+  it('tracks model errors and announces a switch to a fallback model', () => {
+    const failed = (model: string, errorMessage: string) => ({
+      type: 'message_end',
+      message: { role: 'assistant', provider: 'p', model, content: [], stopReason: 'error', errorMessage },
+    });
+    const { translator, out } = run([
+      failed('local', 'stream stalled'),
+      { type: 'model_change', model: 'openai-codex/luna', role: 'fallback' },
+      failed('luna', 'usage_limit_reached'),
+      { type: 'agent_end', messages: [] },
+    ]);
+    const notice = out.find(isOmpNotice);
+    expect(notice?.text).toBe('OMP switched to fallback model openai-codex/luna after: stream stalled');
+    expect(translator.errors.map((e) => [e.text, e.fallback])).toEqual([['stream stalled', false], ['usage_limit_reached', true]]);
+    const result = out.find((m) => m.type === 'result') as { omp_errors?: unknown[] };
+    expect(result.omp_errors).toHaveLength(2);
+  });
+
+  it('emits progress sizes for text, thinking and tool-call deltas when asked', () => {
+    const update = (type: string) => ({ type: 'message_update', assistantMessageEvent: { type, delta: 'abc' } });
+    expect(run([update('text_delta')]).out).toEqual([]);
+    expect(run([update('thinking_delta')], { emitProgress: true }).out).toEqual([{ type: 'system', subtype: 'omp_progress', kind: 'thinking', chars: 3 }]);
+    expect(run([update('toolcall_delta')], { emitProgress: true }).out).toEqual([{ type: 'system', subtype: 'omp_progress', kind: 'toolcall', chars: 3 }]);
+    expect(run([update('text_delta')], { emitProgress: true, emitDeltas: true }).out).toHaveLength(2);
+  });
 });
 
 describe('normalizeToolInput', () => {

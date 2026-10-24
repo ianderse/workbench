@@ -1592,7 +1592,7 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
 function ompAdvisorFlags(terminal: Pick<TerminalProcess, 'shellKind'>, omp: ReturnType<typeof getAgentBackendSettings>['omp']): string {
   const advisor = resolveOmpAdvisor(omp);
   let flags = advisor.mode === 'on' ? ' --advisor' : '';
-  const overlay = buildOmpAdvisorOverlay(advisor);
+  const overlay = buildOmpAdvisorOverlay(advisor, omp.allowFallbackModels === true);
   if (overlay) {
     try {
       const file = path.join(app.getPath('userData'), 'omp-advisor-overlay.yml');

@@ -61,6 +61,9 @@ describe('omp advisor', () => {
     expect(buildOmpAdvisorOverlay({ mode: 'off' })).toBe('advisor:\n  enabled: false\n');
     expect(buildOmpAdvisorOverlay({ mode: 'off', model: 'omlx/big' })).toBe('advisor:\n  enabled: false\n');
     expect(buildOmpAdvisorOverlay({ mode: 'inherit', model: 'omlx/big' })).toBe('modelRoles:\n  advisor: "omlx/big"\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, false)).toBe('retry:\n  modelFallback: false\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'off' }, false)).toBe('advisor:\n  enabled: false\n' + 'retry:\n  modelFallback: false\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true)).toBeUndefined();
     expect(buildOmpAdvisorOverlay({ mode: 'on', model: 'omlx/big' })).toBe('modelRoles:\n  advisor: "omlx/big"\nadvisor:\n  enabled: true\n');
   });
 });

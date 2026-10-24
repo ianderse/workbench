@@ -108,6 +108,8 @@ export interface ClaudeResultMessage {
   api_error_status?: number | null;
   terminal_reason?: string;
   permission_denials?: unknown[];
+  /** OMP: the failed model replies of the run, `fallback` for those of a model OMP switched to */
+  omp_errors?: Array<{ text: string; model?: string; fallback: boolean }>;
 }
 
 interface ClaudeOtherMessage {

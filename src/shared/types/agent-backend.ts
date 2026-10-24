@@ -45,6 +45,11 @@ export interface OmpBackendSettings {
   advisor?: OmpAdvisorMode;
   /** OMP model for the advisor role (`modelRoles.advisor`); empty = the advisor model OMP is configured with */
   advisorModel?: string;
+  /**
+   * Let OMP switch to the fallback models of its config (`retry.fallbackChains`) when the model
+   * fails. Off by default so local runs stay local and do not use cloud quota.
+   */
+  allowFallbackModels?: boolean;
 }
 
 export interface AgentBackendSettings {
@@ -60,6 +65,7 @@ export const DEFAULT_OMP_BACKEND_SETTINGS: OmpBackendSettings = {
   maxPhaseMinutes: 0,
   advisor: 'inherit',
   advisorModel: '',
+  allowFallbackModels: false,
 };
 
 export const DEFAULT_AGENT_BACKEND_SETTINGS: AgentBackendSettings = {

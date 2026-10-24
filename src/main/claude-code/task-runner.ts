@@ -31,6 +31,7 @@ import { triageTask, fixedTriage, applyPlanningPolicy } from './triage';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
 import { buildParallelTasksPrompt } from '../task-changelog';
 import { git } from '../utils/git-exec';
+import { stageTaskWork } from './stage-excludes';
 import { getWslInfo, toHostPath, toRuntimePath, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { buildAttachmentBlocks } from '../insights/message-content';
 import { detectClaudeLimitMessage, parseLimitResetTime } from './limit';
@@ -68,7 +69,18 @@ import { agentDisplayName, getAgentBackendSettings } from '../agent-backend/sett
 import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
 import { buildOmpMemoryPrompt } from '../self-improve/nudge';
 import { startOmpProcess } from '../agent-backend/omp-process';
-import { isOmpNotice, isOmpTodos } from '../agent-backend/omp-translate';
+import { isOmpNotice, isOmpProgress, isOmpTodos } from '../agent-backend/omp-translate';
+import { StreamProgress } from '../agent-backend/stream-progress';
+import { classifyOmpFailure, ompRetryDelayMs, OMP_MAX_RETRIES } from '../agent-backend/omp-retry';
+import { runClaudeText, READ_ONLY_TOOLS } from './run-text';
+import {
+  collectReviewDiff,
+  countFindings,
+  formatReviewForValidation,
+  normalizeReview,
+  REVIEW_SCHEMA,
+  REVIEW_SYSTEM_PROMPT,
+} from './review-diff';
 
 export const CLAUDE_RUN_FILE = 'claude_run.json';
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -239,6 +251,7 @@ ${omp
 - Use subagents only when they help: broad searches whose raw output you don't need, or independent investigations that can run in parallel. Do the implementation itself in this conversation.
 - Use skills and MCP tools when they fit the task.
 `}- Verify your work with the project's own checks (tests, type checker, linter, build) for the code you changed, and fix failures you caused. Show evidence rather than asserting success.
+- Keep generated folders (node_modules, build output, virtual environments) out of commits: if the project has no .gitignore for them, create or extend one before installing dependencies or committing.
 - When the work is done, commit it in this worktree with a descriptive message. Don't push.
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
@@ -319,6 +332,9 @@ function verificationHint(triage: TaskTriage | undefined): string {
 // Runner
 // =============================================================================
 
+/** Steps that run in the task's session */
+type SessionPhaseName = Exclude<ClaudeRunPhaseName, 'triage' | 'review'>;
+
 interface PhaseResult {
   result?: ClaudeResultMessage;
   rateLimit?: { message: string; resetAt?: string };
@@ -345,6 +361,8 @@ export class ClaudeTaskRun {
   /** The current phase reports its own cost (OMP), not the running total of the session (Claude Code) */
   private costIsPerRun = false;
   private saveTimer: NodeJS.Timeout | null = null;
+  /** Fresh-context review (OMP) for the validate prompt; set by `runOmpReview` */
+  private reviewSection: string | undefined;
 
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
     this.runFile = path.join(config.specDir, CLAUDE_RUN_FILE);
@@ -492,7 +510,7 @@ export class ClaudeTaskRun {
   }
 
   /** Run a Claude Code session step; returns an outcome when the run must stop */
-  private async runSessionPhase(name: Exclude<ClaudeRunPhaseName, 'triage'>): Promise<TaskRunOutcome | null> {
+  private async runSessionPhase(name: SessionPhaseName): Promise<TaskRunOutcome | null> {
     const triage = this.info.triage ?? fixedTriage(this.config.settings, this.config.title, 'fallback', 'No triage recorded');
     const model = name === 'plan' ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
     const effort: ClaudeEffort = name === 'plan' && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
@@ -540,6 +558,16 @@ export class ClaudeTaskRun {
       this.callbacks.onTaskEvent?.('QA_STARTED', { iteration: 1, maxIterations: 1 });
       this.emitProgress('qa_review', 0.85, label);
       this.log.startPhase('validation', `${label} (${model}, ${effort})`);
+    }
+
+    // OMP: Workbench runs the fresh-context review itself, before the session validates
+    this.reviewSection = undefined;
+    if (name === 'validate' && backend === 'omp') {
+      await this.runOmpReview();
+      if (this.stopped) {
+        this.log.endPhase(logPhase, 'stopped', 'Stopped');
+        return { status: 'stopped' };
+      }
     }
 
     const sessionId = resumeSessionId ?? randomUUID();
@@ -636,7 +664,7 @@ export class ClaudeTaskRun {
   // Claude Code process
   // ---------------------------------------------------------------------------
 
-  private buildInput(name: Exclude<ClaudeRunPhaseName, 'triage'>, continuing: boolean, resume: boolean): ClaudeUserContentBlock[] {
+  private buildInput(name: SessionPhaseName, continuing: boolean, resume: boolean): ClaudeUserContentBlock[] {
     const triage = this.info.triage;
 
     // The attachments are turned into blocks before the prompt is written, because the prompt has
@@ -687,7 +715,9 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
       case 'validate':
         text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.validate}
 1. Run ${verificationHint(triage)}. Fix failures your change caused.
-2. Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${getAgentBackendSettings().kind === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.
+2. ${this.reviewSection && getAgentBackendSettings().kind === 'omp'
+  ? this.reviewSection
+  : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${getAgentBackendSettings().kind === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
 3. Commit any remaining changes.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
@@ -742,7 +772,7 @@ no notes came with the request, so review the change against the task with fresh
   }
 
   private async runClaude(params: {
-    name: Exclude<ClaudeRunPhaseName, 'triage'>;
+    name: SessionPhaseName;
     model: string;
     effort: ClaudeEffort;
     sessionId: string;
@@ -865,7 +895,7 @@ no notes came with the request, so review the change against the task with fresh
    * Not supported: connectors (MCP), a budget cap, a fallback model, subagent/skill commands.
    */
   private async runOmp(params: {
-    name: Exclude<ClaudeRunPhaseName, 'triage'>;
+    name: SessionPhaseName;
     model: string;
     effort: ClaudeEffort;
     sessionId: string;
@@ -900,43 +930,175 @@ no notes came with the request, so review the change against the task with fresh
     }
 
     this.rejectedRateLimitResetAt = undefined;
-    const handle = await startOmpProcess({
-      settings: omp,
-      cwd: this.config.worktreePath,
-      env: this.config.extraEnv,
-      prompt: params.input,
-      model: params.model,
-      effort: params.effort,
-      // Planning is read-only (OMP has no plan permission mode): fewer tools and a note in the prompt
-      tools: planning ? OMP_READ_ONLY_TOOLS : 'all',
-      autoApprove: !planning,
-      appendSystemPrompt: planning
-        ? `${systemPrompt}\n\nYou are in planning mode: do not modify files, run only read-only commands, and finish with the implementation plan.`
-        : systemPrompt,
-      session: { dir: path.join(this.config.specDir, 'omp-sessions'), resume: params.resume ? params.sessionId : undefined },
-      jsonSchema: params.jsonSchema,
-      maxTimeMinutes: omp.maxPhaseMinutes,
-      abortSignal: this.abortController.signal,
-      onMessage: (message) => {
-        this.handleMessage(message, params.logPhase);
-      },
-      onStderr: (chunk) => {
-        const line = chunk.trim();
-        if (line) this.emitLog(line);
-      },
+    // A retry continues the same phase: what failed attempts spent is added to the final result
+    const carried = { cost: 0, turns: 0, durationMs: 0 };
+    const withCarried = (result: ClaudeResultMessage): ClaudeResultMessage => ({
+      ...result,
+      total_cost_usd: (result.total_cost_usd ?? 0) + carried.cost,
+      num_turns: (result.num_turns ?? 0) + carried.turns,
+      duration_ms: (result.duration_ms ?? 0) + carried.durationMs,
     });
-    this.current = handle;
-    if (this.stopped) handle.stop();
-    const outcome = await handle.done;
-    this.current = null;
+    let resume: string | undefined = params.resume ? params.sessionId : undefined;
+    let input = params.input;
+    let retries = 0;
 
-    if (this.stopped || outcome.aborted) return { stopped: true };
-    const result = outcome.result;
-    if (!result) {
-      const error = outcome.stderr.trim().split('\n').slice(-3).join(' ') || `OMP exited with code ${outcome.exitCode}`;
-      return { stopped: false, error };
+    for (;;) {
+      const progress = new StreamProgress();
+      const handle = await startOmpProcess({
+        settings: omp,
+        cwd: this.config.worktreePath,
+        env: this.config.extraEnv,
+        prompt: input,
+        model: params.model,
+        effort: params.effort,
+        // Planning is read-only (OMP has no plan permission mode): fewer tools and a note in the prompt
+        tools: planning ? OMP_READ_ONLY_TOOLS : 'all',
+        autoApprove: !planning,
+        appendSystemPrompt: planning
+          ? `${systemPrompt}\n\nYou are in planning mode: do not modify files, run only read-only commands, and finish with the implementation plan.`
+          : systemPrompt,
+        session: { dir: path.join(this.config.specDir, 'omp-sessions'), resume },
+        jsonSchema: params.jsonSchema,
+        maxTimeMinutes: omp.maxPhaseMinutes,
+        emitProgress: true,
+        abortSignal: this.abortController.signal,
+        onMessage: (message) => {
+          if (isOmpProgress(message)) {
+            // A long reply shows nothing else: a throttled line keeps the log (and the card's activity) alive
+            const line = progress.add(message.chars, Date.now());
+            if (line) {
+              this.log.add(params.logPhase, 'info', line);
+              this.emitLog(line);
+            }
+            return;
+          }
+          if (isAssistantMessage(message) || isUserMessage(message)) progress.reset();
+          this.handleMessage(message, params.logPhase);
+        },
+        onStderr: (chunk) => {
+          const line = chunk.trim();
+          if (line) this.emitLog(line);
+        },
+      });
+      this.current = handle;
+      if (this.stopped) handle.stop();
+      const outcome = await handle.done;
+      this.current = null;
+
+      if (this.stopped || outcome.aborted) return { stopped: true };
+      const result = outcome.result;
+      const failed = !result || result.is_error || result.subtype !== 'success';
+      const stderrTail = outcome.stderr.trim().split('\n').slice(-3).join(' ');
+      if (!failed) return { result: withCarried(result), stopped: false };
+
+      const kind = classifyOmpFailure({
+        errors: result?.omp_errors,
+        fallbackText: [result?.errors?.join('; '), result?.result, stderrTail].filter(Boolean).join(' '),
+        signal: outcome.signal,
+        timedOut: outcome.timedOut,
+      });
+      const delay = kind === 'transient' ? ompRetryDelayMs(retries + 1) : undefined;
+      if (delay === undefined) {
+        if (kind === 'transient') this.noteLog(params.logPhase, `Giving up after ${OMP_MAX_RETRIES} retries of this step`);
+        if (result) return { result: withCarried(result), stopped: false };
+        return { stopped: false, error: stderrTail || `OMP exited with code ${outcome.exitCode}` };
+      }
+
+      // Transient provider or network error: continue the same step in the same session after a pause
+      retries++;
+      if (result) {
+        carried.cost += result.total_cost_usd ?? 0;
+        carried.turns += result.num_turns ?? 0;
+        carried.durationMs += result.duration_ms ?? 0;
+      }
+      const reason = (result?.omp_errors?.find((e) => !e.fallback)?.text || result?.errors?.join('; ') || stderrTail || 'unknown error').slice(0, 300);
+      this.noteLog(params.logPhase, `Temporary error (${reason}). Retry ${retries}/${OMP_MAX_RETRIES} in ${formatDelay(delay)}`);
+      if (!(await this.sleep(delay))) return { stopped: true };
+      const sessionId = this.info.sessionId;
+      if (sessionId) {
+        resume = sessionId;
+        input = [{
+          type: 'text',
+          text: 'The previous attempt was interrupted by a temporary provider or network error. Continue where you left off: check `git status` and `git log` for what is already done, do not redo finished work, and finish the step.',
+        }];
+      } else {
+        // The session never started: begin the step again from the original prompt
+        resume = undefined;
+        input = params.input;
+      }
     }
-    return { result, stopped: false };
+  }
+
+  /** A line for the task log and the live log */
+  private noteLog(logPhase: TaskLogPhase, line: string): void {
+    this.log.add(logPhase, 'info', line);
+    this.emitLog(line);
+  }
+
+  /** Wait `ms`; false when the run was stopped meanwhile */
+  private sleep(ms: number): Promise<boolean> {
+    return new Promise((resolve) => {
+      if (this.stopped) return resolve(false);
+      const done = (ok: boolean) => {
+        clearTimeout(timer);
+        this.abortController.signal.removeEventListener('abort', onAbort);
+        resolve(ok);
+      };
+      const onAbort = () => done(false);
+      const timer = setTimeout(() => done(!this.stopped), ms);
+      this.abortController.signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  /**
+   * OMP: a separate one-shot run reviews the diff with fresh context (no session, read-only tools,
+   * the Large model); its findings go into the validate prompt. A failed review is logged and the
+   * validation goes on without it.
+   */
+  private async runOmpReview(): Promise<void> {
+    const cwd = this.config.worktreePath;
+    let diff: string | undefined;
+    try {
+      diff = await collectReviewDiff(cwd, this.config.baseBranch);
+    } catch (error) {
+      this.noteLog('validation', `Review skipped, could not read the diff: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (!diff) {
+      this.noteLog('validation', 'Review skipped: no changes to review');
+      return;
+    }
+    this.noteLog('validation', 'Reviewing the change with a fresh context (Large model)');
+    const phase = this.beginPhase('review', { model: 'opus', effort: 'high' });
+    const started = Date.now();
+    try {
+      const result = await runClaudeText({
+        prompt: `${taskBlock(this.config)}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>`,
+        appendSystemPrompt: REVIEW_SYSTEM_PROMPT,
+        model: 'opus',
+        effort: 'high',
+        jsonSchema: REVIEW_SCHEMA,
+        cwd,
+        tools: READ_ONLY_TOOLS,
+        // Local models are slow; one-shot OMP runs get five times this
+        timeoutMs: 20 * 60 * 1000,
+        abortSignal: this.abortController.signal,
+      });
+      const report = normalizeReview(result.structured, result.text);
+      const counts = countFindings(report.findings);
+      Object.assign(phase, { endedAt: new Date().toISOString(), costUsd: result.costUsd ?? 0, durationMs: Date.now() - started });
+      this.updateTotalCost();
+      this.saveInfo();
+      this.reviewSection = formatReviewForValidation(report);
+      const detail = [report.summary, ...report.findings.map((f) => `${f.severity}${f.file ? ` ${f.file}${f.line ? `:${f.line}` : ''}` : ''}: ${f.issue}`)].filter(Boolean).join('\n');
+      this.log.add('validation', 'info', `Review: ${counts.blocker} blocker, ${counts.major} major, ${counts.minor} minor`, { detail, collapsed: true });
+      this.emitLog(`Review: ${counts.blocker} blocker, ${counts.major} major, ${counts.minor} minor. ${report.summary}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      Object.assign(phase, { endedAt: new Date().toISOString(), isError: true, error: message, durationMs: Date.now() - started });
+      this.saveInfo();
+      if (!this.stopped) this.noteLog('validation', `Review failed, validating without it: ${message}`);
+    }
   }
 
   /** Apply one stream message; returns a signal for rate-limit or auth problems */
@@ -1221,9 +1383,8 @@ no notes came with the request, so review the change against the task with fresh
   private async commitLeftovers(): Promise<void> {
     const cwd = this.config.worktreePath;
     try {
-      const { stdout } = await git(['status', '--porcelain', '--', '.', ':(exclude).workbench'], { cwd });
-      if (!stdout.trim()) return;
-      await git(['add', '-A', '--', '.', ':(exclude).workbench'], { cwd });
+      // Generated folders (node_modules, .venv, dist, ...) are never staged, even without a .gitignore
+      if (!(await stageTaskWork(cwd, ['.workbench']))) return;
       const title = this.info.triage?.title || this.config.title;
       await git(['commit', '-m', title, '--no-verify'], { cwd });
       this.emitLog('Committed remaining changes');
@@ -1309,6 +1470,10 @@ function copySessionTranscript(sessionId: string, fromConfigDir: string, toConfi
   } catch (error) {
     console.warn('[ClaudeTaskRun] Could not copy the session transcript to the new profile:', error);
   }
+}
+
+function formatDelay(ms: number): string {
+  return ms >= 60_000 ? `${Math.round(ms / 60_000)} min` : `${Math.round(ms / 1000)} s`;
 }
 
 function writeFileSafe(file: string, content: string): void {

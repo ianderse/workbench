@@ -8,6 +8,7 @@ import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
+import { Switch } from '../ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { SettingsSection } from './SettingsSection';
 import { SegmentedControl, SettingsRow, SettingsRows } from './SettingsRow';
@@ -206,6 +207,22 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
                 htmlFor="omp-advisor-model"
               >
                 {modelPicker('omp-advisor-model', omp.advisorModel ?? '', (v) => updateOmp({ advisorModel: v }))}
+              </SettingsRow>
+            </SettingsRows>
+          </SettingsSection>
+
+          <SettingsSection title={t('agentBackend.fallbackTitle')}>
+            <SettingsRows>
+              <SettingsRow
+                label={t('agentBackend.allowFallbackModels')}
+                description={t('agentBackend.allowFallbackModelsDescription')}
+                htmlFor="omp-allow-fallback"
+              >
+                <Switch
+                  id="omp-allow-fallback"
+                  checked={omp.allowFallbackModels === true}
+                  onCheckedChange={(checked) => updateOmp({ allowFallbackModels: checked })}
+                />
               </SettingsRow>
             </SettingsRows>
           </SettingsSection>

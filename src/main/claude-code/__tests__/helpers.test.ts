@@ -41,6 +41,18 @@ describe('planning policy', () => {
   });
 });
 
+describe('fixedTriage planning', () => {
+  const auto = DEFAULT_CLAUDE_CODE_TASK_SETTINGS;
+  it('plans after a failed triage when the policy is auto', () => {
+    expect(fixedTriage({ ...auto, planning: 'auto' }, 'T', 'fallback', '').needsPlan).toBe(true);
+  });
+  it('respects explicit policies and fixed triage', () => {
+    expect(fixedTriage({ ...auto, planning: 'never' }, 'T', 'fallback', '').needsPlan).toBe(false);
+    expect(fixedTriage({ ...auto, planning: 'always' }, 'T', 'fallback', '').needsPlan).toBe(true);
+    expect(fixedTriage({ ...auto, planning: 'auto' }, 'T', 'fixed', '').needsPlan).toBe(false);
+  });
+});
+
 describe('isClaudeRunFinished', () => {
   const run = (phases: Array<Record<string, unknown>>) => ({ version: 1 as const, phases, subagents: [], totalCostUsd: 0, updatedAt: '' }) as never;
   const done = { startedAt: 'a', endedAt: 'b' };

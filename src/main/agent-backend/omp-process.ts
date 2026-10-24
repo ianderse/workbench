@@ -55,6 +55,8 @@ export interface OmpRunOptions {
   oneShot?: boolean;
   /** Emit `omp_text_delta` messages while text streams */
   emitDeltas?: boolean;
+  /** Emit `omp_progress` messages (chunk sizes) while a reply streams */
+  emitProgress?: boolean;
   onMessage?: (message: ClaudeStreamMessage) => void;
   onStderr?: (chunk: string) => void;
   abortSignal?: AbortSignal;
@@ -152,7 +154,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       await writeFile(appendSystemPromptFile, options.appendSystemPrompt, 'utf-8');
     }
     let advisorOverlayFile: string | undefined;
-    const advisorOverlay = buildOmpAdvisorOverlay(advisor);
+    const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.settings.allowFallbackModels === true);
     if (advisorOverlay) {
       advisorOverlayFile = path.join(tempDir, 'advisor-overlay.yml');
       await writeFile(advisorOverlayFile, advisorOverlay, 'utf-8');
@@ -191,7 +193,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     current = child;
     if (resumeNote) appLog.info(`[OMP] ${resumeNote}`);
     return new Promise<{ outcome: Omit<OmpProcessOutcome, 'result'>; result?: ClaudeResultMessage; text: string; sessionId?: string }>((resolve) => {
-      const translator = createOmpTranslator({ model: ompModelFor(options.model, options.settings), emitDeltas: options.emitDeltas });
+      const translator = createOmpTranslator({ model: ompModelFor(options.model, options.settings), emitDeltas: options.emitDeltas, emitProgress: options.emitProgress });
       let buffer = '';
       let stderr = '';
       let held: ClaudeResultMessage | undefined;
