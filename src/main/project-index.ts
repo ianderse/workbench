@@ -15,6 +15,7 @@ import { appLog } from './app-logger';
 import { READ_ONLY_TOOLS, runClaudeText } from './claude-code/run-text';
 import { resolveClaudeCodeTaskSettings } from './claude-code/settings';
 import { readSettingsFile } from './settings-utils';
+import { isOmpBackend } from './agent-backend/settings';
 
 /** What `/init` writes, and what every session in the project reads */
 const CLAUDE_MD = 'CLAUDE.md';
@@ -125,17 +126,34 @@ export function isProjectIndexBuilding(projectPath: string): boolean {
   return inFlight.has(path.resolve(projectPath));
 }
 
+const OMP_INIT_PROMPT = `Analyze this codebase and create a ${CLAUDE_MD} file in the project root (the current directory) for future coding agents working in this repository.
+
+Include:
+- Commonly used commands: how to build, lint and run tests, including how to run a single test
+- High-level architecture and code structure: the big picture that needs several files to understand
+- Important conventions visible in the code and git history
+
+Keep it concise. Don't list every file or invent sections you can't support from the code. Read the README and any existing agent instruction files (AGENTS.md, .cursorrules, .github/copilot-instructions.md) and keep what is important. Start the file with:
+
+# ${CLAUDE_MD}
+
+This file provides guidance to coding agents when working with code in this repository.
+
+Write the file with your write tool. When it is written, reply with one short sentence.`;
+
 async function run(projectPath: string, profileId?: string): Promise<ProjectIndexInfo> {
   const settings = (readSettingsFile() ?? {}) as Partial<AppSettings>;
   const { triageModel } = resolveClaudeCodeTaskSettings(settings.claudeCodeTasks);
 
+  const omp = isOmpBackend();
   await runClaudeText({
-    prompt: `/init`,
+    // `/init` is a Claude Code command; OMP gets what it does spelled out
+    prompt: omp ? OMP_INIT_PROMPT : `/init`,
     model: triageModel,
     effort: EFFORT,
     cwd: projectPath,
     // `/init` is a command, so the prompt has to keep its slash
-    slashCommands: true,
+    slashCommands: !omp,
     tools: [...READ_ONLY_TOOLS, 'Write', 'Edit', 'Bash'],
     // It reads the project and writes the one file; the git reads are how it sees the conventions
     allowedTools: ['Write', 'Edit', 'Bash(git ls-files *)', 'Bash(git log *)'],

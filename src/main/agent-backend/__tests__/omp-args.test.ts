@@ -14,7 +14,7 @@ describe('omp args', () => {
   });
 
   it('maps Claude tools', () => {
-    expect(ompToolsFromClaude(['Read', 'Glob', 'Grep'])).toEqual(['read', 'find', 'glob', 'grep']);
+    expect(ompToolsFromClaude(['Read', 'Glob', 'Grep'])).toEqual(['read', 'glob', 'grep']);
     expect(ompToolsFromClaude([], ['Bash(git log *)', 'Edit'])).toEqual(['bash', 'edit']);
     expect(ompToolsFromClaude([])).toEqual([]);
   });

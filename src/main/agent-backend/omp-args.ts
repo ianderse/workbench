@@ -9,15 +9,15 @@
 import { CLAUDE_MODEL_ALIASES, type ClaudeEffort, type ClaudeModelAlias } from '../../shared/types/claude-code';
 import type { OmpAdvisorMode, OmpBackendSettings } from '../../shared/types/agent-backend';
 
-/** OMP built-in tools that only read (names verified in omp 18.11.0: read, grep, find, glob) */
-export const OMP_READ_ONLY_TOOLS: readonly string[] = ['read', 'grep', 'find', 'glob'];
+/** OMP built-in tools that only read. `find` is not one: omp 18.11.0 refuses it in --tools ("Built-in tool unavailable") */
+export const OMP_READ_ONLY_TOOLS: readonly string[] = ['read', 'grep', 'glob'];
 
 /** Claude Code built-in tool -> OMP tools */
 const CLAUDE_TO_OMP_TOOLS: Record<string, readonly string[]> = {
   Read: ['read'],
-  Glob: ['find', 'glob'],
+  Glob: ['glob'],
   Grep: ['grep'],
-  LS: ['find'],
+  LS: ['glob'],
   Bash: ['bash'],
   Edit: ['edit'],
   MultiEdit: ['edit'],
