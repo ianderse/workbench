@@ -125,6 +125,12 @@ function collectResult(outcome: Awaited<ReturnType<typeof startClaudeProcess>['d
 }
 
 /**
+ * Local models run far slower than Claude (a 3-minute triage limit timed out on a busy server), so
+ * OMP gets this many times the caller's limit, which was sized for Claude Code
+ */
+const OMP_TIMEOUT_FACTOR = 5;
+
+/**
  * The same call through OMP (oh-my-pi): no session, utility mode (no extensions or skills).
  * OMP cannot scope Bash to a command prefix, so `Bash(git log *)` rules enable its bash tool whole;
  * `maxTurns` has no equivalent and the run is bounded by the timeout.
@@ -142,7 +148,7 @@ async function runOmpText(options: RunClaudeTextOptions, settings: OmpBackendSet
     jsonSchema: options.jsonSchema,
     oneShot: true,
     abortSignal: options.abortSignal,
-    timeoutMs: options.timeoutMs ?? 5 * 60 * 1000,
+    timeoutMs: (options.timeoutMs ?? 5 * 60 * 1000) * OMP_TIMEOUT_FACTOR,
   });
   return collectResult(await handle.done, 'OMP');
 }
