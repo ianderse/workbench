@@ -1,9 +1,11 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Task, TaskStatus } from '../../../shared/types';
 import type { TaskChangelogEntry } from '../../task-changelog';
+
+vi.mock('../../app-logger', () => ({ appLog: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 import { configureTaskMessaging, resetTaskMessagingForTests, takeInbox } from '../broker';
 import { TaskNotices, onTaskLifecycle, type TaskLifecycleEvent } from '../notices';
 
@@ -100,7 +102,7 @@ describe('TaskNotices', () => {
     expect((await texts('003-c')).some((t) => t.includes('finished'))).toBe(false);
   });
 
-  it('says nothing about a stopped run, and tells overlapping tasks to merge the base after a merge', async () => {
+  it('says nothing about a stopped run, and tells running tasks on the same base to merge it after a merge', async () => {
     changelog([
       { at: '2026-10-01T00:00:00Z', task: '001-a', event: 'state', status: 'in_progress', files: ['src/x.ts'] },
       { at: '2026-10-01T00:00:01Z', task: '002-b', event: 'state', status: 'in_progress', files: ['src/x.ts'] },
@@ -116,8 +118,8 @@ describe('TaskNotices', () => {
     await notices.onState({ project, task: tasks[0], status: 'done' });
     await notices.flush();
     const [notice] = await texts('002-b');
-    expect(notice).toContain('was merged into `main`');
-    expect(notice).toContain('run `git merge main` in your worktree');
+    expect(notice).toContain('was merged into `main`, your base branch');
+    expect(notice).toContain('run `git merge --no-edit main`');
   });
 
   it('sends nothing while task messaging is off', async () => {

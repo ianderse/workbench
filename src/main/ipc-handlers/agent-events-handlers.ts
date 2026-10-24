@@ -132,7 +132,7 @@ export function registerAgenteventsHandlers(
   // Every task state and the files tasks edit go to the project's .workbench/changelog.jsonl
   registerTaskChangelog();
   // Parallel tasks message each other and get Workbench's notices about each other
-  registerTaskMessaging();
+  registerTaskMessaging({ isRunning: (taskId, projectId) => agentManager.isRunning(taskId, projectId) });
 
   // Learning between sessions: rebuild the project's memory graph when a task completes, so the
   // agents of the next tasks search code that includes its changes

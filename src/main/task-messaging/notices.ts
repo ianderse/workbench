@@ -9,7 +9,8 @@
  * - a task started                      -> the other active tasks
  * - two tasks change the same files     -> both (once per pair and file)
  * - a task finished (Human Review)      -> active tasks that change the same files
- * - a task was merged into its base     -> active tasks that change the same files
+ * - a task was merged                   -> every other unfinished task; the ones based on the branch
+ *                                          it was merged into take it in (`merge-sync.ts`)
  *
  * Notices are batched per target for a few seconds and deduplicated. The same transitions are
  * offered as lifecycle events (`onTaskLifecycle`) for the project lead.
@@ -22,6 +23,7 @@ import { taskSessionName } from '../../shared/utils/task-messaging';
 import { taskHooks, type TaskHookEvents } from '../task-hooks';
 import { foldTaskChangelog, getTaskChangelogPath, readTaskChangelog, type TaskChangelogTask } from '../task-changelog';
 import { deliverToTask, getTaskMessagingEnv, taskSpecDir } from './broker';
+import { MergeSync, takeTaskMerge, type MergeSyncOptions, type MergeVia, type TaskMergeInfo } from './merge-sync';
 
 /** Tasks that get notices: running, reviewed by AI, or waiting in the queue (their inbox) */
 const RECIPIENT_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_review']);
@@ -41,9 +43,12 @@ export interface TaskLifecycleEvent {
   sessionName: string;
   /** Files its branch changes (as the changelog and its edits know them) */
   files: string[];
-  /** finished: its summary; merged: the branch it was merged into */
+  /** finished: its summary */
   summary?: string;
+  /** merged: the branch it was merged into; done: its base branch */
   baseBranch?: string;
+  /** merged: locally or through its pull request */
+  mergedVia?: MergeVia;
 }
 
 export interface TaskNoticesOptions {
@@ -55,6 +60,10 @@ export interface TaskNoticesOptions {
   isMerged?: (project: Project, task: Task, branch: string | undefined, base: string) => Promise<boolean>;
   /** Whether notices are on now (Settings > Agents) */
   isEnabled?: () => boolean;
+  /** Whether a task's run is active (the AgentManager in the app) */
+  isRunning?: MergeSyncOptions['isRunning'];
+  /** The repository's default branch, for tasks and projects that name none */
+  defaultBranch?: MergeSyncOptions['defaultBranch'];
 }
 
 const lifecycleHandlers = new Set<(event: TaskLifecycleEvent) => void>();
@@ -88,10 +97,6 @@ function listFiles(files: string[]): string {
   return `${shown.map((file) => `\`${file}\``).join(', ')}${more}`;
 }
 
-function baseBranchOf(project: Project, task: Task): string {
-  return task.metadata?.baseBranch || project.settings?.mainBranch || 'main';
-}
-
 const key = (projectId: string, specId: string) => `${projectId}\u0000${specId}`;
 
 /** Batched, deduplicated notices for the tasks of all projects */
@@ -106,10 +111,16 @@ export class TaskNotices {
   private readonly announcedOverlaps = new Set<string>();
   private readonly batches = new Map<string, { projectId: string; specId: string; lines: string[]; timer: ReturnType<typeof setTimeout> }>();
   private readonly unsubscribe: Array<() => void> = [];
+  private readonly mergeSync: MergeSync;
 
   constructor(private readonly options: TaskNoticesOptions = {}) {
     this.batchMs = options.batchMs ?? 3000;
     this.editBatchMs = options.editBatchMs ?? 1000;
+    this.mergeSync = new MergeSync({
+      queueNotice: (projectId, specId, text) => this.queueNotice(projectId, specId, text),
+      isRunning: options.isRunning,
+      defaultBranch: options.defaultBranch,
+    });
   }
 
   /** Listen to the task hooks */
@@ -132,6 +143,7 @@ export class TaskNotices {
   /** Send every collected notice now and wait for it (tests, shutdown) */
   async flush(): Promise<void> {
     await Promise.all([...this.pendingEdits.keys()].map((projectId) => this.checkOverlaps(projectId)));
+    await this.mergeSync.flush();
     await Promise.all([...this.batches.keys()].map((target) => this.sendBatch(target)));
   }
 
@@ -184,17 +196,16 @@ export class TaskNotices {
 
     if (status === 'done') {
       const files = await this.filesOf(project, task.specId);
-      const fold = await this.fold(project);
-      const base = baseBranchOf(project, task);
-      const merged = await this.isMerged(project, task, fold.get(task.specId)?.branch, base);
+      const merge = await this.mergeOf(project, task);
       emitLifecycle({
-        kind: merged ? 'merged' : 'done', projectId: project.id, specId: task.specId, title: task.title,
-        sessionName: taskSessionName(project.id, task.specId), files, baseBranch: base,
+        kind: merge ? 'merged' : 'done', projectId: project.id, specId: task.specId, title: task.title,
+        sessionName: taskSessionName(project.id, task.specId), files,
+        baseBranch: merge?.into ?? await this.mergeSync.baseOf(project, task),
+        ...(merge ? { mergedVia: merge.via } : {}),
       });
       this.edited.delete(key(project.id, task.specId));
-      if (!merged || !this.enabled()) return;
-      await this.notifyOverlapping(project, task, files, (shared) =>
-        `${describe(project.id, task)} was merged into \`${base}\`. It changed files you also change: ${listFiles(shared)}. If your work depends on these files, run \`git merge ${base}\` in your worktree before you finish.`);
+      if (!merge || !this.enabled()) return;
+      await this.mergeSync.onMerged({ project, merged: task, who: describe(project.id, task), info: merge, files });
       return;
     }
 
@@ -256,6 +267,21 @@ export class TaskNotices {
         }
       }
     }
+  }
+
+  /**
+   * Where a task that entered Done was merged, and how: as Workbench recorded it, else a merged
+   * pull request, else its branch found in its base branch (merged locally); undefined: not merged
+   */
+  private async mergeOf(project: Project, task: Task): Promise<TaskMergeInfo | undefined> {
+    const recorded = takeTaskMerge(project.id, task.specId);
+    if (recorded) return recorded;
+    const env = getTaskMessagingEnv();
+    const current = env?.getTasks(project.id).find((t) => t.specId === task.specId) ?? task;
+    const base = await this.mergeSync.baseOf(project, current);
+    if (current.metadata?.prState === 'merged' || task.metadata?.prState === 'merged') return { into: base, via: 'pr' };
+    const fold = await this.fold(project);
+    return (await this.isMerged(project, current, fold.get(task.specId)?.branch, base)) ? { into: base, via: 'local' } : undefined;
   }
 
   /** Notify the active tasks whose files overlap `files` */
@@ -342,12 +368,9 @@ export class TaskNotices {
   }
 
   private async isMerged(project: Project, task: Task, branch: string | undefined, base: string): Promise<boolean> {
-    const env = getTaskMessagingEnv();
-    const current = env?.getTasks(project.id).find((t) => t.specId === task.specId) ?? task;
-    if (current.metadata?.prState === 'merged' || task.metadata?.prState === 'merged') return true;
     if (!this.options.isMerged) return false;
     try {
-      return await this.options.isMerged(project, current, branch ?? getTaskWorktreeBranch(task.specId), base);
+      return await this.options.isMerged(project, task, branch ?? getTaskWorktreeBranch(task.specId), base);
     } catch {
       return false;
     }
