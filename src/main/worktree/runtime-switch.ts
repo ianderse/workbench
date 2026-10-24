@@ -7,7 +7,8 @@
  * background:
  * - the git versions decide whether new worktrees may use relative links (runtime-worktrees.ts)
  * - when the runtime differs from last time, every project's worktrees are repaired for this
- *   runtime's git (`git worktree repair`), one project after the other
+ *   runtime's git (`git worktree repair`), one project after the other, and every self-improve
+ *   project's memory directory setting is rewritten the way this runtime spells it
  * - in WSL, Windows git and WSL git are compared for core.autocrlf, which makes one of them see
  *   every file as changed when they differ
  *
@@ -26,6 +27,7 @@ import { isWindows } from '../platform';
 import { getWslInfo, isWslRuntime, setAutocrlfMismatch, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { runTool } from '../platform/runtime-exec';
 import { projectStore } from '../project-store';
+import { repairProjectMemorySetting } from '../self-improve/relocation';
 import { readSettingsFile } from '../settings-utils';
 import {
   findWindowsExecutableViaWhereAsync,
@@ -33,6 +35,7 @@ import {
   WINDOWS_GIT_PATHS,
 } from '../utils/windows-paths';
 import {
+  listRecordedWorktrees,
   repairProjectWorktrees,
   setKnownGitVersions,
   setWslPathHints,
@@ -147,6 +150,30 @@ export async function repairAllProjects(projectPaths: string[]): Promise<void> {
 }
 
 /**
+ * Re-point every self-improve project at its memory directory as this runtime spells it, one
+ * project at a time.
+ *
+ * Unlike the worktree repair this needs no git, so it runs for every project the app knows, not
+ * only the ones that are repositories; `repairProjectMemorySetting` decides which checkouts
+ * actually hold a value that needs rewriting and reports its own failures, so one unreadable
+ * project never stops the rest. A project's task worktrees each keep their own copy of the
+ * setting, so they are repaired alongside it.
+ */
+export async function repairAllProjectMemory(projectPaths: string[]): Promise<void> {
+  let repaired = 0;
+  for (const projectPath of projectPaths) {
+    // A task's worktree holds its own copy of the setting, so it goes stale with the project's
+    const worktreePaths = (await listRecordedWorktrees(projectPath))
+      .map((entry) => entry.path)
+      .filter((worktreePath): worktreePath is string => !!worktreePath);
+    repaired += await repairProjectMemorySetting(projectPath, worktreePaths);
+  }
+  if (repaired > 0) {
+    appLog.info(`[RuntimeSwitch] Re-pointed ${repaired} checkout(s) at their memory directory for this runtime`);
+  }
+}
+
+/**
  * The startup check (Windows only, in the background): record this runtime and its git version,
  * repair worktrees when the runtime changed since the last start, compare line endings in WSL.
  * Never throws.
@@ -194,6 +221,7 @@ export async function checkRuntimeAtStartup(
       const projectPaths = options.projectPaths?.() ?? projectStore.getProjects().map((project) => project.path);
       appLog.info(`[RuntimeSwitch] Runtime changed (${previous} -> ${runtime}): repairing the worktrees of ${projectPaths.length} project(s)`);
       await repairAllProjects(projectPaths);
+      await repairAllProjectMemory(projectPaths);
     } else {
       appLog.info(`[RuntimeSwitch] Same runtime as the last start (${runtime}): worktrees need no repair`);
     }

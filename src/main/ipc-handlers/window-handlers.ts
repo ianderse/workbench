@@ -30,8 +30,21 @@ export function notifyProjectWindowsChanged(): void {
   safeSendToRenderer(() => null, IPC_CHANNELS.WINDOW_PROJECTS_CHANGED, listProjectWindows());
 }
 
-function senderWindowId(event: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): number | undefined {
-  return BrowserWindow.fromWebContents(event.sender)?.id;
+/**
+ * The window an IPC call came from, when it can still be read.
+ *
+ * A renderer that is already tearing down has no window to find, so callers treat `undefined` as
+ * "could not be attributed" rather than as an error: the work an id would have scoped is simply
+ * left to whatever released it before.
+ */
+export function senderWindowId(
+  event?: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent
+): number | undefined {
+  try {
+    return event?.sender ? BrowserWindow.fromWebContents(event.sender)?.id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function registerWindowHandlers({ createProjectWindow }: WindowHandlerDeps): void {

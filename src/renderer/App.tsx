@@ -521,6 +521,8 @@ export function App() {
   const handleProjectAdded = (project: Project, needsInit: boolean) => {
     if (!activeProjectId && !selectedProjectId) {
       openProjectTab(project.id);
+      // Adding the project no longer selects it, so this window says so itself
+      setActiveProject(project.id);
       if (needsInit) askToInitialize(project);
       return;
     }

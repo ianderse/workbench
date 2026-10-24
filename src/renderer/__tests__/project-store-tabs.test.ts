@@ -469,8 +469,10 @@ describe('Project Store Tab Management', () => {
       );
       // removeProject clears selectedProjectId if it matches the removed project
       expect(useProjectStore.getState().selectedProjectId).toBeNull();
-      // Note: openProjectIds is not automatically cleared by removeProject
-      // This would be handled by the UI layer when it detects the project was removed
+      // The tab for the removed project goes with it, so nothing in the tab bar points at a
+      // project that no longer exists
+      expect(useProjectStore.getState().openProjectIds).toEqual(['project-2']);
+      expect(useProjectStore.getState().activeProjectId).toBe('project-2');
     });
   });
 });

@@ -10,7 +10,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import '../../../../shared/i18n';
 import { TooltipProvider } from '../../ui/tooltip';
-import { WindowsShellSelector } from '../WindowsShellSelector';
+import { SettingsFlushProvider, WindowsShellSelector } from '../WindowsShellSelector';
 import type { AppSettings, ShellRuntimeStatus, WslAvailability } from '../../../../shared/types';
 
 // jsdom has no matchMedia or ResizeObserver (used by SegmentedControl)
@@ -38,9 +38,11 @@ const platform = vi.hoisted(() => ({ windows: true }));
 vi.mock('../../../lib/os-detection', () => ({ isWindows: () => platform.windows }));
 
 const updateSettings = vi.fn();
+const saveSettings = vi.fn();
 vi.mock('../../../stores/settings-store', () => ({
   useSettingsStore: (selector: (state: { updateSettings: typeof updateSettings }) => unknown) =>
-    selector({ updateSettings })
+    selector({ updateSettings }),
+  saveSettings: (updates: unknown) => saveSettings(updates)
 }));
 
 const available: WslAvailability = { available: true, distros: ['Ubuntu'], defaultDistro: 'Ubuntu', version: 2, checkedAt: 1 };
@@ -79,6 +81,7 @@ describe('WindowsShellSelector', () => {
     api.getShellRuntimeStatus.mockResolvedValue({ success: true, data: status() });
     api.refreshWslAvailability.mockResolvedValue({ success: true, data: status({ wsl: available }) });
     api.relaunchApp.mockResolvedValue({ success: true });
+    saveSettings.mockResolvedValue(true);
   });
 
   it('is hidden off Windows', () => {
@@ -128,8 +131,72 @@ describe('WindowsShellSelector', () => {
         <WindowsShellSelector settings={{ theme: 'dark', windowsShell: 'wsl' } as AppSettings} onSettingsChange={onSettingsChange} />
       </TooltipProvider>
     );
+    // The dialog only saves after a pause, so the row saves the shell itself and waits for it:
+    // relaunching first would start the app on the shell it already ran with
     fireEvent.click(screen.getByRole('button', { name: 'Restart to apply' }));
-    expect(api.relaunchApp).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.relaunchApp).toHaveBeenCalledTimes(1));
+    expect(saveSettings).toHaveBeenCalledWith({ windowsShell: 'wsl' });
+    expect(saveSettings.mock.invocationCallOrder[0]).toBeLessThan(
+      api.relaunchApp.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('does not restart when the shell could not be saved', async () => {
+    saveSettings.mockResolvedValue(false);
+    const { onSettingsChange } = renderRow({ theme: 'dark', windowsShell: 'wsl' });
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'WSL' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to apply' }));
+    await waitFor(() => expect(saveSettings).toHaveBeenCalledWith({ windowsShell: 'wsl' }));
+    expect(api.relaunchApp).not.toHaveBeenCalled();
+    expect(onSettingsChange).not.toHaveBeenCalled();
+  });
+
+  it("saves the dialog's pending edits, not just the shell, before it restarts", async () => {
+    // What the dialog's flush does: it writes the whole settings object, so the theme the user
+    // picked a moment ago goes to disk too instead of dying with the debounce the relaunch kills
+    const flush = vi.fn(() => saveSettings({ theme: 'light', windowsShell: 'wsl' }));
+    render(
+      <TooltipProvider>
+        <SettingsFlushProvider value={flush}>
+          <WindowsShellSelector
+            settings={{ theme: 'light', windowsShell: 'wsl' } as AppSettings}
+            onSettingsChange={vi.fn()}
+          />
+        </SettingsFlushProvider>
+      </TooltipProvider>
+    );
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'WSL' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to apply' }));
+
+    await waitFor(() => expect(api.relaunchApp).toHaveBeenCalledTimes(1));
+    expect(flush).toHaveBeenCalledTimes(1);
+    expect(saveSettings).toHaveBeenCalledWith({ theme: 'light', windowsShell: 'wsl' });
+    expect(saveSettings.mock.invocationCallOrder[0]).toBeLessThan(
+      api.relaunchApp.mock.invocationCallOrder[0]
+    );
+  });
+
+  it('does not restart when the dialog could not save what was pending', async () => {
+    const flush = vi.fn(async () => false);
+    render(
+      <TooltipProvider>
+        <SettingsFlushProvider value={flush}>
+          <WindowsShellSelector
+            settings={{ theme: 'light', windowsShell: 'wsl' } as AppSettings}
+            onSettingsChange={vi.fn()}
+          />
+        </SettingsFlushProvider>
+      </TooltipProvider>
+    );
+    await waitFor(() => expect(screen.getByRole('radio', { name: 'WSL' })).toBeEnabled());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Restart to apply' }));
+
+    await waitFor(() => expect(flush).toHaveBeenCalledTimes(1));
+    expect(api.relaunchApp).not.toHaveBeenCalled();
+    expect(saveSettings).not.toHaveBeenCalled();
   });
 
   it('offers no restart when the saved value is the running one', async () => {

@@ -140,6 +140,8 @@ export type PendingTaskSession = Omit<TerminalTaskSessionOptions, 'cwd'>;
 export interface TaskSessionRequest {
   /** Project the task belongs to (the agent window is opened there) */
   projectPath: string;
+  /** The same project by id, which is how the main process keys a task's run */
+  projectId: string;
   taskId: string;
   specId: string;
   /** Window title (the task title) */
@@ -166,6 +168,7 @@ export function getTaskSessionRequest(task: Task, projectPath: string): TaskSess
     [projectPath.replace(/[\\/]+$/, ''), '.workbench', 'worktrees', 'tasks', task.specId].join(separator);
   return {
     projectPath,
+    projectId: task.projectId,
     taskId: task.id,
     specId: task.specId,
     title: task.title,
@@ -174,6 +177,21 @@ export function getTaskSessionRequest(task: Task, projectPath: string): TaskSess
     profileId: run.profileId,
     configDir: run.configDir,
     baseBranch: task.metadata?.baseBranch
+  };
+}
+
+/**
+ * The session an agent window resumes once its shell is ready. Both ways into a task's session
+ * (a new window, and moving an existing window onto the task) build it here, so the project the
+ * main process needs to find the task's run always travels with the request.
+ */
+export function buildPendingTaskSession(request: TaskSessionRequest): PendingTaskSession {
+  return {
+    taskId: request.taskId,
+    projectId: request.projectId,
+    sessionId: request.sessionId,
+    profileId: request.profileId,
+    configDir: request.configDir
   };
 }
 
@@ -665,12 +683,7 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
         title: request.title,
         associatedTaskId: request.taskId,
         worktreeConfig: buildTaskWorktreeConfig(request, terminal.id),
-        pendingTaskSession: {
-          taskId: request.taskId,
-          sessionId: request.sessionId,
-          profileId: request.profileId,
-          configDir: request.configDir
-        }
+        pendingTaskSession: buildPendingTaskSession(request)
       });
     }
     set((state) => ({

@@ -13,6 +13,11 @@ import { readdir, stat } from 'fs/promises';
 import path from 'path';
 import { createInterface } from 'readline';
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
+import { PHASE_PROMPT_OPENING_LIST } from '../claude-code/phase-prompts';
+import { isWindows } from '../platform';
+import { isClaudeHomeInWsl } from '../platform/claude-home';
+import { toHostPath } from '../platform/shell-runtime';
+import { windowsPathKey } from '../platform/wsl-paths';
 
 /** One transcript that belongs to the project */
 export interface ProjectTranscript {
@@ -33,12 +38,34 @@ const CWD_PROBE_LINES = 40;
  * project, but it may equally have been about a sibling, and a preference learned from one project
  * and written into another is worse than one missed. Task worktrees live inside the project, so they
  * are covered by the inside case.
+ *
+ * The two paths can arrive in different namespaces: a transcript records the directory as the OS
+ * Claude Code runs on saw it, which in WSL is a Linux path (`/mnt/c/Users/me/app`), while the paths
+ * Workbench stores and passes in are host paths (`C:\Users\me\app`). Comparing them as they come
+ * would match nothing, so the session's side is brought into the host namespace first. The host in
+ * that case is Windows, which is also whose separator decides where one component ends.
+ *
+ * Windows also reaches one folder through several spellings — any case, and either of the two UNC
+ * prefixes for the distribution's own files, since a project the user added from Explorer is stored
+ * as `\\wsl$\Ubuntu\home\me\app` while `toHostPath()` renders every session's cwd as
+ * `\\wsl.localhost\Ubuntu\home\me\app`. Both sides therefore go through `windowsPathKey()`
+ * (platform/wsl-paths.ts), the same key `worktreePathKey()` (worktree/runtime-worktrees.ts) compares
+ * worktrees by and for the same reason: a spelling rejected here silently costs that session its
+ * spending in Metrics and its turns in the backfill, and a project added under the alias would lose
+ * every session it has. POSIX paths are compared as they are, since there two folders really can
+ * differ in case alone.
  */
 export function belongsToProject(cwd: string, projectPath: string): boolean {
-  const session = path.resolve(cwd);
-  const project = path.resolve(projectPath);
+  const inWsl = isClaudeHomeInWsl();
+  // Host paths are Windows paths both when the app runs on Windows and whenever Claude Code's home
+  // is a WSL one, which only Windows has
+  const windowsPaths = inWsl || isWindows();
+  const paths = windowsPaths ? path.win32 : path;
+  const key = (p: string): string => (windowsPaths ? windowsPathKey(p) : paths.resolve(p));
+  const session = key(inWsl ? toHostPath(cwd) : cwd);
+  const project = key(projectPath);
   if (session === project) return true;
-  return session.startsWith(project.endsWith(path.sep) ? project : project + path.sep);
+  return session.startsWith(project.endsWith(paths.sep) ? project : project + paths.sep);
 }
 
 /** The `cwd` the transcript recorded, read from its opening lines */
@@ -145,8 +172,10 @@ export async function readUserTurns(file: string, maxChars: number): Promise<str
                 .join('\n')
             : '';
       const trimmed = text.trim();
-      // Skip the harness's own injections and the empty turns around tool use
+      // Skip the harness's own injections, Workbench's own phase prompts, and the empty turns
+      // around tool use
       if (trimmed === '' || trimmed.startsWith('<') || trimmed.startsWith('Caveat:')) continue;
+      if (PHASE_PROMPT_OPENING_LIST.some((opening) => trimmed.startsWith(opening))) continue;
       const clipped = trimmed.slice(0, Math.max(0, maxChars - used));
       turns.push(clipped);
       used += clipped.length;

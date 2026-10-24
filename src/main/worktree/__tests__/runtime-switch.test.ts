@@ -1,7 +1,8 @@
 /**
  * Startup check of the tools' runtime (worktree/runtime-switch), Windows only:
- * - the runtime and each runtime's git version are stored; worktrees are repaired for every
- *   project when the runtime differs from the last start (a first start counts as after native)
+ * - the runtime and each runtime's git version are stored; worktrees are repaired and every
+ *   project's memory directory setting re-pointed when the runtime differs from the last start
+ *   (a first start counts as after native)
  * - in WSL, a core.autocrlf difference between Windows git and WSL git is reported
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -10,12 +11,14 @@ import os from 'os';
 import path from 'path';
 
 const mocks = vi.hoisted(() => ({
+  listRecordedWorktrees: vi.fn(async () => [] as Array<{ path: string | null }>),
   windows: true,
   wsl: null as null | { distro: string; mountRoot: string; home: string; tools: { git: { path: string | null; version: string | null } } },
   nativeGitVersion: '2.53.0',
   nativeAutocrlf: 'true' as string | null,
   wslAutocrlf: 'input' as string | null,
   repair: vi.fn(),
+  repairMemory: vi.fn(),
   setKnownGitVersions: vi.fn(),
   setAutocrlfMismatch: vi.fn(),
   warn: vi.fn(),
@@ -36,6 +39,7 @@ vi.mock('../../cli-tool-manager', () => ({
   getToolInfoAsync: async () => ({ found: true, version: mocks.nativeGitVersion, source: 'system-path', message: '' }),
 }));
 vi.mock('../../project-store', () => ({ projectStore: { getProjects: () => [] } }));
+vi.mock('../../self-improve/relocation', () => ({ repairProjectMemorySetting: mocks.repairMemory }));
 vi.mock('../../settings-utils', () => ({ readSettingsFile: () => ({ gitPath: undefined }) }));
 vi.mock('../../utils/windows-paths', () => ({
   findWindowsExecutableViaWhereAsync: async () => 'C:\\Program Files\\Git\\cmd\\git.exe',
@@ -51,6 +55,8 @@ vi.mock('../runtime-worktrees', () => ({
   setKnownGitVersions: mocks.setKnownGitVersions,
   setWslPathHints: vi.fn(),
   useRelativeWorktreePaths: async () => false,
+  // The memory repair asks for a project's worktrees, which keep their own copy of the setting
+  listRecordedWorktrees: mocks.listRecordedWorktrees,
 }));
 
 import { autocrlfDiffers, checkRuntimeAtStartup, readRuntimeState } from '../runtime-switch';
@@ -75,6 +81,8 @@ beforeEach(() => {
   projectDir = mkdtempSync(path.join(os.tmpdir(), 'runtime-switch-project-'));
   writeFileSync(path.join(projectDir, '.git'), 'gitdir: elsewhere\n');
   mocks.repair.mockResolvedValue({ repaired: [] });
+  mocks.repairMemory.mockResolvedValue(0);
+  mocks.listRecordedWorktrees.mockResolvedValue([]);
   // Windows git, run directly
   mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {
     if (args[0] === '--version') return callback(null, { stdout: 'git version 2.53.0.windows.1\n', stderr: '' });
@@ -135,6 +143,45 @@ describe('repair on a runtime change', () => {
     await start();
     expect(mocks.repair).not.toHaveBeenCalled();
     expect(await readRuntimeState(stateFile)).toBeNull();
+  });
+});
+
+describe('the memory directory setting on a runtime change', () => {
+  it('re-points every project, so the value matches how this runtime spells the path', async () => {
+    writeFileSync(stateFile, JSON.stringify({ runtime: 'native', gitVersions: {} }));
+    mocks.wsl = UBUNTU;
+    await start();
+    expect(mocks.repairMemory).toHaveBeenCalledWith(projectDir, []);
+  });
+
+  it("leaves it alone when the runtime is the same as last time, since nothing's spelling changed", async () => {
+    writeFileSync(stateFile, JSON.stringify({ runtime: 'wsl', gitVersions: {} }));
+    mocks.wsl = UBUNTU;
+    await start();
+    expect(mocks.repairMemory).not.toHaveBeenCalled();
+  });
+
+  it("re-points a project that isn't a git repository, which the worktree repair skips", async () => {
+    rmSync(path.join(projectDir, '.git'));
+    writeFileSync(stateFile, JSON.stringify({ runtime: 'native', gitVersions: {} }));
+    mocks.wsl = UBUNTU;
+    await start();
+    expect(mocks.repair).not.toHaveBeenCalled();
+    expect(mocks.repairMemory).toHaveBeenCalledWith(projectDir, []);
+  });
+
+  /**
+   * Each task worktree keeps its own uncommitted copy of `autoMemoryDirectory`, so a switch leaves
+   * it spelled for the other runtime exactly as it leaves the primary checkout.
+   */
+  it("re-points the project's task worktrees along with it", async () => {
+    const worktree = path.join(projectDir, '.workbench', 'worktrees', 'tasks', '001-task');
+    mocks.listRecordedWorktrees.mockResolvedValue([{ path: worktree }, { path: null }]);
+    writeFileSync(stateFile, JSON.stringify({ runtime: 'native', gitVersions: {} }));
+    mocks.wsl = UBUNTU;
+    await start();
+    // The entry git recorded without a readable path is left out rather than passed on as null
+    expect(mocks.repairMemory).toHaveBeenCalledWith(projectDir, [worktree]);
   });
 });
 

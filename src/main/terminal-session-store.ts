@@ -1,4 +1,5 @@
 import { app } from 'electron';
+import os from 'os';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, promises as fsPromises } from 'fs';
@@ -37,6 +38,12 @@ export interface SessionOwner {
   /** Identifies one run of the app; a pid on its own can be reused by a later process */
   instanceId: string;
   pid: number;
+  /**
+   * When the machine the run started on came up (epoch ms). A pid means nothing without it: across
+   * a reboot the number is handed out again, so an unrelated process answers for it. Absent in
+   * files written before windows recorded it.
+   */
+  bootTimeMs?: number;
 }
 
 /**
@@ -51,17 +58,162 @@ interface SessionData {
   windows: TerminalSession[];
 }
 
-/** This run of the app, stamped on every window it saves */
-const THIS_INSTANCE: SessionOwner = { instanceId: randomUUID(), pid: process.pid };
+/**
+ * When this machine came up (epoch ms), which every run of the app on this boot reads the same.
+ *
+ * `os.uptime()` is seconds since boot on Windows, macOS and Linux alike, so this needs no platform
+ * branch. The result is rounded to the second: two runs read it from a clock that can be adjusted
+ * under them, so the readings are compared with room to spare rather than for equality.
+ *
+ * On all three it counts the time the machine spent asleep, which is what makes the reading the
+ * same for every run rather than a measure of how long each one has been up: libuv reads
+ * `GetTickCount64()` on Windows, whose elapsed time Microsoft documents as including time the
+ * system spends in sleep or hibernation (the count that leaves sleep out is
+ * `QueryUnbiasedInterruptTime`, which libuv does not call), `/proc/uptime` or `CLOCK_BOOTTIME` on
+ * Linux, and the wall clock minus `kern.boottime` on macOS. Were any of them the sleep-free count,
+ * a run started after a long sleep would compute a boot time hours after the one a run that has
+ * been up since before it stamped on its windows, and each would take the other's windows over.
+ */
+function currentBootTimeMs(): number {
+  return Math.round(Date.now() - os.uptime() * 1000);
+}
 
-/** Whether another copy of the app, still running, has this window open */
-function isOwnedByRunningInstance(owner: SessionOwner | undefined): boolean {
+/** How far apart two readings of the same boot time may be (clock adjustments, rounding) */
+const BOOT_TIME_TOLERANCE_MS = 60_000;
+
+/**
+ * How often `TerminalManager` saves every terminal it has open, which is what leaves a running
+ * copy's trail on its windows. It lives here, with the rule that reads that trail, because the two
+ * numbers only mean anything together - see `OWNER_ACTIVITY_MAX_AGE_MS`.
+ */
+export const SESSION_SAVE_INTERVAL_MS = 30_000;
+
+/**
+ * How old the last activity on a window may be and still be taken as a sign that the run which
+ * owns it is going now.
+ *
+ * A save stamps the window with the time it happened, so a run that is still going leaves a trail
+ * no more than one saving period behind. This allows six of them, which covers a machine too busy
+ * to run the timer on time and a write that had to queue behind another one. The two are derived
+ * from one constant so raising the saving period cannot quietly make a running copy's windows look
+ * abandoned.
+ */
+const OWNER_ACTIVITY_MAX_AGE_MS = 6 * SESSION_SAVE_INTERVAL_MS;
+
+/** When the machine this run started on came up */
+const THIS_BOOT_MS = currentBootTimeMs();
+
+/** This run of the app, stamped on every window it saves */
+const THIS_INSTANCE: SessionOwner = {
+  instanceId: randomUUID(),
+  pid: process.pid,
+  bootTimeMs: THIS_BOOT_MS,
+};
+
+/**
+ * Whether the run that saved a window could still be the one running now, going by the boot it
+ * says it belongs to.
+ *
+ * Without this the pid decides on its own, and a pid does not survive a reboot: the number belongs
+ * to some unrelated process by then, which answered the liveness check below for every window the
+ * user had open and hid all of them instead of offering them back.
+ *
+ * This reading is sound across a sleep, which is what makes it worth keeping, but it is not sound
+ * across a step in the wall clock, because the boot time is the wall clock minus an age: an NTP
+ * correction on a machine that came up with a wrong real-time clock, or a VM resumed without the
+ * guest noticing how long the host had it suspended, moves it by the size of the step for every run
+ * that reads it afterwards. Two runs of the app on the same boot then disagree about that boot
+ * forever, so this answer alone is not allowed to decide that nothing holds a window — see
+ * `isOwnedByRunningInstance`.
+ *
+ * A window written before windows recorded a boot time falls back to when it was last active,
+ * which is after the boot of the run that has it open; a timestamp that cannot be read leaves the
+ * pid to decide, as before.
+ */
+function savedOnThisBoot(owner: SessionOwner, lastActiveAt: string | undefined): boolean {
+  if (typeof owner.bootTimeMs === 'number') {
+    return Math.abs(owner.bootTimeMs - THIS_BOOT_MS) <= BOOT_TIME_TOLERANCE_MS;
+  }
+  const lastActive = lastActiveAt ? Date.parse(lastActiveAt) : NaN;
+  return Number.isNaN(lastActive) || lastActive >= THIS_BOOT_MS - BOOT_TIME_TOLERANCE_MS;
+}
+
+/**
+ * Whether the window has been touched recently enough that whoever owns it must be going now.
+ *
+ * This is the one thing in the file a dead run cannot produce: `TerminalManager` saves every
+ * terminal it holds every 30 seconds, and each save writes the moment it happened, so a trail that
+ * reaches up to the present moment is being laid by a process that exists. It costs nothing to
+ * read — the time is already in the window, written by a timer that already runs — and it owes
+ * nothing to the boot time, so a clock step stops mattering as soon as the running copy writes
+ * once more.
+ *
+ * Three conditions keep a dead run's trail from passing for a live one. It must not be older than a
+ * few saving periods. It must not predate this boot, however recent it looks, which is what rules
+ * out a machine rebooted and started again inside those few periods, and last boot's windows when
+ * the clock was moved back in between; a running copy writes its trail while this boot is up, so
+ * the comparison needs no slack beyond the sub-millisecond rounding of the boot time, and nothing
+ * writes a terminal window in the first instant of a boot. And it must not lie in the future, which
+ * is a clock moved back under a running copy rather than a sign of life — that case is left to the
+ * boot time, which still agrees.
+ */
+function activeSinceThisBootStarted(lastActiveAt: string | undefined): boolean {
+  const lastActive = lastActiveAt ? Date.parse(lastActiveAt) : NaN;
+  if (Number.isNaN(lastActive) || lastActive < THIS_BOOT_MS) return false;
+  const age = Date.now() - lastActive;
+  return age >= 0 && age <= OWNER_ACTIVITY_MAX_AGE_MS;
+}
+
+/**
+ * Whether another copy of the app, still running, has this window open.
+ *
+ * Three facts have to line up, because no one of them answers the question on its own:
+ *
+ * The pid must exist. Necessary, and nothing more than that: the number is handed out again after a
+ * reboot, so an unrelated process answers for it.
+ *
+ * Then either the boot the window was saved on is this boot, or the window has been touched since
+ * this boot started. Taking either as enough, rather than demanding both, is what makes the pair
+ * work, because each one covers the case the other gets wrong. The boot time survives a sleep,
+ * where no window is touched for hours and the run holding them is plainly still there, but not a
+ * clock step, which moves it for good. The record of activity survives a clock step, since the next
+ * save a running copy makes is in the clock as it now stands, but not a sleep. Were either allowed
+ * to settle the matter alone, the case it gets wrong would end with this run taking windows away
+ * from a copy of the app that is still using them, and two live copies believing they hold the same
+ * terminals.
+ *
+ * Demanding both instead would bring the reboot back: after a reboot the boot times rightly
+ * disagree, and a window whose pid has been handed to some live process would be hidden again.
+ *
+ * Two ways of telling a dead run from a live one were turned down. Reading what the pid is actually
+ * running (`/proc/<pid>/cmdline`) tells the two apart outright, but this runs on the main process
+ * at startup and has to stay a cheap synchronous check, which rules out the child process the other
+ * platforms would need. A boot identity that owes nothing to the clock (`/proc/sys/kernel/random/
+ * boot_id`, `btime` in `/proc/stat`) would make the boot time exact, but only on Linux; macOS and
+ * Windows have nothing as cheap to read, so the derived boot time would have to stay for them
+ * anyway, and this app ships on all three.
+ *
+ * What is left: in the moments between a clock step and the next save a running copy makes, both
+ * answers are no and its windows can be taken from it. That is a window of one saving period, after
+ * which the trail of activity is in the clock as it now stands and the right answer comes back,
+ * where the boot time on its own was wrong from the step onwards and stayed wrong. The same window
+ * covers a copy of the app that is stopped at a breakpoint or frozen for longer than a few saving
+ * periods while the clock steps under it.
+ */
+function isOwnedByRunningInstance(window: Pick<TerminalSession, 'owner' | 'lastActiveAt'>): boolean {
+  const owner = window.owner;
   // No owner (written before windows recorded one) or our own: nothing else holds it
   if (!owner || owner.instanceId === THIS_INSTANCE.instanceId) return false;
   // Our pid under another id: an earlier run of the app whose process number we now have
   if (owner.pid === THIS_INSTANCE.pid) return false;
+  if (!processExists(owner.pid)) return false;
+  return savedOnThisBoot(owner, window.lastActiveAt) || activeSinceThisBootStarted(window.lastActiveAt);
+}
+
+/** Whether a process is running under this pid, whatever program it is */
+function processExists(pid: number): boolean {
   try {
-    process.kill(owner.pid, 0);  // Signal 0 only asks whether the process is there
+    process.kill(pid, 0);  // Signal 0 only asks whether the process is there
     return true;
   } catch (error) {
     // EPERM means the process exists but belongs to someone else
@@ -132,7 +284,7 @@ export class TerminalSessionStore {
     this.data = {
       ...loaded,
       windows: loaded.windows
-        .filter(w => !isOwnedByRunningInstance(w.owner))
+        .filter(w => !isOwnedByRunningInstance(w))
         .map(w => ({ ...w, owner: THIS_INSTANCE })),
     };
   }

@@ -240,12 +240,110 @@ describe('ClaudeTaskRun', () => {
     expect(outcome.status).toBe('completed');
     expect(events).toContain('QA_FAILED');
     const reviseInput = (spawned[2].input as Array<{ text?: string }>)[0].text;
-    expect(reviseInput).toContain('Rename it');
+    expect(reviseInput).toContain('The reviewer requested changes:\n\n<feedback>\nRename it\n</feedback>\n\nApply them,');
     expect(spawned[2].args).toContain('--resume');
     // The change request is assessed first (triage), then applied with the model triage picked
     expect(triageMock).toHaveBeenCalledTimes(2);
     expect(triageMock.mock.calls[1][0].description).toContain('Rename it');
     expect(loadClaudeRunInfo(specDir)!.phases.slice(-3).map((p) => p.name)).toEqual(['triage', 'revise', 'validate']);
+  });
+
+  it('points the revision at the images when the reviewer asked for the changes in screenshots alone', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    writeFileSync(path.join(specDir, 'shot.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(path.join(specDir, 'shot2.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const image = (filename: string) => ({ path: path.join(specDir, filename), filename, mimeType: 'image/png' });
+    const noValidation = { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false };
+
+    scripts.push({ messages: [result('s13')] });
+    await makeRun({ mode: 'revise', feedback: '', feedbackAttachments: [image('shot.png')], settings: noValidation }).run();
+
+    const input = spawned[0].input as Array<{ type: string; text?: string }>;
+    expect(input[0].text).toContain('The reviewer requested changes:\n\nsee the attached image.\n\nApply them,');
+    expect(input[0].text).not.toContain('<feedback>');
+    // The image is on the same turn, so the sentence above has something to point at
+    expect(input.map((block) => block.type)).toEqual(['text', 'image']);
+    // Triage sizes the change from the same statement of it, not from a claim that there is none
+    expect(triageMock.mock.calls[0][0].description).toContain('see the attached image.');
+    expect(triageMock.mock.calls[0][0].attachmentNames).toEqual(['shot.png']);
+
+    // Several screenshots are counted, so the model knows how many to look for
+    scripts.push({ messages: [result('s13')] });
+    await makeRun({ mode: 'revise', feedback: '  ', feedbackAttachments: [image('shot.png'), image('shot2.png')], settings: noValidation }).run();
+    const resumed = spawned[1].input as Array<{ type: string; text?: string }>;
+    expect(resumed[0].text).toContain('The reviewer requested changes:\n\nsee the 2 attached images.\n\nApply them,');
+    expect(resumed.map((block) => block.type)).toEqual(['text', 'image', 'image']);
+  });
+
+  /**
+   * The sentence that points at the images is written from the images the turn really carries, not
+   * from what the reviewer picked: an attachment over the image limit is dropped while the request
+   * is being built, and a request of one oversized screenshot and no text would otherwise read as
+   * "see the attached image" above a turn carrying no image at all - and would skip the one wording
+   * that is honest about it.
+   */
+  it('does not promise images that were too large to attach', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+    writeFileSync(path.join(specDir, 'small.png'), png);
+    // Over MAX_IMAGE_BYTES (5 MB), the limit the run drops an image at
+    writeFileSync(path.join(specDir, 'huge.png'), Buffer.alloc(5 * 1024 * 1024 + 1));
+    const image = (filename: string) => ({ path: path.join(specDir, filename), filename, mimeType: 'image/png' });
+    const noValidation = { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false };
+
+    scripts.push({ messages: [result('s15')] });
+    await makeRun({ mode: 'revise', feedback: '', feedbackAttachments: [image('huge.png')], settings: noValidation }).run();
+
+    const input = spawned[0].input as Array<{ type: string; text?: string }>;
+    expect(input[0].text).toContain('The reviewer requested changes:\n\nno notes came with the request, so review the change against the task with fresh eyes');
+    expect(input[0].text).not.toContain('attached image');
+    expect(input.map((block) => block.type)).toEqual(['text']);
+
+    // Only the images that survived are counted, so two attachments can still be "the attached image"
+    scripts.push({ messages: [result('s15')] });
+    await makeRun({
+      mode: 'revise',
+      feedback: '',
+      feedbackAttachments: [image('huge.png'), image('small.png')],
+      settings: noValidation,
+    }).run();
+    const resumed = spawned[1].input as Array<{ type: string; text?: string }>;
+    expect(resumed[0].text).toContain('The reviewer requested changes:\n\nsee the attached image.\n\nApply them,');
+    expect(resumed.map((block) => block.type)).toEqual(['text', 'image']);
+  });
+
+  /**
+   * A run started over from "Request changes" introduces the same images from the same count, so
+   * the oversized screenshot has to disappear from its notes as well.
+   */
+  it('leaves the images out of a restarted run\'s notes when none of them could be attached', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    writeFileSync(path.join(specDir, 'huge.png'), Buffer.alloc(5 * 1024 * 1024 + 1));
+    const noValidation = { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false };
+
+    scripts.push({ messages: [result('s16')] });
+    await makeRun({
+      mode: 'start',
+      feedback: '',
+      feedbackAttachments: [{ path: path.join(specDir, 'huge.png'), filename: 'huge.png', mimeType: 'image/png' }],
+      settings: noValidation,
+    }).run();
+
+    const input = spawned[0].input as Array<{ type: string; text?: string }>;
+    expect(input[0].text).not.toContain('starting it over');
+    expect(input[0].text).not.toContain('attached image');
+    expect(input.map((block) => block.type)).toEqual(['text']);
+  });
+
+  it('asks for a fresh look when a change request arrives with neither notes nor images', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push({ messages: [result('s14')] });
+    await makeRun({ mode: 'revise', feedback: '', settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+
+    const text = (spawned[0].input as Array<{ text?: string }>)[0].text!;
+    expect(text).toContain('The reviewer requested changes:\n\nno notes came with the request, so review the change against the task with fresh eyes');
+    expect(text).not.toContain('<feedback>');
+    expect(triageMock.mock.calls[0][0].description).toContain('they left no notes with the request.');
   });
 
   it('tells a run started over what the discarded attempt got wrong', async () => {

@@ -23,7 +23,8 @@ import {
   escapeShellArg,
   escapeForWindowsDoubleQuote,
   escapePowerShellArg,
-  buildCdCommand
+  buildCdCommand,
+  buildUnsetEnvPrefix
 } from '../../shared/utils/shell-escape';
 import { getClaudeCliInvocation, getClaudeCliInvocationAsync } from '../cli-utils';
 import { isWindows } from '../platform';
@@ -41,6 +42,7 @@ import type {
 } from './types';
 import { getClaudeGlobalConfigPath, isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { lastAgentSession, readAgentSessions, recordAgentSessionAsync } from '../agent-session-store';
+import { getSessionFilePath } from '../claude-profile/session-utils';
 import { findSessionTranscript, latestTranscript } from '../claude-code/session-spending';
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
 import { appLog } from '../app-logger';
@@ -525,31 +527,114 @@ function trackAgentWindowSession(
   });
 }
 
+/** How a restored window picks Claude Code up again */
+interface ResumedSession {
+  /** The flag that picks the session up: ` --resume <id>`, or ` --continue` when none is known */
+  flag: string;
+  /**
+   * The config dir the session's transcript was found in, when one was. Claude Code looks for a
+   * session under the account it runs with, so the window has to run with this one or `--resume`
+   * finds nothing to load.
+   */
+  configDir?: string;
+}
+
+/**
+ * Whether a config dir holds the session's transcript at the path Claude Code writes it to for this
+ * working directory - the one place a live session is, as opposed to the copies a swap leaves
+ * behind. Unreadable or missing counts as not held, which is what the next dir is for.
+ */
+async function holdsSessionTranscript(configDir: string, cwd: string, sessionId: string): Promise<boolean> {
+  try {
+    const stats = await fsPromises.stat(getSessionFilePath(configDir, cwd, sessionId));
+    return stats.isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The config dirs to look a window's own session up in, the account the window was recorded on
+ * first.
+ *
+ * `claudeConfigDirs` lists every dir a session of this machine can live under, but in its own
+ * order: Claude Code's default dir, then the environment's, then the ones handed to it. Swapping
+ * accounts *copies* a transcript from one config dir to another and never deletes the source
+ * (`claude-profile/session-utils`), so after a swap the same session id sits at the same relative
+ * path under both dirs, and whichever dir is looked at first decides which copy the window
+ * resumes. The window's own recorded account is the one the user picked and the one whose copy is
+ * live, so it has to be asked before the rest; that order is what every pass below searches in.
+ *
+ * The dirs come back resolved and deduplicated, so the window's own dir is already among them
+ * under its resolved spelling - hence moving it rather than prepending it, which would otherwise
+ * search the same account twice.
+ */
+function sessionSearchDirs(ownConfigDir: string | undefined): string[] {
+  const dirs = claudeConfigDirs([ownConfigDir]);
+  if (!ownConfigDir) return dirs;
+  // Resolved exactly as `claudeConfigDirs` resolves what it is given, so the two agree on spelling
+  const paths = isClaudeHomeInWsl() ? path.win32 : path;
+  const own = paths.resolve(expandClaudeHome(ownConfigDir));
+  const index = dirs.indexOf(own);
+  if (index <= 0) return dirs;
+  return [own, ...dirs.slice(0, index), ...dirs.slice(index + 1)];
+}
+
 /**
  * How a restored window picks Claude Code up again, and what that costs the project.
  *
  * Its own last session comes first, by id, so a window always continues its own conversation
- * rather than whatever session in the directory was written to last. When it has none - the window
- * was there before Workbench recorded sessions, or its session's transcript is gone - it picks up
- * the session `claude --continue` would have picked, the directory's newest, and records it as the
- * window's own. From then on that conversation's spending reaches Metrics, including what it had
- * already spent on earlier days.
+ * rather than whatever session in the directory was written to last. The accounts are searched one
+ * at a time rather than all at once, because swapping accounts moves a transcript from one config
+ * dir to another and the window has to run on the dir that holds it now: the exact path Claude Code
+ * writes to, across every account, and only then the wider scan of each account in turn. Every one
+ * of those passes asks the window's own account first (`sessionSearchDirs`), because a swap leaves
+ * the same session id under more than one account at once.
+ *
+ * When the window has no session - it was there before Workbench recorded sessions, or its
+ * session's transcript is gone - it picks up the session `claude --continue` would have picked,
+ * the directory's newest, and records it as the window's own. From then on that conversation's
+ * spending reaches Metrics, including what it had already spent on earlier days.
  */
 async function resumeOwnSessionFlag(
   terminal: Pick<TerminalProcess, 'id' | 'projectPath' | 'cwd'>
-): Promise<string> {
-  if (!terminal.projectPath) return ' --continue';
+): Promise<ResumedSession> {
+  const continueLatest: ResumedSession = { flag: ' --continue' };
+  if (!terminal.projectPath) return continueLatest;
   try {
     const own = await lastAgentSession(terminal.projectPath, terminal.id);
     if (own) {
       // Claude Code names the transcript's folder after the directory as it sees it (in WSL, the
       // Linux path; the translation leaves a path that is already one unchanged)
-      const transcript = await findSessionTranscript(
-        own.sessionId,
-        claudeConfigDirs([own.configDir]),
-        own.cwd ? toRuntimePath(own.cwd) : own.cwd
-      );
-      if (transcript) return buildResumeSessionFlag(own.sessionId);
+      const ownCwd = own.cwd ? toRuntimePath(own.cwd) : own.cwd;
+      const configDirs = sessionSearchDirs(own.configDir);
+
+      // The account that holds the transcript where Claude Code itself writes it for this directory
+      // wins over any account that merely has a copy of the session somewhere, and it wins across
+      // every account before any of them is searched more widely. Swapping accounts copies session
+      // files from one config dir to another (`claude-profile/session-utils`), so the same id
+      // sitting in several dirs at once is an expected state, and letting the first dir's wider
+      // search answer first would hand the window a stale copy - and with it the account that only
+      // has that copy, under which `--resume` loads nothing. Between two accounts that both have
+      // the session at that exact path, the window's own comes first, which is what the order of
+      // `configDirs` is for: the other one's copy is the one a swap left behind.
+      if (ownCwd) {
+        for (const configDir of configDirs) {
+          if (await holdsSessionTranscript(configDir, ownCwd, own.sessionId)) {
+            return { flag: buildResumeSessionFlag(own.sessionId), configDir };
+          }
+        }
+      }
+
+      // Only then the wider search: the session may have run in another directory, or have been
+      // moved into a project folder of its own. Asked without a working directory,
+      // `findSessionTranscript` is that scan of every project folder alone, so this pass cannot
+      // undercut the one above - and it stays per dir, because the dir that answers is the account
+      // the window has to run on.
+      for (const configDir of configDirs) {
+        const transcript = await findSessionTranscript(own.sessionId, [configDir]);
+        if (transcript) return { flag: buildResumeSessionFlag(own.sessionId), configDir };
+      }
     }
 
     // The window has no session of its own: adopt the one it would have continued anyway,
@@ -561,12 +646,12 @@ async function resumeOwnSessionFlag(
     );
     const cwd = terminal.projectPath || terminal.cwd;
     const latest = await latestTranscript(claudeConfigDirs([own?.configDir]), toRuntimePath(cwd), taken);
-    if (!latest || !isValidClaudeSessionId(latest.sessionId)) return ' --continue';
+    if (!latest || !isValidClaudeSessionId(latest.sessionId)) return continueLatest;
     trackAgentWindowSession(terminal, latest.sessionId, latest.configDir, cwd);
-    return buildResumeSessionFlag(latest.sessionId);
+    return { flag: buildResumeSessionFlag(latest.sessionId), configDir: latest.configDir };
   } catch (error) {
     appLog.warn('[ClaudeIntegration] Could not look up the window\'s own session:', error);
-    return ' --continue';
+    return continueLatest;
   }
 }
 
@@ -601,6 +686,75 @@ export function resolveSessionConfigDir(configDir: string | undefined): string |
   return (isClaudeHomeInWsl() ? path.win32 : path).resolve(expanded);
 }
 
+/** The variable that names the account Claude Code runs on */
+const CLAUDE_CONFIG_DIR_VAR = 'CLAUDE_CONFIG_DIR';
+
+/**
+ * How a window must run so Claude Code looks for a session under the account whose transcripts
+ * hold it: with CLAUDE_CONFIG_DIR pointing at that account's dir, or - for Claude Code's own
+ * default `~/.claude`, which it reads only while the variable is absent - with the variable
+ * removed for the command.
+ *
+ * Removing it is not the same as leaving it alone. An agent window's environment carries the
+ * config dir of the account it was spawned on, so a window that swapped to another account and
+ * then went back to a conversation in the default dir would resume under the wrong account and
+ * find nothing. Undefined when no account is known, which is the only case where the window's
+ * environment is the best guess there is.
+ *
+ * `keepScreen` is for the caller that has something on the screen worth keeping - a restore, which
+ * replays the window's own scrollback before the session is picked up again.
+ */
+function sessionAccountCommand(
+  terminal: Pick<TerminalProcess, 'shellKind'>,
+  configDir: string,
+  options?: { keepScreen?: boolean }
+): ClaudeCommandConfig;
+function sessionAccountCommand(
+  terminal: Pick<TerminalProcess, 'shellKind'>,
+  configDir: string | undefined,
+  options?: { keepScreen?: boolean }
+): ClaudeCommandConfig | undefined;
+function sessionAccountCommand(
+  terminal: Pick<TerminalProcess, 'shellKind'>,
+  configDir: string | undefined,
+  options?: { keepScreen?: boolean }
+): ClaudeCommandConfig | undefined {
+  if (!configDir) return undefined;
+  const override = resolveSessionConfigDir(configDir);
+  return override
+    ? { method: 'config-dir', configDir: windowConfigDir(terminal, override), keepScreen: options?.keepScreen }
+    : { method: 'default-config-dir' };
+}
+
+/**
+ * Mark onboarding complete for the account a window is about to run on, so Claude Code opens a
+ * session instead of its onboarding and theme prompts.
+ *
+ * What this takes is the account's own config dir, never the CLAUDE_CONFIG_DIR override
+ * `sessionAccountCommand` builds from it, because the two part company on exactly the account that
+ * needs this most. Claude Code's default `~/.claude` is run without the variable, so there is no
+ * override to pass - and yet its config is the one place the flag matters:
+ * `getClaudeGlobalConfigPath` maps that dir to `~/.claude.json`, the very file Claude Code reads
+ * while the variable is absent. An account signed in through the keychain, or one on a fresh
+ * machine, has that file without the flag until someone finishes `claude`'s interactive onboarding,
+ * and a window started on it would open in the wizard instead of a session.
+ */
+function ensureAccountOnboarded(configDir: string | undefined): void {
+  if (configDir) ensureOnboardingComplete(configDir);
+}
+
+/**
+ * A POSIX command run with CLAUDE_CONFIG_DIR removed. A WSL window's command already starts with
+ * `env -u ANTHROPIC_API_KEY`, and `env` takes any number of -u options, so the two removals share
+ * that one invocation rather than nesting a second `env` around it.
+ */
+function posixWithoutConfigDir(command: string): string {
+  const prefix = buildUnsetEnvPrefix(CLAUDE_CONFIG_DIR_VAR, 'posix');
+  return command.startsWith(WSL_UNSET_API_KEY)
+    ? `${prefix}${command.slice('env '.length)}`
+    : `${prefix}${command}`;
+}
+
 // ============================================================================
 // SHARED HELPERS - Used by both sync and async invokeClaude
 // ============================================================================
@@ -614,7 +768,19 @@ export function resolveSessionConfigDir(configDir: string | undefined): string |
 type ClaudeCommandConfig =
   | { method: 'default' }
   | { method: 'temp-file'; tempFile: string }
-  | { method: 'config-dir'; configDir: string };
+  | {
+      method: 'config-dir';
+      configDir: string;
+      /**
+       * Leave whatever is on the screen alone. This method otherwise starts with a clear, which
+       * only hides the config dir on the line from sight; what keeps that line out of the shell's
+       * history are the history-safe prefixes, and those stay either way. A window being restored
+       * has just had its own scrollback replayed into it, so clearing there would throw away the
+       * very thing the restore is for.
+       */
+      keepScreen?: boolean;
+    }
+  | { method: 'default-config-dir' };
 
 /**
  * Build the shell command for invoking Claude CLI.
@@ -623,9 +789,13 @@ type ClaudeCommandConfig =
  * - 'default': Simple command execution
  * - 'temp-file': Sources OAuth token from temp file, then removes it
  * - 'config-dir': Sets CLAUDE_CONFIG_DIR for custom profile location
+ * - 'default-config-dir': Unsets CLAUDE_CONFIG_DIR, for Claude Code's own default ~/.claude
  *
- * All non-default methods include history-safe prefixes (HISTFILE=, HISTCONTROL=)
- * to prevent sensitive data from appearing in shell history (Unix/macOS only).
+ * The methods that put something sensitive on the line (temp-file, config-dir) include
+ * history-safe prefixes (HISTFILE=, HISTCONTROL=) to prevent sensitive data from appearing in
+ * shell history (Unix/macOS only), and clear the screen so the line itself does not stay in
+ * sight - unless the config-dir method is asked to keep the screen, which a restored window's
+ * replayed scrollback depends on.
  *
  * For cmd.exe, the temp file method uses a batch file approach with inline environment setup.
  *
@@ -660,6 +830,14 @@ type ClaudeCommandConfig =
  * // Config dir method (PowerShell)
  * buildClaudeShellCommand('', '', "& 'claude'", { method: 'config-dir', configDir: 'C:\\cfg' }, undefined, 'powershell');
  * // Returns: "Clear-Host; $env:CLAUDE_CONFIG_DIR = 'C:\\cfg'; & 'claude'\r"
+ *
+ * // Config dir method keeping a restored window's screen (PowerShell)
+ * buildClaudeShellCommand('', '', "& 'claude'", { method: 'config-dir', configDir: 'C:\\cfg', keepScreen: true }, undefined, 'powershell');
+ * // Returns: "$env:CLAUDE_CONFIG_DIR = 'C:\\cfg'; & 'claude'\r"
+ *
+ * // Default config dir method (Unix/macOS)
+ * buildClaudeShellCommand('', '', "'claude'", { method: 'default-config-dir' });
+ * // Returns: "env -u CLAUDE_CONFIG_DIR 'claude'\r"
  */
 export function buildClaudeShellCommand(
   cwdCommand: string,
@@ -686,7 +864,9 @@ export function buildClaudeShellCommand(
         );
       }
       case 'config-dir':
-        return `Clear-Host; ${cwdCommand}$env:CLAUDE_CONFIG_DIR = ${escapePowerShellArg(config.configDir)}; ${pathPrefix}${fullCmd}\r`;
+        return `${config.keepScreen ? '' : 'Clear-Host; '}${cwdCommand}$env:CLAUDE_CONFIG_DIR = ${escapePowerShellArg(config.configDir)}; ${pathPrefix}${fullCmd}\r`;
+      case 'default-config-dir':
+        return `${cwdCommand}${buildUnsetEnvPrefix(CLAUDE_CONFIG_DIR_VAR, 'powershell')}${pathPrefix}${fullCmd}\r`;
       default:
         return `${cwdCommand}${pathPrefix}${fullCmd}\r`;
     }
@@ -721,11 +901,20 @@ export function buildClaudeShellCommand(
         // escapeForWindowsDoubleQuote() because caret is literal inside
         // double quotes in cmd.exe (only double quotes need escaping).
         const escapedConfigDir = escapeForWindowsDoubleQuote(config.configDir);
-        return `cls && ${cwdCommand}set "CLAUDE_CONFIG_DIR=${escapedConfigDir}" && ${pathPrefix}${fullCmd}\r`;
+        return `${config.keepScreen ? '' : 'cls && '}${cwdCommand}set "CLAUDE_CONFIG_DIR=${escapedConfigDir}" && ${pathPrefix}${fullCmd}\r`;
       } else {
         // Unix/macOS: Use bash with config dir and history-safe prefixes
         const escapedConfigDir = escapeShellArg(config.configDir);
-        return `clear && ${cwdCommand}HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR=${escapedConfigDir} ${pathPrefix}bash -c "${escapeForPosixDoubleQuote(`exec ${fullCmd}`)}"\r`;
+        return `${config.keepScreen ? '' : 'clear && '}${cwdCommand}HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR=${escapedConfigDir} ${pathPrefix}bash -c "${escapeForPosixDoubleQuote(`exec ${fullCmd}`)}"\r`;
+      }
+
+    case 'default-config-dir':
+      // Nothing secret goes into this line, so it needs neither the cleared screen nor the
+      // history-safe prefixes the other overrides carry: only the variable has to go.
+      if (isWin) {
+        return `${cwdCommand}${buildUnsetEnvPrefix(CLAUDE_CONFIG_DIR_VAR, 'cmd')}${pathPrefix}${fullCmd}\r`;
+      } else {
+        return `${cwdCommand}${pathPrefix}${posixWithoutConfigDir(fullCmd)}\r`;
       }
 
     default:
@@ -1243,14 +1432,18 @@ function executeProfileCommand(options: ExecuteProfileCommandOptions): boolean {
   // read full Keychain credentials including subscriptionType ("max") and rateLimitTier.
   // Using CLAUDE_CODE_OAUTH_TOKEN alone lacks tier info, causing "Claude API" display.
   if (activeProfile.configDir) {
-    // Ensure Claude Code skips onboarding for authenticated profiles
-    ensureOnboardingComplete(activeProfile.configDir);
+    // An account Claude Code found for itself can sit in the default `~/.claude` and still not be
+    // the default profile. Naming that dir in CLAUDE_CONFIG_DIR would make Claude Code read
+    // `~/.claude/.claude.json` instead of `~/.claude.json` and lose the sign-in, so such an account
+    // runs with the variable removed instead (`sessionAccountCommand`). Onboarding is marked
+    // complete either way, against whichever config the account really has.
+    ensureAccountOnboarded(activeProfile.configDir);
 
     const command = buildClaudeShellCommand(
       cwdCommand,
       pathPrefix,
       escapedClaudeCmd,
-      { method: 'config-dir', configDir: windowConfigDir(terminal, activeProfile.configDir) },
+      sessionAccountCommand(terminal, activeProfile.configDir),
       extraFlags,
       shellKindOf(terminal)
     );
@@ -1323,14 +1516,18 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
   // read full Keychain credentials including subscriptionType ("max") and rateLimitTier.
   // Using CLAUDE_CODE_OAUTH_TOKEN alone lacks tier info, causing "Claude API" display.
   if (activeProfile.configDir) {
-    // Ensure Claude Code skips onboarding for authenticated profiles
-    ensureOnboardingComplete(activeProfile.configDir);
+    // An account Claude Code found for itself can sit in the default `~/.claude` and still not be
+    // the default profile. Naming that dir in CLAUDE_CONFIG_DIR would make Claude Code read
+    // `~/.claude/.claude.json` instead of `~/.claude.json` and lose the sign-in, so such an account
+    // runs with the variable removed instead (`sessionAccountCommand`). Onboarding is marked
+    // complete either way, against whichever config the account really has.
+    ensureAccountOnboarded(activeProfile.configDir);
 
     const command = buildClaudeShellCommand(
       cwdCommand,
       pathPrefix,
       escapedClaudeCmd,
-      { method: 'config-dir', configDir: windowConfigDir(terminal, activeProfile.configDir) },
+      sessionAccountCommand(terminal, activeProfile.configDir),
       extraFlags,
       shellKindOf(terminal)
     );
@@ -1648,21 +1845,21 @@ export async function invokeCLIAsync(
     });
 
     // A resumed session must run on the config dir that holds its transcript, even when the
-    // terminal already uses that profile or the profile is the default one
-    const sessionConfigDir = resumeSessionId
-      ? resolveSessionConfigDir(options.configDir ?? activeProfile?.configDir)
-      : undefined;
-    if (sessionConfigDir) {
-      ensureOnboardingComplete(sessionConfigDir);
+    // terminal already uses that profile, the profile is the default one, or the transcript sits
+    // in Claude Code's default dir, where the variable the window carries has to go
+    const resumedConfigDir = resumeSessionId ? options.configDir ?? activeProfile?.configDir : undefined;
+    const sessionAccount = sessionAccountCommand(terminal, resumedConfigDir);
+    if (sessionAccount) {
+      ensureAccountOnboarded(resumedConfigDir);
       const command = buildClaudeShellCommand(
         cwdCommand,
         pathPrefix,
         escapedClaudeCmd,
-        { method: 'config-dir', configDir: windowConfigDir(terminal, sessionConfigDir) },
+        sessionAccount,
         extraFlags,
         shellKindOf(terminal)
       );
-      debugLog('[ClaudeIntegration:invokeCLIAsync] Resuming session (configDir method, history-safe)');
+      debugLog('[ClaudeIntegration:invokeCLIAsync] Resuming session on its own account:', sessionAccount.method);
       writeCliCommand(terminal, command);
       if (activeProfile) {
         profileManager.markProfileUsed(activeProfile.id);
@@ -1757,13 +1954,35 @@ export async function resumeClaudeAsync(
 
     const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
 
-    // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
+    // The session to pick up, and the account whose transcripts hold it
+    const resumed = await resumeOwnSessionFlag(terminal);
+
+    // The session flag, then YOLO mode (preserved from the terminal's stored state), the Graphify
+    // hint and the theme matching the app's
+    const extraFlags = `${resumed.flag}${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
 
     // Go to the project directory, then pick the window's own session up again
     const cdCommand = buildCdCommand(windowPath(terminal, terminal.projectPath || terminal.cwd), shellKindOf(terminal));
-    const sessionFlag = await resumeOwnSessionFlag(terminal);
-    const command = `${cdCommand}${pathPrefix}${escapedClaudeCmd}${sessionFlag}${extraFlags}`;
+
+    // A session loads only under the account that holds its transcript, so the window runs on that
+    // account's config dir rather than on whichever one its environment carries: swapping accounts
+    // moves transcripts, and the window's own conversation can sit under any of them, the default
+    // dir included, where the account the window was spawned on has to be taken out of the way
+    //
+    // The screen stays as it is: a restore has just replayed the window's own scrollback into it,
+    // and the account override is not worth wiping that for
+    const sessionAccount = sessionAccountCommand(terminal, resumed.configDir, { keepScreen: true });
+    ensureAccountOnboarded(resumed.configDir);
+    const command = sessionAccount
+      ? buildClaudeShellCommand(
+          cdCommand,
+          pathPrefix,
+          escapedClaudeCmd,
+          sessionAccount,
+          extraFlags,
+          shellKindOf(terminal)
+        )
+      : `${cdCommand}${pathPrefix}${escapedClaudeCmd}${extraFlags}`;
 
     // Use PtyManager.writeToPty for safer write with error handling
     writeCliCommand(terminal, command);

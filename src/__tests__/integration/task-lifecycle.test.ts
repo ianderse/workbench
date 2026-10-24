@@ -306,14 +306,16 @@ describe('Task Lifecycle Integration', () => {
       });
 
       // Call startTask (resume)
-      const startTask = electronAPI['startTask'] as (id: string, options?: object) => void;
-      startTask('task-001', { resume: true });
+      const startTask = electronAPI['startTask'] as (id: string, options?: object, projectId?: string) => void;
+      startTask('task-001', { resume: true }, 'project-001');
 
-      // Verify IPC send was called
+      // Verify IPC send was called, with the board's project: a task id is only unique within a
+      // project, so the main process must not infer whose task to resume
       expect(mockIpcRenderer.send).toHaveBeenCalledWith(
         'task:start',
         'task-001',
-        { resume: true }
+        { resume: true },
+        'project-001'
       );
     });
 

@@ -1,5 +1,8 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+// The i18next singleton that src/shared/i18n configures, imported straight from the package so
+// that pulling this module in never drags react-i18next along with it
+import i18n from 'i18next';
 
 /**
  * Utility function to merge Tailwind CSS classes
@@ -27,25 +30,31 @@ export function formatRelativeTime(date: Date): string {
   return new Date(date).toLocaleDateString();
 }
 
-const SHORT_UNITS: Array<{ limit: number; per: number; unit: string }> = [
-  { limit: 60, per: 1, unit: 'sec' },
-  { limit: 3600, per: 60, unit: 'min' },
-  { limit: 86400, per: 3600, unit: 'h' },
-  { limit: 2592000, per: 86400, unit: 'd' },
-  { limit: 31536000, per: 2592000, unit: 'mo' },
+const SHORT_UNITS: Array<{ limit: number; per: number; key: string }> = [
+  { limit: 60, per: 1, key: 'common:relativeTime.secondsAgo' },
+  { limit: 3600, per: 60, key: 'common:relativeTime.minutesAgo' },
+  { limit: 86400, per: 3600, key: 'common:relativeTime.hoursAgo' },
+  { limit: 2592000, per: 86400, key: 'common:relativeTime.daysAgo' },
+  { limit: 31536000, per: 2592000, key: 'common:relativeTime.monthsAgo' },
 ];
 
 /**
  * How long ago something happened, in short units: "42 sec ago", "7 min ago", "3 h ago",
  * "5 d ago", "2 mo ago", "1 y ago". Unlike {@link formatRelativeTime} it never falls back to a
  * date, so an old entry still reads as an age.
+ *
+ * The wording comes from the translation files. This is a plain function rather than a hook, so
+ * it reads them through the configured i18next instance instead of a `t` from a component.
  */
 export function formatShortRelativeTime(date: Date | string | number): string {
-  const seconds = Math.max(1, Math.floor((Date.now() - new Date(date).getTime()) / 1000));
-  for (const { limit, per, unit } of SHORT_UNITS) {
-    if (seconds < limit) return `${Math.floor(seconds / per)} ${unit} ago`;
+  const time = new Date(date).getTime();
+  // An unparsable date has no age to show, and arithmetic on it would read as "NaN y ago"
+  if (Number.isNaN(time)) return i18n.t('common:relativeTime.unknown');
+  const seconds = Math.max(1, Math.floor((Date.now() - time) / 1000));
+  for (const { limit, per, key } of SHORT_UNITS) {
+    if (seconds < limit) return i18n.t(key, { value: Math.floor(seconds / per) });
   }
-  return `${Math.floor(seconds / 31536000)} y ago`;
+  return i18n.t('common:relativeTime.yearsAgo', { value: Math.floor(seconds / 31536000) });
 }
 
 /**

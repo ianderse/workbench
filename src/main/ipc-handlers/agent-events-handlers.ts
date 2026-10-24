@@ -32,8 +32,42 @@ import { registerTaskChangelog } from "../task-changelog-writer";
 // Timeout for fallback safety net to check if task is still stuck after process exit
 const STUCK_TASK_FALLBACK_TIMEOUT_MS = 500;
 
-// Map to store active fallback timers so they can be cancelled on task restart
+/**
+ * The pending fallback timers, by project and task — the same keying `AgentState` and
+ * `TaskStateManager` use, and for the same reason: a task id is only unique inside its project.
+ * Keyed by the task alone, one project starting the task cancelled another project's net, so that
+ * project's card was never forced out of In Progress - the stuck card this exists to prevent - and
+ * two runs exiting within the window shared one slot, so only one net ever fired.
+ */
 const fallbackTimers = new Map<string, NodeJS.Timeout>();
+
+const fallbackTimerKey = (taskId: string, projectId?: string): string => `${projectId ?? ''}\u0000${taskId}`;
+
+/**
+ * The key a task's fallback timer is held under. A run's exit event carries its project, but not
+ * always (the task can be deleted or its project removed mid-run), so a timer can be armed without
+ * one — and then only a bare lookup can find it again. With two projects holding the id and no
+ * project named there is no timer the caller can mean, so nothing is cancelled: letting the net
+ * fire is recoverable, cancelling the wrong project's is the stuck card itself.
+ */
+function findFallbackTimerKey(taskId: string, projectId?: string): string | undefined {
+  const exact = fallbackTimerKey(taskId, projectId);
+  if (fallbackTimers.has(exact)) return exact;
+  if (projectId) {
+    const unscoped = fallbackTimerKey(taskId);
+    return fallbackTimers.has(unscoped) ? unscoped : undefined;
+  }
+  const suffix = `\u0000${taskId}`;
+  const held = [...fallbackTimers.keys()].filter((key) => key.endsWith(suffix));
+  if (held.length === 1) return held[0];
+  if (held.length > 1) {
+    appLog.warn(
+      `[agent-events-handlers] "${taskId}" has a stuck-run timer in more than one project and none `
+        + 'was named, so none was cancelled'
+    );
+  }
+  return undefined;
+}
 
 /**
  * Before holding a rate-limited task until its reset time, try switching to another
@@ -64,7 +98,9 @@ function tryAutoSwapBeforeHold(
     return false;
   }
   console.warn(`[agent-events-handlers] Rate limit for ${taskId}: switching profile ${limitedProfileId} -> ${bestProfile.id} instead of holding`);
-  if (!agentManager.restartTask(taskId, bestProfile.id)) {
+  // A task id is only unique inside its project, so the restart names the project the event came
+  // from: without it a task of the same name in another project could be the one restarted
+  if (!agentManager.restartTask(taskId, bestProfile.id, event.projectId)) {
     return false;
   }
   const rateLimitInfo: SDKRateLimitInfo = {
@@ -170,16 +206,20 @@ export function registerAgenteventsHandlers(
     const { task: exitTask, project: exitProject } = findTaskAndProject(taskId, projectId);
     const exitProjectId = exitProject?.id || projectId;
 
-    taskStateManager.handleProcessExited(taskId, code, exitTask, exitProject);
+    taskStateManager.handleProcessExited(taskId, code, exitTask, exitProject, projectId);
 
     // Fallback safety net: If XState failed to transition the task out of an active state,
     // force it out after a short delay. This prevents tasks from getting stuck when the run
     // ends without XState seeing its terminal event.
     // We check XState's current state directly to avoid stale cache issues from projectStore.
     // Store timer reference so it can be cancelled if task restarts within the window.
-    cancelFallbackTimer(taskId);
+    cancelFallbackTimer(taskId, exitProjectId);
     const timer = setTimeout(() => {
-      const currentState = taskStateManager.getCurrentState(taskId);
+      // The same project the timer is filed under. Reading the state with the event's raw id
+      // instead would ask about no project at all when the event carried none, and a task id two
+      // projects hold is ambiguous then - the state manager answers nothing, the net reads the card
+      // as inactive and never fires, which is the stuck card it exists to prevent
+      const currentState = taskStateManager.getCurrentState(taskId, exitProjectId);
 
       if (currentState && XSTATE_ACTIVE_STATES.has(currentState)) {
         const { task: checkTask, project: checkProject } = findTaskAndProject(taskId, projectId);
@@ -206,12 +246,12 @@ export function registerAgenteventsHandlers(
         }
       }
       // Clean up timer reference after it fires
-      fallbackTimers.delete(taskId);
+      fallbackTimers.delete(fallbackTimerKey(taskId, exitProjectId));
     }, STUCK_TASK_FALLBACK_TIMEOUT_MS);
-    fallbackTimers.set(taskId, timer);
+    fallbackTimers.set(fallbackTimerKey(taskId, exitProjectId), timer);
 
     // Send final plan state to renderer BEFORE unwatching, so it has the final subtasks
-    const finalPlan = fileWatcher.getCurrentPlan(taskId);
+    const finalPlan = fileWatcher.getCurrentPlan(taskId, exitProjectId);
     if (finalPlan) {
       safeSendToRenderer(
         getMainWindow,
@@ -222,7 +262,9 @@ export function registerAgenteventsHandlers(
       );
     }
 
-    fileWatcher.unwatch(taskId).catch((err) => {
+    // The run that exited is this project's, so its watcher is the one to close: another project
+    // can be running a task of the same spec id and still needs its plan updates
+    fileWatcher.unwatch(taskId, exitProjectId).catch((err) => {
       console.error(`[agent-events-handlers] Failed to unwatch for ${taskId}:`, err);
     });
 
@@ -230,7 +272,7 @@ export function registerAgenteventsHandlers(
     if (!task || !project) return;
 
     // Rate-limit hold: the task is queued for automatic resume, not failed
-    if (taskStateManager.getCurrentState(taskId) === 'queued') return;
+    if (taskStateManager.getCurrentState(taskId, project.id) === 'queued') return;
 
     const taskTitle = task.title || task.specId;
     if (code === 0) {
@@ -316,7 +358,7 @@ export function registerAgenteventsHandlers(
     // XState is the source of truth for status. When XState is in a settled state
     // (e.g., error after CODING_FAILED), execution-progress events from the run are
     // stale and must not overwrite XState's persisted status.
-    const currentXState = taskStateManager.getCurrentState(taskId);
+    const currentXState = taskStateManager.getCurrentState(taskId, taskProjectId);
     const xstateInTerminalState = currentXState && XSTATE_SETTLED_STATES.has(currentXState);
 
     // Persist phase to plan file for restoration on app refresh
@@ -371,9 +413,16 @@ export function registerAgenteventsHandlers(
   // File Watcher Events → Renderer
   // ============================================
 
-  fileWatcher.on("progress", (taskId: string, plan: ImplementationPlan) => {
-    // File watcher events don't carry projectId — fall back to lookup
-    const { task, project } = findTaskAndProject(taskId);
+  fileWatcher.on("progress", (taskId: string, plan: ImplementationPlan, projectId?: string) => {
+    // Every watch is started for one project's spec dir and the event carries that project, so
+    // the task is looked up inside it. Searching the projects for the task id used to be the only
+    // option here, and it answered with the first project holding the id - which is the wrong
+    // project's window and the wrong project's plan file whenever two of them hold a task of the
+    // same spec id. A watch that was started without a project still falls back to that search.
+    const { task, project } = findTaskAndProject(taskId, projectId);
+    // The project the watch belongs to is what routes the update, even if the task lookup above
+    // came up empty (a cold cache, a spec dir mid-rewrite)
+    const eventProjectId = projectId ?? project?.id;
 
     // Diagnostic: log subtask status summary for debugging status-not-updating issues.
     // Only log when there are non-pending statuses (reduces noise).
@@ -390,17 +439,18 @@ export function registerAgenteventsHandlers(
         console.warn(
           `[FileWatcher→Renderer] Task ${taskId} subtask statuses:`,
           statusCounts,
-          `| projectId: ${project?.id ?? 'UNKNOWN'}`,
+          `| projectId: ${eventProjectId ?? 'UNKNOWN'}`,
         );
       }
     }
 
-    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_PROGRESS, taskId, plan, project?.id);
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_PROGRESS, taskId, plan, eventProjectId);
 
     // Re-stamp XState status fields if the plan file was rewritten without them
     // (otherwise tasks snap back to backlog on refresh).
     const planWithStatus = plan as { xstateState?: string; executionPhase?: string; status?: string };
-    const currentXState = taskStateManager.getCurrentState(taskId);
+    // The project the watch belongs to, the same one this handler routed the update to
+    const currentXState = taskStateManager.getCurrentState(taskId, eventProjectId ?? project?.id);
     if (currentXState && !planWithStatus.xstateState && task && project) {
       console.debug(`[agent-events-handlers] Re-stamping XState status on plan file for ${taskId} (state: ${currentXState})`);
       const mainPlanPath = getPlanPath(project, task);
@@ -425,10 +475,11 @@ export function registerAgenteventsHandlers(
     }
   });
 
-  fileWatcher.on("error", (taskId: string, error: string) => {
-    // File watcher events don't carry projectId — fall back to lookup
-    const { project } = findTaskAndProject(taskId);
-    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_ERROR, taskId, error, project?.id);
+  fileWatcher.on("error", (taskId: string, error: string, projectId?: string) => {
+    // The watch's own project, so the error reaches the window of the project whose plan file it
+    // is about; a watch started without one still falls back to searching for the task id
+    const project = projectId ? undefined : findTaskAndProject(taskId).project;
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_ERROR, taskId, error, projectId ?? project?.id);
   });
 }
 
@@ -437,11 +488,12 @@ export function registerAgenteventsHandlers(
  * Should be called when a task is restarted to prevent the stale timer
  * from incorrectly stopping the new process.
  */
-export function cancelFallbackTimer(taskId: string): void {
-  const timer = fallbackTimers.get(taskId);
-  if (timer) {
+export function cancelFallbackTimer(taskId: string, projectId?: string): void {
+  const key = findFallbackTimerKey(taskId, projectId);
+  const timer = key ? fallbackTimers.get(key) : undefined;
+  if (key && timer) {
     clearTimeout(timer);
-    fallbackTimers.delete(taskId);
+    fallbackTimers.delete(key);
     console.debug(`[agent-events-handlers] Cancelled fallback timer for task ${taskId}`);
   }
 }

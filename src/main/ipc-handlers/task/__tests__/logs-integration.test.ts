@@ -316,7 +316,10 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
         path.join('/absolute/path/to/project', '.workbench/tasks', '001-test-task'),
         '/absolute/path/to/project',
         '.workbench/tasks',
-        'project-123'
+        'project-123',
+        // These calls carry no real sender, so the watch is not attributed to a window and only
+        // its own unwatch releases it
+        undefined
       );
     });
 
@@ -362,7 +365,10 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
         path.join('/absolute/path/to/project', '.workbench/tasks', 'nonexistent-spec'),
         '/absolute/path/to/project',
         '.workbench/tasks',
-        'project-123'
+        'project-123',
+        // These calls carry no real sender, so the watch is not attributed to a window and only
+        // its own unwatch releases it
+        undefined
       );
     });
 
@@ -410,7 +416,7 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
 
       expect(result.success).toBe(true);
       // Keyed by directory, so another project's watch on the same spec id is left alone
-      expect(taskLogService.stopWatching).toHaveBeenCalledWith(specDir);
+      expect(taskLogService.stopWatching).toHaveBeenCalledWith(specDir, undefined);
     });
 
     it('should release the watch when the project is gone', async () => {
@@ -422,9 +428,10 @@ describe('Task Logs Integration (IPC → Service → State)', () => {
       const handler = ipcHandlers['task:logsUnwatch'];
       const result = await handler({}, 'nonexistent-project', '001-test-task') as IPCResult;
 
-      // Its directory can't be worked out any more, so the spec's watch goes by id
+      // Its directory can't be worked out any more, so the watch goes by spec id - still named by
+      // the project it was removed under, so another project's watch of that id is left alone
       expect(result.success).toBe(true);
-      expect(taskLogService.stopWatchingSpec).toHaveBeenCalledWith('001-test-task');
+      expect(taskLogService.stopWatchingSpec).toHaveBeenCalledWith('001-test-task', 'nonexistent-project');
     });
 
     it('should handle taskLogService unwatch errors gracefully', async () => {

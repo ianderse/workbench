@@ -311,4 +311,100 @@ describe('FileWatcher concurrency', () => {
       expect(chokidar.watch.mock.calls[1][1]).not.toHaveProperty('usePolling');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // A task id is its spec id, which every project numbers from its own start, so two projects can
+  // be running `001-add-login` at once - each writing its own implementation_plan.json. Keyed by
+  // the task alone, the second project's watch() saw a different spec dir, took itself for a
+  // re-watch and closed the first project's watcher; the first unwatch() then removed the single
+  // entry that was left and neither project's progress reached the renderer again.
+  // -------------------------------------------------------------------------
+  describe('project scoping', () => {
+    const TASK = '001-add-login';
+    const specA = path.join('/projects', 'a', '.workbench', 'tasks', TASK);
+    const specB = path.join('/projects', 'b', '.workbench', 'tasks', TASK);
+
+    it('keeps a watcher per project for the same task id', async () => {
+      await fw.watch(TASK, specA, 'project-a');
+      await fw.watch(TASK, specB, 'project-b');
+
+      // Two live watchers, each on its own project's plan file
+      expect(createdWatchers).toHaveLength(2);
+      expect(createdWatchers[0].close).not.toHaveBeenCalled();
+      expect(fw.isWatching(TASK, 'project-a')).toBe(true);
+      expect(fw.isWatching(TASK, 'project-b')).toBe(true);
+      expect(fw.getWatchedSpecDir(TASK, 'project-a')).toBe(specA);
+      expect(fw.getWatchedSpecDir(TASK, 'project-b')).toBe(specB);
+    });
+
+    it('leaves the other project\'s plan updates flowing when one project stops', async () => {
+      const progress = vi.fn();
+      fw.on('progress', progress);
+
+      await fw.watch(TASK, specA, 'project-a');
+      await fw.watch(TASK, specB, 'project-b');
+
+      await fw.unwatch(TASK, 'project-b');
+
+      expect(fw.isWatching(TASK, 'project-b')).toBe(false);
+      expect(createdWatchers[1].close).toHaveBeenCalled();
+      expect(fw.isWatching(TASK, 'project-a')).toBe(true);
+      expect(createdWatchers[0].close).not.toHaveBeenCalled();
+
+      // Project A's plan file still reaches the renderer, and says which project it is about
+      progress.mockClear();
+      createdWatchers[0].emit('change');
+      expect(progress).toHaveBeenCalledWith(TASK, expect.anything(), 'project-a');
+    });
+
+    it('emits the project each watch belongs to, so no listener has to search for the task id', async () => {
+      const progress = vi.fn();
+      fw.on('progress', progress);
+
+      // The initial read emits straight away
+      await fw.watch(TASK, specA, 'project-a');
+      expect(progress).toHaveBeenLastCalledWith(TASK, expect.anything(), 'project-a');
+
+      await fw.watch(TASK, specB, 'project-b');
+      expect(progress).toHaveBeenLastCalledWith(TASK, expect.anything(), 'project-b');
+    });
+
+    it('refuses an unwatch that names no project while two projects watch the task', async () => {
+      // Either watcher could be the one meant, and closing the wrong project's would silence a
+      // run the caller never touched, so nothing is closed: both projects keep reporting
+      await fw.watch(TASK, specA, 'project-a');
+      await fw.watch(TASK, specB, 'project-b');
+
+      await fw.unwatch(TASK);
+
+      expect(fw.isWatching(TASK, 'project-a')).toBe(true);
+      expect(fw.isWatching(TASK, 'project-b')).toBe(true);
+      expect(createdWatchers[0].close).not.toHaveBeenCalled();
+      expect(createdWatchers[1].close).not.toHaveBeenCalled();
+    });
+
+    it('cancels only the named project\'s in-flight watch, and leaks no watcher for it', async () => {
+      // The in-flight bookkeeping is per project too: an unwatch arriving while that project's
+      // watch() is still awaiting a close must leave no watcher behind, and must not touch the
+      // other project's watch
+      await fw.watch(TASK, specA, 'project-a');
+      await fw.watch(TASK, specB, 'project-b');
+
+      let resolveClose!: () => void;
+      createdWatchers[0].close = vi.fn(() => new Promise<void>((res) => { resolveClose = res; }));
+
+      const specA2 = path.join('/projects', 'a', '.workbench', 'tasks-moved', TASK);
+      const rewatch = fw.watch(TASK, specA2, 'project-a');
+
+      await fw.unwatch(TASK, 'project-a');
+      resolveClose();
+      await rewatch;
+
+      expect(fw.isWatching(TASK, 'project-a')).toBe(false);
+      // Only the two original watchers were ever created: the cancelled re-watch made none
+      expect(createdWatchers).toHaveLength(2);
+      expect(fw.isWatching(TASK, 'project-b')).toBe(true);
+      expect(fw.getWatchedSpecDir(TASK, 'project-b')).toBe(specB);
+    });
+  });
 });

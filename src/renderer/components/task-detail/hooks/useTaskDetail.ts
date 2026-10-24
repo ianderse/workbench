@@ -117,7 +117,8 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
         return;
       }
 
-      checkTaskRunning(task.id).then((actuallyRunning) => {
+      // The dialog's own task, so its project is the one that may be running it
+      checkTaskRunning(task.id, task.projectId).then((actuallyRunning) => {
         if (hasRecentActivity(task.id)) {
           setIsStuck(false);
         } else {
@@ -137,7 +138,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   useEffect(() => {
     if (showDeleteDialog && task) {
       setIsCheckingChanges(true);
-      window.electronAPI.checkWorktreeChanges(task.id).then((result) => {
+      window.electronAPI.checkWorktreeChanges(task.id, task.projectId).then((result) => {
         if (result.success && result.data) {
           setWorktreeChangesInfo(result.data);
         }
@@ -159,7 +160,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
   const taskBaseBranch = task.metadata?.baseBranch;
   useEffect(() => {
     if (needsReview) {
-      window.electronAPI.getWorktreeStatus(task.id).then((statusResult) => {
+      window.electronAPI.getWorktreeStatus(task.id, task.projectId).then((statusResult) => {
         if (statusResult.success && statusResult.data) {
           setWorktreeStatus(statusResult.data);
         }
@@ -169,7 +170,7 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     } else {
       setWorktreeStatus(null);
     }
-  }, [task.id, needsReview, taskBaseBranch]);
+  }, [task.id, task.projectId, needsReview, taskBaseBranch]);
 
   // The task's earlier runs. Loaded once; starting the task over adds one, so the dialog
   // reloads them after a retry (reloadPreviousRuns) rather than polling

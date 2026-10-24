@@ -1,5 +1,5 @@
 import { writeFileSync } from 'fs';
-import { tmpdir } from 'os';
+import { homedir, tmpdir } from 'os';
 import path from 'path';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type * as pty from '@lydell/node-pty';
@@ -66,6 +66,12 @@ vi.mock('../../claude-profile-manager', () => ({
   initializeClaudeProfileManager: mockInitializeClaudeProfileManager,
 }));
 
+// Which transcript files exist: a restored window asks for the exact path its session has under
+// each account, and nothing in a test writes those files. Hoisted, because the mock of `fs` is
+// built while this file's own `import 'fs'` is resolved, before its variables exist
+const mockStat = vi.hoisted(() => vi.fn(async (_file: string): Promise<{ isFile: () => boolean }> => {
+  throw new Error('ENOENT');
+}));
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
   return {
@@ -73,6 +79,7 @@ vi.mock('fs', async (importOriginal) => {
     writeFileSync: vi.fn(),
     promises: {
       writeFile: vi.fn(),
+      stat: mockStat,
     },
   };
 });
@@ -99,9 +106,33 @@ vi.mock('../../claude-code/session-spending', () => ({
   findSessionTranscript: mockFindSessionTranscript,
   latestTranscript: mockLatestTranscript,
 }));
-vi.mock('../../claude-profile/profile-config-dirs', () => ({
-  claudeConfigDirs: () => ['/home/user/.claude'],
-}));
+// Every account's config dir: Claude Code's default dir (the real home's, so the code under test
+// recognises it as the default), two accounts of the app's own, and whichever the caller knows of.
+// The default dir comes first because that is where `claudeConfigDirs` itself puts it, which is
+// what makes the order a window's own account has to be lifted out of worth testing against
+vi.mock('../../claude-profile/profile-config-dirs', async () => {
+  const { homedir } = await import('os');
+  const { default: nodePath } = await import('path');
+  return {
+    claudeConfigDirs: (extra: Array<string | undefined> = []) => {
+      const dirs = [nodePath.join(homedir(), '.claude'), '/home/user/.claude', '/home/user/.claude-profiles/work'];
+      // Resolved and deduplicated exactly as the real `claudeConfigDirs` returns them, so a caller
+      // that resolves the dir it hands in finds it among these on every host
+      return [...new Set([...dirs, ...extra].filter((dir): dir is string => !!dir).map((dir) => nodePath.resolve(dir)))];
+    },
+  };
+});
+
+/**
+ * The accounts the mock above lists, in the spelling the handler passes on: `claudeConfigDirs` and
+ * `resolveSessionConfigDir` both resolve a config dir, which on a Windows host turns a POSIX
+ * literal into a drive-letter path. Resolving the fixtures too keeps every assertion about the
+ * command, and every path built from them, true on all three hosts.
+ */
+const OTHER_ACCOUNT_DIR = path.resolve('/home/user/.claude');
+const WORK_ACCOUNT_DIR = path.resolve('/home/user/.claude-profiles/work');
+/** The config dir of a profile a test hands to the handler itself */
+const PROFILE_CONFIG_DIR = path.resolve('/tmp/claude-config');
 
 // Mock PtyManager.writeToPty - the implementation now uses this instead of terminal.pty.write
 const mockWriteToPty = vi.fn();
@@ -261,6 +292,14 @@ function getConfigDirCommand(platform: 'win32' | 'darwin' | 'linux', configDir: 
   return `CLAUDE_CONFIG_DIR='${configDir}'`;
 }
 
+/** The platform's way of running the command with CLAUDE_CONFIG_DIR taken out of the environment */
+function getUnsetConfigDirCommand(platform: 'win32' | 'darwin' | 'linux'): string {
+  if (platform === 'win32') {
+    return 'Remove-Item Env:\\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; ';
+  }
+  return 'env -u CLAUDE_CONFIG_DIR ';
+}
+
 describe('cli-integration-handler', () => {
   beforeEach(() => {
     mockGetClaudeCliInvocation.mockClear();
@@ -364,7 +403,7 @@ describe('cli-integration-handler', () => {
           name: 'Work',
           isDefault: false,
           oauthToken: 'token-value',
-          configDir: '/tmp/claude-config',
+          configDir: PROFILE_CONFIG_DIR,
         })),
         getProfileToken: vi.fn(() => 'token-value'),
         markProfileUsed: vi.fn(),
@@ -387,7 +426,7 @@ describe('cli-integration-handler', () => {
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
-      const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
+      const configDir = getConfigDirCommand(platform, PROFILE_CONFIG_DIR);
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(configDir);
@@ -396,6 +435,45 @@ describe('cli-integration-handler', () => {
       expect(profileManager.getProfile).toHaveBeenCalledWith('prof-both');
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
       expect(profileManager.markProfileUsed).toHaveBeenCalledWith('prof-both');
+    });
+
+    /**
+     * Claude Code's own setups are listed as accounts, and one of them is the default `~/.claude`
+     * while still not being the default profile. Naming that dir in CLAUDE_CONFIG_DIR makes Claude
+     * Code read `~/.claude/.claude.json` instead of `~/.claude.json`, so the window loses the
+     * sign-in: the variable has to be absent, not set to it.
+     */
+    it('takes CLAUDE_CONFIG_DIR out of the environment for a detected account on the default dir', async () => {
+      const command = '/opt/claude/bin/claude';
+      const defaultDir = path.join(homedir(), '.claude');
+      const profileManager = {
+        getActiveProfile: vi.fn(),
+        getProfile: vi.fn(() => ({
+          id: 'prof-detected',
+          name: 'Claude Code',
+          isDefault: false,
+          detected: true,
+          configDir: defaultDir,
+        })),
+        getProfileToken: vi.fn(() => undefined),
+        markProfileUsed: vi.fn(),
+      };
+
+      mockGetClaudeCliInvocation.mockReturnValue({ command, env: { PATH: '/opt/claude/bin:/usr/bin' } });
+      mockGetClaudeProfileManager.mockReturnValue(profileManager);
+
+      const terminal = createMockTerminal({ id: 'term-detected' });
+
+      const { invokeClaude } = await import('../cli-integration-handler');
+      invokeClaude(terminal, '/tmp/project', 'prof-detected', () => null);
+
+      const written = mockWriteToPty.mock.calls[0][1] as string;
+      expect(written).toContain(getUnsetConfigDirCommand(platform));
+      // Never set to the default dir, and never falls back to writing a token temp file
+      expect(written).not.toContain(getConfigDirCommand(platform, defaultDir));
+      expect(written).not.toMatch(/CLAUDE_CONFIG_DIR\s*=\s*[^"\s]/);
+      expect(vi.mocked(writeFileSync)).not.toHaveBeenCalled();
+      expect(profileManager.markProfileUsed).toHaveBeenCalledWith('prof-detected');
     });
 
     it('handles missing profiles by falling back to the default command', async () => {
@@ -432,7 +510,7 @@ describe('cli-integration-handler', () => {
           id: 'prof-2',
           name: 'Work',
           isDefault: false,
-          configDir: '/tmp/claude-config',
+          configDir: PROFILE_CONFIG_DIR,
         })),
         getProfileToken: vi.fn(() => null),
         markProfileUsed: vi.fn(),
@@ -452,7 +530,7 @@ describe('cli-integration-handler', () => {
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
-      const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
+      const configDir = getConfigDirCommand(platform, PROFILE_CONFIG_DIR);
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(configDir);
@@ -718,7 +796,7 @@ describe('invokeCLIAsync', () => {
           id: 'prof-config',
           name: 'Work',
           isDefault: false,
-          configDir: '/tmp/claude-config',
+          configDir: PROFILE_CONFIG_DIR,
         })),
         getProfileToken: vi.fn(() => null),
         markProfileUsed: vi.fn(),
@@ -738,7 +816,7 @@ describe('invokeCLIAsync', () => {
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
-      const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
+      const configDir = getConfigDirCommand(platform, PROFILE_CONFIG_DIR);
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(configDir);
@@ -872,6 +950,41 @@ describe('invokeCLIAsync', () => {
       expect(written).toContain(getConfigDirCommand(platform, path.resolve('/tmp/work-config')));
       expect(written).toContain('--resume sess-1');
       expect(written).not.toContain('--dangerously-skip-permissions');
+    });
+
+    it("takes the window's CLAUDE_CONFIG_DIR away for a run in the default config dir", async () => {
+      mockGetClaudeCliInvocationAsync.mockResolvedValue({
+        command: '/opt/claude/bin/claude',
+        env: { PATH: '/opt/claude/bin:/usr/bin' },
+      });
+      const profileManager = {
+        getActiveProfile: vi.fn(),
+        // The account the window was spawned on: its config dir is in the window's environment
+        getProfile: vi.fn(() => ({ id: 'work', name: 'Work', isDefault: false, configDir: '/tmp/work-config' })),
+        getProfileToken: vi.fn(() => 'tok-123'),
+        markProfileUsed: vi.fn(),
+      };
+      mockInitializeClaudeProfileManager.mockResolvedValue(profileManager);
+
+      const terminal = createMockTerminal();
+
+      const { invokeCLIAsync } = await import('../cli-integration-handler');
+      await invokeCLIAsync(terminal, '/tmp/wt', 'work', () => null, false, {
+        resumeSessionId: 'sess-1',
+        configDir: path.join(homedir(), '.claude'),
+      });
+
+      const written = mockWriteToPty.mock.calls[0][1] as string;
+      const unset = platform === 'win32'
+        ? 'Remove-Item Env:\\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; '
+        : 'env -u CLAUDE_CONFIG_DIR ';
+      expect(written).toContain(unset);
+      expect(written).toContain('--resume sess-1');
+      // Neither the work account's dir nor the default one is set: the run belongs to ~/.claude,
+      // which Claude Code reads only while the variable is absent
+      expect(written).not.toContain('/tmp/work-config');
+      expect(written).not.toContain(getConfigDirCommand(platform, path.join(homedir(), '.claude')));
+      expect(profileManager.markProfileUsed).toHaveBeenCalledWith('work');
     });
 
     it('refuses a session id that is not a plain id', async () => {
@@ -1042,6 +1155,71 @@ describe('cli-integration-handler - Helper Functions', () => {
       expect(buildClaudeShellCommand('', '', "& 'claude'", config, undefined, 'powershell')).toBe(
         "Clear-Host; $env:CLAUDE_CONFIG_DIR = '/home/user/.claude-work'; & 'claude'\r"
       );
+    });
+
+    /**
+     * The clear only hides the config dir from sight; the history-safe prefixes are what keep the
+     * line out of the shell's history, so a caller with something on the screen worth keeping can
+     * drop the one and still get the other.
+     */
+    it('keeps the screen on request without giving up the history protection', async () => {
+      const { buildClaudeShellCommand } = await import('../cli-integration-handler');
+      const config = { method: 'config-dir', configDir: '/home/user/.claude-work', keepScreen: true } as const;
+
+      expect(buildClaudeShellCommand("cd '/tmp/project' && ", "PATH='/opt/bin' ", "'claude'", config, ' --resume s1', 'posix')).toBe(
+        "cd '/tmp/project' && HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR='/home/user/.claude-work' " +
+          `PATH='/opt/bin' bash -c "exec 'claude' --resume s1"\r`
+      );
+      expect(buildClaudeShellCommand('cd /d "C:\\p" && ', 'set "PATH=C:\\bin" && ', '"claude"', config, ' --resume s1', 'cmd')).toBe(
+        'cd /d "C:\\p" && set "CLAUDE_CONFIG_DIR=/home/user/.claude-work" && set "PATH=C:\\bin" && "claude" --resume s1\r'
+      );
+      expect(buildClaudeShellCommand('', "$env:PATH = 'C:\\bin'; ", "& 'claude'", config, ' --resume s1', 'powershell')).toBe(
+        "$env:CLAUDE_CONFIG_DIR = '/home/user/.claude-work'; $env:PATH = 'C:\\bin'; & 'claude' --resume s1\r"
+      );
+
+      // The same config without the flag is the one that clears, in every shell's syntax
+      for (const shellKind of ['posix', 'cmd', 'powershell'] as const) {
+        const clearing = buildClaudeShellCommand('', '', "'claude'", { ...config, keepScreen: false }, undefined, shellKind);
+        expect(clearing).toMatch(/^(clear && |cls && |Clear-Host; )/);
+      }
+    });
+
+    it("runs on Claude Code's default dir by taking CLAUDE_CONFIG_DIR out of the environment", async () => {
+      const { buildClaudeShellCommand } = await import('../cli-integration-handler');
+      const config = { method: 'default-config-dir' } as const;
+
+      expect(buildClaudeShellCommand("cd '/tmp/project' && ", "PATH='/opt/bin' ", "'claude'", config, ' --resume s1', 'posix')).toBe(
+        "cd '/tmp/project' && PATH='/opt/bin' env -u CLAUDE_CONFIG_DIR 'claude' --resume s1\r"
+      );
+      expect(buildClaudeShellCommand('cd /d "C:\\p" && ', 'set "PATH=C:\\bin" && ', '"claude"', config, ' --resume s1', 'cmd')).toBe(
+        'cd /d "C:\\p" && set "CLAUDE_CONFIG_DIR=" && set "PATH=C:\\bin" && "claude" --resume s1\r'
+      );
+      expect(buildClaudeShellCommand('', "$env:PATH = 'C:\\bin'; ", "& 'claude'", config, ' --resume s1', 'powershell')).toBe(
+        "Remove-Item Env:\\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; $env:PATH = 'C:\\bin'; & 'claude' --resume s1\r"
+      );
+
+      // Nowhere does it set the variable to the default dir, which would cost the window its sign-in
+      for (const shellKind of ['posix', 'cmd', 'powershell'] as const) {
+        const command = buildClaudeShellCommand('', '', "'claude'", config, undefined, shellKind);
+        expect(command).not.toMatch(/CLAUDE_CONFIG_DIR\s*=\s*[^"\s]/);
+        expect(command).not.toContain('.claude');
+      }
+    });
+
+    it('folds the removal into the `env -u` a WSL window already starts with', async () => {
+      const { buildClaudeShellCommand } = await import('../cli-integration-handler');
+      // windowClaudeCommand puts `env -u ANTHROPIC_API_KEY` in front of a WSL window's claude; env
+      // takes both removals, so no second env wraps the first
+      expect(
+        buildClaudeShellCommand(
+          "cd '/home/me/repo' && ",
+          '',
+          "env -u ANTHROPIC_API_KEY '/home/me/.local/bin/claude'",
+          { method: 'default-config-dir' },
+          ' --resume s1',
+          'posix'
+        )
+      ).toBe("cd '/home/me/repo' && env -u CLAUDE_CONFIG_DIR -u ANTHROPIC_API_KEY '/home/me/.local/bin/claude' --resume s1\r");
     });
 
     it('builds PowerShell commands that Windows PowerShell 5.1 can run (no && anywhere)', async () => {
@@ -1359,6 +1537,31 @@ describe('agent window sessions', () => {
     );
   });
 
+  it('clears the window when the user starts Claude on a non-default account', async () => {
+    mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: '/usr/bin' } });
+    const work = {
+      id: 'work',
+      name: 'Work',
+      isDefault: false,
+      configDir: WORK_ACCOUNT_DIR,
+    };
+    mockInitializeClaudeProfileManager.mockResolvedValue({
+      getActiveProfile: vi.fn(() => work),
+      getProfile: vi.fn(() => work),
+      getProfileToken: vi.fn(() => null),
+      markProfileUsed: vi.fn(),
+    });
+
+    const { invokeCLIAsync } = await import('../cli-integration-handler');
+    await invokeCLIAsync(createMockTerminal({ projectPath: '/tmp/project' }), '/tmp/project', 'work', () => null);
+
+    // A window the user just pressed the button in has no replayed scrollback to lose, so the
+    // config dir on the line still goes out of sight the moment Claude starts
+    const written = mockWriteToPty.mock.calls[0][1] as string;
+    expect(written.startsWith('clear && ')).toBe(true);
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(work.configDir)}`);
+  });
+
   it('leaves a resumed task session its own id, and does not count it as a window session', async () => {
     mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: '/usr/bin' } });
     mockInitializeClaudeProfileManager.mockResolvedValue({
@@ -1391,6 +1594,9 @@ describe('restoring an agent window', () => {
     mockRecordAgentSession.mockClear();
     mockReadAgentSessions.mockReset();
     mockReadAgentSessions.mockResolvedValue([]);
+    // No account holds the session at its own path unless a test says so
+    mockStat.mockReset();
+    mockStat.mockRejectedValue(new Error('ENOENT'));
     mockPlatform('linux');
     mockGetClaudeCliInvocationAsync.mockResolvedValue({ command: 'claude', env: { PATH: '/usr/bin' } });
   });
@@ -1399,6 +1605,25 @@ describe('restoring an agent window', () => {
     const { resumeClaudeAsync } = await import('../cli-integration-handler');
     await resumeClaudeAsync(terminal, () => null);
     return mockWriteToPty.mock.calls[0][1] as string;
+  };
+
+  /** Claude Code's own default config dir, the one it reads only while CLAUDE_CONFIG_DIR is unset */
+  const DEFAULT_DIR = path.join(homedir(), '.claude');
+
+  /**
+   * A window that started on the work account - whose config dir its shell's environment still
+   * carries - whose conversation an account swap left in Claude Code's default dir
+   */
+  const windowSwappedToDefaultAccount = (sessionId: string) => {
+    mockLastAgentSession.mockResolvedValue({
+      sessionId,
+      configDir: WORK_ACCOUNT_DIR,
+      startedAt: '2026-10-21T09:00:00.000Z',
+      cwd: '/tmp/project',
+    });
+    mockFindSessionTranscript.mockImplementation(async (_sessionId: string, dirs: string[]) =>
+      dirs[0] === DEFAULT_DIR ? { file: '/t.jsonl', size: 10, modifiedMs: 1 } : null
+    );
   };
 
   it('picks the window\'s own session up again instead of the directory\'s latest', async () => {
@@ -1415,11 +1640,219 @@ describe('restoring an agent window', () => {
     expect(written).not.toContain('--continue');
   });
 
+  it('runs the session on the account whose transcripts hold it, not the one it started on', async () => {
+    mockLastAgentSession.mockResolvedValue({
+      sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
+      configDir: OTHER_ACCOUNT_DIR,
+      startedAt: '2026-10-21T09:00:00.000Z',
+      cwd: '/tmp/project',
+    });
+    // An account swap moved the transcript: it is the other account that holds it now
+    mockFindSessionTranscript.mockImplementation(async (_sessionId: string, dirs: string[]) =>
+      dirs[0] === WORK_ACCOUNT_DIR ? { file: '/t.jsonl', size: 10, modifiedMs: 1 } : null
+    );
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(WORK_ACCOUNT_DIR)}`);
+    // The accounts are searched one at a time, so the one that answered is the one to run on, and
+    // the wider search is asked without a working directory so it is the project-folder scan alone
+    expect(mockFindSessionTranscript).toHaveBeenCalledWith(
+      '0b7c6c1e-1234-4abc-9def-001122334455',
+      [OTHER_ACCOUNT_DIR]
+    );
+  });
+
+  /**
+   * An account swap copies session files between config dirs, so a stale duplicate under another
+   * account is an expected state. The dir that has the transcript where Claude Code writes it for
+   * this directory is the one holding the live conversation, whichever dir is looked at first.
+   */
+  it('prefers the account with the session at its own path over one with a stale copy', async () => {
+    const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
+    mockLastAgentSession.mockResolvedValue({
+      sessionId,
+      configDir: OTHER_ACCOUNT_DIR,
+      startedAt: '2026-10-21T09:00:00.000Z',
+      cwd: '/tmp/project',
+    });
+    // The first account has a copy a swap left in some other project's folder, which only its scan
+    // of every project folder finds; the second has the live transcript at the session's own path
+    mockFindSessionTranscript.mockImplementation(async (_sessionId: string, dirs: string[]) =>
+      dirs[0] === OTHER_ACCOUNT_DIR
+        ? { file: path.join(OTHER_ACCOUNT_DIR, 'projects', '-other-project', 'stale.jsonl'), size: 10, modifiedMs: 1 }
+        : null
+    );
+    mockStat.mockImplementation(async (file: string) => {
+      if (!file.startsWith(path.join(WORK_ACCOUNT_DIR, 'projects'))) throw new Error('ENOENT');
+      return { isFile: () => true };
+    });
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(written).toContain(`--resume ${sessionId}`);
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(WORK_ACCOUNT_DIR)}`);
+    // Settled before any account was scanned, so the stale copy never got to answer
+    expect(mockFindSessionTranscript).not.toHaveBeenCalled();
+  });
+
+  /**
+   * A swap copies the transcript and deletes nothing, so afterwards the same session id sits at the
+   * same relative path under both accounts and the exact-path probe can answer with either. The
+   * window's own recorded account is the one the user picked and the one the live conversation is
+   * under; the other holds the copy the swap left from before it. Searching the accounts in
+   * `claudeConfigDirs`' own order would answer with the default dir, which comes first there, and
+   * resume the pre-swap transcript on an account the user never chose.
+   */
+  it('resumes on the window\'s own account when a swap left the session under the default dir too', async () => {
+    const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
+    const work = WORK_ACCOUNT_DIR;
+    /** The window ran on the work account, and both it and the default dir hold the session */
+    const sessionUnderBothAccounts = () => {
+      mockLastAgentSession.mockResolvedValue({
+        sessionId,
+        configDir: work,
+        startedAt: '2026-10-21T09:00:00.000Z',
+        cwd: '/tmp/project',
+      });
+      mockStat.mockImplementation(async (file: string) => {
+        if (file.startsWith(path.join(work, 'projects')) || file.startsWith(path.join(DEFAULT_DIR, 'projects'))) {
+          return { isFile: () => true };
+        }
+        throw new Error('ENOENT');
+      });
+    };
+    const ownAccount = {
+      posix: `HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR=${escapeShellArg(work)} PATH='/usr/bin' bash -c "exec 'claude' --resume ${sessionId}`,
+      cmd: `set "CLAUDE_CONFIG_DIR=${work}" && set "PATH=/usr/bin" && "claude" --resume ${sessionId}`,
+      powershell: `$env:CLAUDE_CONFIG_DIR = ${psQuote(work)}; $env:PATH = '/usr/bin'; & 'claude' --resume ${sessionId}`,
+    };
+
+    for (const shellKind of ['posix', 'cmd', 'powershell'] as const) {
+      mockWriteToPty.mockClear();
+      sessionUnderBothAccounts();
+
+      const written = await resume(createMockTerminal({ projectPath: '/tmp/project', shellKind }));
+
+      expect(written).toContain(ownAccount[shellKind]);
+      // Not the default dir, which would mean running with the variable taken out instead
+      expect(written).not.toContain('env -u CLAUDE_CONFIG_DIR');
+      expect(written).not.toContain('set "CLAUDE_CONFIG_DIR="');
+      expect(written).not.toContain('Remove-Item Env:');
+    }
+  });
+
+  /**
+   * The wider scan runs account by account for the same reason, so it inherits the same order and
+   * has to lift the window's own account out of it the same way: a session the swap copied before
+   * it was moved into a project folder of its own is findable under both accounts there too.
+   */
+  it('scans the window\'s own account first in the wider search as well', async () => {
+    const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
+    const work = WORK_ACCOUNT_DIR;
+    mockLastAgentSession.mockResolvedValue({
+      sessionId,
+      configDir: work,
+      startedAt: '2026-10-21T09:00:00.000Z',
+      cwd: '/tmp/project',
+    });
+    // No account holds it at the session's own path (`mockStat` rejects everything), and every
+    // account's scan of its project folders would find a copy, so the first account asked wins
+    mockFindSessionTranscript.mockImplementation(async (_sessionId: string, dirs: string[]) => ({
+      file: path.join(dirs[0], 'projects', '-elsewhere', `${sessionId}.jsonl`),
+      size: 10,
+      modifiedMs: 1,
+    }));
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
+
+    expect(mockFindSessionTranscript).toHaveBeenCalledTimes(1);
+    expect(mockFindSessionTranscript).toHaveBeenCalledWith(sessionId, [work]);
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(work)}`);
+  });
+
+  it('takes CLAUDE_CONFIG_DIR out of the environment for a session in the default dir', async () => {
+    const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
+    windowSwappedToDefaultAccount(sessionId);
+
+    const written = await resume(createMockTerminal({ projectPath: '/tmp/project', claudeProfileId: 'work' }));
+
+    // Claude Code reads ~/.claude only while the variable is absent, so leaving the work account's
+    // dir in place (what "no override" would do) would look for the session under the wrong account
+    expect(written).toContain(`env -u CLAUDE_CONFIG_DIR 'claude' --resume ${sessionId}`);
+    expect(written).not.toContain('CLAUDE_CONFIG_DIR=');
+    expect(written).not.toContain('.claude-profiles/work');
+  });
+
+  it('removes the variable in the syntax of the window\'s shell', async () => {
+    const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
+
+    windowSwappedToDefaultAccount(sessionId);
+    const posix = await resume(createMockTerminal({ projectPath: '/tmp/project', shellKind: 'posix' }));
+    expect(posix).toContain(`cd '/tmp/project' && PATH='/usr/bin' env -u CLAUDE_CONFIG_DIR 'claude' --resume ${sessionId}`);
+
+    mockWriteToPty.mockClear();
+    windowSwappedToDefaultAccount(sessionId);
+    const cmd = await resume(createMockTerminal({ projectPath: '/tmp/project', shellKind: 'cmd' }));
+    expect(cmd).toContain(`set "CLAUDE_CONFIG_DIR=" && set "PATH=/usr/bin" && "claude" --resume ${sessionId}`);
+    expect(cmd).not.toMatch(/CLAUDE_CONFIG_DIR=[^"]/);
+
+    mockWriteToPty.mockClear();
+    windowSwappedToDefaultAccount(sessionId);
+    const powershell = await resume(createMockTerminal({ projectPath: '/tmp/project', shellKind: 'powershell' }));
+    expect(powershell).toContain(
+      `Remove-Item Env:\\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; $env:PATH = '/usr/bin'; & 'claude' --resume ${sessionId}`
+    );
+    expect(powershell).not.toContain('$env:CLAUDE_CONFIG_DIR');
+  });
+
+  /**
+   * A restore replays the window's own scrollback and only then resumes the session, so the clear
+   * the config dir override otherwise starts with would throw away everything the restore just put
+   * back. Hiding the dir from sight is worth nothing next to that; keeping the line out of the
+   * shell's history, which the prefixes do, costs nothing and stays.
+   */
+  it('resumes on a non-default account without wiping the replayed scrollback', async () => {
+    const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
+    const work = WORK_ACCOUNT_DIR;
+    /** The window's own session, held by the work account at the path Claude Code writes it to */
+    const ownSessionOnWorkAccount = () => {
+      mockLastAgentSession.mockResolvedValue({
+        sessionId,
+        configDir: work,
+        startedAt: '2026-10-21T09:00:00.000Z',
+        cwd: '/tmp/project',
+      });
+      mockStat.mockImplementation(async (file: string) => {
+        if (!file.startsWith(path.join(work, 'projects'))) throw new Error('ENOENT');
+        return { isFile: () => true };
+      });
+    };
+    const accountOverride = {
+      posix: `HISTFILE= HISTCONTROL=ignorespace CLAUDE_CONFIG_DIR=${escapeShellArg(work)} PATH='/usr/bin' bash -c "exec 'claude' --resume ${sessionId}`,
+      cmd: `set "CLAUDE_CONFIG_DIR=${work}" && set "PATH=/usr/bin" && "claude" --resume ${sessionId}`,
+      powershell: `$env:CLAUDE_CONFIG_DIR = ${psQuote(work)}; $env:PATH = '/usr/bin'; & 'claude' --resume ${sessionId}`,
+    };
+
+    for (const shellKind of ['posix', 'cmd', 'powershell'] as const) {
+      mockWriteToPty.mockClear();
+      ownSessionOnWorkAccount();
+
+      const written = await resume(createMockTerminal({ projectPath: '/tmp/project', shellKind }));
+
+      expect(written).toContain(accountOverride[shellKind]);
+      expect(written).not.toContain('clear && ');
+      expect(written).not.toContain('cls && ');
+      expect(written).not.toContain('Clear-Host');
+    }
+  });
+
   it('adopts the session it would have continued when the window has none of its own', async () => {
     mockLastAgentSession.mockResolvedValue(undefined);
     mockLatestTranscript.mockResolvedValue({
       sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-      configDir: '/home/user/.claude-profiles/work',
+      configDir: WORK_ACCOUNT_DIR,
       file: '/t.jsonl',
       size: 10,
       modifiedMs: 1,
@@ -1429,12 +1862,14 @@ describe('restoring an agent window', () => {
 
     expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
     expect(written).not.toContain('--continue');
+    // And on the account the adopted transcript was found under
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(WORK_ACCOUNT_DIR)}`);
     // Recorded for the project, so what the conversation spends from here on reaches Metrics
     expect(mockRecordAgentSession).toHaveBeenCalledWith(
       '/tmp/project',
       expect.objectContaining({
         sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-        configDir: path.resolve('/home/user/.claude-profiles/work'),
+        configDir: WORK_ACCOUNT_DIR,
         cwd: '/tmp/project',
       })
     );
@@ -1448,7 +1883,7 @@ describe('restoring an agent window', () => {
     mockFindSessionTranscript.mockResolvedValue(null);
     mockLatestTranscript.mockResolvedValue({
       sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-      configDir: '/home/user/.claude',
+      configDir: OTHER_ACCOUNT_DIR,
       file: '/t.jsonl',
       size: 10,
       modifiedMs: 1,
@@ -1479,13 +1914,16 @@ describe('restoring an agent window', () => {
 
     expect(written).toContain('--continue');
     expect(mockRecordAgentSession).not.toHaveBeenCalled();
+    // No account answered, so the window's environment is left exactly as it is
+    expect(written.startsWith("cd '/tmp/project' && PATH='/usr/bin' 'claude' --continue")).toBe(true);
+    expect(written).not.toContain('CLAUDE_CONFIG_DIR');
   });
 
   it('continues without adopting a transcript whose name is not a session id', async () => {
     mockLastAgentSession.mockResolvedValue(undefined);
     mockLatestTranscript.mockResolvedValue({
       sessionId: '../../escape',
-      configDir: '/home/user/.claude',
+      configDir: OTHER_ACCOUNT_DIR,
       file: '/t.jsonl',
       size: 10,
       modifiedMs: 1,

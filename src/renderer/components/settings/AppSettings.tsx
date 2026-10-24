@@ -21,6 +21,7 @@ import { ScrollArea } from '../ui/scroll-area';
 import { cn } from '../../lib/utils';
 import { useSettings } from './hooks/useSettings';
 import { ThemeSettings } from './ThemeSettings';
+import { SettingsFlushProvider } from './WindowsShellSelector';
 import { GeneralSettings } from './GeneralSettings';
 import { ClaudeCodeTaskSettings } from './ClaudeCodeTaskSettings';
 import { AdvancedSettings } from './AdvancedSettings';
@@ -173,18 +174,20 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
   saveRef.current = saveSettings;
   const serialized = JSON.stringify(settings);
 
-  const flushSave = useCallback(async () => {
+  // Reports whether everything the user changed is on disk, so a row that is about to relaunch the
+  // app (the Windows shell) can wait for the pending edits and stop when they could not be saved
+  const flushSave = useCallback(async (): Promise<boolean> => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    if (lastSavedRef.current !== null && lastSavedRef.current !== serialized) {
-      const saved = await saveRef.current();
-      if (saved) {
-        lastSavedRef.current = serialized;
-        commitTheme();
-      }
+    if (lastSavedRef.current === null || lastSavedRef.current === serialized) return true;
+    const saved = await saveRef.current();
+    if (saved) {
+      lastSavedRef.current = serialized;
+      commitTheme();
     }
+    return saved;
   }, [serialized, commitTheme]);
 
   useEffect(() => {
@@ -359,7 +362,8 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
 
             <ScrollArea className="min-h-0 flex-1">
               <div className="mx-auto w-full max-w-[832px] px-7 pb-10">
-                {renderContent()}
+                {/* A row that relaunches the app saves the edits still waiting on the debounce */}
+                <SettingsFlushProvider value={flushSave}>{renderContent()}</SettingsFlushProvider>
               </div>
             </ScrollArea>
           </div>

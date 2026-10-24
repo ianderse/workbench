@@ -21,9 +21,10 @@ import { join, resolve } from 'path';
 
 import { getSpecsDir } from '../../shared/constants';
 import { isSelfImproveEnabledForPath } from '../self-improve/setting';
+import { baseBranchRefCandidates, fetchBaseBranch, lookUpBaseBranchRef } from '../utils/base-branch';
 import { git as runGit } from '../utils/git-exec';
 import { toHostPath } from '../platform/shell-runtime';
-import { repairForeignWorktrees, worktreeGitArgs } from './runtime-worktrees';
+import { pruneWorktrees, repairForeignWorktrees, worktreeGitArgs, worktreePathKey } from './runtime-worktrees';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -97,11 +98,14 @@ export async function createOrGetWorktree(
   // ------------------------------------------------------------------
   // Step 1: Prune stale worktree references from git's internal records
   // ------------------------------------------------------------------
-  // On Windows, worktrees linked by the other runtime's git (native / WSL) are repaired first,
-  // or the prune would drop them as broken
+  // On Windows, worktrees linked by the other runtime's git (native / WSL) are repaired first, or
+  // the prune would drop them as broken. `pruneWorktrees` then only removes registrations whose
+  // folders are really gone: that is what lets a worktree deleted outside the app stop blocking its
+  // task, while a worktree still on disk is never unregistered - step 3 below deletes the folder
+  // git no longer tracks, so an over-eager prune here would take uncommitted work with it.
   await repairForeignWorktrees(projectPath);
   console.warn('[WorktreeManager] Pruning stale worktree references...');
-  await git(['worktree', 'prune'], projectPath, /* allowFailure */ true);
+  await pruneWorktrees(projectPath);
 
   // ------------------------------------------------------------------
   // Step 2: Return early when worktree already exists and is registered
@@ -149,18 +153,38 @@ export async function createOrGetWorktree(
   );
   const branchExists = branchListOutput.includes(branchName);
 
+  // The ref the base branch resolves to, through the same lookup that validated it
+  // (utils/base-branch), which is what keeps the two from disagreeing: a branch that only exists
+  // on a remote other than origin was accepted there, so it has to be a branch this step can both
+  // refresh and cut a worktree from. `useLocalBranch` decides whether the local branch or the
+  // remote ref wins when both exist - the local one preserves files a fetched ref knows nothing
+  // about. The lookup fetches by itself when the repo has not got the ref it wants, and reports
+  // whether it did: that is a branch a teammate pushed since the last fetch, and equally a
+  // `useLocalBranch` false start in a repo that has the branch only locally (never fetched, a
+  // single-branch clone, a remote added later), where answering from the refs on disk would turn
+  // the remote-first default into a start from the user's own possibly stale local branch.
+  // Whichever it is, it is one fetch, and step 5 then skips the fetch it would otherwise run.
+  const base = branchExists
+    ? null
+    : await lookUpBaseBranchRef(projectPath, baseBranch, { preferLocal: useLocalBranch });
+  const startPoint = base?.ref ?? null;
+
   // ------------------------------------------------------------------
   // Step 5: Fetch latest from remote (non-fatal — remote may not exist)
   // ------------------------------------------------------------------
-  console.warn(
-    `[WorktreeManager] Fetching latest from origin/${baseBranch}...`,
-  );
-  // git fetch stdout is empty on success — result is intentionally unused
-  await git(
-    ['fetch', 'origin', baseBranch],
-    projectPath,
-    /* allowFailure */ true,
-  );
+  // The remote AND the name on it both come from the resolved ref, because the base branch may
+  // live on a fork or a second upstream and may carry that remote in its own name: asking origin
+  // for `upstream/main` is a refspec no remote has, and since the fetch is best-effort the
+  // rejection would pass unnoticed and leave the worktree on whatever the last working fetch
+  // brought in - stale code the agent then implements on. There is nothing to refresh when the
+  // task's branch already exists (the worktree attaches to it, not to the base branch) or when
+  // the start point is a local branch, and nothing to repeat when the lookup just fetched it.
+  if (base?.fetch && !base.fetched) {
+    console.warn(
+      `[WorktreeManager] Fetching latest from ${base.fetch.remote}/${base.fetch.branch}...`,
+    );
+    await fetchBaseBranch(projectPath, base.fetch);
+  }
 
   // ------------------------------------------------------------------
   // Step 6: Create the worktree
@@ -173,28 +197,15 @@ export async function createOrGetWorktree(
       projectPath,
     );
   } else {
-    // Determine the start point: the local branch when asked for, the remote ref otherwise,
-    // falling back to the other form so a base branch that exists on only one side still
-    // works instead of failing with git's "invalid reference"
-    const remoteRef = `origin/${baseBranch}`;
-    const candidates = useLocalBranch ? [baseBranch, remoteRef] : [remoteRef, baseBranch];
-
-    let startPoint: string | undefined;
-    for (const candidate of candidates) {
-      const resolved = await git(
-        ['rev-parse', '--verify', '--quiet', candidate],
-        projectPath,
-        /* allowFailure */ true,
-      );
-      if (resolved) {
-        startPoint = candidate;
-        break;
-      }
-    }
-
     if (!startPoint) {
+      // Naming the refs that were tried, rather than a fixed pair, is what tells the user whether
+      // the branch was looked for on the remote they expected
+      const tried = await baseBranchRefCandidates(projectPath, baseBranch, { preferLocal: useLocalBranch });
+      // Saying that the remote was asked as well stops the user from reading this as a repo that
+      // simply needs fetching, when the fetch is exactly what has already come back empty
+      const fetched = base?.fetched ? ' A fetch of the remote did not bring it in either.' : '';
       throw new Error(
-        `Base branch "${baseBranch}" does not exist in this repository (looked for ${baseBranch} and ${remoteRef}). ` +
+        `Base branch "${baseBranch}" does not exist in this repository (looked for ${tried.join(', ')}).${fetched} ` +
           'Create it, or give the task a base branch that exists.',
       );
     }
@@ -308,13 +319,16 @@ async function isWorktreeRegistered(
   if (!output) return false;
 
   // Each entry starts with "worktree <absolute-path>"
-  const normalizedTarget = resolve(worktreePath);
+  // The listed path and the expected one can spell the same folder differently (`\\wsl$\` vs
+  // `\\wsl.localhost\`, either slash, any case), and a worktree that only looks unregistered is
+  // deleted with the work in it — worktreePathKey() makes the two spellings compare equal
+  const normalizedTarget = worktreePathKey(worktreePath);
   return output
     .split(/\r?\n/)
     .some((line) => {
       if (!line.startsWith('worktree ')) return false;
       // git in WSL lists Linux paths
       const listed = toHostPath(line.slice('worktree '.length).trim());
-      return resolve(listed) === normalizedTarget;
+      return worktreePathKey(listed) === normalizedTarget;
     });
 }

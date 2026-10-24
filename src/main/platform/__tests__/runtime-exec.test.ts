@@ -22,11 +22,28 @@ const mocks = vi.hoisted(() => ({
   killProcessGracefully: vi.fn(),
 }));
 
-vi.mock('child_process', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('child_process')>()),
-  execFile: mocks.execFile,
-  spawn: mocks.spawn,
-}));
+vi.mock('child_process', async (importOriginal) => {
+  const { promisify } = await import('util');
+  // Node's own execFile carries a promisify hook that hands the caller the ChildProcess as
+  // `promise.child`; the mock keeps it, because that is how the WSL paths read the wrapper's
+  // pid line from a process they only hold through execFile
+  Object.defineProperty(mocks.execFile, promisify.custom, {
+    configurable: true,
+    value: (file: string, args: string[], options: unknown) => {
+      let child: unknown;
+      const promise = new Promise((resolve, reject) => {
+        child = mocks.execFile(file, args, options, (error: Error | null, result?: unknown) =>
+          error ? reject(error) : resolve(result));
+      });
+      return Object.assign(promise, { child });
+    },
+  });
+  return {
+    ...(await importOriginal<typeof import('child_process')>()),
+    execFile: mocks.execFile,
+    spawn: mocks.spawn,
+  };
+});
 vi.mock('../../cli-tool-manager', () => ({ getToolPathAsync: mocks.getToolPathAsync }));
 vi.mock('../index', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../index')>()),
@@ -248,6 +265,138 @@ function wrapped(cwd: string | null, ...argv: string[]): string[] {
   return ['-d', 'Ubuntu', ...(cwd ? ['--cd', cwd] : []), '--exec', '/bin/sh', '-c', WSL_WRAPPER, 'sh', ...argv];
 }
 
+/** The scripts sent through their own wsl.exe launch (the TERM/KILL calls) */
+function wslScripts(): string[] {
+  return mocks.execFile.mock.calls
+    .filter((call) => call[0] === WSL_EXE && call[1][2] === '--exec' && String(call[1].at(-1)).startsWith('pkill'))
+    .map((call) => call[1].at(-1) as string);
+}
+
+/** The reads of a pid's start time, the identity check the KILL escalation is guarded with */
+function startTimeReads(): string[] {
+  return mocks.execFile.mock.calls
+    .filter((call) => call[0] === WSL_EXE && String(call[1].at(-1)).startsWith('s=$(cat /proc/'))
+    .map((call) => call[1].at(-1) as string);
+}
+
+/**
+ * execFile for a WSL run the caller stops: the tool's own launch stays pending until the returned
+ * `stop` is called (as a timeout or an abort signal would end it), the TERM/KILL launches answer
+ * at once, and each read of the pid's start time answers with the next value of `starts` -- an
+ * empty one standing for a pid no process has any more.
+ */
+function wslRunStoppedBy(starts: string[], failure: object): { child: ReturnType<typeof fakeChild>; stop: () => void } {
+  const child = fakeChild();
+  let stopRun: (() => void) | undefined;
+  mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {
+    const script = String(args.at(-1));
+    if (script.startsWith('pkill')) {
+      callback(null, { stdout: '', stderr: '' });
+      return undefined;
+    }
+    if (script.startsWith('s=$(cat /proc/')) {
+      callback(null, { stdout: starts.shift() ?? '', stderr: '' });
+      return undefined;
+    }
+    stopRun = () => callback(Object.assign(new Error('Command failed: wsl.exe'), failure));
+    return child;
+  });
+  return { child, stop: () => stopRun!() };
+}
+
+/**
+ * execFile for a WSL run whose pid changes hands the moment TERM is delivered: every read of the
+ * start time answers `before` until the TERM script has run and `after` from then on. A first read
+ * ordered after TERM therefore sees the new process twice, finds the two values equal, and lets
+ * KILL through to a stranger and its process group.
+ */
+function wslRunRecycledOnTerm(before: string, after: string): { child: ReturnType<typeof fakeChild>; stop: () => void } {
+  const child = fakeChild();
+  let terminated = false;
+  let stopRun: (() => void) | undefined;
+  mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {
+    const script = String(args.at(-1));
+    if (script.startsWith('pkill')) {
+      terminated = true;
+      callback(null, { stdout: '', stderr: '' });
+      return undefined;
+    }
+    if (script.startsWith('s=$(cat /proc/')) {
+      callback(null, { stdout: terminated ? after : before, stderr: '' });
+      return undefined;
+    }
+    stopRun = () => callback(Object.assign(new Error('Command failed: wsl.exe'), KILLED_BY_US));
+    return child;
+  });
+  return { child, stop: () => stopRun!() };
+}
+
+/** How long the mock below makes a read of a pid's start time take to answer */
+const LATE_READ_MS = 5;
+
+/**
+ * execFile for a WSL run whose reads of the start time answer a few milliseconds late, with the
+ * start time of whatever holds the pid at the moment the answer is worked out: `before` while the
+ * TERM script has not run, `after` once it has.
+ *
+ * This is the race the real distribution runs: a read that is only in flight when TERM goes out is
+ * a second wsl.exe launch, and the tool can obey TERM and have its pid handed on before that read
+ * reaches `/proc`. Both reads then describe the new process and agree, which is precisely what the
+ * guard must not accept.
+ */
+function wslRunReadAnsweredLate(before: string, after: string): { child: ReturnType<typeof fakeChild>; stop: () => void } {
+  const child = fakeChild();
+  let terminated = false;
+  let stopRun: (() => void) | undefined;
+  mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {
+    const script = String(args.at(-1));
+    if (script.startsWith('pkill')) {
+      terminated = true;
+      callback(null, { stdout: '', stderr: '' });
+      return undefined;
+    }
+    if (script.startsWith('s=$(cat /proc/')) {
+      setTimeout(() => callback(null, { stdout: terminated ? after : before, stderr: '' }), LATE_READ_MS);
+      return undefined;
+    }
+    stopRun = () => callback(Object.assign(new Error('Command failed: wsl.exe'), KILLED_BY_US));
+    return child;
+  });
+  return { child, stop: () => stopRun!() };
+}
+
+/** Node killed the child itself, which is what its timeout and the caller's abort signal do */
+const KILLED_BY_US = { killed: true, signal: 'SIGTERM', code: null, stdout: '', stderr: '' };
+
+/** Start a WSL run, let it report its pid, then end it; resolves once the run has rejected */
+async function stoppedRun(starts: string[], failure: object = KILLED_BY_US): Promise<void> {
+  await driveStoppedRun(wslRunStoppedBy(starts, failure));
+}
+
+/**
+ * Drive a prepared run to its stop: report the pid, then end it as a timeout would. `settleMs` is
+ * for a run whose cleanup waits on something of its own (a start-time read that answers late): the
+ * clock has to reach it before the run's own rejection arrives. `pidChunks` is how the wrapper's
+ * pid line reaches stderr, one 'data' event per entry, for runs that test a stream boundary inside
+ * it.
+ */
+async function driveStoppedRun(
+  run: { child: ReturnType<typeof fakeChild>; stop: () => void },
+  settleMs = 0,
+  pidChunks: string[] = ['\x1eWBPID 909\n']
+): Promise<void> {
+  const pending = runTool('python', ['-m', 'graphify'], { cwd: 'C:\\repo', timeout: 50 })
+    .catch((error: unknown) => error);
+  await vi.advanceTimersByTimeAsync(0);
+  for (const chunk of pidChunks) {
+    run.child.stderr!.write(chunk);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+  run.stop();
+  if (settleMs > 0) await vi.advanceTimersByTimeAsync(settleMs);
+  await pending;
+}
+
 /** A spawned wsl.exe: emits exit/close, stderr is a stream */
 function fakeChild() {
   const child = Object.assign(new EventEmitter(), {
@@ -332,6 +481,193 @@ describe('WSL mode', () => {
       expect(winEnv.PATH).toBe('C:\\Windows;C:\\tools');
     });
 
+    it('ends the process inside the distribution when a timeout or the caller stops the run', async () => {
+      // Node can only kill wsl.exe, and the tool is not its child on the Windows side: a
+      // graphify build whose switch went off would otherwise keep writing its output folder
+      vi.useFakeTimers();
+      try {
+        // The same process throughout: its start time does not change
+        await stoppedRun(['72923660', '72923660']);
+
+        expect(wslScripts()).toEqual([
+          'pkill -TERM -P 909 2>/dev/null; kill -TERM -909 2>/dev/null; kill -TERM 909 2>/dev/null; exit 0',
+        ]);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(wslScripts()[1]).toContain('kill -KILL -909');
+        expect(startTimeReads()).toHaveLength(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not escalate to KILL once the process has gone', async () => {
+      // The pid is free, and the distribution may have handed it to anything by now: the
+      // escalation signals the pid's whole process group, so it must not fire blind
+      vi.useFakeTimers();
+      try {
+        await stoppedRun(['72923660', '']);
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(wslScripts()).toEqual([
+          'pkill -TERM -P 909 2>/dev/null; kill -TERM -909 2>/dev/null; kill -TERM 909 2>/dev/null; exit 0',
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not escalate to KILL when the pid now belongs to another process', async () => {
+      vi.useFakeTimers();
+      try {
+        // Same pid, later start time: a different process has it
+        await stoppedRun(['72923660', '80000000']);
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(wslScripts().some((script) => script.includes('KILL'))).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not escalate to KILL when the pid changed hands as the tool obeyed TERM', async () => {
+      // The start time is only proof of identity if it was read from the process we signalled:
+      // a tool that obeys TERM at once can be gone, and its pid taken, before a read that went
+      // out after TERM is answered
+      vi.useFakeTimers();
+      try {
+        await driveStoppedRun(wslRunRecycledOnTerm('72923660', '80000000'));
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(wslScripts().some((script) => script.includes('KILL'))).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('does not escalate to KILL on a start-time read that was only answered after TERM', async () => {
+      // The read has to be answered before TERM is sent, not merely started before it: a value
+      // that only arrived afterwards can already describe the stranger the pid was handed to, and
+      // then the two reads agree and the guard licenses a KILL of that stranger's process group
+      vi.useFakeTimers();
+      try {
+        await driveStoppedRun(wslRunReadAnsweredLate('72923660', '80000000'), LATE_READ_MS);
+
+        // Long enough for the escalation's own read to be answered as well, so this is the guard
+        // refusing rather than the clock not having got there yet
+        await vi.advanceTimersByTimeAsync(5000 + LATE_READ_MS * 4);
+        expect(startTimeReads()).toHaveLength(2);
+        expect(wslScripts().some((script) => script.includes('KILL'))).toBe(false);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('signals nothing when the pid cannot be shown to hold the process we started', async () => {
+      // An unreadable start time and a pid no process has any more look the same from here, and
+      // both mean the TERM would land on whoever has the pid now, and on their whole process group
+      vi.useFakeTimers();
+      try {
+        await stoppedRun(['']);
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(startTimeReads()).toHaveLength(1);
+        expect(wslScripts()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('takes the pid from the whole pid line when a stderr chunk ends inside its digits', async () => {
+      // stderr is a stream, so `\x1eWBPID 909\n` can arrive as `\x1eWBPID 9` and `09\n`; a pid
+      // read from the first half would send TERM and KILL to pid 9 and its whole process group
+      vi.useFakeTimers();
+      try {
+        await driveStoppedRun(wslRunStoppedBy(['72923660', '72923660'], KILLED_BY_US), 0,
+          ['\x1eWBPID 9', '09\n']);
+
+        expect(wslScripts()).toEqual([
+          'pkill -TERM -P 909 2>/dev/null; kill -TERM -909 2>/dev/null; kill -TERM 909 2>/dev/null; exit 0',
+        ]);
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(wslScripts()[1]).toContain('kill -KILL -909');
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('signals nothing when only part of the pid line ever arrives', async () => {
+      // Half a pid is no pid at all: until the line break turns up there is no process to end
+      vi.useFakeTimers();
+      try {
+        await driveStoppedRun(wslRunStoppedBy(['72923660', '72923660'], KILLED_BY_US), 0,
+          ['\x1eWBPID 9']);
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(startTimeReads()).toEqual([]);
+        expect(wslScripts()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('reports a cancelled run at once rather than behind the cleanup', async () => {
+      // The cleanup is best-effort and nothing the caller does depends on it, so it runs detached:
+      // waiting for its /proc read and its TERM would keep the Use Graphify switch disabled for
+      // the twenty seconds those two wsl.exe calls are allowed between them
+      vi.useFakeTimers();
+      try {
+        const run = wslRunReadAnsweredLate('72923660', '72923660');
+        let rejected = false;
+        const pending = runTool('python', ['-m', 'graphify'], { cwd: 'C:\\repo', timeout: 50 })
+          .catch(() => { rejected = true; });
+        await vi.advanceTimersByTimeAsync(0);
+        run.child.stderr!.write('\x1eWBPID 909\n');
+        await vi.advanceTimersByTimeAsync(0);
+        run.stop();
+
+        // The clock has not moved, so the cleanup's first read of /proc cannot have answered yet
+        await vi.advanceTimersByTimeAsync(0);
+        expect(rejected).toBe(true);
+        expect(wslScripts()).toEqual([]);
+
+        // The chain still keeps its own order once the caller has been told: read, then TERM,
+        // then a second read before KILL
+        await vi.advanceTimersByTimeAsync(LATE_READ_MS);
+        expect(wslScripts()[0]).toContain('kill -TERM -909');
+        await vi.advanceTimersByTimeAsync(5000 + LATE_READ_MS * 2);
+        expect(wslScripts()[1]).toContain('kill -KILL -909');
+        await pending;
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('leaves the distribution alone when the tool died of its own signal', async () => {
+      // Nobody asked this one to stop, so there is nothing of ours left to end: the pid is as
+      // good as free, and signalling it would land on whatever the distribution gave it to
+      vi.useFakeTimers();
+      try {
+        await stoppedRun(['72923660', '72923660'], {
+          killed: false, signal: 'SIGSEGV', code: null, stdout: '', stderr: '',
+        });
+
+        await vi.advanceTimersByTimeAsync(5000);
+        expect(wslScripts()).toEqual([]);
+        expect(startTimeReads()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('leaves the distribution alone when the tool itself failed', async () => {
+      const failure = Object.assign(new Error('Command failed'), { code: 128, stdout: '', stderr: '' });
+      mocks.execFile.mockImplementation((_file: string, _args: string[], _options: unknown, callback: ExecCallback) => callback(failure));
+
+      await runTool('git', ['status'], { cwd: 'C:\\x' }).catch(() => undefined);
+
+      expect(wslScripts()).toEqual([]);
+    });
+
     it('rejects with the exit code, stderr without the pid line, and a message naming the tool', async () => {
       const failure = Object.assign(new Error('Command failed: C:\\Windows\\System32\\wsl.exe -d Ubuntu ...'), {
         code: 128,
@@ -349,10 +685,17 @@ describe('WSL mode', () => {
 
   describe('buildWslEnv', () => {
     const LOGIN_PATH = '/usr/bin:/bin';
+    /** Forwarded and translated whatever they hold, so they are never "the app's own environment" */
+    const ALWAYS_FORWARDED = ['CLAUDE_CONFIG_DIR', 'GRAPHIFY_OUT'];
 
     it('forwards only what the caller added or changed, translating single path values', () => {
+      // The variables forwarded whatever they hold (next test) are left out, so the assertion below
+      // means the same whether or not the shell running these tests happens to have them set
+      const ambient = Object.fromEntries(
+        Object.entries(process.env).filter(([key]) => !ALWAYS_FORWARDED.includes(key)),
+      );
       const env = buildWslEnv({
-        ...process.env,
+        ...ambient,
         NEW_FLAG: '1',
         DATA_DIR: 'D:\\data\\x',
         SEARCH_DIRS: 'C:\\a;C:\\b',
@@ -362,7 +705,7 @@ describe('WSL mode', () => {
       expect(env.DATA_DIR).toBe('/mnt/d/data/x');
       expect(env.SEARCH_DIRS).toBe('C:\\a;C:\\b');
       // The app's own environment stays on the Windows side
-      const inherited = Object.keys(process.env).filter((key) => key !== 'WSLENV');
+      const inherited = Object.keys(ambient).filter((key) => key !== 'WSLENV');
       for (const key of inherited) expect(listed).not.toContain(key);
     });
 

@@ -35,6 +35,18 @@ export interface AgentSessionSpending {
   transcript: string;
   size: number;
   modifiedMs: number;
+  /**
+   * What reconciling the whole project needs on top of the scaled figures above, which it cannot be
+   * worked out from: one cost accounting's total reaches every transcript it touched, so it has to
+   * be recognized across them rather than added up (`project-metrics.ts`). These are optional
+   * because a store written before they were kept holds only the two figures above.
+   */
+  /** The turns priced per model, before they were scaled to what the accountings reported */
+  estimate?: { days: Record<string, number>; total: number; undated: number };
+  /** Day of the transcript's last record, where turns with no day of their own are booked */
+  lastDay?: string | null;
+  /** Highest total each cost accounting reported in this transcript, by its `runKey()` */
+  runs?: Record<string, number>;
 }
 
 /** One Claude Code session an agent window started */

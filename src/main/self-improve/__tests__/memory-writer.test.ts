@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
-import { countMemories, writeMemories, MAX_MEMORIES, type MemoryDraft } from '../memory-writer';
+import { countMemories, listMemories, writeMemories, MAX_MEMORIES, type MemoryDraft } from '../memory-writer';
 import { getCompengDir, getMemoryIndexPath } from '../paths';
 
 let tmp: string;
@@ -53,6 +53,27 @@ describe('writeMemories', () => {
     const index = await readFile(getMemoryIndexPath(project), 'utf-8');
     expect(index.match(/\]\(use-tabs\.md\)/g)).toHaveLength(1);
     expect(index).toContain('](run-typecheck.md)');
+  });
+
+  it('keeps the text the user wrote into the index themselves', async () => {
+    await writeMemories(project, [draft('use-tabs')]);
+    const authored = '# Project memory\n\nThe ones that matter most are first.\n\n- [Title use-tabs](use-tabs.md) — Rule use-tabs\n';
+    await writeFile(getMemoryIndexPath(project), authored);
+
+    await writeMemories(project, [draft('run-typecheck')]);
+
+    // MEMORY.md is the user's index file; rebuilding it from the lines we can parse loses the rest
+    const index = await readFile(getMemoryIndexPath(project), 'utf-8');
+    expect(index).toContain('# Project memory');
+    expect(index).toContain('The ones that matter most are first.');
+    expect(index.match(/\]\(use-tabs\.md\)/g)).toHaveLength(1);
+    expect(index).toContain('](run-typecheck.md)');
+  });
+
+  it('lists what the project already remembers, so a rebuild is told not to write it again', async () => {
+    await writeMemories(project, [draft('use-tabs')]);
+
+    expect(await listMemories(project)).toEqual(['[Title use-tabs](use-tabs.md) — Rule use-tabs']);
   });
 
   it('slugifies a name and stops at the cap, so the index stays inside its read limit', async () => {
