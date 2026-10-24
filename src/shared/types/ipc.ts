@@ -481,6 +481,9 @@ export interface ElectronAPI {
   getClaudeCodeInstallations: () => Promise<IPCResult<import('./cli').ClaudeInstallationList>>;
   setClaudeCodeActivePath: (cliPath: string) => Promise<IPCResult<{ path: string }>>;
 
+  // Agent backend (OMP detection)
+  detectOmp: () => Promise<IPCResult<import('./omp-detection').OmpDetection>>;
+
   // Graphify CLI (memory graph)
   checkGraphifyVersion: (forceRefresh?: boolean) => Promise<IPCResult<import('./cli').GraphifyVersionInfo>>;
   installGraphify: () => Promise<IPCResult<{ command: string }>>;

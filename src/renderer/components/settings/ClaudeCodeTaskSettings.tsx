@@ -10,6 +10,7 @@ import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { SettingsSection } from './SettingsSection';
+import { AgentBackendSettings } from './AgentBackendSettings';
 import { SegmentedControl, SettingsRow, SettingsRows } from './SettingsRow';
 import {
   DEFAULT_MAX_TERMINALS,
@@ -89,6 +90,8 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
 
   return (
     <>
+      <AgentBackendSettings settings={settings} onSettingsChange={onSettingsChange} />
+
       <SettingsSection title={t('claudeCode.execution.title')}>
         <SettingsRows>
           <SettingsRow

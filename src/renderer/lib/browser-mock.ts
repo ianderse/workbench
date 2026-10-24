@@ -116,6 +116,8 @@ const browserMockAPI: ElectronAPI = {
 
   // Claude Code Operations
   // Graphify CLI (memory graph)
+  detectOmp: async () => ({ success: true as const, data: { installed: false, models: [] } }),
+
   checkGraphifyVersion: async () => ({
     success: true,
     data: { installed: null, latest: null, isOutdated: false }

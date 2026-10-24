@@ -29,6 +29,7 @@ import { cancelFallbackTimer } from '../agent-events-handlers';
 import { safeSendToRenderer } from '../utils';
 import { readSettingsFile } from '../../settings-utils';
 import { getAPIProfileEnv } from '../../services/profile';
+import { isOmpBackend } from '../../agent-backend/settings';
 import { loadClaudeRunInfo } from '../../claude-code/task-runner';
 import { rateLimitResumeScheduler, type HeldTaskRef } from '../../services/rate-limit-resume-scheduler';
 import { clearRateLimitHold } from './rate-limit-hold';
@@ -88,6 +89,8 @@ async function ensureProfileManagerInitialized(): Promise<
  * (Anthropic-compatible endpoint).
  */
 async function checkClaudeCodeAuth(): Promise<{ ok: true } | { ok: false; error: string }> {
+  // OMP runs local models: no Claude account is needed
+  if (isOmpBackend()) return { ok: true };
   const initResult = await ensureProfileManagerInitialized();
   if (!initResult.success) {
     return { ok: false, error: initResult.error };

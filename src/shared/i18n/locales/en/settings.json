@@ -644,5 +644,61 @@
       "notSignedIn": "No new sign-in was found",
       "failedToStart": "Couldn't open a terminal for Claude Code's sign-in"
     }
+  },
+  "agentBackend": {
+    "title": "Agent backend",
+    "backend": "Backend",
+    "backendDescription": "Claude Code is the default. OMP runs local models (Ollama, LM Studio, llama.cpp, MLX or any OpenAI-compatible server) that you set up in ~/.omp/agent/models.yml. With OMP, MCP connectors, account switching and budgets do not apply",
+    "kinds": {
+      "claude": "Claude Code",
+      "omp": "OMP (local models)"
+    },
+    "command": "OMP command",
+    "commandDescription": "Path to the omp executable, or its name when it is on PATH",
+    "commandPlaceholder": "omp",
+    "status": "Status",
+    "statusChecking": "Checking OMP",
+    "statusFound": "OMP {{version}} found",
+    "statusFoundNoVersion": "OMP found",
+    "statusNotFound": "OMP not found",
+    "statusFailed": "OMP could not be checked: {{error}}",
+    "modelsCount": "{{count}} models available",
+    "noModels": "No models found. Type a model id instead",
+    "refresh": "Refresh",
+    "modelsTitle": "Models",
+    "modelsDescription": "Triage picks a size for each task. Choose the OMP model that handles each size",
+    "tiers": {
+      "haiku": "Small",
+      "sonnet": "Standard",
+      "opus": "Large",
+      "fable": "Largest"
+    },
+    "ompDefault": "OMP default",
+    "modelPlaceholder": "provider/model",
+    "advisorTitle": "Advisor",
+    "advisorDescription": "A stronger model reviews each turn and adds notes for the model that does the work. Applies to tasks, Insights and agent terminals. Utility calls such as titles and commit messages skip it. It uses the advisor model's quota and billing",
+    "advisor": "Advisor",
+    "advisorModeDescription": "Use OMP setting follows ~/.omp/agent/config.yml",
+    "advisorModes": {
+      "inherit": "Use OMP setting",
+      "on": "On",
+      "off": "Off"
+    },
+    "advisorModel": "Advisor model",
+    "advisorModelDescription": "OMP default uses the advisor model set in the OMP config",
+    "thinkingTitle": "Thinking",
+    "thinkingDescription": "OMP thinking level for each effort level",
+    "thinkingLevels": {
+      "off": "Off",
+      "minimal": "Minimal",
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Max",
+      "auto": "Auto"
+    },
+    "maxMinutes": "Max minutes per phase",
+    "maxMinutesDescription": "Stops a task phase after this long. 0 means no limit"
   }
 }

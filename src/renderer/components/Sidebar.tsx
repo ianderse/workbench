@@ -262,7 +262,8 @@ export function Sidebar({
               {!isCollapsed && <span className="min-w-0 flex-1 truncate text-left">{t('actions.settings')}</span>}
             </button>
           ))}
-          {!isCollapsed && <UsageIndicator />}
+          {/* Claude usage and limits mean nothing for local OMP models */}
+          {!isCollapsed && settings.agentBackend?.kind !== 'omp' && <UsageIndicator />}
         </div>
       </aside>
 

@@ -902,10 +902,12 @@ export function App() {
         </Dialog>
 
         {/* Auth Failure Modal - shows when Claude CLI encounters 401/auth errors */}
-        <AuthFailureModal onOpenSettings={() => {
-          setSettingsInitialSection('accounts');
-          setIsSettingsDialogOpen(true);
-        }} />
+        {settings.agentBackend?.kind !== 'omp' && (
+          <AuthFailureModal onOpenSettings={() => {
+            setSettingsInitialSection('accounts');
+            setIsSettingsDialogOpen(true);
+          }} />
+        )}
 
         {/* App Update Notification - shows when new app version is available */}
         <AppUpdateNotification />
