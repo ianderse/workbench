@@ -113,6 +113,26 @@ describe('readUserTurns', () => {
     expect(await readUserTurns(file, 10_000)).toEqual(['always use tabs', 'never use spaces']);
   });
 
+  it("leaves out Workbench's own phase prompts, which are the app talking and not the user", async () => {
+    const file = path.join(tmp, 'task-run.jsonl');
+    await writeFile(
+      file,
+      [
+        // The turns a task run's phases send (claude-code/task-runner.ts, buildInput)
+        { type: 'user', message: { role: 'user', content: 'Continue the task from where you left off. Check `git status` and `git log` to see what is already done, then finish the work.' } },
+        { type: 'user', message: { role: 'user', content: 'The plan is approved. Implement it now, verify it with the project\'s tests, and commit the result.' } },
+        { type: 'user', message: { role: 'user', content: 'Before handing this off, validate the work:\n1. Run the tests. Fix failures your change caused.' } },
+        { type: 'user', message: { role: 'user', content: 'The reviewer requested changes:\n\n<feedback>\nUse tabs\n</feedback>' } },
+        { type: 'user', message: { role: 'user', content: 'always run the type checker before committing' } },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n')
+    );
+
+    // Learning a "preference" from these would record Workbench's own instructions as the user's
+    expect(await readUserTurns(file, 10_000)).toEqual(['always run the type checker before committing']);
+  });
+
   it('stops at the character budget', async () => {
     const file = path.join(tmp, 'long.jsonl');
     const turn = 'x'.repeat(100);
