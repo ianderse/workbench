@@ -14,7 +14,7 @@ import type { SelfImproveIndexInfo } from '../../shared/types/cli';
 import { appLog } from '../app-logger';
 import { runClaudeText } from '../claude-code/run-text';
 import { getCompengDir } from './paths';
-import { countMemories, MAX_MEMORIES, writeMemories, type MemoryDraft } from './memory-writer';
+import { countMemories, listMemories, MAX_MEMORIES, writeMemories, type MemoryDraft } from './memory-writer';
 import { findProjectTranscripts, readUserTurns } from './transcripts';
 
 /** Stats of the last build, beside the memories themselves */
@@ -77,7 +77,7 @@ Rules:
 - Write each memory as a general instruction in the words the user used. Never quote the conversation, never name a person, and never record secrets, credentials, paths to private data or anything that looks like a token.
 - Prefer \`type: feedback\` for a preference or correction, \`project\` for a standing fact about how the project is worked on, \`user\` for how this person likes to work, \`reference\` for where information lives.
 - At most ${MAX_MEMORIES} memories, and fewer is better. Return an empty list when nothing qualifies; that is a correct answer.
-${existing.length > 0 ? `\nThese memories already exist, so do not restate them: ${existing.join(', ')}.\n` : ''}
+${existing.length > 0 ? `\nThese memories already exist, so do not restate them:\n${existing.map((memory) => `- ${memory}`).join('\n')}\n` : ''}
 ${transcript}`;
 }
 
@@ -126,9 +126,12 @@ async function run(projectPath: string, profileId?: string): Promise<SelfImprove
 
   let written: string[] = [];
   if (sessions.length > 0) {
-    const existing = await countMemories(projectPath);
+    // This pass is re-runnable by hand over sessions it has already read, so what the project
+    // remembers goes into the prompt: without it a second run writes the same memories again under
+    // slightly different names, which `writeMemories` cannot recognize as duplicates
+    const existing = await listMemories(projectPath);
     const result = await runClaudeText({
-      prompt: buildPrompt(sessions, []),
+      prompt: buildPrompt(sessions, existing),
       model: MODEL,
       effort: EFFORT,
       jsonSchema: schema as unknown as Record<string, unknown>,
@@ -136,7 +139,7 @@ async function run(projectPath: string, profileId?: string): Promise<SelfImprove
       cwd: projectPath,
     });
     const drafts = (result.structured as { memories?: MemoryDraft[] } | undefined)?.memories ?? [];
-    if (drafts.length > 0) written = await writeMemories(projectPath, drafts.slice(0, MAX_MEMORIES - existing));
+    if (drafts.length > 0) written = await writeMemories(projectPath, drafts.slice(0, MAX_MEMORIES - existing.length));
   }
 
   const info: SelfImproveIndexInfo = {
