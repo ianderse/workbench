@@ -343,6 +343,7 @@
   },
   "accounts": {
     "title": "Accounts",
+    "ompNote": "Accounts, API profiles and spending apply to Claude Code only. With OMP, models and their sign-in are set up in ~/.omp/agent/models.yml",
     "description": "Manage Claude accounts and API endpoints",
     "autoSwitching": {
       "description": "Switch to another Claude account before or when the one in use hits a limit",
@@ -394,6 +395,7 @@
     }
   },
   "mcp": {
+    "ompNote": "Connectors apply to Claude Code only. With OMP, add MCP servers to ~/.omp/agent/mcp.json or to a .mcp.json in the project",
     "serversEnabled": "{{count}} servers enabled",
     "defaultsHint": "Defaults for new tasks; each task can change them",
     "addServer": "Add server",
@@ -569,6 +571,8 @@
       "triageModelDescription": "Model that assesses each task before it starts",
       "allowFable": "Allow Fable",
       "allowFableDescription": "Let triage pick Fable for the hardest tasks. Fable may bill to usage credits",
+      "allowLargest": "Allow largest size",
+      "allowLargestDescription": "Let triage pick the largest model size for the hardest tasks",
       "planning": "Planning",
       "planningModes": {
         "auto": "Automatic",
@@ -589,6 +593,7 @@
     "agentWindows": {
       "skipPermissions": "Skip permission prompts",
       "skipPermissionsDescription": "Agent windows start Claude Code with --dangerously-skip-permissions",
+      "skipPermissionsOmpDescription": "Agent windows start OMP with --auto-approve",
       "liveAgent": "Live agent",
       "liveAgentDescription": "Claude Code windows show a live graph for all project sessions",
       "liveAgentNoProject": "Select a project to show a live graph of its Claude Code sessions in its agent windows",

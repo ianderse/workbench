@@ -33,6 +33,7 @@ import {
 import type { AppSettings } from '../../../shared/types';
 import { useProjectStore } from '../../stores/project-store';
 import { useLiveAgentStore } from '../../stores/live-agent-store';
+import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 
 interface ClaudeCodeTaskSettingsProps {
   settings: AppSettings;
@@ -45,6 +46,7 @@ const FALLBACK_OPTIONS = ['none', 'sonnet', 'haiku', 'opus'] as const;
 /** Task execution, permissions, agent windows and limits sections of the Agents page */
 export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCodeTaskSettingsProps) {
   const { t } = useTranslation('settings');
+  const isOmp = useIsOmpBackend();
   const stored = settings.claudeCodeTasks ?? {};
   const current: TaskSettings = { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, ...stored };
 
@@ -68,7 +70,8 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
       ? t('claudeCode.agentWindows.liveAgentHooksFailed', { error: hooksError })
       : undefined;
 
-  const modelLabel = (model: ClaudeModelAlias) => t(`claudeCode.models.${model}`);
+  // Under OMP the model names stand for the sizes mapped to OMP models (Settings > Agents > Models)
+  const modelLabel = (model: ClaudeModelAlias) => t(isOmp ? `agentBackend.tiers.${model}` : `claudeCode.models.${model}`);
   const effortLabel = (effort: ClaudeEffort) => t(`claudeCode.efforts.${effort}`);
 
   const modelSelect = (id: string, value: ClaudeModelAlias, onChange: (model: ClaudeModelAlias) => void) => (
@@ -151,13 +154,13 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
                 {modelSelect('claude-code-triage-model', current.triageModel, (triageModel) => update({ triageModel }))}
               </SettingsRow>
               <SettingsRow
-                label={t('claudeCode.execution.allowFable')}
-                description={t('claudeCode.execution.allowFableDescription')}
+                label={t(isOmp ? 'claudeCode.execution.allowLargest' : 'claudeCode.execution.allowFable')}
+                description={t(isOmp ? 'claudeCode.execution.allowLargestDescription' : 'claudeCode.execution.allowFableDescription')}
               >
                 <Switch
                   checked={current.allowFable}
                   onCheckedChange={(allowFable) => update({ allowFable })}
-                  aria-label={t('claudeCode.execution.allowFable')}
+                  aria-label={t(isOmp ? 'claudeCode.execution.allowLargest' : 'claudeCode.execution.allowFable')}
                 />
               </SettingsRow>
             </>
@@ -190,36 +193,39 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             />
           </SettingsRow>
 
-          <SettingsRow
-            label={t('claudeCode.execution.fallbackModel')}
-            description={t('claudeCode.execution.fallbackModelDescription')}
-            htmlFor="claude-code-fallback-model"
-          >
-            <Select
-              value={fallbackValue}
-              onValueChange={(v) => update({ fallbackModel: v === 'none' ? undefined : v })}
+          {/* --fallback-model is a Claude Code flag; OMP has no equivalent */}
+          {!isOmp && (
+            <SettingsRow
+              label={t('claudeCode.execution.fallbackModel')}
+              description={t('claudeCode.execution.fallbackModelDescription')}
+              htmlFor="claude-code-fallback-model"
             >
-              <SelectTrigger id="claude-code-fallback-model" className="h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {FALLBACK_OPTIONS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option === 'none' ? t('claudeCode.execution.fallbackNone') : modelLabel(option)}
-                  </SelectItem>
-                ))}
-                {/* A custom chain set elsewhere stays selectable */}
-                {!(FALLBACK_OPTIONS as readonly string[]).includes(fallbackValue) && (
-                  <SelectItem value={fallbackValue}>{fallbackValue}</SelectItem>
-                )}
-              </SelectContent>
-            </Select>
-          </SettingsRow>
+              <Select
+                value={fallbackValue}
+                onValueChange={(v) => update({ fallbackModel: v === 'none' ? undefined : v })}
+              >
+                <SelectTrigger id="claude-code-fallback-model" className="h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FALLBACK_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option === 'none' ? t('claudeCode.execution.fallbackNone') : modelLabel(option)}
+                    </SelectItem>
+                  ))}
+                  {/* A custom chain set elsewhere stays selectable */}
+                  {!(FALLBACK_OPTIONS as readonly string[]).includes(fallbackValue) && (
+                    <SelectItem value={fallbackValue}>{fallbackValue}</SelectItem>
+                  )}
+                </SelectContent>
+              </Select>
+            </SettingsRow>
+          )}
 
-          {/* Agent windows (terminals) start Claude Code with or without permission prompts */}
+          {/* Agent windows (terminals) start the agent with or without permission prompts (OMP: --auto-approve) */}
           <SettingsRow
             label={t('claudeCode.agentWindows.skipPermissions')}
-            description={t('claudeCode.agentWindows.skipPermissionsDescription')}
+            description={t(isOmp ? 'claudeCode.agentWindows.skipPermissionsOmpDescription' : 'claudeCode.agentWindows.skipPermissionsDescription')}
           >
             <Switch
               checked={settings.dangerouslySkipPermissions === true}
@@ -228,28 +234,32 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             />
           </SettingsRow>
 
-          {/* The project's agent windows show a live agent-flow graph of their Claude Code session */}
-          <SettingsRow
-            label={t('claudeCode.agentWindows.liveAgent')}
-            description={
-              <>
-                {project
-                  ? t('claudeCode.agentWindows.liveAgentDescription', { project: project.name })
-                  : t('claudeCode.agentWindows.liveAgentNoProject')}
-                {liveAgentProblem && <span className="mt-1 block text-destructive">{liveAgentProblem}</span>}
-              </>
-            }
-          >
-            <Switch
-              checked={liveAgent}
-              disabled={!projectPath}
-              onCheckedChange={(enabled) => {
-                if (!projectPath) return;
-                void useLiveAgentStore.getState().setEnabled(projectPath, enabled).then(setLiveAgentError);
-              }}
-              aria-label={t('claudeCode.agentWindows.liveAgent')}
-            />
-          </SettingsRow>
+          {!isOmp && (
+            <>
+              {/* The project's agent windows show a live agent-flow graph of their Claude Code session */}
+              <SettingsRow
+                label={t('claudeCode.agentWindows.liveAgent')}
+                description={
+                  <>
+                    {project
+                      ? t('claudeCode.agentWindows.liveAgentDescription', { project: project.name })
+                      : t('claudeCode.agentWindows.liveAgentNoProject')}
+                    {liveAgentProblem && <span className="mt-1 block text-destructive">{liveAgentProblem}</span>}
+                  </>
+                }
+              >
+                <Switch
+                  checked={liveAgent}
+                  disabled={!projectPath}
+                  onCheckedChange={(enabled) => {
+                    if (!projectPath) return;
+                    void useLiveAgentStore.getState().setEnabled(projectPath, enabled).then(setLiveAgentError);
+                  }}
+                  aria-label={t('claudeCode.agentWindows.liveAgent')}
+                />
+              </SettingsRow>
+            </>
+          )}
         </SettingsRows>
       </SettingsSection>
 

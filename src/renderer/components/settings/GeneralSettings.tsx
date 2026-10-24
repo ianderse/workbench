@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Input } from '../ui/input';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
+import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 import type {
   AppSettings,
   ShellRuntimeStatus,
@@ -93,6 +94,9 @@ function ToolDetectionDisplay({ info, isLoading, inWsl }: ToolDetectionDisplayPr
  */
 export function GeneralSettings({ settings, onSettingsChange }: GeneralSettingsProps) {
   const { t } = useTranslation('settings');
+  const isOmp = useIsOmpBackend();
+  // The Claude CLI path only matters to Claude Code (OMP's command is set under Agents)
+  const pathTools = isOmp ? PATH_TOOLS.filter(({ tool }) => tool !== 'claude') : PATH_TOOLS;
   const [toolsInfo, setToolsInfo] = useState<ToolsInfo | null>(null);
   const [runtime, setRuntime] = useState<ShellRuntimeStatus | null>(null);
   const [isLoadingTools, setIsLoadingTools] = useState(false);
@@ -149,7 +153,7 @@ export function GeneralSettings({ settings, onSettingsChange }: GeneralSettingsP
       description={t('general.pathsDescription')}
     >
       <SettingsRows>
-        {PATH_TOOLS.map(({ tool, field, wslExample }) => {
+        {pathTools.map(({ tool, field, wslExample }) => {
           const value = inWsl ? wslToolPaths[tool] ?? '' : settings[field] ?? '';
           const id = inWsl ? `wsl-${field}` : field;
           return (

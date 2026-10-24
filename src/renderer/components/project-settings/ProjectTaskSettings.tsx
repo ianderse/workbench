@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
+import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
 
 interface ProjectTaskSettingsProps {
@@ -18,6 +19,7 @@ interface ProjectTaskSettingsProps {
  */
 export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettingsProps) {
   const { t } = useTranslation('settings');
+  const isOmp = useIsOmpBackend();
   const profiles = useClaudeProfileStore((state) => state.profiles);
   const activeProfileId = useClaudeProfileStore((state) => state.activeProfileId);
 
@@ -46,6 +48,9 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
     const parsed = Number(value);
     if (Number.isFinite(parsed) && parsed > 0) setSettings({ ...settings, maxBudgetUsd: parsed });
   };
+
+  // Both rows are Claude Code's (its account, --max-budget-usd); OMP has neither
+  if (isOmp) return null;
 
   return (
     <SettingsSection title={t('projectPages.tasks.title')}>

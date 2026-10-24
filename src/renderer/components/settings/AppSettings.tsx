@@ -31,6 +31,8 @@ import { AccountSettings } from './AccountSettings';
 import { ProjectSettingsContent, ProjectSettingsSection } from './ProjectSettingsContent';
 import { ConnectorsSettings } from './ConnectorsSettings';
 import { useProjectStore } from '../../stores/project-store';
+import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
+import { ClaudeOnlyNote } from './ClaudeOnlyNote';
 import type { UseProjectSettingsReturn } from '../project-settings/hooks/useProjectSettings';
 import {
   DIALOG_ANIMATION_CLASS,
@@ -105,6 +107,7 @@ const AUTOSAVE_DELAY_MS = 400;
 export function AppSettingsDialog({ open, onOpenChange, initialSection, initialProjectSection, focusId }: AppSettingsDialogProps) {
   const { t } = useTranslation('settings');
   const { settings, setSettings, error, saveSettings, commitTheme } = useSettings();
+  const isOmp = useIsOmpBackend();
   const [version, setVersion] = useState<string>('');
 
   // Track which top-level group is active
@@ -225,19 +228,29 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
           </>
         );
       case 'accounts':
-        return <AccountSettings settings={settings} onSettingsChange={setSettings} isOpen={open} />;
+        // Accounts, API profiles and spending are Claude Code's; OMP's models live in its own config
+        return isOmp ? (
+          <ClaudeOnlyNote title={t('accounts.title')}>{t('accounts.ompNote')}</ClaudeOnlyNote>
+        ) : (
+          <AccountSettings settings={settings} onSettingsChange={setSettings} isOpen={open} />
+        );
       case 'agents':
         return <ClaudeCodeTaskSettings settings={settings} onSettingsChange={setSettings} />;
       case 'connectors':
-        return <ConnectorsSettings settings={settings} onSettingsChange={setSettings} />;
+        // Connectors are passed to Claude Code with --mcp-config; OMP reads its own MCP files
+        return isOmp ? (
+          <ClaudeOnlyNote title={t('sections.connectors.title')}>{t('mcp.ompNote')}</ClaudeOnlyNote>
+        ) : (
+          <ConnectorsSettings settings={settings} onSettingsChange={setSettings} />
+        );
       case 'devtools':
         return <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />;
       case 'updates':
         return (
           <>
             <AdvancedSettings settings={settings} onSettingsChange={setSettings} section="updates" version={version} />
-            {/* Claude Code CLI (status, install/update, version switching) */}
-            <ClaudeCodeSettings />
+            {/* Claude Code CLI (status, install/update, version switching); OMP updates itself */}
+            {!isOmp && <ClaudeCodeSettings />}
             {/* Graphify CLI (builds the projects' memory graphs) */}
             <GraphifySettings />
           </>

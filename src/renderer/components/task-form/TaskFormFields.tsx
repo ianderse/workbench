@@ -16,6 +16,7 @@ import { useImageUpload } from './useImageUpload';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { cn } from '../../lib/utils';
 import { TaskConnectorRows } from './TaskConnectorRows';
+import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 import type { ImageAttachment } from '../../../shared/types';
 import { AttachmentTile } from './AttachmentTile';
 import { useAttachmentThumbnails } from './useAttachmentThumbnails';
@@ -67,6 +68,8 @@ export function TaskFormFields({
   extraSections
 }: TaskFormFieldsProps) {
   const { t } = useTranslation(['tasks', 'common']);
+  // Connectors are Claude Code's --mcp-config; OMP tasks ignore them, so the section is left out
+  const isOmp = useIsOmpBackend();
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const prefix = idPrefix ? `${idPrefix}-` : '';
 
@@ -214,7 +217,7 @@ export function TaskFormFields({
         </div>
 
         {/* MCP connectors for the task's Claude Code session */}
-        {onMcpConnectorsChange && (
+        {onMcpConnectorsChange && !isOmp && (
           <SettingsSection title={t('tasks:form.sections.connectors')}>
             <TaskConnectorRows
               value={mcpConnectors}
