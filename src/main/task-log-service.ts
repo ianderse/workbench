@@ -3,6 +3,7 @@ import { existsSync, readFileSync, } from 'fs';
 import { EventEmitter } from 'events';
 import type { TaskLogs, TaskLogPhase, TaskLogStreamChunk, TaskPhaseLog } from '../shared/types';
 import { findTaskWorktree } from './worktree-paths';
+import { listProjectWindows, onProjectWindowsChanged } from './window-manager';
 import { debugLog, debugWarn, debugError } from '../shared/utils/debug-logger';
 
 function findWorktreeSpecDir(projectPath: string, specId: string, specsRelPath: string): string | null {
@@ -19,6 +20,7 @@ function findWorktreeSpecDir(projectPath: string, specId: string, specsRelPath: 
  * This service provides:
  * - Loading logs from the spec directory (and worktree spec directory when active)
  * - Watching for log file changes
+ * - Releasing a watch when its last view unwatches, or when the windows holding it are gone
  * - Emitting streaming updates when logs change
  * - Determining which phase is currently active
  *
@@ -26,17 +28,57 @@ function findWorktreeSpecDir(projectPath: string, specId: string, specsRelPath: 
  * the worktree's spec directory, not the main project's spec directory. This service
  * watches both locations and merges logs from both sources.
  */
+/** Stands for a view whose window could not be read; only an unwatch releases it (`stopWatching`) */
+const UNATTRIBUTED_VIEWER = 0;
+
 class TaskLogService extends EventEmitter {
   private logCache: Map<string, TaskLogs> = new Map();
   // Watches are keyed by spec directory, not spec id: two projects can hold the same spec id
   // (each numbers its tasks from 001), and each window watches its own project's spec
   private pollIntervals: Map<string, NodeJS.Timeout> = new Map();
-  // Store paths being watched for each spec directory (main + worktree). `watchers` counts
-  // the views on it: several windows can watch the same spec, and the poller stops with the last.
-  private watchedPaths: Map<string, { mainSpecDir: string; worktreeSpecDir: string | null; specsRelPath: string; specId: string; projectId?: string; watchers: number }> = new Map();
+  // Store paths being watched for each spec directory (main + worktree). `viewers` counts the
+  // views each window holds on it: several windows can watch the same spec, one window can hold
+  // more than one view of it (two task dialogs, or a dialog reopened before its unwatch landed),
+  // and the poller stops when the last of those views is released. Counting per window is what
+  // keeps both halves true at once - a window closing takes every view it held, while a single
+  // window's second view still needs its own unwatch. A view whose window could not be read
+  // counts under `UNATTRIBUTED_VIEWER`, which only an explicit unwatch releases.
+  private watchedPaths: Map<string, { mainSpecDir: string; worktreeSpecDir: string | null; specsRelPath: string; specId: string; projectId?: string; viewers: Map<number, number> }> = new Map();
 
   // Poll interval for watching log changes (more reliable than fs.watch on some systems)
   private readonly POLL_INTERVAL_MS = 1000;
+
+  /** Unsubscribe from the window registry; set while anything is watched */
+  private releaseWindowListener: (() => void) | null = null;
+
+  /**
+   * Release the watches held by windows that are gone.
+   *
+   * A window closed with the task dialog open never sends its unwatch, so its poller would read
+   * the log files for the rest of the session. What decides is whether the window that asked for
+   * the watch still exists - not which project the windows currently report. A window reports the
+   * project it is showing, and it reports none while nothing is selected and switches as the user
+   * changes tabs; releasing on that would stop the log stream of a task dialog that is still open,
+   * and the renderer only subscribes once, so it would never come back.
+   */
+  private releaseClosedWindows(): void {
+    const live = new Set(listProjectWindows().map((window) => window.windowId));
+    for (const [specDir, watched] of [...this.watchedPaths]) {
+      // A window that is gone takes every view it held with it, however many it had open
+      for (const windowId of [...watched.viewers.keys()]) {
+        if (windowId !== UNATTRIBUTED_VIEWER && !live.has(windowId)) watched.viewers.delete(windowId);
+      }
+      // Only an entry with no view left is released. A view that could not be attributed to a
+      // window survives the loop above, so such an entry is never cleared here: nothing here can
+      // say whether the window behind it is still showing the task, and an unwatch releases it
+      // instead (its own, or the one `stopWatching` recognises by its window holding no view of
+      // its own). The dead windows beside it have gone, though, so the entry no longer stands in
+      // for views nobody holds any more.
+      if (watched.viewers.size > 0) continue;
+      debugLog('[TaskLogService] The windows watching this spec are gone, releasing it:', specDir);
+      this.clearWatch(specDir);
+    }
+  }
 
   /**
    * Load task logs from a single spec directory
@@ -252,8 +294,9 @@ class TaskLogService extends EventEmitter {
    * @param projectPath - Optional: Project root path (needed to find worktree)
    * @param specsRelPath - Optional: Relative path to specs (e.g., ".workbench/tasks")
    * @param projectId - Optional: Project the spec belongs to, sent with the change events
+   * @param windowId - Optional: Window asking for it, whose closing releases it
    */
-  startWatching(specId: string, specDir: string, projectPath?: string, specsRelPath?: string, projectId?: string): void {
+  startWatching(specId: string, specDir: string, projectPath?: string, specsRelPath?: string, projectId?: string, windowId?: number): void {
     debugLog('[TaskLogService.startWatching] Starting watch:', {
       specId,
       specDir,
@@ -261,18 +304,25 @@ class TaskLogService extends EventEmitter {
       specsRelPath
     });
 
-    // Already watched (another window has it open, or a rapid watch/unwatch cycle): share
-    // the poller and count the extra view, so one view closing doesn't freeze the other
+    // Already watched (another window has it open, the same window opened a second view, or a
+    // rapid watch/unwatch cycle): share the poller and count the extra view, so one view closing
+    // doesn't freeze the other
+    const viewer = windowId ?? UNATTRIBUTED_VIEWER;
     const watched = this.watchedPaths.get(specDir);
     if (watched && this.pollIntervals.has(specDir)) {
-      watched.watchers++;
-      debugLog('[TaskLogService.startWatching] Already watching this spec, sharing it:', watched.watchers);
+      watched.viewers.set(viewer, (watched.viewers.get(viewer) ?? 0) + 1);
+      debugLog('[TaskLogService.startWatching] Already watching this spec, sharing it:', watched.viewers.get(viewer));
       return;
     }
 
-    // A stale poller for the same spec under another directory (the project's paths changed)
-    // can no longer be stopped by an unwatch, so drop it here
-    this.stopWatchingSpec(specId);
+    // A stale poller for this project's spec under another directory (the project's paths changed)
+    // can no longer be stopped by an unwatch, so drop it here. Scoped to the project, or opening
+    // the same task id in a second project would stop the first project's live poller
+    this.stopWatchingSpec(specId, projectId);
+
+    // A window that closes while the task dialog is open never unwatches, so the registry is
+    // what releases its watches
+    this.releaseWindowListener ??= onProjectWindowsChanged(() => this.releaseClosedWindows());
 
     const mainLogFile = path.join(specDir, 'task_logs.json');
 
@@ -289,7 +339,7 @@ class TaskLogService extends EventEmitter {
       specsRelPath: specsRelPath || '',
       specId,
       projectId,
-      watchers: 1
+      viewers: new Map([[viewer, 1]])
     });
 
     let lastMainContent = '';
@@ -357,7 +407,7 @@ class TaskLogService extends EventEmitter {
             specsRelPath: specsRelPath,
             specId,
             projectId,
-            watchers: watchedInfo?.watchers ?? 1
+            viewers: watchedInfo?.viewers ?? new Map([[UNATTRIBUTED_VIEWER, 1]])
           });
           debugLog('[TaskLogService] Discovered worktree for spec:', {
             specId,
@@ -439,21 +489,97 @@ class TaskLogService extends EventEmitter {
 
   /**
    * Drop one view of a spec directory; the poller stops with the last one.
+   *
+   * An unwatch only ever drops its own view: one of the views counted under the window it names,
+   * or an unattributed one when nothing else can be meant (see `dropOneView`). It is tempting to
+   * let an unwatch that matched nothing stand in for "the last view is going", since a renderer
+   * tearing down can lose its window before it unwatches - but the counts cannot say whether the
+   * one view left is the window now unwatching or a second window still showing the task, and
+   * guessing wrong stops a poller that window still needs, for good, because the renderer
+   * subscribes only when it mounts. Nothing is lost by not guessing: a view whose window is gone
+   * is released by the registry when that window leaves it (`releaseClosedWindows`), which is the
+   * signal that actually knows.
    */
-  stopWatching(specDir: string): void {
+  stopWatching(specDir: string, windowId?: number): void {
     const watched = this.watchedPaths.get(specDir);
-    if (watched && watched.watchers > 1) {
-      watched.watchers--;
-      debugLog('[TaskLogService.stopWatching] Another view still watching:', watched.watchers);
-      return;
+    if (watched) {
+      this.dropOneView(specDir, watched.viewers, windowId);
+      if (watched.viewers.size > 0) {
+        debugLog('[TaskLogService.stopWatching] Another view still watching:', watched.viewers.size);
+        return;
+      }
     }
     this.clearWatch(specDir);
   }
 
-  /** Stop watching a spec wherever it is watched from (its project is gone, or moved) */
-  stopWatchingSpec(specId: string): void {
+  /**
+   * Give up one view of a watch on behalf of the window that unwatched, or none when the view it
+   * owns cannot be told from another window's.
+   *
+   * The rule cannot stop a poller a live window still needs, because a view is only ever taken
+   * away from the window that holds it under its own id, with one exception that no named view can
+   * be hiding behind: the unattributed count, which is touched only while it is the sole thing
+   * left in the entry. A window whose id could be read when it watched is counted under that id,
+   * so an entry holding a named count is never cut below what those windows hold.
+   *
+   * That leaves two unwatches that drop a view they do not name, both of them confined to that
+   * exception:
+   *
+   * - The unwatch whose window could not be read (`windowId` undefined) while named views are also
+   *   in the entry drops nothing at all. It could be one of those windows unwatching after its id
+   *   became unreadable, or the holder of an unattributed view, and taking the unattributed view on
+   *   that guess is how a window that is still showing the task lost its log stream: its view went
+   *   first, and the registry then released the named view beside it and found the entry empty.
+   *   Leaving the view behind costs a poller that reads two files a second until the window holding
+   *   it closes; guessing costs a dialog that never streams again.
+   * - The unwatch that names a window holding no view, while the unattributed count is all that is
+   *   left, releases one unattributed view. That is the watch taken before the window could be read
+   *   and dropped after it could: the registry leaves unattributed views alone on purpose, so
+   *   nothing else would ever reclaim the poller. Here, too, no named view is in the entry, so the
+   *   only window this can cut off is one that was itself unattributed when it watched - which
+   *   needs one window's attribution to flip between its watch and its unwatch while another window
+   *   is unattributed at the same moment.
+   */
+  private dropOneView(specDir: string, viewers: Map<number, number>, windowId?: number): void {
+    const onlyUnattributed = viewers.size === 1 && viewers.has(UNATTRIBUTED_VIEWER);
+    if (windowId === undefined) {
+      if (!onlyUnattributed) {
+        debugLog('[TaskLogService.stopWatching] Unattributed unwatch beside a named view, keeping both:', specDir);
+        return;
+      }
+      this.releaseView(viewers, UNATTRIBUTED_VIEWER);
+      return;
+    }
+    if (this.releaseView(viewers, windowId)) return;
+    if (onlyUnattributed) {
+      debugLog('[TaskLogService.stopWatching] Releasing the view this window took unattributed:', specDir);
+      this.releaseView(viewers, UNATTRIBUTED_VIEWER);
+    }
+  }
+
+  /** Decrement a viewer's view count, dropping it once it holds none; false when it held none */
+  private releaseView(viewers: Map<number, number>, viewer: number): boolean {
+    const views = viewers.get(viewer);
+    if (views === undefined) return false;
+    if (views > 1) viewers.set(viewer, views - 1);
+    else viewers.delete(viewer);
+    return true;
+  }
+
+  /**
+   * Stop watching a spec wherever it is watched from (its project is gone, or moved).
+   *
+   * With a project named, only that project's watches of the spec go. A task id is only unique
+   * inside its project, so clearing every watch of the id would stop a second project's poller for
+   * a spec that merely shares the name - and that project's task dialog subscribes only when it
+   * mounts, so its log stream would never come back. Without one (a project that has been removed,
+   * whose directories can no longer be worked out) there is nothing to narrow by.
+   */
+  stopWatchingSpec(specId: string, projectId?: string): void {
     for (const [specDir, watched] of [...this.watchedPaths]) {
-      if (watched.specId === specId) this.clearWatch(specDir);
+      if (watched.specId !== specId) continue;
+      if (projectId && watched.projectId && watched.projectId !== projectId) continue;
+      this.clearWatch(specDir);
     }
   }
 
@@ -465,6 +591,13 @@ class TaskLogService extends EventEmitter {
       this.pollIntervals.delete(specDir);
     }
     this.watchedPaths.delete(specDir);
+    // Nothing is watched any more, so there is nothing for a window opening or closing to release.
+    // Left subscribed, the registry would go on calling `releaseClosedWindows` over an empty set on
+    // every window change for the rest of the session, from the first task dialog the user closes.
+    if (this.watchedPaths.size === 0) {
+      this.releaseWindowListener?.();
+      this.releaseWindowListener = null;
+    }
   }
 
   /**
@@ -474,6 +607,8 @@ class TaskLogService extends EventEmitter {
     for (const specDir of [...this.pollIntervals.keys()]) {
       this.clearWatch(specDir);
     }
+    this.releaseWindowListener?.();
+    this.releaseWindowListener = null;
   }
 
   /**

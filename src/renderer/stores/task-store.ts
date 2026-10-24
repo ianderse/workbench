@@ -349,7 +349,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
 
       const index = findTaskIndex(state.tasks, taskId);
       if (index === -1) {
-        console.log('[updateTaskFromPlan] Task not found:', taskId);
+        debugLog('[updateTaskFromPlan] Task not found:', taskId);
         return state;
       }
 
@@ -756,17 +756,36 @@ export async function createTask(
 }
 
 /**
- * Start a task
+ * The project whose board the user acted on, for the calls that reach a task's run. A task id is
+ * only unique inside its project, so the main process cannot work the project out from it: two
+ * projects can both hold `001-add-login`, and searching for the id finds a project that has such
+ * a task rather than the one running it. The store holds one project's tasks, so the task's own
+ * `projectId` is that board; the active project covers a task the store does not have.
  */
-export function startTask(taskId: string, options?: { parallel?: boolean; workers?: number }): void {
-  window.electronAPI.startTask(taskId, options);
+function boardProjectId(taskId: string): string | undefined {
+  const task = useTaskStore.getState().tasks.find((t) => t.id === taskId || t.specId === taskId);
+  return task?.projectId ?? useProjectStore.getState().getActiveProject()?.id;
 }
 
 /**
- * Stop a task
+ * Start a task. `projectId` is the board the start was pressed on (see `boardProjectId`); without
+ * it the main process can only search the projects for the task id and may start the task of that
+ * id in another project.
  */
-export function stopTask(taskId: string): void {
-  window.electronAPI.stopTask(taskId);
+export function startTask(
+  taskId: string,
+  options?: { parallel?: boolean; workers?: number },
+  projectId?: string
+): void {
+  window.electronAPI.startTask(taskId, options, projectId ?? boardProjectId(taskId));
+}
+
+/**
+ * Stop a task. `projectId` is the board the stop was pressed on (see `boardProjectId`); without
+ * it the main process can only stop a run whose task id no other project is running.
+ */
+export function stopTask(taskId: string, projectId?: string): void {
+  window.electronAPI.stopTask(taskId, projectId ?? boardProjectId(taskId));
 }
 
 /**
@@ -777,10 +796,18 @@ export async function submitReview(
   approved: boolean,
   feedback?: string,
   images?: ImageAttachment[],
-  options?: TaskReviewOptions
+  options?: TaskReviewOptions,
+  projectId?: string
 ): Promise<boolean> {
   try {
-    const result = await window.electronAPI.submitReview(taskId, approved, feedback, images, options);
+    const result = await window.electronAPI.submitReview(
+      taskId,
+      approved,
+      feedback,
+      images,
+      options,
+      projectId ?? boardProjectId(taskId)
+    );
     if (result.success) {
       return true;
     }
@@ -807,18 +834,26 @@ export interface PersistStatusResult {
 export async function persistTaskStatus(
   taskId: string,
   status: TaskStatus,
-  options?: { forceCleanup?: boolean; keepWorktree?: boolean }
+  options?: { forceCleanup?: boolean; keepWorktree?: boolean },
+  projectId?: string
 ): Promise<PersistStatusResult> {
   const store = useTaskStore.getState();
 
   try {
-    // Persist to file first (don't optimistically update for 'done' status)
-    const result = await window.electronAPI.updateTaskStatus(taskId, status, options);
+    // Persist to file first (don't optimistically update for 'done' status).
+    // Moving a task out of In Progress stops its run, which needs the project (see
+    // `boardProjectId`)
+    const result = await window.electronAPI.updateTaskStatus(
+      taskId,
+      status,
+      options,
+      projectId ?? boardProjectId(taskId)
+    );
 
     if (!result.success) {
       // Check if this is a worktree exists case
       if (result.worktreeExists) {
-        console.log('[persistTaskStatus] Worktree exists, confirmation needed');
+        debugLog('[persistTaskStatus] Worktree exists, confirmation needed');
         return {
           success: false,
           worktreeExists: true,
@@ -844,8 +879,8 @@ export async function persistTaskStatus(
  * Used when user confirms they want to delete the worktree and mark as done
  * Returns full result including error details for better UX
  */
-export async function forceCompleteTask(taskId: string): Promise<PersistStatusResult> {
-  return persistTaskStatus(taskId, 'done', { forceCleanup: true });
+export async function forceCompleteTask(taskId: string, projectId?: string): Promise<PersistStatusResult> {
+  return persistTaskStatus(taskId, 'done', { forceCleanup: true }, projectId);
 }
 
 /**
@@ -881,13 +916,16 @@ export interface StartTaskOrQueueResult {
  * Backend failures are surfaced asynchronously through task status change events,
  * not through this return value.
  */
-export async function startTaskOrQueue(taskId: string): Promise<StartTaskOrQueueResult> {
+export async function startTaskOrQueue(taskId: string, projectId?: string): Promise<StartTaskOrQueueResult> {
   const task = useTaskStore.getState().tasks.find(t => t.id === taskId);
   // Exclude this task from the capacity check when it's already in_progress (stuck restart)
   const excludeId = task?.status === 'in_progress' ? taskId : undefined;
+  // Both ways of starting reach the task's run, so they carry the board's project (see
+  // `boardProjectId`, which fills it in when the caller has not named it)
+  const board = projectId ?? boardProjectId(taskId);
 
   if (isQueueAtCapacity(excludeId)) {
-    const result = await persistTaskStatus(taskId, 'queue');
+    const result = await persistTaskStatus(taskId, 'queue', undefined, board);
     if (!result.success) {
       console.error('[Queue] Failed to queue task:', taskId, result.error);
       return { action: 'queued', success: false, error: result.error };
@@ -895,7 +933,7 @@ export async function startTaskOrQueue(taskId: string): Promise<StartTaskOrQueue
     return { action: 'queued', success: true };
   }
 
-  startTask(taskId);
+  startTask(taskId, undefined, board);
   return { action: 'started', success: true };
 }
 
@@ -904,9 +942,9 @@ export async function startTaskOrQueue(taskId: string): Promise<StartTaskOrQueue
  * its spec files and starts it again (or queues it when the parallel limit is reached).
  * Clears the previous run's state (run steps, subtasks, logs) from the store.
  */
-export async function retryTask(taskId: string): Promise<StartTaskOrQueueResult> {
+export async function retryTask(taskId: string, projectId?: string): Promise<StartTaskOrQueueResult> {
   try {
-    const result = await window.electronAPI.retryTask(taskId);
+    const result = await window.electronAPI.retryTask(taskId, projectId ?? boardProjectId(taskId));
     if (!result.success || !result.data) {
       return { action: 'started', success: false, error: result.error };
     }
@@ -936,13 +974,14 @@ export async function retryTask(taskId: string): Promise<StartTaskOrQueueResult>
  */
 export async function persistUpdateTask(
   taskId: string,
-  updates: { title?: string; description?: string; metadata?: Partial<TaskMetadata> }
+  updates: { title?: string; description?: string; metadata?: Partial<TaskMetadata> },
+  projectId?: string
 ): Promise<boolean> {
   const store = useTaskStore.getState();
 
   try {
     // Call the IPC to persist changes to spec files
-    const result = await window.electronAPI.updateTask(taskId, updates);
+    const result = await window.electronAPI.updateTask(taskId, updates, projectId ?? boardProjectId(taskId));
 
     if (result.success && result.data) {
       // Update local state with the returned task data
@@ -966,9 +1005,9 @@ export async function persistUpdateTask(
 /**
  * Check if a task has an active running process
  */
-export async function checkTaskRunning(taskId: string): Promise<boolean> {
+export async function checkTaskRunning(taskId: string, projectId?: string): Promise<boolean> {
   try {
-    const result = await window.electronAPI.checkTaskRunning(taskId);
+    const result = await window.electronAPI.checkTaskRunning(taskId, projectId ?? boardProjectId(taskId));
     return result.success && result.data === true;
   } catch (error) {
     console.error('Error checking task running status:', error);
@@ -980,12 +1019,13 @@ export async function checkTaskRunning(taskId: string): Promise<boolean> {
  * Delete a task and its spec directory
  */
 export async function deleteTask(
-  taskId: string
+  taskId: string,
+  projectId?: string
 ): Promise<{ success: boolean; error?: string }> {
   const store = useTaskStore.getState();
 
   try {
-    const result = await window.electronAPI.deleteTask(taskId);
+    const result = await window.electronAPI.deleteTask(taskId, projectId ?? boardProjectId(taskId));
 
     if (result.success) {
       // Remove from local state

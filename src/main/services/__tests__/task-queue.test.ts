@@ -146,17 +146,22 @@ describe('TaskQueue', () => {
 
   it('skips tasks that already have a run', async () => {
     const { queue, startTask } = createHarness({ p1: [makeTask('q1', 'queue')] });
+    const isTaskRunning = vi.fn(() => true);
     queue.configure({
       listProjectIds: () => ['p1'],
       listTasks: () => [makeTask('q1', 'queue')],
       getMaxParallelTasks: () => 3,
-      isTaskRunning: () => true,
+      isTaskRunning,
       startTask,
     });
 
     await queue.processProject('p1');
 
     expect(startTask).not.toHaveBeenCalled();
+    // A task id is only unique within a project, so the run it is asked about has to be named by
+    // both - otherwise an id two projects are running reads as not running and this pass starts a
+    // second run of its own project's task
+    expect(isTaskRunning).toHaveBeenCalledWith('q1', 'p1');
   });
 
   it('counts tasks it started even before their status is written, so it never exceeds the limit', async () => {

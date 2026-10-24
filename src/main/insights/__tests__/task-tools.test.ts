@@ -3,6 +3,8 @@
  * requests; the task IPC handlers and the project store are mocked):
  * - each chat turn has its own token; other requests are refused
  * - tools go through the UI's IPC handlers and the board's move rules
+ * - every call that reaches a task's run or its worktree ends with the chat's own project ('p1'),
+ *   because a task id is only unique inside its project
  * - the board reloads after tools that change tasks
  */
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
@@ -111,7 +113,7 @@ describe('task tools server', () => {
     });
     const { data } = await call(session, 'create_task', { title: 'New one', description: 'Add a health check endpoint', start: true });
     expect(data).toMatchObject({ id: '004-new', action: 'started' });
-    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_START, '004-new');
+    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_START, '004-new', undefined, 'p1');
     expect(onTasksChanged).toHaveBeenCalledTimes(1);
     session.close();
   });
@@ -121,8 +123,8 @@ describe('task tools server', () => {
     const session = await open();
     const { data } = await call(session, 'start_task', { taskId: '001-a' });
     expect(data).toEqual({ id: '001-a', action: 'queued' });
-    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_UPDATE_STATUS, '001-a', 'queue');
-    expect(invokeIpcHandler).not.toHaveBeenCalledWith(IPC_CHANNELS.TASK_START, '001-a');
+    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_UPDATE_STATUS, '001-a', 'queue', undefined, 'p1');
+    expect(invokeIpcHandler).not.toHaveBeenCalledWith(IPC_CHANNELS.TASK_START, '001-a', undefined, 'p1');
     session.close();
   });
 
@@ -134,7 +136,7 @@ describe('task tools server', () => {
     expect(invokeIpcHandler).not.toHaveBeenCalled();
 
     await call(session, 'move_task', { taskId: '002-b', to: 'backlog' });
-    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_UPDATE_STATUS, '002-b', 'backlog', undefined);
+    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_UPDATE_STATUS, '002-b', 'backlog', undefined, 'p1');
     session.close();
   });
 
@@ -146,7 +148,7 @@ describe('task tools server', () => {
     expect(asked.text).toContain('keep it or delete it');
 
     await call(session, 'move_task', { taskId: '002-b', to: 'done', worktree: 'keep' });
-    expect(invokeIpcHandler).toHaveBeenLastCalledWith(IPC_CHANNELS.TASK_UPDATE_STATUS, '002-b', 'done', { keepWorktree: true });
+    expect(invokeIpcHandler).toHaveBeenLastCalledWith(IPC_CHANNELS.TASK_UPDATE_STATUS, '002-b', 'done', { keepWorktree: true }, 'p1');
     session.close();
   });
 
@@ -163,12 +165,12 @@ describe('task tools server', () => {
   it('requests changes and merges pull requests through the same handlers as the UI', async () => {
     const session = await open();
     await call(session, 'request_changes', { taskId: '002-b', feedback: 'Rename the endpoint' });
-    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_REVIEW, '002-b', false, 'Rename the endpoint');
+    expect(invokeIpcHandler).toHaveBeenCalledWith(IPC_CHANNELS.TASK_REVIEW, '002-b', false, 'Rename the endpoint', undefined, undefined, 'p1');
 
     invokeIpcHandler.mockResolvedValueOnce({ success: true, data: { success: true, targetBranch: 'develop', conflictedFiles: [] } });
     const merged = await call(session, 'merge_pull_request', { taskId: '002-b' });
     expect(merged.data).toMatchObject({ id: '002-b', success: true, targetBranch: 'develop' });
-    expect(invokeIpcHandler).toHaveBeenLastCalledWith(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, '002-b', { targetBranch: undefined });
+    expect(invokeIpcHandler).toHaveBeenLastCalledWith(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, '002-b', { targetBranch: undefined }, 'p1');
     session.close();
   });
 });

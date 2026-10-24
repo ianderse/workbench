@@ -163,7 +163,8 @@ export const TaskCard = memo(function TaskCard({
       }
 
       // No recent activity: verify the process is actually gone
-      checkTaskRunning(task.id).then((actuallyRunning) => {
+      // The card's own project: the same task id can sit on another project's board
+      checkTaskRunning(task.id, task.projectId).then((actuallyRunning) => {
         // Re-check activity in case something arrived while the IPC was in flight
         if (hasRecentActivity(task.id)) {
           setIsStuck(false);
@@ -188,7 +189,7 @@ export const TaskCard = memo(function TaskCard({
     if (isRunning) {
       // Allow stopping both running and stuck tasks
       // User should be able to force-stop a stuck task
-      stopTask(task.id);
+      stopTask(task.id, task.projectId);
     } else {
       // A queued task moves to the Queue column, so only a failure needs telling
       const result = await startTaskOrQueue(task.id);
@@ -201,7 +202,7 @@ export const TaskCard = memo(function TaskCard({
   const handleRetry = async (e: React.MouseEvent) => {
     e.stopPropagation();
     setIsRetrying(true);
-    const result = await retryTask(task.id);
+    const result = await retryTask(task.id, task.projectId);
     setIsRetrying(false);
     if (result.success) {
       setIsStuck(false);

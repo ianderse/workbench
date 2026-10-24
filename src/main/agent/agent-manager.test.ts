@@ -81,6 +81,18 @@ vi.mock('../app-logger', () => ({
   appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+// The real one asks git; its own tests cover resolving and the branch that exists nowhere
+vi.mock('../utils/base-branch', () => ({
+  resolveBaseBranch: vi.fn(async (_cwd: string, wanted: string) => wanted),
+  resolveDefaultBaseBranch: vi.fn(async () => 'master'),
+}));
+
+// git answers two questions here: whether the task's branch is already in the repository, and
+// which branch the project has checked out. Nothing is in it by default. Hoisted, because the mock
+// is built while another module's `import '../utils/git-exec'` is resolved
+const mockGit = vi.hoisted(() => vi.fn(async (_args: string[], _options?: unknown) => ({ stdout: '', stderr: '' })));
+vi.mock('../utils/git-exec', () => ({ git: mockGit }));
+
 import { AgentManager } from './agent-manager';
 
 const project = {
@@ -120,10 +132,62 @@ async function nextRun(count: number): Promise<MockRun> {
 describe('AgentManager', () => {
   let manager: AgentManager;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     runs.length = 0;
     vi.clearAllMocks();
+    // Clearing a mock keeps whatever a test set on it, so the modules the run config asks about
+    // its branches are put back the way every test but that one expects them
+    mockGit.mockImplementation(async () => ({ stdout: '', stderr: '' }));
+    const baseBranch = await import('../utils/base-branch');
+    vi.mocked(baseBranch.resolveBaseBranch).mockImplementation(async (_cwd: string, wanted: string) => wanted);
+    vi.mocked(baseBranch.resolveDefaultBaseBranch).mockImplementation(async () => 'master');
     manager = new AgentManager();
+  });
+
+  /**
+   * A branch the user chose is never swapped for another, but when neither the task nor the project
+   * names one there is no choice to honour: the repository is asked for its default instead of the
+   * run assuming `main`, which no `master` project has.
+   */
+  it('asks the repo for its default branch only when no base branch was chosen', async () => {
+    const { resolveBaseBranch, resolveDefaultBaseBranch } = await import('../utils/base-branch');
+
+    const chosenOnTask = makeTask({ metadata: { baseBranch: 'upstream/release' } } as Partial<Task>);
+    await manager.startTask('001-add-login', { project, task: chosenOnTask, mode: 'start' });
+    expect((await nextRun(1)).config.baseBranch).toBe('upstream/release');
+    expect(resolveDefaultBaseBranch).not.toHaveBeenCalled();
+
+    // Chosen as the project's main branch, with nothing on the task
+    await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
+    expect((await nextRun(2)).config.baseBranch).toBe('develop');
+    expect(resolveDefaultBaseBranch).not.toHaveBeenCalled();
+
+    // Nothing chosen anywhere
+    const noMainBranch = { ...project, settings: {} } as unknown as Project;
+    await manager.startTask('001-add-login', { project: noMainBranch, task: makeTask(), mode: 'start' });
+    expect((await nextRun(3)).config.baseBranch).toBe('master');
+    expect(resolveDefaultBaseBranch).toHaveBeenCalledWith('/project');
+    expect(resolveBaseBranch).not.toHaveBeenCalledWith('/project', 'main');
+  });
+
+  /**
+   * A task that needs no worktree can run in a directory that is not a git repository, so the
+   * repository has no default branch to give. The value is only printed in that case, so the run
+   * has to start anyway.
+   */
+  it('starts a worktree-less run in a directory with no branch to detect', async () => {
+    const { resolveDefaultBaseBranch } = await import('../utils/base-branch');
+    vi.mocked(resolveDefaultBaseBranch).mockRejectedValueOnce(
+      new Error('This project has no branch to start the task from')
+    );
+    const noMainBranch = { ...project, settings: {} } as unknown as Project;
+    const noWorktree = makeTask({ metadata: { useWorktree: false } } as Partial<Task>);
+
+    await manager.startTask('001-add-login', { project: noMainBranch, task: noWorktree, mode: 'start' });
+
+    const run = await nextRun(1);
+    expect(run.config.worktreePath).toBe('/project');
+    expect(run.config.baseBranch).toBe('main');
   });
 
   it('builds the run config from the task, project and settings', async () => {
@@ -145,7 +209,7 @@ describe('AgentManager', () => {
     expect(run.config.mode).toBe('start');
     expect(manager.isRunning('001-add-login')).toBe(true);
     expect(registry.registerOperation).toHaveBeenCalledWith(
-      '001-add-login', 'task-execution', 'profile-a', 'Account A', expect.any(Function), expect.anything()
+      'task:project-1:001-add-login', 'task-execution', 'profile-a', 'Account A', expect.any(Function), expect.anything()
     );
   });
 
@@ -168,6 +232,68 @@ describe('AgentManager', () => {
     expect(run.config.mode).toBe('revise');
     expect(run.config.feedback).toBe('Use the shared button');
     expect(run.config.feedbackAttachments).toEqual([{ path: '/tmp/shot.jpg', filename: 'shot.jpg', mimeType: 'image/jpeg' }]);
+  });
+
+  it('passes reviewer images on a start over even when nothing was typed', async () => {
+    // "Request changes" with "Start over" and only screenshots attached: the images are the notes
+    await manager.startTask('001-add-login', {
+      project,
+      task: makeTask(),
+      mode: 'start',
+      feedbackImagePaths: ['/tmp/shot.jpg'],
+    });
+    const run = await nextRun(1);
+    expect(run.config.feedback).toBe('');
+    expect(run.config.feedbackAttachments).toEqual([{ path: '/tmp/shot.jpg', filename: 'shot.jpg', mimeType: 'image/jpeg' }]);
+  });
+
+  /**
+   * A task in Human Review whose base branch was merged and deleted - the normal end state of a
+   * feature branch used as a base - still has its worktree and its branch, and reviving it cuts
+   * nothing from the base branch. Failing it on the missing branch would leave "Request changes"
+   * with no way through at all, and the message would ask for a restart, which discards the work.
+   */
+  it('revises a task whose branch exists even when its base branch resolves nowhere', async () => {
+    const { resolveBaseBranch } = await import('../utils/base-branch');
+    vi.mocked(resolveBaseBranch).mockRejectedValue(new Error('Base branch "feature/login" does not exist'));
+    // `git rev-parse` answers with a sha: the task's branch, and its worktree, are already there
+    mockGit.mockResolvedValue({ stdout: '9f1c0de\n', stderr: '' });
+    const task = makeTask({ metadata: { baseBranch: 'feature/login' } } as Partial<Task>);
+
+    await manager.startTask(task.id, { project, task, mode: 'revise', feedback: 'Use the shared button' });
+    const run = await nextRun(1);
+
+    expect(run.config.mode).toBe('revise');
+    expect(resolveBaseBranch).not.toHaveBeenCalled();
+    // Named as what the worktree came from, which is what the user chose, and read as nothing else
+    expect(run.config.baseBranch).toBe('feature/login');
+  });
+
+  it('reports a failed start when the task\'s base branch cannot be resolved', async () => {
+    const { resolveBaseBranch } = await import('../utils/base-branch');
+    // The message resolving throws is what the user reads, so it has to arrive whole: the
+    // branch that is gone and what to do about it
+    const thrown = 'Base branch "upstream/main" does not exist locally or on any remote. '
+      + 'Give the task a base branch that exists and start it again.';
+    vi.mocked(resolveBaseBranch).mockRejectedValueOnce(new Error(thrown));
+    const taskEvents: Array<Record<string, unknown>> = [];
+    const logs: string[] = [];
+    const errors: string[] = [];
+    manager.on('task-event', (_taskId: string, event: Record<string, unknown>) => taskEvents.push(event));
+    manager.on('log', (_taskId: string, line: string) => logs.push(line));
+    manager.on('error', (_taskId: string, message: string) => errors.push(message));
+    manager.on('exit', () => undefined);
+
+    await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
+
+    expect(runs).toHaveLength(0);
+    expect(taskEvents[0]).toMatchObject({
+      type: 'PLANNING_FAILED',
+      error: thrown,
+      recoverable: true,
+    });
+    expect(logs.join('')).toContain(`Could not start the task: ${thrown}`);
+    expect(errors).toEqual([thrown]);
   });
 
   it('forwards run callbacks as manager events', async () => {
@@ -228,7 +354,8 @@ describe('AgentManager', () => {
     await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
     const run = await nextRun(1);
 
-    expect(manager.killTask('001-add-login')).toBe(true);
+    // It reports the project of the run it stopped, which a caller with no project to name needs
+    expect(manager.killTask('001-add-login')).toBe('project-1');
     expect(run.stop).toHaveBeenCalled();
     expect(manager.isRunning('001-add-login')).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -256,11 +383,123 @@ describe('AgentManager', () => {
     expect(manager.getRunningTasks()).toEqual(['001-add-login', '001-add-login']);
 
     // And stopping one stops only that project's run
-    expect(manager.killTask('001-add-login', 'project-2')).toBe(true);
+    expect(manager.killTask('001-add-login', 'project-2')).toBe('project-2');
     expect(second.stop).toHaveBeenCalled();
     expect(first.stop).not.toHaveBeenCalled();
     expect(manager.isRunning('001-add-login', 'project-1')).toBe(true);
     expect(manager.isRunning('001-add-login', 'project-2')).toBe(false);
+  });
+
+  it('restarts the run of the project it is told, not a same-named task in another', async () => {
+    const other = { ...project, id: 'project-2', path: '/other' } as unknown as Project;
+
+    await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
+    const first = await nextRun(1);
+    await manager.startTask('001-add-login', {
+      project: other,
+      task: makeTask({ projectId: 'project-2' }),
+      mode: 'start',
+    });
+    const second = await nextRun(2);
+
+    expect(manager.restartTask('001-add-login', 'profile-b', 'project-2')).toBe(true);
+
+    expect(second.stop).toHaveBeenCalled();
+    expect(first.stop).not.toHaveBeenCalled();
+    const restarted = await nextRun(3);
+    expect(restarted.config.projectId).toBe('project-2');
+    expect(restarted.config.profileId).toBe('profile-b');
+  });
+
+  /**
+   * The operation registry keys its operations by the id it is handed, so a bare task id would
+   * let the second project's run replace the first's registration - and the first run to end
+   * would then unregister whichever entry was left behind.
+   */
+  it('registers the same task id in two projects as two operations', async () => {
+    const other = { ...project, id: 'project-2', path: '/other' } as unknown as Project;
+
+    await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
+    await nextRun(1);
+    await manager.startTask('001-add-login', {
+      project: other,
+      task: makeTask({ projectId: 'project-2' }),
+      mode: 'start',
+    });
+    await nextRun(2);
+
+    const ids = registry.registerOperation.mock.calls.map((call) => call[0]);
+    expect(ids).toEqual(['task:project-1:001-add-login', 'task:project-2:001-add-login']);
+
+    // Both runs are on the same account, and the queue sees two of them rather than one
+    expect(manager.getRunningTasksByProfile()).toEqual({
+      byProfile: { 'profile-a': ['001-add-login', '001-add-login'] },
+      totalRunning: 2,
+    });
+
+    // And stopping one takes only its own registration with it
+    manager.killTask('001-add-login', 'project-2');
+    expect(registry.unregisterOperation.mock.calls).toEqual([['task:project-2:001-add-login']]);
+    expect(manager.getRunningTasksByProfile().totalRunning).toBe(1);
+  });
+
+  /**
+   * Callers that still name no project (the stop button among them) have to keep working, but
+   * with the same task id in two projects there is no run they can be meaning: stopping one at
+   * random would kill work the user never touched, so the manager refuses and says so.
+   */
+  it('refuses to stop a task by id alone while two projects are running it', async () => {
+    const other = { ...project, id: 'project-2', path: '/other' } as unknown as Project;
+
+    await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
+    const first = await nextRun(1);
+    await manager.startTask('001-add-login', {
+      project: other,
+      task: makeTask({ projectId: 'project-2' }),
+      mode: 'start',
+    });
+    const second = await nextRun(2);
+
+    expect(manager.killTask('001-add-login')).toBeUndefined();
+    expect(first.stop).not.toHaveBeenCalled();
+    expect(second.stop).not.toHaveBeenCalled();
+    expect(manager.isRunning('001-add-login', 'project-1')).toBe(true);
+    expect(manager.isRunning('001-add-login', 'project-2')).toBe(true);
+
+    // The one run left over is found by its task id again, so the tolerant path still works
+    expect(manager.killTask('001-add-login', 'project-2')).toBe('project-2');
+    // It reports the project of the run it stopped, which a caller with no project to name needs
+    expect(manager.killTask('001-add-login')).toBe('project-1');
+    expect(first.stop).toHaveBeenCalled();
+  });
+
+  it('restarts the right project\'s run when the swap comes through the operation registry', async () => {
+    // A rate limit swaps the run through the callback registered with the operation registry, and
+    // that callback has to name its project: with the same 001 running in two projects, the task
+    // id alone would let the swap stop and restart the other project's run
+    const other = { ...project, id: 'project-2', path: '/other' } as unknown as Project;
+
+    await manager.startTask('001-add-login', { project, task: makeTask(), mode: 'start' });
+    const first = await nextRun(1);
+    await manager.startTask('001-add-login', {
+      project: other,
+      task: makeTask({ projectId: 'project-2' }),
+      mode: 'start',
+    });
+    const second = await nextRun(2);
+
+    // The registration of the second project's run, told apart by the project path it carries
+    const registration = registry.registerOperation.mock.calls.find(
+      (call) => (call[5] as { metadata?: { projectPath?: string } } | undefined)?.metadata?.projectPath === '/other'
+    );
+    const swap = registration?.[4] as (profileId: string) => boolean;
+    expect(swap('profile-b')).toBe(true);
+
+    expect(second.stop).toHaveBeenCalled();
+    expect(first.stop).not.toHaveBeenCalled();
+    const restarted = await nextRun(3);
+    expect(restarted.config.projectId).toBe('project-2');
+    expect(restarted.config.profileId).toBe('profile-b');
   });
 
   it('records a rate limit on the profile the run used and tags the event with it', async () => {

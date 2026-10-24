@@ -12,12 +12,49 @@ import { taskHooks } from './task-hooks';
 import { getSpecsDir, AUTO_BUILD_PATHS } from '../shared/constants';
 import { existsSync } from 'fs';
 import path from 'path';
+import { appLog } from './app-logger';
 
 type TaskActor = ActorRefFrom<typeof taskMachine>;
 
 interface TaskContextEntry {
   task: Task;
   project: Project;
+}
+
+/**
+ * A task id is its spec id (`001-<slug>`), which each project numbers from its own start, so two
+ * projects can hold the same one. Everything below is therefore held per project and task: keyed
+ * by the task alone, one project's run reads the other's state machine, has its events dropped
+ * for being behind the other's sequence numbers, and takes the other's terminal event as its own.
+ * The shape is `AgentState`'s, separator included; an entry stored before its project was known
+ * keeps the empty project until a caller names one.
+ */
+const stateKey = (taskId: string, projectId?: string): string => `${projectId ?? ''}\u0000${taskId}`;
+
+/**
+ * The project and the task a key was built from. Neither id can contain the separator, so the
+ * project is everything before the first one and the task everything after it - which is what a
+ * lookup by bare task id has to compare against, having no project to build a key from.
+ */
+const keyProjectId = (key: string): string => key.slice(0, key.indexOf('\u0000'));
+const keyTaskId = (key: string): string => key.slice(key.indexOf('\u0000') + 1);
+
+interface ActorEntry {
+  actor: TaskActor;
+  taskId: string;
+  /**
+   * The project the actor's state is keyed under, empty only while no caller has named one. Its
+   * subscriber reads this on every transition instead of closing over the key, so an actor
+   * adopted by its project (`keyForProject`) goes on emitting under the key its state moved to.
+   */
+  projectId?: string;
+}
+
+/** Carry a map entry over to another key, for an actor adopted by its project */
+function moveEntry<V>(map: Map<string, V>, from: string, to: string): void {
+  if (!map.has(from)) return;
+  map.set(to, map.get(from) as V);
+  map.delete(from);
 }
 
 const TERMINAL_EVENTS = new Set<string>([
@@ -32,14 +69,15 @@ const TERMINAL_EVENTS = new Set<string>([
 ]);
 
 export class TaskStateManager {
-  private actors = new Map<string, TaskActor>();
+  // Every one of these is keyed by project and task (`stateKey`), never by the task alone
+  private actors = new Map<string, ActorEntry>();
   private lastSequenceByTask = new Map<string, number>();
   private lastStateByTask = new Map<string, string>();
   private taskContextById = new Map<string, TaskContextEntry>();
   private terminalEventSeen = new Set<string>();
   private getMainWindow: (() => BrowserWindow | null) | null = null;
   private onTaskCompleted: ((taskId: string, project: Project) => void) | null = null;
-  private onStatusChange: ((taskId: string, status: TaskStatus, projectId?: string) => void) | null = null;
+  private onStatusChange: ((taskId: string, status: TaskStatus, projectId: string) => void) | null = null;
 
   configure(getMainWindow: () => BrowserWindow | null): void {
     this.getMainWindow = getMainWindow;
@@ -55,28 +93,31 @@ export class TaskStateManager {
 
   /**
    * Called after every status the machine emits (persisted first), e.g. so the task
-   * queue can fill a slot freed by a task leaving In Progress
+   * queue can fill a slot freed by a task leaving In Progress. The project is always known
+   * - the machine emits for a task it was given with its project - and the queue needs it to
+   * know which project has the free slot, so it is handed over rather than left optional.
    */
-  setStatusChangeListener(listener: ((taskId: string, status: TaskStatus, projectId?: string) => void) | null): void {
+  setStatusChangeListener(listener: ((taskId: string, status: TaskStatus, projectId: string) => void) | null): void {
     this.onStatusChange = listener;
   }
 
   handleTaskEvent(taskId: string, event: TaskEventPayload, task: Task, project: Project): boolean {
-    const lastSeq = this.lastSequenceByTask.get(taskId);
+    const key = this.keyForProject(taskId, project.id);
+    const lastSeq = this.lastSequenceByTask.get(key);
     console.debug(`[TaskStateManager] handleTaskEvent: ${event.type} seq=${event.sequence}, lastSeq=${lastSeq}`);
 
-    if (!this.isNewSequence(taskId, event.sequence)) {
+    if (!this.isNewSequence(key, event.sequence)) {
       console.debug(`[TaskStateManager] Event ${event.type} DROPPED - sequence ${event.sequence} not newer than ${lastSeq}`);
       return false;
     }
-    this.setTaskContext(taskId, task, project);
-    this.lastSequenceByTask.set(taskId, event.sequence);
+    this.setTaskContext(key, task, project);
+    this.lastSequenceByTask.set(key, event.sequence);
 
     if (TERMINAL_EVENTS.has(event.type)) {
-      this.terminalEventSeen.add(taskId);
+      this.terminalEventSeen.add(key);
     }
 
-    const actor = this.getOrCreateActor(taskId);
+    const actor = this.getOrCreateActor(key, taskId, project.id);
     const stateBefore = String(actor.getSnapshot().value);
     console.debug(`[TaskStateManager] Sending ${event.type} to actor in state: ${stateBefore}`);
     actor.send(event as TaskEvent);
@@ -85,19 +126,30 @@ export class TaskStateManager {
     return true;
   }
 
+  /**
+   * `projectId` is for the one caller that knows the project an exit came from without having
+   * found its task: the run's own exit event carries it, while the task lookup it feeds can still
+   * come back empty (a task deleted while it ran, a project removed from the board).
+   */
   handleProcessExited(
     taskId: string,
     exitCode: number | null,
     task?: Task,
-    project?: Project
+    project?: Project,
+    projectId?: string
   ): void {
-    if (task && project) {
-      this.setTaskContext(taskId, task, project);
-    }
-    if (this.terminalEventSeen.has(taskId)) {
+    const owner = project?.id ?? projectId;
+    const key = this.writeKey(taskId, owner, 'handleProcessExited');
+    if (key === undefined) {
       return;
     }
-    const actor = this.getOrCreateActor(taskId);
+    if (task && project) {
+      this.setTaskContext(key, task, project);
+    }
+    if (this.terminalEventSeen.has(key)) {
+      return;
+    }
+    const actor = this.getOrCreateActor(key, taskId, owner);
     // Only mark as unexpected if the run ended with a non-zero code
     const isUnexpected = exitCode !== 0;
     actor.send({
@@ -109,8 +161,9 @@ export class TaskStateManager {
 
   handleUiEvent(taskId: string, event: TaskEvent, task: Task, project: Project): void {
     console.debug(`[TaskStateManager] handleUiEvent: ${event.type} for task ${taskId}`);
-    this.setTaskContext(taskId, task, project);
-    const actor = this.getOrCreateActor(taskId);
+    const key = this.keyForProject(taskId, project.id);
+    this.setTaskContext(key, task, project);
+    const actor = this.getOrCreateActor(key, taskId, project.id);
     const stateBefore = String(actor.getSnapshot().value);
     console.debug(`[TaskStateManager] Sending UI event ${event.type} to actor in state: ${stateBefore}`);
     actor.send(event);
@@ -133,7 +186,7 @@ export class TaskStateManager {
         return true;
       case 'in_progress': {
         // Use XState as source of truth for determining correct event
-        const currentState = this.getCurrentState(taskId);
+        const currentState = this.getCurrentState(taskId, project.id);
         if (currentState === 'queued' || (!currentState && task.status === 'queue' && task.rateLimitHold)) {
           // Rate-limit hold released: restart via planning; the Claude Code run continues
           // from its saved state (triage/plan/implementation aren't repeated)
@@ -166,24 +219,29 @@ export class TaskStateManager {
     }
   }
 
-  setLastSequence(taskId: string, sequence: number): void {
-    this.lastSequenceByTask.set(taskId, sequence);
+  setLastSequence(taskId: string, sequence: number, projectId?: string): void {
+    const key = this.writeKey(taskId, projectId, 'setLastSequence');
+    if (key !== undefined) {
+      this.lastSequenceByTask.set(key, sequence);
+    }
   }
 
-  getLastSequence(taskId: string): number | undefined {
-    return this.lastSequenceByTask.get(taskId);
+  getLastSequence(taskId: string, projectId?: string): number | undefined {
+    const key = this.resolveKey(taskId, projectId, 'getLastSequence');
+    return key !== undefined ? this.lastSequenceByTask.get(key) : undefined;
   }
 
   /**
-   * Get the current XState state for a task.
-   * Returns undefined if no actor exists for the task.
+   * Get the current XState state for a task of a project.
+   * Returns undefined if no actor exists for it.
    */
-  getCurrentState(taskId: string): string | undefined {
-    const actor = this.actors.get(taskId);
-    if (!actor) {
+  getCurrentState(taskId: string, projectId?: string): string | undefined {
+    const key = this.resolveKey(taskId, projectId, 'getCurrentState');
+    const entry = key !== undefined ? this.actors.get(key) : undefined;
+    if (!entry) {
       return undefined;
     }
-    return String(actor.getSnapshot().value);
+    return String(entry.actor.getSnapshot().value);
   }
 
   /**
@@ -193,57 +251,193 @@ export class TaskStateManager {
    * as duplicates). Does NOT stop or remove the XState actor, since
    * the caller may still need to send events to it.
    */
-  prepareForRestart(taskId: string): void {
-    this.terminalEventSeen.delete(taskId);
-    this.lastSequenceByTask.delete(taskId);
+  prepareForRestart(taskId: string, projectId?: string): void {
+    const key = this.resolveKey(taskId, projectId, 'prepareForRestart');
+    if (key === undefined) {
+      return;
+    }
+    this.terminalEventSeen.delete(key);
+    this.lastSequenceByTask.delete(key);
   }
 
-  clearTask(taskId: string): void {
-    this.lastSequenceByTask.delete(taskId);
-    this.lastStateByTask.delete(taskId);
-    this.terminalEventSeen.delete(taskId);
-    this.taskContextById.delete(taskId);
-    const actor = this.actors.get(taskId);
-    if (actor) {
-      actor.stop();
-      this.actors.delete(taskId);
+  clearTask(taskId: string, projectId?: string): void {
+    const key = this.resolveKey(taskId, projectId, 'clearTask');
+    if (key !== undefined) {
+      this.dropKey(key);
     }
   }
 
   /**
-   * Clear all task state. Called by TASK_LIST handler when forceRefresh is true.
-   * This ensures actors are recreated with fresh task data when the user
-   * triggers a manual refresh from the UI.
+   * Clear task state. Called by the TASK_LIST handler when forceRefresh is true, with the project
+   * whose board asked: actors are then recreated from that project's fresh task data, while the
+   * other projects' running tasks keep the machines their events are driving. State held under no
+   * project yet is left for whichever project claims it, since it may be another project's.
    *
    * Note: lastSequenceByTask is preserved to prevent duplicate event processing
    * if backend events arrive during the refresh window. Sequence numbers are
    * specific to task execution sessions and should remain valid across UI refreshes.
    */
-  clearAllTasks(): void {
-    for (const [_taskId, actor] of this.actors) {
-      actor.stop();
+  clearAllTasks(projectId?: string): void {
+    for (const key of this.heldKeys()) {
+      if (projectId !== undefined && keyProjectId(key) !== projectId) {
+        continue;
+      }
+      this.actors.get(key)?.actor.stop();
+      this.actors.delete(key);
+      // Preserve lastSequenceByTask to prevent duplicate event processing during refresh
+      // Only clear state that needs to be rebuilt from fresh task data
+      this.lastStateByTask.delete(key);
+      this.terminalEventSeen.delete(key);
+      this.taskContextById.delete(key);
     }
-    this.actors.clear();
-    // Preserve lastSequenceByTask to prevent duplicate event processing during refresh
-    // Only clear state that needs to be rebuilt from fresh task data
-    this.lastStateByTask.clear();
-    this.terminalEventSeen.clear();
-    this.taskContextById.clear();
-    console.log('[TaskStateManager] Cleared task actors and state for refresh (preserved sequence tracking)');
+    appLog.info(
+      `[TaskStateManager] Cleared task actors and state for refresh of ${projectId ?? 'every project'} (preserved sequence tracking)`
+    );
   }
 
-  private setTaskContext(taskId: string, task: Task, project: Project): void {
-    this.taskContextById.set(taskId, { task, project });
+  /** Every key any of the collections holds, which is what a project-wide or global sweep walks */
+  private heldKeys(): Set<string> {
+    const keys = new Set<string>();
+    for (const collection of this.collections()) {
+      for (const key of collection.keys()) keys.add(key);
+    }
+    return keys;
   }
 
-  private getOrCreateActor(taskId: string): TaskActor {
-    const existing = this.actors.get(taskId);
+  /** The collections a task's state lives in, so one lookup can answer for all of them */
+  private collections(): Array<{ has(key: string): boolean; keys(): IterableIterator<string> }> {
+    return [
+      this.actors,
+      this.lastSequenceByTask,
+      this.lastStateByTask,
+      this.taskContextById,
+      this.terminalEventSeen
+    ];
+  }
+
+  private heldAt(key: string): boolean {
+    return this.collections().some((collection) => collection.has(key));
+  }
+
+  /**
+   * The key a task's state is held under, or undefined when none of it is held for the task.
+   *
+   * A caller that names the project gets that project's state, and otherwise state stored before
+   * any project was known - never another project's. Almost every caller names one now (the board
+   * sends the project of the card the user acted on, and the handlers pass it through), but a bare
+   * task id still has to answer for the callers that genuinely have none, such as a file-watcher
+   * event: with one project holding the task there is nothing to confuse it with. When two
+   * projects hold it there is no honest answer, and guessing would report the other project's run
+   * as active or stop its actor, so the lookup says which task it was asked about and refuses.
+   */
+  private resolveKey(taskId: string, projectId: string | undefined, operation: string): string | undefined {
+    const { key, ambiguous } = this.locate(taskId, projectId);
+    if (ambiguous) {
+      appLog.warn(
+        `[TaskStateManager] ${operation}: ${taskId} is in more than one project and no project was named, doing nothing`
+      );
+    }
+    return key;
+  }
+
+  /**
+   * The lookup itself: `ambiguous` tells a caller that has to write apart from one that only
+   * reads, since storing state under no project while two projects hold the task would leave a
+   * third entry that every later bare-task-id lookup would find first.
+   */
+  private locate(
+    taskId: string,
+    projectId: string | undefined
+  ): { key: string | undefined; ambiguous: boolean } {
+    const exact = stateKey(taskId, projectId);
+    if (this.heldAt(exact)) return { key: exact, ambiguous: false };
+    if (projectId) {
+      const projectless = stateKey(taskId, undefined);
+      return { key: this.heldAt(projectless) ? projectless : undefined, ambiguous: false };
+    }
+
+    let found: string | undefined;
+    for (const key of this.heldKeys()) {
+      if (keyTaskId(key) !== taskId) continue;
+      if (found !== undefined) return { key: undefined, ambiguous: true };
+      found = key;
+    }
+    return { key: found, ambiguous: false };
+  }
+
+  /**
+   * The key a caller that names its project writes under. State stored before any project was
+   * known - a process exit whose task lookup came back empty - is carried over to it instead of
+   * being left behind: a second entry for the same task would make every later bare-id lookup
+   * ambiguous, and a second actor for one task run would emit that task's statuses twice. The
+   * actor moves with its state, so an in-flight machine keeps its current state and its
+   * subscription; only the key it is filed under changes.
+   */
+  private keyForProject(taskId: string, projectId: string): string {
+    const key = stateKey(taskId, projectId);
+    const projectless = stateKey(taskId, undefined);
+    if (!this.heldAt(projectless)) return key;
+    if (this.heldAt(key)) {
+      // The project's own state took over in the meantime, so what is left under no project is
+      // stale and would answer a later bare lookup in place of it
+      this.dropKey(projectless);
+      return key;
+    }
+    const entry = this.actors.get(projectless);
+    if (entry) {
+      entry.projectId = projectId;
+      this.actors.set(key, entry);
+      this.actors.delete(projectless);
+    }
+    moveEntry(this.lastSequenceByTask, projectless, key);
+    moveEntry(this.lastStateByTask, projectless, key);
+    moveEntry(this.taskContextById, projectless, key);
+    if (this.terminalEventSeen.delete(projectless)) this.terminalEventSeen.add(key);
+    return key;
+  }
+
+  /**
+   * The key a write belongs under: the project's own when one is named, otherwise whatever entry
+   * the task id already has, or a fresh projectless one. Refuses when two projects hold the task
+   * and none was named, rather than adding a third entry that outranks both.
+   */
+  private writeKey(taskId: string, projectId: string | undefined, operation: string): string | undefined {
+    if (projectId !== undefined) return this.keyForProject(taskId, projectId);
+    const { key, ambiguous } = this.locate(taskId, undefined);
+    if (ambiguous) {
+      appLog.warn(
+        `[TaskStateManager] ${operation}: ${taskId} is in more than one project and no project was named, doing nothing`
+      );
+      return undefined;
+    }
+    return key ?? stateKey(taskId, undefined);
+  }
+
+  /** Forget everything held under one key, stopping its actor */
+  private dropKey(key: string): void {
+    this.lastSequenceByTask.delete(key);
+    this.lastStateByTask.delete(key);
+    this.terminalEventSeen.delete(key);
+    this.taskContextById.delete(key);
+    const entry = this.actors.get(key);
+    if (entry) {
+      entry.actor.stop();
+      this.actors.delete(key);
+    }
+  }
+
+  private setTaskContext(key: string, task: Task, project: Project): void {
+    this.taskContextById.set(key, { task, project });
+  }
+
+  private getOrCreateActor(key: string, taskId: string, projectId?: string): TaskActor {
+    const existing = this.actors.get(key);
     if (existing) {
-      console.debug(`[TaskStateManager] Using existing actor for ${taskId}, current state:`, String(existing.getSnapshot().value));
-      return existing;
+      console.debug(`[TaskStateManager] Using existing actor for ${taskId}, current state:`, String(existing.actor.getSnapshot().value));
+      return existing.actor;
     }
 
-    const contextEntry = this.taskContextById.get(taskId);
+    const contextEntry = this.taskContextById.get(key);
     const snapshot = contextEntry
       ? this.buildSnapshotFromTask(contextEntry.task)
       : undefined;
@@ -262,9 +456,14 @@ export class TaskStateManager {
     const actor = snapshot
       ? createActor(taskMachine, { snapshot })
       : createActor(taskMachine);
+    const actorEntry: ActorEntry = { actor, taskId, projectId };
     actor.subscribe((snapshot) => {
+      // The key is read from the entry on every transition rather than closed over: an actor
+      // adopted by its project is re-keyed under it, and a captured key would go on writing the
+      // task's last state and reading its context under the key the actor was created with
+      const key = stateKey(actorEntry.taskId, actorEntry.projectId);
       const stateValue = String(snapshot.value);
-      const lastState = this.lastStateByTask.get(taskId);
+      const lastState = this.lastStateByTask.get(key);
 
       console.debug(`[TaskStateManager] XState transition for ${taskId}:`, {
         from: lastState,
@@ -275,9 +474,9 @@ export class TaskStateManager {
       if (lastState === stateValue) {
         return;
       }
-      this.lastStateByTask.set(taskId, stateValue);
+      this.lastStateByTask.set(key, stateValue);
 
-      const contextEntry = this.taskContextById.get(taskId);
+      const contextEntry = this.taskContextById.get(key);
       if (!contextEntry) {
         console.debug(`[TaskStateManager] No context for task ${taskId} during state transition to ${stateValue} - skipping emit (may occur after clearTask during event processing)`);
         return;
@@ -309,7 +508,7 @@ export class TaskStateManager {
     });
 
     actor.start();
-    this.actors.set(taskId, actor);
+    this.actors.set(key, actorEntry);
     return actor;
   }
 
@@ -350,7 +549,7 @@ export class TaskStateManager {
     taskId: string,
     status: TaskStatus,
     reviewReason: ReviewReason | undefined,
-    projectId?: string
+    projectId: string
   ): void {
     try {
       this.onStatusChange?.(taskId, status, projectId);
@@ -372,8 +571,8 @@ export class TaskStateManager {
     );
   }
 
-  private isNewSequence(taskId: string, sequence: number): boolean {
-    const last = this.lastSequenceByTask.get(taskId);
+  private isNewSequence(key: string, sequence: number): boolean {
+    const last = this.lastSequenceByTask.get(key);
     // Use >= to accept the first event when sequence equals last (e.g., both are 0)
     // This handles the case where we reload lastSequence from plan file and the next
     // event has the same sequence number (which shouldn't happen, but we should be lenient)

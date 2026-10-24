@@ -101,13 +101,21 @@ export function registerTerminalHandlers(
         const settings = await readSettingsFileAsync();
         const dangerouslySkipPermissions = settings?.dangerouslySkipPermissions === true;
         const taskId = options.taskId;
-        if (taskId && agentManager?.isRunning(taskId)) {
+        // The project comes with the request, because a task id is only unique within one: the
+        // renderer builds the request from the task and names its project, so the window follows
+        // that project's run and never another project's run of a task of the same id. A request
+        // without a project (a window restored from a saved session, or an older renderer) still
+        // asks for the run by task id alone, which AgentManager answers only while the id is
+        // unambiguous; otherwise the window resumes the session it was handed, which is the
+        // session the task's own run wrote and so the right transcript either way.
+        const projectId = options.projectId;
+        if (taskId && agentManager?.isRunning(taskId, projectId)) {
           terminalManager.followTaskSession(
             id,
             options,
             {
-              isRunning: () => agentManager.isRunning(taskId),
-              getSession: () => agentManager.getRunSession(taskId),
+              isRunning: () => agentManager.isRunning(taskId, projectId),
+              getSession: () => agentManager.getRunSession(taskId, projectId),
             },
             dangerouslySkipPermissions
           );
