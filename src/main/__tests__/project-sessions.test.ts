@@ -25,8 +25,11 @@ describe('finding a project\'s sessions', () => {
 
   /** A transcript Claude Code wrote for a session that ran in `cwd` */
   const givenSession = (configDir: string, sessionId: string, cwd: string, writtenMs = Date.now()): string => {
-    // Claude Code drops the drive letter and replaces both separators and dots in the directory name
-    const folder = cwd.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, '').replace(/[/.]/g, '-');
+    // Claude Code names the folder after the directory with every character that is not a letter
+    // or a digit replaced by a dash, the drive letter included (`/home/me/.config` becomes
+    // `-home-me--config`). Anything narrower matches nothing at all on a host whose temporary
+    // directory holds a character this rule replaces and that one keeps.
+    const folder = cwd.replace(/[^a-zA-Z0-9]/g, '-');
     const dir = path.join(root, configDir, 'projects', folder);
     mkdirSync(dir, { recursive: true });
     const file = path.join(dir, `${sessionId}.jsonl`);

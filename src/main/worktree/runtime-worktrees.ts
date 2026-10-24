@@ -106,8 +106,9 @@ async function currentGit(): Promise<{ version: string | null; path: string | nu
  */
 async function macosSystemGitSupportsRelative(currentGitPath: string | null): Promise<boolean> {
   if (!isMacOS() || !existsSync(MACOS_SYSTEM_GIT)) return true;
-  // The session already runs the system git: its version was checked by the caller
-  if (currentGitPath && path.resolve(currentGitPath) === MACOS_SYSTEM_GIT) return true;
+  // The session already runs the system git: its version was checked by the caller. Both paths are
+  // POSIX ones, so they are compared by POSIX rules rather than the host's.
+  if (currentGitPath && path.posix.resolve(currentGitPath) === MACOS_SYSTEM_GIT) return true;
   if (macosSystemGitRelative === undefined) {
     try {
       const { stdout } = await runTool('git', ['--version'], {

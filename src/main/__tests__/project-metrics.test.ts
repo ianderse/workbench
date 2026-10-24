@@ -367,7 +367,9 @@ describe('agent window spending', () => {
   describe('every Claude Code session of the project', () => {
     /** A transcript of a session that ran in `cwd`, in the folder Claude Code names after it */
     const givenSession = (sessionId: string, cwd: string, day: string, costUsd: number): string => {
-      const dir = path.join(root, 'config', 'projects', cwd.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, '').replace(/[/.]/g, '-'));
+      // The folder Claude Code names after the directory: every character that is not a letter or
+      // a digit becomes a dash (`/home/me/.config` becomes `-home-me--config`)
+      const dir = path.join(root, 'config', 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'));
       mkdirSync(dir, { recursive: true });
       const file = path.join(dir, `${sessionId}.jsonl`);
       writeFileSync(
