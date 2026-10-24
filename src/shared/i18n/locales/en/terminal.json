@@ -50,7 +50,7 @@
   },
   "grid": {
     "emptyTitle": "Agents",
-    "emptyDescription": "Run Claude agents side by side, each in its own terminal.",
+    "emptyDescription": "Run {{agent}} agents side by side, each in its own terminal.",
     "newTerminal": "New terminal",
     "count": "{{count}} / {{max}} windows",
     "settingsAriaLabel": "Agent window limit settings",

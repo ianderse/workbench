@@ -38,12 +38,26 @@ i18n
     defaultNS,
     ns: ['common', 'navigation', 'settings', 'tasks', 'welcome', 'dialogs', 'taskReview', 'terminal', 'errors'],
     interpolation: {
-      escapeValue: false // React already escapes values
+      escapeValue: false, // React already escapes values
+      // Agent backend names, available to every string as {{agent}} / {{agentCli}} (see setAgentBackendNames)
+      defaultVariables: { agent: 'Claude', agentCli: 'Claude Code' }
     },
     react: {
       useSuspense: false // Disable suspense for Electron compatibility
     }
   });
+
+/**
+ * Point {{agent}} / {{agentCli}} at the active agent backend and re-render translated components
+ * (react-i18next re-renders on languageChanged).
+ */
+export function setAgentBackendNames(kind: 'claude' | 'omp' | undefined): void {
+  const vars = kind === 'omp' ? { agent: 'OMP', agentCli: 'OMP' } : { agent: 'Claude', agentCli: 'Claude Code' };
+  const current = i18n.options.interpolation?.defaultVariables as { agent?: string } | undefined;
+  if (current?.agent === vars.agent) return;
+  i18n.options.interpolation = { ...i18n.options.interpolation, defaultVariables: vars };
+  i18n.emit('languageChanged', i18n.language);
+}
 
 /** @internal The configured instance, for tests (the app loads this module for its side effects) */
 export default i18n;

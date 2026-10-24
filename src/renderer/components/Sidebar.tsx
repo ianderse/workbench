@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
-  PanelLeft
+  PanelLeft,
+  Sparkles
 } from 'lucide-react';
 import { AgentNodeIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
 import { useMemoryGraphStore } from '../stores/memory-graph-store';
@@ -161,7 +162,7 @@ export function Sidebar({
         aria-current={isActive ? 'page' : undefined}
         className={rowClass(isActive)}
       >
-        {renderRowIcon(item.icon)}
+        {renderRowIcon(item.id === 'insights' && settings.agentBackend?.kind === 'omp' ? Sparkles : item.icon)}
         {!isCollapsed && <span className="min-w-0 flex-1 truncate text-left">{label}</span>}
       </button>
     );

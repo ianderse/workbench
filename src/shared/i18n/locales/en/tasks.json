@@ -179,8 +179,8 @@
   },
   "wizard": {
     "createTitle": "Create new task",
-    "createDescription": "Claude Code plans and builds it in an isolated worktree",
-    "descriptionPlaceholder": "What should Claude Code do?",
+    "createDescription": "{{agentCli}} plans and builds it in an isolated worktree",
+    "descriptionPlaceholder": "What should {{agentCli}} do?",
     "draftRestored": "Draft restored",
     "startFresh": "Start fresh",
     "creating": "Creating...",
@@ -228,7 +228,7 @@
   },
   "form": {
     "description": "Description",
-    "descriptionPlaceholder": "What should Claude Code do?",
+    "descriptionPlaceholder": "What should {{agentCli}} do?",
     "attachFiles": "Attach files",
     "dropToAttach": "Drop images to attach",
     "imageAddedSuccess": "Image added successfully!",
@@ -275,7 +275,7 @@
   },
   "warnings": {
     "incompleteTitle": "Task incomplete",
-    "incompleteDescription": "This task stopped before Claude Code finished it ({{completed}}/{{total}} task list items done). The process likely exited early. Resume to continue the same session.",
+    "incompleteDescription": "This task stopped before {{agentCli}} finished it ({{completed}}/{{total}} task list items done). The process likely exited early. Resume to continue the same session.",
     "resume": "Resume task"
   },
   "previousRuns": {

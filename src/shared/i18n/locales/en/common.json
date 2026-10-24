@@ -160,7 +160,7 @@
     "send": "Send message",
     "sending": "Sending…",
     "thinking": "Thinking…",
-    "disclaimer": "Claude is AI and can make mistakes.",
+    "disclaimer": "{{agent}} is AI and can make mistakes.",
     "copyResponse": "Copy response",
     "copied": "Copied",
     "tools": {
@@ -229,8 +229,8 @@
     },
     "kanbanTools": {
       "label": "Kanban",
-      "off": "Let Claude manage this project's tasks",
-      "on": "Claude can manage this project's tasks"
+      "off": "Let {{agent}} manage this project's tasks",
+      "on": "{{agent}} can manage this project's tasks"
     }
   },
   "usage": {

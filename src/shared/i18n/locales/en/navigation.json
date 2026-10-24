@@ -9,7 +9,7 @@
   "items": {
     "kanban": "Kanban",
     "terminals": "Agents",
-    "insights": "Claude",
+    "insights": "{{agent}}",
     "projects": "Projects",
     "memory": "Graph"
   },

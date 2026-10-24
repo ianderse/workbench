@@ -64,7 +64,7 @@ import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/
 import { DATA_DIR_NAMES } from '../../shared/constants';
 import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
 import { appLog } from '../app-logger';
-import { getAgentBackendSettings } from '../agent-backend/settings';
+import { agentDisplayName, getAgentBackendSettings } from '../agent-backend/settings';
 import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
 import { startOmpProcess } from '../agent-backend/omp-process';
 import { isOmpNotice, isOmpTodos } from '../agent-backend/omp-translate';
@@ -499,7 +499,7 @@ export class ClaudeTaskRun {
     await whenShellRuntimeReady();
     const runtime = currentRuntime();
     if (this.info.sessionId && (this.info.runtime ?? 'native') !== runtime) {
-      this.emitLog(`Claude Code now runs ${runtime === 'wsl' ? 'in WSL' : 'natively'}, so this step starts a new session`);
+      this.emitLog(`${agentDisplayName()} now runs ${runtime === 'wsl' ? 'in WSL' : 'natively'}, so this step starts a new session`);
       this.info.sessionId = undefined;
     }
     if (this.info.runtime !== runtime) {
@@ -581,7 +581,7 @@ export class ClaudeTaskRun {
         || result?.errors?.join('; ')
         || (result?.subtype === 'error_max_budget_usd' ? 'The task reached its budget limit (Settings > Project)' : '')
         || result?.result
-        || 'Claude Code stopped with an error';
+        || `${agentDisplayName()} stopped with an error`;
       this.endPhase(phase, { isError: true, error }, result);
       this.log.endPhase(logPhase, false, error);
       this.failEvent(name, error);
@@ -850,7 +850,7 @@ no notes came with the request, so review the change against the task with fresh
     if (rateLimit) return { rateLimit, stopped: false, result };
     if (authFailed) return { authFailed, stopped: false, result };
     if (!result) {
-      const error = outcome.stderr.trim().split('\n').slice(-3).join(' ') || `Claude Code exited with code ${outcome.exitCode}`;
+      const error = outcome.stderr.trim().split('\n').slice(-3).join(' ') || `${agentDisplayName()} exited with code ${outcome.exitCode}`;
       return { stopped: false, error };
     }
     return { result, stopped: false };

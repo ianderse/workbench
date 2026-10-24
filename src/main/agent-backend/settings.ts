@@ -33,3 +33,8 @@ export function getAgentBackendSettings(): AgentBackendSettings {
 export function isOmpBackend(): boolean {
   return getAgentBackendSettings().kind === 'omp';
 }
+
+/** Name of the agent backend in use, for text the user sees ("Claude Code" or "OMP") */
+export function agentDisplayName(): string {
+  return isOmpBackend() ? 'OMP' : 'Claude Code';
+}

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { setAgentBackendNames } from '../../shared/i18n';
 import type { AppSettings } from '../../shared/types';
 import type { APIProfile, ProfileFormData, TestConnectionResult, ModelInfo } from '@shared/types/profile';
 import { DEFAULT_APP_SETTINGS } from '../../shared/constants';
@@ -325,3 +326,11 @@ export async function loadProfiles(): Promise<void> {
     store.setProfilesLoading(false);
   }
 }
+
+// Keep {{agent}} / {{agentCli}} in translated strings in step with the selected agent backend
+setAgentBackendNames(useSettingsStore.getState().settings.agentBackend?.kind);
+useSettingsStore.subscribe((state, prev) => {
+  if (state.settings.agentBackend?.kind !== prev.settings.agentBackend?.kind) {
+    setAgentBackendNames(state.settings.agentBackend?.kind);
+  }
+});

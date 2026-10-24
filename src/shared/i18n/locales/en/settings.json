@@ -27,7 +27,7 @@
     },
     "agents": {
       "title": "Agents",
-      "description": "How tasks run in Claude Code"
+      "description": "How tasks run in {{agentCli}}"
     },
     "paths": {
       "title": "Paths",
@@ -562,9 +562,9 @@
         "fixed": "Fixed"
       },
       "model": "Model",
-      "modelDescription": "Model Claude Code uses for every task",
+      "modelDescription": "Model {{agentCli}} uses for every task",
       "effort": "Effort",
-      "effortDescription": "How much Claude Code thinks before it acts",
+      "effortDescription": "How much {{agentCli}} thinks before it acts",
       "triageModel": "Triage model",
       "triageModelDescription": "Model that assesses each task before it starts",
       "allowFable": "Allow Fable",
