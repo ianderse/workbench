@@ -15,7 +15,7 @@
 import { git as runGit } from '../../../utils/git-exec';
 import { runTool } from '../../../platform/runtime-exec';
 import type { MergeAgentFn } from '../merge-agent';
-import { mergeTargetIntoBranch } from '../merge-target-into-branch';
+import { abortOwnWorktreeMerge, inspectWorktreeMerge, mergeTargetIntoBranch } from '../merge-target-into-branch';
 import type { MergePRStep, WorktreeMergePRResult } from '../../../../shared/types/task';
 
 export interface MergePRConfig {
@@ -61,7 +61,6 @@ export async function mergePR(config: MergePRConfig): Promise<MergePRResult> {
   const gh = config.gh ?? (async (args: string[]) =>
     (await runTool('gh', args, { cwd: projectDir, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 })).stdout);
   const dataDir = `${(config.dataDir || '.workbench').replace(/\\/g, '/')}/`;
-  const isMerging = () => git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).then(() => true, () => false);
 
   // 1. The pull request
   onProgress?.('checking');
@@ -76,8 +75,13 @@ export async function mergePR(config: MergePRConfig): Promise<MergePRResult> {
   const target = config.targetBranch?.trim() || view.baseRefName;
   const targetRef = `origin/${target}`;
 
-  // A merge left over from an interrupted attempt starts over; other changes must be committed
-  if (await isMerging()) await git(['merge', '--abort']).catch(() => undefined);
+  // A merge Workbench left over from an interrupted attempt starts over; anyone else's merge in
+  // progress is refused; other changes must be committed
+  const leftover = await inspectWorktreeMerge(worktreePath);
+  if (leftover === 'foreign') {
+    return { success: false, error: "A merge is in progress in the task's worktree. Finish or abort it before merging." };
+  }
+  if (leftover === 'own') await abortOwnWorktreeMerge(worktreePath);
   const dirty = (await git(['status', '--porcelain', '--untracked-files=no']))
     .split('\n')
     .filter((line) => line.trim() && !line.slice(3).startsWith(dataDir));

@@ -5,7 +5,8 @@
  * - a fast-forward when the task has no commits of its own
  * - starts the task, or queues it at the parallel task limit
  * - leaves failed requests, running tasks, branches being merged and local merges for PR tasks alone
- * - picks up a request when a run ends, but not when the user stopped it
+ * - picks up a request when a run ends, but not when the user stopped it (at startup neither)
+ * - checks a merge the task's session made itself before dropping the request
  */
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
@@ -19,6 +20,7 @@ vi.mock('../../cli-tool-manager', () => ({ getToolPath: () => 'git', getToolPath
 
 import { TaskResync, type TaskResyncDeps } from '..';
 import { readResyncRequest, recordResyncRequest, updateResyncRequest } from '../request';
+import { clearStoppedByUser, markStoppedByUser } from '../user-stop';
 import { guardKey, mergingPRs } from '../../worktree/merge-guard';
 import { taskHooks } from '../../task-hooks';
 
@@ -176,7 +178,10 @@ describe('TaskResync', () => {
     commitFile(root, 'c.txt', 'from a\n', 'a merged');
     requestFor('002-b');
     requestFor('003-c');
-    writeFileSync(path.join(specDirOf('003-c'), 'claude_run.json'), JSON.stringify({ phases: [{ name: 'implement', isError: true, error: 'Stopped' }] }));
+    // Stopped by the user: recorded before the task's state changes, while its run has not written
+    // its "Stopped" phase yet
+    markStoppedByUser(specDirOf('003-c'));
+    writeFileSync(path.join(specDirOf('003-c'), 'claude_run.json'), JSON.stringify({ phases: [{ name: 'implement', endedAt: 'x' }] }));
     taskHooks.emit('state', { project, task: c, status: 'human_review' });
     taskHooks.emit('state', { project, task: b, status: 'human_review' });
     await untilCalled();
@@ -184,12 +189,55 @@ describe('TaskResync', () => {
     expect(calls).toEqual(['start 002-b']);
   });
 
-  it('picks up requests left from before a restart', async () => {
+  it('picks up requests left from before a restart, but not of a task the user stopped', async () => {
     pending('002-b');
+    pending('003-c');
     commitFile(root, 'c.txt', 'from a\n', 'a merged');
     requestFor('002-b');
+    requestFor('003-c');
+    markStoppedByUser(specDirOf('003-c'));
     resync.scan(['p1']);
     await untilCalled();
+    await new Promise((resolve) => setTimeout(resolve, 50));
     expect(calls).toEqual(['start 002-b']);
+    // Until the user starts it
+    expect(await resync.process('p1', '003-c')).toBe('none');
+    clearStoppedByUser(specDirOf('003-c'));
+    expect(await resync.process('p1', '003-c')).toBe('started');
+  });
+
+  it("checks a merge the task's session made while it ran: drops the request when it holds, starts the task when it does not", async () => {
+    const good = worktreeOf('002-b');
+    const bad = worktreeOf('003-c');
+    pending('002-b');
+    pending('003-c');
+    commitFile(good, 'a.txt', 'one\nfrom b\n', 'b changes a');
+    commitFile(bad, 'a.txt', 'one\nfrom c\n', 'c changes a');
+    commitFile(root, 'a.txt', 'one\nfrom main\nmore from main\n', 'a merged');
+    requestFor('002-b');
+    requestFor('003-c');
+    // Each session merged main when it was told to; 003-c dropped main's lines
+    for (const [dir, content] of [[good, 'one\nfrom b\nfrom main\nmore from main\n'], [bad, 'one\nfrom c\n']]) {
+      try { git(dir, 'merge', '--no-edit', 'main'); } catch { /* conflicts */ }
+      writeFileSync(path.join(dir, 'a.txt'), content);
+      git(dir, 'commit', '-q', '-am', 'merge main');
+    }
+
+    expect(await resync.process('p1', '002-b')).toBe('up-to-date');
+    expect(readResyncRequest(specDirOf('002-b'))).toBeUndefined();
+    expect(await resync.process('p1', '003-c')).toBe('started');
+    expect(readResyncRequest(specDirOf('003-c'))).toBeDefined();
+    expect(calls).toEqual(['start 003-c']);
+  });
+
+  it('keeps a failure, and the local guard, when another merge coalesces into the request', async () => {
+    pending('002-b');
+    commitFile(root, 'c.txt', 'from a\n', 'a merged');
+    const first = requestFor('002-b', 'local');
+    updateResyncRequest(specDirOf('002-b'), first.at, { failedAt: new Date().toISOString(), error: 'x' });
+    const next = recordResyncRequest(specDirOf('002-b'), { ref: 'origin/main', into: 'main', via: 'pr', merged: { specId: '005-e', files: [] } });
+    expect(next).toEqual(expect.objectContaining({ ref: 'origin/main', refs: ['main', 'origin/main'], via: 'local', failedAt: expect.any(String) }));
+    expect(await resync.process('p1', '002-b')).toBe('none');
+    expect(calls).toEqual([]);
   });
 });

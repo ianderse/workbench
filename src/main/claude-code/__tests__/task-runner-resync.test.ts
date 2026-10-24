@@ -2,7 +2,8 @@
  * Resync runs (real git worktree, scripted Claude Code): the task's own session merges the base
  * branch another task was merged into, resumes where it stopped, and validates; Workbench checks
  * the merge, gives the session one more pass when it finds problems, and fails the run when they
- * remain.
+ * remain. Any failure marks the request failed (no automatic restart); a merge that never passed
+ * the check is checked (and validated) on the next start; a change request is applied first.
  */
 import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
@@ -51,8 +52,14 @@ vi.mock('../../platform/shell-runtime', () => ({
   toRuntimePath: (p: string) => p,
 }));
 
+vi.mock('../../ai/runners/merge-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../ai/runners/merge-agent')>()),
+  runMergeAgent: vi.fn(),
+}));
+
 import { ClaudeTaskRun, loadClaudeRunInfo } from '../task-runner';
-import { readResyncRequest, recordResyncRequest, type ResyncRequest } from '../../task-resync/request';
+import { runMergeAgent } from '../../ai/runners/merge-agent';
+import { readResyncRequest, recordResyncRequest, updateResyncRequest, type ResyncRequest } from '../../task-resync/request';
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf-8' }).trim();
 const commitFile = (repo: string, file: string, content: string, message: string) => {
@@ -285,5 +292,152 @@ describe('ClaudeTaskRun resync', () => {
     expect(loadClaudeRunInfo(specDir)!.phases.map((p) => p.name)).toEqual(['triage', 'resync', 'implement', 'validate']);
     expect(readFileSync(path.join(worktree, 'c.txt'), 'utf-8')).toBe('from task a\n');
     expect(readResyncRequest(specDir)).toBeUndefined();
+  });
+
+  /** The session merges main into its branch and resolves a.txt keeping only its own side */
+  const mergeKeepingOurs = () => {
+    try { git(worktree, 'merge', '--no-edit', 'main'); } catch { /* conflicts */ }
+    writeFileSync(path.join(worktree, 'a.txt'), 'one\nTWO FROM B\nthree\n');
+    git(worktree, 'commit', '-q', '-am', 'merge main');
+  };
+  const failedResult = (error = 'No conversation found with session ID: s1') =>
+    result({ is_error: true, subtype: 'error_during_execution', errors: [error], result: undefined });
+
+  it('marks the request failed when the resync step itself fails, so nothing restarts the task for it', async () => {
+    runInfo([done('triage'), done('implement'), done('validate')]);
+    const request = mergeIntoMain();
+    scripts.push({ messages: [failedResult()] });
+    const outcome = await makeRun(request).run();
+
+    expect(outcome.status).toBe('failed');
+    expect(outcome.error).toContain('No conversation found');
+    expect(readResyncRequest(specDir)).toEqual(expect.objectContaining({ failedAt: expect.any(String), error: outcome.error }));
+  });
+
+  it('checks a merge an earlier resync committed but never got through the check, then validates again', async () => {
+    runInfo([done('triage'), done('implement'), done('validate')]);
+    commitFile(worktree, 'a.txt', 'one\nTWO FROM B\nthree\n', 'task b changes a');
+    const request = mergeIntoMain('a');
+    const mainCommit = git(root, 'rev-parse', 'main');
+    // The session merges, losing main's lines; its fix pass ends in an error
+    scripts.push({ effect: mergeKeepingOurs, messages: [result()] }, { messages: [failedResult('boom')] });
+    expect((await makeRun(request).run()).status).toBe('failed');
+    const failed = readResyncRequest(specDir)!;
+    expect(failed.failedAt).toBeDefined();
+    expect(failed.unverified).toEqual([{ ref: 'main', commit: mainCommit }]);
+
+    // The user starts it again: the branch has main, yet the merge is checked, fixed and validated
+    spawned.length = 0;
+    scripts.push(
+      { effect: () => {
+        writeFileSync(path.join(worktree, 'a.txt'), 'one\nTWO FROM B\nthree\nfour from a\n');
+        git(worktree, 'commit', '-q', '-am', 'restore');
+      }, messages: [result({ structured_output: { summary: 'Restored', intentionallyDropped: [{ file: 'a.txt', line: 'TWO FROM A', reason: 'B replaces it' }] } })] },
+      { messages: [validated()] },
+    );
+    const outcome = await makeRun(failed).run();
+
+    expect(outcome.status).toBe('completed');
+    expect(spawned).toHaveLength(2);
+    expect(promptOf(0)).toMatch(/^Workbench checked your merge and found problems:/);
+    expect(promptOf(1)).toContain('Before handing this off, validate the work:');
+    expect(readResyncRequest(specDir)).toBeUndefined();
+  });
+
+  it('validates again after a resync that merged but ended in an error', async () => {
+    runInfo([done('triage'), done('implement'), done('validate')]);
+    const request = mergeIntoMain();
+    scripts.push({ effect: () => git(worktree, 'merge', '--no-edit', 'main'), messages: [failedResult('boom')] });
+    expect((await makeRun(request).run()).status).toBe('failed');
+
+    spawned.length = 0;
+    scripts.push({ messages: [validated()] });
+    const outcome = await makeRun(readResyncRequest(specDir)).run();
+
+    expect(outcome.status).toBe('completed');
+    expect(spawned).toHaveLength(1);
+    expect(promptOf(0)).toContain('Before handing this off, validate the work:');
+    expect(readResyncRequest(specDir)).toBeUndefined();
+  });
+
+  it("checks the files of work the session committed right before merging as the task's side", async () => {
+    runInfo([done('triage'), done('implement'), done('validate')]);
+    const request = mergeIntoMain('a');
+    // Uncommitted work of the task, committed by the session as the prompt asks, then merged
+    writeFileSync(path.join(worktree, 'a.txt'), 'one\nTWO FROM B\nthree\n');
+    scripts.push(
+      { effect: () => { git(worktree, 'commit', '-q', '-am', 'wip'); mergeKeepingOurs(); }, messages: [result()] },
+      { messages: [result({ structured_output: { summary: 'Tried', intentionallyDropped: [] } })] },
+    );
+    const outcome = await makeRun(request).run();
+
+    expect(outcome.status).toBe('failed');
+    expect(promptOf(1)).toContain('The merge lost changes from `main` in a.txt');
+    expect(outcome.error).toContain('The merge lost changes from `main` in a.txt');
+  });
+
+  it("applies requested changes before a pending sync, and keeps them when the sync fails again", async () => {
+    runInfo([done('triage'), done('implement'), done('validate')]);
+    const pending = mergeIntoMain();
+    updateResyncRequest(specDir, pending.at, { failedAt: new Date().toISOString(), error: 'earlier failure' });
+    scripts.push(
+      { effect: () => commitFile(worktree, 'b.txt', 'task b, blue\n', 'blue'), messages: [result({ result: 'Made it blue' })] },
+      { messages: [failedResult('boom')] },
+    );
+    const outcome = await makeRun(readResyncRequest(specDir), {}, {
+      mode: 'revise',
+      feedback: 'Make the button blue',
+      settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, triage: 'fixed' },
+    }).run();
+
+    expect(promptOf(0)).toContain('Make the button blue');
+    expect(promptOf(1)).toMatch(/^Your base branch moved on/);
+    expect(outcome.status).toBe('failed');
+    expect(readFileSync(path.join(worktree, 'b.txt'), 'utf-8')).toBe('task b, blue\n');
+    expect(loadClaudeRunInfo(specDir)!.phases.map((p) => p.name)).toEqual(['triage', 'implement', 'validate', 'triage', 'revise', 'resync']);
+  });
+
+  it('merges every ref the request names, and checks each', async () => {
+    runInfo([done('triage'), done('implement'), done('validate')]);
+    mergeIntoMain();
+    // A ref main does not have (as origin/main can be after a merged pull request)
+    git(root, 'checkout', '-q', '-b', 'side', 'main~1');
+    commitFile(root, 'd.txt', 'from side\n', 'side work');
+    git(root, 'checkout', '-q', 'main');
+    const request = recordResyncRequest(specDir, { ref: 'side', into: 'main', via: 'pr', merged: { specId: '009-z', files: ['d.txt'] } });
+    expect(request).toEqual(expect.objectContaining({ ref: 'side', refs: ['main', 'side'], via: 'local' }));
+    scripts.push(
+      // Merges only one of them: the check sends it back for the other
+      { effect: () => git(worktree, 'merge', '--no-edit', 'main'), messages: [result()] },
+      { effect: () => git(worktree, 'merge', '--no-edit', 'side'), messages: [result({ structured_output: { summary: 'Merged side', intentionallyDropped: [] } })] },
+      { messages: [validated()] },
+    );
+    const outcome = await makeRun(request).run();
+
+    expect(outcome.status).toBe('completed');
+    expect(promptOf(0)).toContain('Run `git merge --no-edit main`, then `git merge --no-edit side`');
+    expect(promptOf(1)).toContain('`side` is not merged into the branch');
+    expect(readResyncRequest(specDir)).toBeUndefined();
+  });
+
+  it('lets Stop interrupt the merge helper of a task without a session', async () => {
+    runInfo([done('triage')], null);
+    commitFile(worktree, 'a.txt', 'one\nTWO FROM B\nthree\n', 'task b changes a');
+    const request = mergeIntoMain('a');
+    const before = git(worktree, 'rev-parse', 'HEAD');
+    let run: ClaudeTaskRun | undefined;
+    const signals: Array<AbortSignal | undefined> = [];
+    vi.mocked(runMergeAgent).mockImplementationOnce(async (input) => {
+      signals.push(input.abortSignal);
+      run!.stop();
+      return { status: 'failed', summary: 'Stopped', intentionallyDropped: [] };
+    });
+    run = makeRun(request);
+    const outcome = await run.run();
+
+    expect(outcome.status).toBe('stopped');
+    expect(signals[0]?.aborted).toBe(true);
+    expect(git(worktree, 'rev-parse', 'HEAD')).toBe(before);
+    expect(readResyncRequest(specDir)?.failedAt).toBeUndefined();
   });
 });

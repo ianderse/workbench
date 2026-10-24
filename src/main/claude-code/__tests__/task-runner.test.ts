@@ -18,7 +18,7 @@ vi.mock('../env', () => ({
  * Scripted Claude Code runs: one entry per spawned process. A `{ type: '__read', id, text }` entry
  * stands for a read receipt (`onInputRead`); `unread` lists stdin messages it never read.
  */
-type Script = { messages: ClaudeStreamMessage[]; unread?: Array<{ id: string; text: string }> };
+type Script = { messages: ClaudeStreamMessage[]; unread?: Array<{ id: string; text: string }>; origins?: Array<'task' | 'message'> };
 const scripts: Script[] = [];
 const spawned: ClaudeProcessOptions[] = [];
 /** MCP config files as they were when each process started (they are removed after the phase) */
@@ -45,7 +45,7 @@ vi.mock('../process', () => ({
       child: {},
       stop: vi.fn(),
       send: vi.fn(() => false),
-      done: Promise.resolve({ exitCode: 0, signal: null, result: results.at(-1), results, unread: script.unread ?? [], stderr: '', aborted: false, timedOut: false }),
+      done: Promise.resolve({ exitCode: 0, signal: null, result: results.at(-1), results, resultOrigins: script.origins, unread: script.unread ?? [], stderr: '', aborted: false, timedOut: false }),
     };
   }),
 }));
@@ -621,7 +621,7 @@ describe('ClaudeTaskRun', () => {
     }
     const settings = { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false };
 
-    it('keeps stdin open, accepts native messages and gets the Workbench tools through a config file', async () => {
+    it('keeps stdin open and gets the Workbench tools through a config file, without accepting native messages', async () => {
       triageMock.mockResolvedValue({ triage: triage() });
       scripts.push({ messages: [result('s30')], unread: [{ id: 'wbm-1', text: 'late' }] });
       const { value, calls } = messaging();
@@ -631,7 +631,11 @@ describe('ClaudeTaskRun', () => {
       expect(options.keepStdinOpen).toBe(true);
       expect(argValue(options.args, '--name')).toBe('wb-abc123-001-task');
       expect(options.args).toContain('--replay-user-messages');
-      expect(JSON.parse(argValue(options.args, '--settings')!)).toEqual({ crossSessionInbound: 'accept' });
+      // Claude Code's default holds other sessions' messages for a session that skips permission
+      // checks: no local session can add turns to an unattended run
+      expect(options.args).not.toContain('--settings');
+      expect(options.args.join(' ')).not.toContain('crossSessionInbound');
+      expect(argValue(options.args, '--append-system-prompt')).toContain('Reach other tasks with `message_task`, not SendMessage');
       expect(argValue(options.args, '--allowedTools')).toBe('mcp__workbench__message_task,mcp__workbench__list_parallel_tasks');
       expect(options.args.join(' ')).not.toContain('secret');
       expect(JSON.parse(mcpConfigs[0]).mcpServers.workbench.headers.Authorization).toBe('Bearer secret');
@@ -683,6 +687,19 @@ describe('ClaudeTaskRun', () => {
       expect(calls.peerMessage).toHaveBeenCalledWith('m7');
     });
 
+    it('keeps the step\'s outcome when a turn that only answered a notice fails after it', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({
+        messages: [result('s34', { result: 'Implemented and committed' }), result('s34', { is_error: true, subtype: 'error_during_execution', errors: ['crash'], total_cost_usd: 0.15 })],
+        origins: ['task', 'message'],
+      });
+      const { value } = messaging();
+      const outcome = await makeRun({ settings, projectId: 'p1', messaging: value }).run();
+      expect(outcome.status).toBe('completed');
+      // The notice's turn still costs
+      expect(loadClaudeRunInfo(specDir)?.phases.find((p) => p.name === 'implement')?.costUsd).toBeCloseTo(0.15, 5);
+    });
+
     it('runs as before without messaging', async () => {
       triageMock.mockResolvedValue({ triage: triage() });
       scripts.push({ messages: [result('s33')] });
@@ -707,7 +724,7 @@ describe('wrapWorkbenchMessages', () => {
 describe('pickPhaseResult', () => {
   const r = (fields: Record<string, unknown>) => ({ type: 'result', subtype: 'success', is_error: false, session_id: 's', ...fields }) as never;
 
-  it('keeps the last result when every turn succeeded, with the session total and the turns and time of all', () => {
+  it('keeps the last result when every turn was the task\'s, with the session total and the turns and time of all', () => {
     const picked = pickPhaseResult([
       r({ structured_output: { status: 'A' }, total_cost_usd: 0.2, duration_ms: 10, num_turns: 3 }),
       r({ structured_output: { status: 'B' }, total_cost_usd: 0.25, duration_ms: 5, num_turns: 4 }),
@@ -723,5 +740,21 @@ describe('pickPhaseResult', () => {
     // A last turn that ran out of budget fails the phase, even after the earlier one succeeded
     const budget = pickPhaseResult([r({ result: 'Waiting for the agents' }), r({ is_error: true, subtype: 'error_max_budget_usd' })]);
     expect(budget?.subtype).toBe('error_max_budget_usd');
+  });
+
+  it('decides from the task\'s turns, not from turns that only answered a message', () => {
+    const plan = r({ structured_output: { plan: 'P' }, total_cost_usd: 0.2, num_turns: 3, duration_ms: 10 });
+    const answer = r({ result: 'Noted the notice.', total_cost_usd: 0.22, num_turns: 1, duration_ms: 2 });
+    // A notice answered after the plan doesn't replace it; the costs and turns still count
+    expect(pickPhaseResult([plan, answer], ['task', 'message'])).toMatchObject({ structured_output: { plan: 'P' }, total_cost_usd: 0.22, num_turns: 4, duration_ms: 12 });
+    // An error in a message turn doesn't fail a phase that succeeded
+    const failedAnswer = r({ is_error: true, subtype: 'error_max_budget_usd', total_cost_usd: 0.3 });
+    expect(pickPhaseResult([plan, failedAnswer], ['task', 'message'])).toMatchObject({ structured_output: { plan: 'P' }, is_error: false, subtype: 'success', total_cost_usd: 0.3 });
+    // A background agent's report starts a turn of the task's own: its result is the phase's
+    const report = r({ structured_output: { plan: 'P2' } });
+    expect(pickPhaseResult([plan, answer, report], ['task', 'message', 'task'])?.structured_output).toEqual({ plan: 'P2' });
+    // Errors in the task's own turns still fail it
+    const error = r({ is_error: true, subtype: 'error_during_execution', result: 'boom' });
+    expect(pickPhaseResult([error, answer], ['task', 'message'])?.result).toBe('boom');
   });
 });

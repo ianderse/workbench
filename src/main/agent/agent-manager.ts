@@ -33,7 +33,7 @@ import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 import { createRunMessaging } from '../task-messaging/run-messaging';
 import { branchMergeBlocker, waitForBranchSync } from '../worktree/merge-guard';
-import { readResyncRequest } from '../task-resync/request';
+import { keepsLocalMergeOut, readResyncRequest } from '../task-resync/request';
 
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
@@ -492,8 +492,10 @@ export class AgentManager extends EventEmitter {
 
     const taskSettings = resolveClaudeCodeTaskSettings(settings.claudeCodeTasks);
     // Another task was merged into the base branch since this one ran: whatever starts the run (the
-    // resync service, the queue, a rate-limit resume, the user) takes it in first (task-resync/)
-    const resync = task.metadata?.useWorktree !== false ? readResyncRequest(specDir) : undefined;
+    // resync service, the queue, a rate-limit resume, the user) takes it in first (task-resync/).
+    // Not a local merge into a task with a pull request: its next push would carry those commits
+    const pendingResync = task.metadata?.useWorktree !== false ? readResyncRequest(specDir) : undefined;
+    const resync = pendingResync && !keepsLocalMergeOut(pendingResync, task) ? pendingResync : undefined;
     // Starting a task whose last run went all the way through begins a new run (fresh triage
     // and session) in the same worktree, instead of finishing again immediately. Not for a resync:
     // the session that did the work merges the base branch in and resumes

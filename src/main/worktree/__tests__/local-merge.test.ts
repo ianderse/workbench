@@ -288,9 +288,13 @@ describe('localMerge', () => {
   it('starts over a merge an interrupted attempt left in the worktree', async () => {
     commitFile(worktree, 'a.txt', 'one\ntask\nthree\n', 'task edit');
     commitFile(project, 'a.txt', 'one\nproject\nthree\n', 'project edit');
-    // The app quit while the merge agent was resolving: the worktree is mid-merge, with conflicts
+    // The app quit while the merge agent was resolving: the worktree is mid-merge, with conflicts,
+    // and carries the marker Workbench writes when it starts a merge there
+    const before = git(worktree, 'rev-parse', 'HEAD');
     expect(() => git(worktree, 'merge', '-q', '--no-edit', 'main')).toThrow();
     expect(git(worktree, 'status', '--porcelain', '--untracked-files=no')).toContain('UU a.txt');
+    writeFileSync(path.resolve(worktree, git(worktree, 'rev-parse', '--git-path', 'workbench-merge.json')),
+      JSON.stringify({ targetCommit: git(worktree, 'rev-parse', 'MERGE_HEAD'), before }));
     const mergeAgent = vi.fn<MergeAgentFn>(async () => {
       commitResolution('a.txt', 'one\ntask\nproject\nthree\n');
       return { status: 'resolved', summary: 'Kept both lines', intentionallyDropped: [] };
@@ -301,6 +305,39 @@ describe('localMerge', () => {
     expect(result).toMatchObject({ success: true, resolvedConflicts: ['a.txt'] });
     expect(mergeAgent).toHaveBeenCalledTimes(1);
     expect(readFileSync(path.join(project, 'a.txt'), 'utf-8')).toBe('one\ntask\nproject\nthree\n');
+  });
+
+  it("refuses a merge in progress in the worktree that Workbench did not start, and leaves it alone", async () => {
+    commitFile(worktree, 'a.txt', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, 'a.txt', 'one\nproject\nthree\n', 'project edit');
+    // The user's own merge, mid-way
+    expect(() => git(worktree, 'merge', '-q', '--no-edit', 'main')).toThrow();
+    const mergeHead = git(worktree, 'rev-parse', 'MERGE_HEAD');
+    const mergeAgent = vi.fn<MergeAgentFn>();
+
+    const result = await localMerge(config({ mergeAgent }));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("A merge is in progress in the task's worktree");
+    expect(mergeAgent).not.toHaveBeenCalled();
+    expect(git(worktree, 'rev-parse', 'MERGE_HEAD')).toBe(mergeHead);
+  });
+
+  it("leaves Workbench's own leftover merge in place while the project is not ready", async () => {
+    commitFile(worktree, 'a.txt', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, 'a.txt', 'one\nproject\nthree\n', 'project edit');
+    const before = git(worktree, 'rev-parse', 'HEAD');
+    expect(() => git(worktree, 'merge', '-q', '--no-edit', 'main')).toThrow();
+    const mergeHead = git(worktree, 'rev-parse', 'MERGE_HEAD');
+    writeFileSync(path.resolve(worktree, git(worktree, 'rev-parse', '--git-path', 'workbench-merge.json')),
+      JSON.stringify({ targetCommit: mergeHead, before }));
+    git(project, 'checkout', '-q', '-b', 'other');
+
+    const result = await localMerge(config());
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('The project is on other');
+    expect(git(worktree, 'rev-parse', 'MERGE_HEAD')).toBe(mergeHead);
   });
 
   it('rejects a resolution that leaves conflict markers in a file with a non-ASCII name', async () => {
