@@ -13,7 +13,8 @@ import { getClaudeProfileManager, initializeClaudeProfileManager } from '../clau
 import { getFullCredentialsFromKeychain, clearKeychainCache, updateProfileSubscriptionMetadata } from '../claude-profile/credential-utils';
 import { getEmailFromConfigDir } from '../claude-profile/profile-utils';
 import { findStandaloneLimitReset } from '../claude-profile/rate-limit-manager';
-import { SELF_IMPROVE_NUDGE_ONE_LINE } from '../self-improve/nudge';
+import { SELF_IMPROVE_NUDGE_ONE_LINE, buildOmpMemoryPrompt } from '../self-improve/nudge';
+import { getCompengDir } from '../self-improve/paths';
 import * as OutputParser from './output-parser';
 import * as SessionHandler from './session-handler';
 import * as PtyManager from './pty-manager';
@@ -460,9 +461,13 @@ function quoteFlagText(text: string, shellKind: ShellKind): string {
  * the project's self-improve switch is on. The project's own `.claude/MEMORY.md` carries the same
  * text for sessions started outside the app; this covers the window Workbench launches.
  */
-function selfImproveFlag(terminal: Pick<TerminalProcess, 'selfImprove' | 'shellKind'>): string {
+function selfImproveFlag(terminal: Pick<TerminalProcess, 'selfImprove' | 'shellKind'>, ompMemoryDir?: string): string {
   if (!terminal.selfImprove) return '';
-  return ` --append-system-prompt ${quoteFlagText(SELF_IMPROVE_NUDGE_ONE_LINE, shellKindOf(terminal))}`;
+  // OMP has no auto memory, so it is also told where the notes are and how to save one
+  const text = ompMemoryDir
+    ? `${SELF_IMPROVE_NUDGE_ONE_LINE} ${buildOmpMemoryPrompt(ompMemoryDir).replace(/\s+/g, ' ').trim()}`
+    : SELF_IMPROVE_NUDGE_ONE_LINE;
+  return ` --append-system-prompt ${quoteFlagText(text, shellKindOf(terminal))}`;
 }
 
 /**
@@ -1607,7 +1612,7 @@ function ompAdvisorFlags(terminal: Pick<TerminalProcess, 'shellKind'>, omp: Retu
  * is involved. `pathEnv` is the augmented PATH used when the command isn't an absolute path.
  */
 export function buildOmpLaunchCommand(
-  terminal: Pick<TerminalProcess, 'shellKind' | 'graphifyOut' | 'selfImprove'>,
+  terminal: Pick<TerminalProcess, 'shellKind' | 'graphifyOut' | 'selfImprove' | 'projectPath'>,
   cwd: string | undefined,
   dangerouslySkipPermissions: boolean | undefined,
   pathEnv: string,
@@ -1618,6 +1623,8 @@ export function buildOmpLaunchCommand(
   const command = omp.command || 'omp';
   const model = omp.models.sonnet?.trim();
   const cwdCommand = buildCdCommand(windowPath(terminal, cwd), shellKind);
+  const projectDir = terminal.projectPath ?? cwd;
+  const memoryDir = projectDir ? windowPath(terminal, getCompengDir(projectDir)) : undefined;
   // A WSL window uses the distribution's own PATH
   const pathPrefix = isWslWindow(terminal) || isAbsoluteExecutableCommand(command) ? '' : buildPathPrefix(pathEnv, shellKind);
   const flags =
@@ -1625,7 +1632,7 @@ export function buildOmpLaunchCommand(
     `${model ? ` --model ${quoteFlagText(model, shellKind)}` : ''}` +
     `${dangerouslySkipPermissions ? ' --auto-approve' : ''}` +
     ompAdvisorFlags(terminal, omp) +
-    `${graphifyHintFlag(terminal)}${selfImproveFlag(terminal)}`;
+    `${graphifyHintFlag(terminal)}${selfImproveFlag(terminal, memoryDir)}`;
   return `${cwdCommand}${pathPrefix}${escapeShellCommand(command, shellKind)}${flags}`;
 }
 

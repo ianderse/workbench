@@ -18,6 +18,7 @@ import { addToWorktree } from '../live-agent/project-setup';
 import { readSettingsFile } from '../settings-utils';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { isSelfImproveEnabled, SELF_IMPROVE_NUDGE } from '../self-improve';
+import { getCompengDir } from '../self-improve/paths';
 import { getAugmentedEnvAsync } from '../env-utils';
 import { isWslRuntime } from '../platform/shell-runtime';
 import { git } from '../utils/git-exec';
@@ -508,7 +509,10 @@ export class AgentManager extends EventEmitter {
       profileId: options.profileId,
     };
 
-    if (isSelfImproveEnabled(project.settings)) config.selfImprovePrompt = SELF_IMPROVE_NUDGE;
+    if (isSelfImproveEnabled(project.settings)) {
+      config.selfImprovePrompt = SELF_IMPROVE_NUDGE;
+      config.selfImproveDir = getCompengDir(project.path);
+    }
 
     if (await isGraphifyEnabled(project.path)) {
       try {

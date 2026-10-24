@@ -35,3 +35,20 @@ export const SELF_IMPROVE_MEMORY_FILE = `${SELF_IMPROVE_NUDGE}\n`;
 
 /** Name of that file inside the project's `.claude` directory */
 export const SELF_IMPROVE_MEMORY_FILENAME = 'MEMORY.md';
+
+/**
+ * OMP has no auto memory and does not resolve the `@` import of the memory index in CLAUDE.md, so a
+ * run tells it where the notes live and how to save one, and carries the current index along.
+ * `indexText` is the memory index's content (empty when the project has no memories yet).
+ * Written without apostrophes, like the nudge, so it can also be flattened into a shell flag.
+ */
+export function buildOmpMemoryPrompt(memoryDir: string, indexText = ''): string {
+  const index = indexText.replace(/<!--[\s\S]*?-->/g, '').trim();
+  const lines = [
+    '## Memory directory',
+    `Saved memories live in ${memoryDir}. MEMORY.md there is the index, one line per memory; read the memories that bear on your task before you start.`,
+    'To save a memory, write a markdown file named after it in that directory (front matter with name, description and type: feedback) and add one line to MEMORY.md: - [Title](file.md) - one-line hook. When a memory is replaced, update its file and index line in place.',
+  ];
+  if (index) lines.push('Current index:', index);
+  return lines.join('\n');
+}

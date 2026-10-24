@@ -66,6 +66,7 @@ import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
 import { appLog } from '../app-logger';
 import { agentDisplayName, getAgentBackendSettings } from '../agent-backend/settings';
 import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
+import { buildOmpMemoryPrompt } from '../self-improve/nudge';
 import { startOmpProcess } from '../agent-backend/omp-process';
 import { isOmpNotice, isOmpTodos } from '../agent-backend/omp-translate';
 
@@ -115,6 +116,8 @@ export interface TaskRunConfig {
   graphifyPrompt?: string;
   /** Tells the session to save what it learns, when the project's self-improve switch is on */
   selfImprovePrompt?: string;
+  /** The project's memory directory (self-improve); OMP is told where it is, since it has no auto memory */
+  selfImproveDir?: string;
   /** The project's task changelog; each phase's prompt lists what the other tasks are changing */
   changelogPath?: string;
   /** Extra environment (e.g. GRAPHIFY_OUT, PATH with the graphify CLI) */
@@ -878,7 +881,17 @@ no notes came with the request, so review the change against the task with fresh
       ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir), toRuntimePath(this.config.changelogPath))
       : undefined;
     const planning = params.name === 'plan';
-    const systemPrompt = buildSystemPrompt(this.config, specDirRelative, parallelTasksPrompt, true);
+    let systemPrompt = buildSystemPrompt(this.config, specDirRelative, parallelTasksPrompt, true);
+    if (this.config.selfImprovePrompt && this.config.selfImproveDir) {
+      // The memory index is read at every phase, so notes saved by an earlier phase are included
+      let memoryIndex = '';
+      try {
+        memoryIndex = readFileSync(path.join(this.config.selfImproveDir, 'MEMORY.md'), 'utf-8').slice(0, 25_000);
+      } catch {
+        // No memories yet
+      }
+      systemPrompt = `${systemPrompt}\n\n${buildOmpMemoryPrompt(this.config.selfImproveDir, memoryIndex)}`;
+    }
     if (Object.keys(buildMcpConfig(this.config.connectorIds, this.config.connectorSettings).mcpServers).length > 0) {
       appLog.info('[OMP] Connectors (MCP servers) are not available with the OMP backend and are ignored');
     }
