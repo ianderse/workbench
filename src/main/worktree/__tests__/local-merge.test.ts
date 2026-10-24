@@ -5,6 +5,10 @@
  * - the base branch is pulled first when it tracks a remote; offline or diverged, a note says so
  * - conflicts are resolved by the merge agent in the task's worktree before the merge; a failed
  *   resolution leaves the worktree and the project as they were
+ * - the resolution is checked against the base branch commit it merged, file by exact name
+ * - the project is checked again after the resolution: another branch checked out, or a merge
+ *   started there meanwhile, stops the merge (and that merge is never undone)
+ * - a merge an interrupted attempt left in the worktree starts over
  * - without `merge-tree --write-tree` (git < 2.38) the merge itself finds the conflicts
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -18,18 +22,21 @@ vi.mock('../../ai/runners/merge-agent', () => ({ runMergeAgent: vi.fn() }));
 
 /** Set to make git act like a version without `merge-tree --write-tree` */
 let oldGit = false;
+/** Options of every `git fetch` the merge ran */
+const fetchOptions: Array<Record<string, unknown>> = [];
 vi.mock('../../utils/git-exec', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../utils/git-exec')>();
   return {
     ...actual,
     git: (args: string[], options: Parameters<typeof actual.git>[1]) =>
+      (args[0] === 'fetch' && fetchOptions.push(options as never), false) ||
       oldGit && args.includes('merge-tree')
         ? Promise.reject(Object.assign(new Error('usage: git merge-tree'), { code: 129, stdout: '', stderr: 'usage: git merge-tree' }))
         : actual.git(args, options),
   };
 });
 
-import { localMerge, type LocalMergeConfig } from '../local-merge';
+import { localMerge, PULL_FETCH_TIMEOUT_MS, type LocalMergeConfig } from '../local-merge';
 import type { MergeAgentFn, MergeAgentInput } from '../../ai/runners/merge-agent';
 
 const BRANCH = 'workbench/001-a';
@@ -43,6 +50,12 @@ const commitFile = (repo: string, file: string, content: string, message: string
   writeFileSync(path.join(repo, file), content);
   git(repo, 'add', file);
   git(repo, 'commit', '-q', '-m', message);
+};
+/** What the fake merge agent does: write the resolved file and conclude the merge in the worktree */
+const commitResolution = (file: string, content: string) => {
+  writeFileSync(path.join(worktree, file), content);
+  git(worktree, 'add', file);
+  git(worktree, 'commit', '-q', '--no-edit');
 };
 
 beforeEach(() => {
@@ -230,6 +243,124 @@ describe('localMerge', () => {
     expect(readFileSync(path.join(project, 'b.txt'), 'utf-8')).toBe('from the task\n');
   });
 
+  it('merges nothing when the project moved to another branch while the agent resolved', async () => {
+    commitFile(worktree, 'a.txt', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, 'a.txt', 'one\nproject\nthree\n', 'project edit');
+    const projectHead = git(project, 'rev-parse', 'HEAD');
+    const mergeAgent = vi.fn<MergeAgentFn>(async () => {
+      commitResolution('a.txt', 'one\ntask\nproject\nthree\n');
+      git(project, 'checkout', '-q', '-b', 'other');
+      return { status: 'resolved', summary: 'Kept both lines', intentionallyDropped: [] };
+    });
+
+    const result = await localMerge(config({ mergeAgent }));
+
+    expect(result).toMatchObject({ success: false, summary: 'Kept both lines' });
+    expect(result.error).toContain('changed while Claude Code resolved the conflicts');
+    expect(result.error).toContain('The project is on other');
+    // Neither the branch checked out now nor the base branch got the task's commits
+    expect(git(project, 'rev-parse', 'other')).toBe(projectHead);
+    expect(git(project, 'rev-parse', 'main')).toBe(projectHead);
+    // The task's branch keeps the resolved merge
+    expect(git(worktree, 'show', 'HEAD:a.txt')).toBe('one\ntask\nproject\nthree');
+  });
+
+  it('leaves a merge someone started in the project meanwhile alone', async () => {
+    commitFile(worktree, 'a.txt', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, 'a.txt', 'one\nproject\nthree\n', 'project edit');
+    const projectHead = git(project, 'rev-parse', 'HEAD');
+    // A commit that changes nothing: merging it leaves no uncommitted changes, only MERGE_HEAD
+    const side = git(project, 'commit-tree', 'HEAD^{tree}', '-p', 'HEAD', '-m', 'side');
+    const mergeAgent = vi.fn<MergeAgentFn>(async () => {
+      commitResolution('a.txt', 'one\ntask\nproject\nthree\n');
+      execFileSync('git', ['merge', '--no-ff', '--no-commit', side], { cwd: project, stdio: 'ignore' });
+      return { status: 'resolved', summary: 'Kept both lines', intentionallyDropped: [] };
+    });
+
+    const result = await localMerge(config({ mergeAgent }));
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('A merge is in progress in the project');
+    expect(git(project, 'rev-parse', 'MERGE_HEAD')).toBe(side);
+    expect(git(project, 'rev-parse', 'main')).toBe(projectHead);
+  });
+
+  it('starts over a merge an interrupted attempt left in the worktree', async () => {
+    commitFile(worktree, 'a.txt', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, 'a.txt', 'one\nproject\nthree\n', 'project edit');
+    // The app quit while the merge agent was resolving: the worktree is mid-merge, with conflicts
+    expect(() => git(worktree, 'merge', '-q', '--no-edit', 'main')).toThrow();
+    expect(git(worktree, 'status', '--porcelain', '--untracked-files=no')).toContain('UU a.txt');
+    const mergeAgent = vi.fn<MergeAgentFn>(async () => {
+      commitResolution('a.txt', 'one\ntask\nproject\nthree\n');
+      return { status: 'resolved', summary: 'Kept both lines', intentionallyDropped: [] };
+    });
+
+    const result = await localMerge(config({ mergeAgent }));
+
+    expect(result).toMatchObject({ success: true, resolvedConflicts: ['a.txt'] });
+    expect(mergeAgent).toHaveBeenCalledTimes(1);
+    expect(readFileSync(path.join(project, 'a.txt'), 'utf-8')).toBe('one\ntask\nproject\nthree\n');
+  });
+
+  it('rejects a resolution that leaves conflict markers in a file with a non-ASCII name', async () => {
+    commitFile(project, 'é.txt', 'one\ntwo\nthree\n', 'add é');
+    git(worktree, 'merge', '-q', '--ff-only', 'main');
+    commitFile(worktree, 'é.txt', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, 'é.txt', 'one\nproject\nthree\n', 'project edit');
+    const projectHead = git(project, 'rev-parse', 'HEAD');
+    const worktreeHead = git(worktree, 'rev-parse', 'HEAD');
+    const mergeAgent = vi.fn<MergeAgentFn>(async () => {
+      // Concludes the merge with the conflict markers still in the file
+      git(worktree, 'add', 'é.txt');
+      git(worktree, 'commit', '-q', '--no-edit');
+      return { status: 'resolved', summary: 'Resolved', intentionallyDropped: [] };
+    });
+
+    const result = await localMerge(config({ mergeAgent }));
+
+    expect(result).toMatchObject({ success: false, conflictedFiles: ['é.txt'] });
+    expect(result.error).toContain('Conflict markers remain in é.txt');
+    expect(mergeAgent.mock.calls[0][0].conflictedFiles).toEqual(['é.txt']);
+    expect(git(project, 'rev-parse', 'main')).toBe(projectHead);
+    expect(git(worktree, 'rev-parse', 'HEAD')).toBe(worktreeHead);
+  });
+
+  it('checks the lines of a conflicted file whose name looks like a pattern in that file alone', async () => {
+    commitFile(project, '[id].tsx', 'one\ntwo\nthree\n', 'add page');
+    git(worktree, 'merge', '-q', '--ff-only', 'main');
+    commitFile(worktree, '[id].tsx', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, '[id].tsx', 'one\nproject\nthree\n', 'project edit');
+    // Matched by the pattern `[id].tsx`, changed on the base branch only
+    commitFile(project, 'i.tsx', 'another page\n', 'add another page');
+    const mergeAgent = vi.fn<MergeAgentFn>(async () => {
+      commitResolution('[id].tsx', 'one\ntask\nproject\nthree\n');
+      return { status: 'resolved', summary: 'Kept both lines', intentionallyDropped: [] };
+    });
+
+    const result = await localMerge(config({ mergeAgent }));
+
+    expect(result).toMatchObject({ success: true, resolvedConflicts: ['[id].tsx'] });
+    expect(mergeAgent).toHaveBeenCalledTimes(1);
+  });
+
+  it('accepts the resolution when the base branch gains a commit while the agent resolves', async () => {
+    commitFile(worktree, 'a.txt', 'one\ntask\nthree\n', 'task edit');
+    commitFile(project, 'a.txt', 'one\nproject\nthree\n', 'project edit');
+    const mergeAgent = vi.fn<MergeAgentFn>(async () => {
+      commitResolution('a.txt', 'one\ntask\nproject\nthree\n');
+      // A commit on the base branch in the project meanwhile, adding a line the merge never had
+      commitFile(project, 'a.txt', 'one\nproject\nthree\nfour\n', 'more project work');
+      return { status: 'resolved', summary: 'Kept both lines', intentionallyDropped: [] };
+    });
+
+    const result = await localMerge(config({ mergeAgent }));
+
+    expect(result).toMatchObject({ success: true, resolvedConflicts: ['a.txt'] });
+    expect(mergeAgent).toHaveBeenCalledTimes(1);
+    expect(readFileSync(path.join(project, 'a.txt'), 'utf-8')).toBe('one\ntask\nproject\nthree\nfour\n');
+  });
+
   describe('with a remote', () => {
     let origin: string;
     let other: string;
@@ -272,6 +403,8 @@ describe('localMerge', () => {
 
       expect(result).toMatchObject({ success: true, pullNote: { reason: 'fetchFailed', upstream: 'origin/main' } });
       expect(readFileSync(path.join(project, 'b.txt'), 'utf-8')).toBe('from the task\n');
+      // The fetch can't hang the merge: bounded, and no credential prompt
+      expect(fetchOptions.at(-1)).toMatchObject({ timeout: PULL_FETCH_TIMEOUT_MS, env: expect.objectContaining({ GIT_TERMINAL_PROMPT: '0' }) });
     });
 
     it('merges into the local base branch with a note when it diverged from the remote', async () => {
