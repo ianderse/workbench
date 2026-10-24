@@ -39,6 +39,12 @@ export interface ClaudeCodeTaskSettings {
   allowFable: boolean;
   /** Fallback model chain when the chosen model is overloaded (`--fallback-model`) */
   fallbackModel?: string;
+  /**
+   * Parallel tasks message each other (Workbench's `message_task` and `list_parallel_tasks`
+   * tools) and get Workbench's notices about each other (started, overlapping files, finished,
+   * merged)
+   */
+  taskMessaging: boolean;
 }
 
 export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
@@ -49,6 +55,7 @@ export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
   planning: 'auto',
   validation: true,
   allowFable: false,
+  taskMessaging: true,
 };
 
 /** Size of a task as judged by triage */

@@ -82,6 +82,13 @@ export interface ClaudeUserMessage {
   session_id?: string;
   parent_tool_use_id: string | null;
   message: { content: string | ClaudeUserContentBlock[] };
+  /** `--replay-user-messages`: a user message Claude read (stdin input, or a peer session's message) */
+  isReplay?: boolean;
+  isSynthetic?: boolean;
+  /** Where a synthetic message came from; `peer` is another session's native SendMessage */
+  origin?: { kind?: string; name?: string; msg_id?: string; body?: string; fromMode?: string };
+  /** The tool's own result object (e.g. SendMessage: `{ success, message, msg_id }`) */
+  tool_use_result?: unknown;
 }
 
 export interface ClaudeRateLimitEvent {

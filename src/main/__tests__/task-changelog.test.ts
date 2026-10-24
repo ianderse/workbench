@@ -17,6 +17,7 @@ const worktrees = new Map<string, string>();
 vi.mock('../worktree-paths', () => ({ findTaskWorktree: (_projectPath: string, specId: string) => worktrees.get(specId) ?? null }));
 
 import { taskHooks } from '../task-hooks';
+import { taskSessionName } from '../../shared/utils/task-messaging';
 import { buildParallelTasksPrompt, foldTaskChangelog, parseTaskChangelog, type TaskChangelogEntry } from '../task-changelog';
 import { flushTaskChangelog, registerTaskChangelog } from '../task-changelog-writer';
 
@@ -78,6 +79,20 @@ describe('buildParallelTasksPrompt', () => {
     expect(prompt).toContain(`- \`002-coding\` "Add 'auth'", In Progress (coding): \`src/auth.ts\``);
     expect(prompt).toContain('- `003-review` "Review me", Human Review: no file changes yet');
     for (const hidden of ['src/self.ts', '004-done', '005-planning', '006-deleted']) expect(prompt).not.toContain(hidden);
+  });
+
+  it("names each task's session and points at the live tools when task messaging is on", async () => {
+    const specsDir = path.join(tmp, 'tasks');
+    mkdirSync(path.join(specsDir, '002-coding'), { recursive: true });
+    const changelog = path.join(tmp, 'changelog.jsonl');
+    writeFileSync(changelog, JSON.stringify({ at: at(1), task: '002-coding', event: 'state', status: 'in_progress', files: ['src/a.ts'] }));
+
+    const prompt = await buildParallelTasksPrompt(changelog, '001-self', specsDir, changelog, { projectId: 'p1', tools: true });
+    expect(prompt).toContain(`- \`002-coding\`, session \`${taskSessionName('p1', '002-coding')}\`, In Progress`);
+    expect(prompt).toContain('`list_parallel_tasks` (the changelog is the fallback)');
+    const plain = await buildParallelTasksPrompt(changelog, '001-self', specsDir);
+    expect(plain).not.toContain('session `');
+    expect(plain).not.toContain('list_parallel_tasks');
   });
 
   it('says so when no other task has unmerged changes, also without a changelog yet', async () => {

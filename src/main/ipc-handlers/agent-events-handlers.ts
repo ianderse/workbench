@@ -28,6 +28,7 @@ import { isGraphifyEnabled, refreshGraphifyIndex } from "../graphify";
 import { projectStore } from "../project-store";
 import { appLog } from "../app-logger";
 import { registerTaskChangelog } from "../task-changelog-writer";
+import { registerTaskMessaging } from "../task-messaging";
 
 // Timeout for fallback safety net to check if task is still stuck after process exit
 const STUCK_TASK_FALLBACK_TIMEOUT_MS = 500;
@@ -130,6 +131,8 @@ export function registerAgenteventsHandlers(
   taskStateManager.configure(getMainWindow);
   // Every task state and the files tasks edit go to the project's .workbench/changelog.jsonl
   registerTaskChangelog();
+  // Parallel tasks message each other and get Workbench's notices about each other
+  registerTaskMessaging();
 
   // Learning between sessions: rebuild the project's memory graph when a task completes, so the
   // agents of the next tasks search code that includes its changes
