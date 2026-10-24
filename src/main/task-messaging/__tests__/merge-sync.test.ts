@@ -45,10 +45,11 @@ vi.mock('../../utils/git-exec', async (importOriginal) => {
 });
 
 import { configureTaskMessaging, resetTaskMessagingForTests, takeInbox } from '../broker';
-import { recordTaskMerge } from '../merge-sync';
+import { isBranchMergedInto, recordTaskMerge } from '../merge-sync';
 import { TaskNotices } from '../notices';
 import { guardKey, localMerges } from '../../worktree/merge-guard';
 import { readResyncRequest } from '../../task-resync/request';
+import { markStoppedByUser } from '../../task-resync/user-stop';
 
 let tmp: string;
 let root: string;
@@ -314,5 +315,71 @@ describe('merge sync', () => {
     expect(resyncs).toEqual(['002-b']);
     expect(request('003-c')?.ref).toBe('main');
     expect(await texts('003-c')).toEqual([]);
+  });
+
+  it('treats a merged pull request it could not fetch as a local merge: kept out of tasks with a pull request', async () => {
+    tasks.push(task('002-b', 'human_review'), task('003-c', 'pr_created'));
+    for (const specId of ['002-b', '003-c']) addWorktree(specId);
+    commitFile(root, 'c.txt', 'from task a\n', 'task a merged');
+    // No origin: the fetch fails, and the local `main` (with its unpushed commits) stands in
+    await merged('pr');
+
+    expect(request('002-b')).toEqual(expect.objectContaining({ ref: 'main', via: 'local' }));
+    expect(request('003-c')).toBeUndefined();
+    expect(await texts('003-c')).toEqual([expect.stringContaining('Workbench could not fetch it, so it was not merged into your branch')]);
+  });
+
+  it('takes a branch as merged only when it has commits of its own that its base branch has', async () => {
+    const dir = addWorktree('002-b', false);
+    // No commits: in main without having been merged; edits alone change nothing
+    writeFileSync(path.join(dir, 'a.txt'), 'edited\n');
+    expect(await isBranchMergedInto(root, 'workbench/002-b', 'main')).toBe(false);
+    git(dir, 'checkout', '-q', '--', 'a.txt');
+    commitFile(dir, 'b.txt', 'work\n', 'work');
+    expect(await isBranchMergedInto(root, 'workbench/002-b', 'main')).toBe(false);
+    git(root, 'merge', '-q', '--no-edit', 'workbench/002-b');
+    expect(await isBranchMergedInto(root, 'workbench/002-b', 'main')).toBe(true);
+    expect(await isBranchMergedInto(root, 'workbench/missing', 'main')).toBe(false);
+  });
+
+  it('announces a merge made outside Workbench when the branch is gone by the time the task enters Done', async () => {
+    const outside = new TaskNotices({
+      batchMs: 60_000,
+      requestResync: (_project, t) => resyncs.push(t.specId),
+      isMerged: async (p, _t, branch, base) => !!branch && isBranchMergedInto(p.path, branch, base),
+    });
+    const dir = addWorktree('001-a');
+    tasks.push(task('002-b', 'human_review'));
+    addWorktree('002-b');
+    mkdirSync(path.join(root, '.workbench'), { recursive: true });
+    writeFileSync(path.join(root, '.workbench', 'changelog.jsonl'), JSON.stringify({ at: '2026-10-01T00:00:00Z', task: '001-a', event: 'state', status: 'human_review', files: ['001-a.txt'] }));
+    git(root, 'merge', '-q', '--no-edit', 'workbench/001-a');
+    // The board's Done flow: checked first, then the worktree and branch are deleted
+    await outside.noteMergeBeforeDone(project, tasks[0]);
+    git(root, 'worktree', 'remove', '--force', dir);
+    git(root, 'branch', '-D', 'workbench/001-a');
+    await outside.onState({ project, task: tasks[0], status: 'done' });
+    await outside.flush();
+    outside.stop();
+
+    expect(resyncs).toEqual(['002-b']);
+    expect(request('002-b')).toEqual(expect.objectContaining({ ref: 'main', via: 'local' }));
+  });
+
+  it('does not announce a stopped task as finished before its run writes the stop', async () => {
+    tasks.push(task('002-b', 'in_progress'));
+    mkdirSync(path.join(root, '.workbench'), { recursive: true });
+    writeFileSync(path.join(root, '.workbench', 'changelog.jsonl'), [
+      { at: '2026-10-01T00:00:00Z', task: '001-a', event: 'state', status: 'in_progress', files: ['src/x.ts'] },
+      { at: '2026-10-01T00:00:01Z', task: '002-b', event: 'state', status: 'in_progress', files: ['src/x.ts'] },
+    ].map((e) => JSON.stringify(e)).join('\n'));
+    mkdirSync(specDirOf('001-a'), { recursive: true });
+    writeFileSync(path.join(specDirOf('001-a'), 'claude_run.json'), JSON.stringify({ phases: [{ name: 'implement', endedAt: 'x' }], summary: 'Half done' }));
+    markStoppedByUser(specDirOf('001-a'));
+    await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'coding' });
+    await notices.onState({ project, task: tasks[0], status: 'human_review', state: 'human_review' });
+    await notices.flush();
+
+    expect(await texts('002-b')).toEqual([]);
   });
 });

@@ -10,17 +10,19 @@
  *   (`request.ts`) and asks this service to act on it when the task is not running.
  * - A task that was running when the merge happened is checked again when its run ends (the
  *   `state` task hook), so a notice it never acted on is not lost.
- * - Here, per task: nothing to do when its branch already has the merge; a note when its worktree
- *   has uncommitted changes or a merge in progress (the request waits for its next start); a plain
- *   fast-forward when it has no commits of its own; otherwise it starts now, or waits in the Queue
- *   when the project runs as many tasks as it may (the queue's start applies the request).
+ * - Here, per task: when its branch already has the merge (its session merged it while it ran),
+ *   the merge is checked like a resync's and the request dropped once it passes (else the task
+ *   starts, and its session fixes the merge); a note when its worktree has uncommitted changes or
+ *   a merge in progress (the request waits for its next start); a plain fast-forward when it has
+ *   no commits of its own; otherwise it starts now, or waits in the Queue when the project runs as
+ *   many tasks as it may (the queue's start applies the request).
  * - The run itself applies the request (`ClaudeTaskRun` with `resync`); any start does: the user's,
- *   the queue's, a rate-limit resume. A failed resync is not retried automatically.
+ *   the queue's, a rate-limit resume. A failed resync is not retried automatically, and a task the
+ *   user stopped (`user-stop.ts`) is left alone until the user starts it.
  *
  * Checks for a project run one at a time, together with the queue's passes (`runExclusive`).
  */
 import path from 'path';
-import { readFile } from 'fs/promises';
 import type { Project, Task, TaskStatus } from '../../shared/types';
 import { getSpecsDir } from '../../shared/constants/config';
 import { appLog } from '../app-logger';
@@ -29,8 +31,17 @@ import { taskHooks } from '../task-hooks';
 import { findTaskWorktree } from '../worktree-paths';
 import { isTaskBranchBusy, runBranchSync } from '../worktree/merge-guard';
 import { pullIntoWorktree } from '../task-messaging/merge-sync';
-import { inspectResync } from './git';
-import { clearResyncRequest, readResyncRequest, updateResyncRequest, type ResyncRequest } from './request';
+import { inspectResync, readResyncTargets, verifyResyncTargets } from './git';
+import {
+  clearResyncRequest,
+  keepsLocalMergeOut,
+  readResyncRequest,
+  resolveResyncRequest,
+  resyncRefs,
+  updateResyncRequest,
+  type ResyncRequest,
+} from './request';
+import { isStoppedByUser } from './user-stop';
 
 /** Statuses of a task that has stopped and may be brought back to In Progress */
 export const RESYNC_IDLE_STATUSES = new Set<TaskStatus>(['human_review', 'error', 'pr_created']);
@@ -108,31 +119,21 @@ export class TaskResync {
       if (!project) continue;
       for (const task of deps.getTasks(projectId)) {
         if (!RESYNC_IDLE_STATUSES.has(task.status) || task.metadata?.archivedAt) continue;
-        const request = readResyncRequest(specDirOf(project, task));
-        if (request && !request.failedAt) this.schedule(projectId, task.id, 0, 0);
+        const specDir = specDirOf(project, task);
+        const request = readResyncRequest(specDir);
+        if (request && !request.failedAt && !isStoppedByUser(specDir)) this.schedule(projectId, task.id, 0, 0);
       }
     }
   }
 
   /** A task stopped (its run ended): a request it got while running is applied now */
   private async afterRun(project: Project, task: Task): Promise<void> {
-    const request = readResyncRequest(specDirOf(project, task));
+    const specDir = specDirOf(project, task);
+    const request = readResyncRequest(specDir);
     if (!request || request.failedAt) return;
-    // The user stopped it: leave it alone until the next merge or start
-    if (await this.stoppedByUser(project, task)) return;
+    // The user stopped it: leave it alone until the user starts it
+    if (isStoppedByUser(specDir)) return;
     this.schedule(project.id, task.id, this.deps?.delays?.afterRunMs ?? AFTER_RUN_DELAY_MS, 0);
-  }
-
-  private async stoppedByUser(project: Project, task: Task): Promise<boolean> {
-    try {
-      const info = JSON.parse(await readFile(path.join(specDirOf(project, task), 'claude_run.json'), 'utf-8')) as {
-        phases?: Array<{ isError?: boolean; error?: string }>;
-      };
-      const last = info.phases?.at(-1);
-      return last?.isError === true && last.error === 'Stopped';
-    } catch {
-      return false;
-    }
   }
 
   private schedule(projectId: string, taskId: string, delayMs: number, attempt: number): void {
@@ -163,11 +164,12 @@ export class TaskResync {
     const specDir = specDirOf(project, task);
     const request = readResyncRequest(specDir);
     if (!request || request.failedAt) return 'none';
+    if (isStoppedByUser(specDir)) return 'none';
     // Still winding down (or started meanwhile, and so applies the request itself)
     if (deps.isRunning(task.id, projectId)) return RESYNC_IDLE_STATUSES.has(task.status) ? 'retry' : 'none';
     if (!RESYNC_IDLE_STATUSES.has(task.status)) return 'none';
     // A pull request is only brought up to date with a merge that was pushed
-    if (request.via === 'local' && (task.status === 'pr_created' || (task.metadata?.prUrl && task.metadata.prState !== 'closed'))) return 'none';
+    if (keepsLocalMergeOut(request, task)) return 'none';
     if (isTaskBranchBusy(projectId, task.id)) return 'retry';
     const worktreePath = task.metadata?.useWorktree === false ? null : findTaskWorktree(project.path, task.specId);
     if (!worktreePath) {
@@ -175,17 +177,26 @@ export class TaskResync {
       return 'none';
     }
 
-    const need = await inspectResync(worktreePath, request.ref, project.autoBuildPath);
+    const { need, refs } = await inspectResync(worktreePath, resyncRefs(request), project.autoBuildPath);
     switch (need) {
       case 'missing':
-      case 'up-to-date':
-        clearResyncRequest(specDir, request.at);
-        return 'up-to-date';
+      case 'up-to-date': {
+        // Its branch has the merge (its session merged it while it ran): it still has to pass the
+        // check before the request goes; when it does not, the task's session fixes it
+        const targets = await readResyncTargets(worktreePath, request);
+        const check = await verifyResyncTargets(worktreePath, targets, { dropped: request.dropped });
+        if (check.ok) {
+          resolveResyncRequest(specDir, request.at, targets);
+          return 'up-to-date';
+        }
+        this.taskLog(specDir, task.specId, `The merge of ${resyncRefs(request).join(', ')} into this task's branch has problems: ${check.problems.join('; ')}`);
+        break;
+      }
       case 'dirty':
       case 'merging': {
         if (!request.notedAt) {
           const why = need === 'dirty' ? 'Your worktree has uncommitted changes' : 'A merge is in progress in your worktree';
-          const text = `${describeMerged(request)} was merged into \`${request.into}\`, your base branch. ${why}, so Workbench did not start a sync: when you run again, you merge \`${request.ref}\` first.`;
+          const text = `${describeMerged(request)} was merged into \`${request.into}\`, your base branch. ${why}, so Workbench did not start a sync: when you run again, you merge ${refs.map((ref) => `\`${ref}\``).join(' and ')} first.`;
           this.taskLog(specDir, task.specId, `${request.into} changed (${describeMerged(request)} merged). ${why}, so the sync waits for the next run`);
           await deps.note?.(project, task, text).catch(() => undefined);
           updateResyncRequest(specDir, request.at, { notedAt: new Date().toISOString() });
@@ -194,21 +205,24 @@ export class TaskResync {
       }
       case 'no-own-commits': {
         // Nothing of its own to merge with: take the base branch as it is
+        const ref = refs[0];
         const result = await runBranchSync(projectId, task.id, () =>
-          pullIntoWorktree({ worktreePath, ref: request.ref, dataDir: project.autoBuildPath, canMerge: () => !deps.isRunning(task.id, projectId) }));
+          pullIntoWorktree({ worktreePath, ref, dataDir: project.autoBuildPath, canMerge: () => !deps.isRunning(task.id, projectId) }));
         if (result.status === 'merged' || result.status === 'up-to-date') {
-          this.taskLog(specDir, task.specId, `Brought this task's branch up to date with ${request.ref} after ${describeMerged(request)} was merged`);
+          this.taskLog(specDir, task.specId, `Brought this task's branch up to date with ${ref} after ${describeMerged(request)} was merged`);
           clearResyncRequest(specDir, request.at);
           return 'fast-forwarded';
         }
-        appLog.warn(`[TaskResync] Could not fast-forward ${task.specId} to ${request.ref}: ${result.status}`);
+        appLog.warn(`[TaskResync] Could not fast-forward ${task.specId} to ${ref}: ${result.status}`);
         return 'none';
       }
       default:
         break;
     }
 
-    this.taskLog(specDir, task.specId, `${request.into} changed (${describeMerged(request)} merged): back to In Progress to merge ${request.ref} and carry on`);
+    if (need !== 'missing' && need !== 'up-to-date') {
+      this.taskLog(specDir, task.specId, `${request.into} changed (${describeMerged(request)} merged): back to In Progress to merge ${refs.join(', ')} and carry on`);
+    }
     if (deps.isAtParallelLimit(project, task.id)) {
       await deps.queue(project, task);
       return 'queued';

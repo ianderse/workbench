@@ -5,7 +5,7 @@
  * When a task is merged, every other unfinished task of the project hears about it (In Progress,
  * AI Review, Human Review, PR Created, Error; no file filter), and the ones based on the branch
  * it was merged into take the change in. Each of those whose worktree branch lacks the merge gets a
- * resync request (`task-resync/request.ts`; several merges coalesce into one, for the latest ref):
+ * resync request (`task-resync/request.ts`; several merges coalesce into one that merges every ref):
  *
  * - running (its run is live, or it is In Progress / AI Review): a `[Workbench]` notice tells it
  *   to merge that branch now (live stdin, or the inbox for its next step). Should the run end
@@ -20,14 +20,15 @@
  * - based on another branch: an informational notice.
  *
  * The merged ref: a local merge's `<base>`; a merged PR's `origin/<base>` after one fetch in the
- * project (the local `<base>` when the fetch fails). Checks run one task at a time per project.
+ * project (the local `<base>` when the fetch fails, then treated as a local merge: not for tasks with
+ * a pull request). Checks run one task at a time per project.
  */
 import type { Project, Task, TaskStatus } from '../../shared/types';
 import { appLog } from '../app-logger';
 import { git } from '../utils/git-exec';
 import { findTaskWorktree } from '../worktree-paths';
 import { isTaskBranchMerging } from '../worktree/merge-guard';
-import { recordResyncRequest } from '../task-resync/request';
+import { keepsLocalMergeOut as keepsLocalResyncOut, recordResyncRequest } from '../task-resync/request';
 import { getTaskMessagingEnv, isTaskLive, taskSpecDir } from './broker';
 
 /** How a task was merged */
@@ -66,6 +67,12 @@ export function recordTaskMerge(projectId: string, specId: string, info: TaskMer
   recorded.set(recordKey(projectId, specId), { into, via: info.via, at: Date.now() });
 }
 
+/** Whether a merge is recorded for the task (not taken yet) */
+export function hasTaskMerge(projectId: string, specId: string): boolean {
+  const entry = recorded.get(recordKey(projectId, specId));
+  return !!entry && Date.now() - entry.at <= RECORD_TTL_MS;
+}
+
 /** The merge recorded for a task that just entered Done (once) */
 export function takeTaskMerge(projectId: string, specId: string): TaskMergeInfo | undefined {
   const key = recordKey(projectId, specId);
@@ -73,6 +80,25 @@ export function takeTaskMerge(projectId: string, specId: string): TaskMergeInfo 
   recorded.delete(key);
   if (!entry || Date.now() - entry.at > RECORD_TTL_MS) return undefined;
   return { into: entry.into, via: entry.via };
+}
+
+/**
+ * Whether `branch` has commits of its own (it moved on from the commit it was created at, as its
+ * reflog has it) and all of them are in `base`. A branch with no commits is in its base branch
+ * without having been merged
+ */
+export async function isBranchMergedInto(projectPath: string, branch: string, base: string): Promise<boolean> {
+  const run = async (args: string[]) =>
+    (await git(args, { cwd: projectPath, isolated: true, encoding: 'utf-8', timeout: 15000 })).stdout.trim();
+  try {
+    const tip = await run(['rev-parse', '--verify', '-q', `refs/heads/${branch}^{commit}`]);
+    await run(['merge-base', '--is-ancestor', tip, base]);
+    const created = (await run(['log', '-g', '--format=%H', `refs/heads/${branch}`]).catch(() => '')).split('\n').filter(Boolean).at(-1);
+    // Without a reflog (turned off) there is no telling: the branch being in its base counts
+    return !created || created !== tip;
+  } catch {
+    return false;
+  }
 }
 
 // =============================================================================
@@ -124,8 +150,8 @@ export async function pullIntoWorktree(params: {
     await run(['merge', '--no-edit', ref]);
     return { status: 'merged' };
   } catch (error) {
-    const files = (await run(['diff', '--name-only', '--diff-filter=U']).catch(() => ''))
-      .split('\n').map((line) => line.trim()).filter(Boolean);
+    const files = (await run(['diff', '--no-color', '--no-ext-diff', '--name-only', '-z', '--diff-filter=U']).catch(() => ''))
+      .split('\0').filter(Boolean);
     // Leave the worktree exactly as it was
     await run(['merge', '--abort']).catch(() => undefined);
     return files.length ? { status: 'conflicts', files } : { status: 'failed', error: errorText(error) };
@@ -158,9 +184,7 @@ function listFiles(files: string[]): string {
  * request: Merge PR pushes the task's branch, which would carry those commits into the PR
  */
 export function keepsLocalMergeOut(info: { via: MergeVia }, task: Task): boolean {
-  if (info.via !== 'local') return false;
-  const { prUrl, prState } = task.metadata ?? {};
-  return task.status === 'pr_created' || (!!prUrl && prState !== 'merged' && prState !== 'closed');
+  return keepsLocalResyncOut(info, task);
 }
 
 interface MergeEvent {
@@ -170,6 +194,8 @@ interface MergeEvent {
   who: string;
   info: TaskMergeInfo;
   files: string[];
+  /** A merged PR whose `origin/<base>` could not be fetched: the local base branch stands in */
+  fetchFailed?: boolean;
 }
 
 /** Tells the other tasks about a merge and has the ones on the same base branch take it in */
@@ -228,11 +254,13 @@ export class MergeSync {
     if (same.length === 0) return;
 
     const { ref, fetchNote } = await this.mergedRef(project, info);
+    // Without the fetch the ref is the local base branch, with its unpushed commits: a local merge
+    const merge: MergeEvent = fetchNote ? { ...event, info: { ...info, via: 'local' }, fetchFailed: true } : event;
     for (const task of same) {
-      if (keepsLocalMergeOut(info, task)) {
-        this.options.queueNotice(project.id, task.specId, this.notPushedText(event));
+      if (keepsLocalMergeOut(merge.info, task)) {
+        this.options.queueNotice(project.id, task.specId, this.notPushedText(merge));
       } else {
-        this.enqueue(project.id, () => this.takeIn(event, task.specId, ref, fetchNote));
+        this.enqueue(project.id, () => this.takeIn(merge, task.specId, ref, fetchNote));
       }
     }
   }
@@ -264,6 +292,9 @@ export class MergeSync {
 
   private notPushedText(event: MergeEvent): string {
     const { into } = event.info;
+    if (event.fetchFailed) {
+      return `${event.who} was merged into \`origin/${into}\`, but Workbench could not fetch it, so it was not merged into your branch: your local \`${into}\` may have commits that are not pushed, and your pull request merges against \`origin/${into}\`.`;
+    }
     return `${event.who} was merged into \`${into}\` locally and is not pushed yet, so it was not merged into your branch: your pull request merges against \`origin/${into}\`.`;
   }
 

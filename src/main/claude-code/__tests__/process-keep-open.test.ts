@@ -129,11 +129,69 @@ describe('startClaudeProcess with stdin kept open', () => {
     expect((await handle.done).results).toHaveLength(2);
   });
 
-  it('closes stdin after a silence when background tasks never report back', async () => {
-    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true, backgroundIdleCloseMs: 20 });
+  it('closes stdin at the shell cap even while the shell writes output and a subagent talks', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true, backgroundWaitMs: { shell: 60, agent: 10_000 } });
     const child = children[0];
-    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 'a1', is_backgrounded: true });
+    // A dev server: Claude Code can't tell it from a command that ends
+    child.emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'srv', task_type: 'local_bash' }] });
+    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 'srv', task_type: 'local_bash', is_backgrounded: true });
     child.emitLine(result());
+    await tick();
+    expect(child.stdinEnded).toBe(false);
+    // Unrelated output keeps coming: it neither resets nor clears the cap
+    for (let i = 0; i < 8; i++) {
+      child.emitLine({ type: 'system', subtype: 'thinking_tokens' });
+      child.emitLine({ type: 'assistant', parent_tool_use_id: 'toolu_x', message: { content: [{ type: 'text', text: 'sub' }] } });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    expect(child.stdinEnded).toBe(true);
+    child.exit(0);
+    await handle.done;
+  });
+
+  it('keeps stdin open for a background agent within its cap, also through a new turn', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true, backgroundWaitMs: { shell: 10, agent: 80 } });
+    const child = children[0];
+    child.emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'a1', task_type: 'local_agent' }, { task_id: 'b1', task_type: 'local_bash' }] });
+    child.emitLine(result());
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    // Past the shell cap: an agent is still running
+    expect(child.stdinEnded).toBe(false);
+    // A message starts a turn: the cap keeps running (assistant messages don't disable it)
+    const id = handle.send('[Workbench] hi')!;
+    child.emitLine(replay([{ type: 'text', text: '[Workbench] hi' }, { type: 'text', text: `[Workbench message ${id}]` }]));
+    child.emitLine({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'ok' }] } });
+    await new Promise((resolve) => setTimeout(resolve, 70));
+    expect(child.stdinEnded).toBe(true);
+    child.exit(0);
+    await handle.done;
+  });
+
+  it('never keeps stdin open for ambient, awaited or subagent-owned tasks', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true });
+    const child = children[0];
+    child.emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [
+      { task_id: 'w1', task_type: 'local_bash', ambient: true },
+      { task_id: 'r1', task_type: 'local_agent', awaited: true },
+      { task_id: 's1', task_type: 'local_bash', parent_task_id: 'a0' },
+    ] });
+    // The level comes before task_started: that must not add an ignored task back
+    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 'w1', task_type: 'local_bash', is_backgrounded: true });
+    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 's2', task_type: 'local_bash', is_backgrounded: true, owned_by_subagent: true, parent_task_id: 'a0' });
+    child.emitLine(result());
+    await tick();
+    expect(child.stdinEnded).toBe(true);
+    child.exit(0);
+    await handle.done;
+  });
+
+  it('closes stdin after a short grace when the tasks ended without a new turn', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true, backgroundWaitMs: { agent: 10_000, grace: 20 } });
+    const child = children[0];
+    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 'a1', task_type: 'local_agent', is_backgrounded: true });
+    child.emitLine(result());
+    await tick();
+    child.emitLine({ type: 'system', subtype: 'task_updated', task_id: 'a1', patch: { status: 'killed' } });
     await tick();
     expect(child.stdinEnded).toBe(false);
     await new Promise((resolve) => setTimeout(resolve, 40));
@@ -151,6 +209,54 @@ describe('startClaudeProcess with stdin kept open', () => {
     expect(child.stdinEnded).toBe(true);
     child.exit(0);
     await handle.done;
+  });
+
+  it('tells which results ended turns that only answered a message', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true, backgroundWaitMs: { agent: 10_000 } });
+    const child = children[0];
+    const main = (text: string) => ({ type: 'assistant', parent_tool_use_id: null, message: { content: [{ type: 'text', text }] } });
+    const marked = (id: string) => replay([{ type: 'text', text: 'notice' }, { type: 'text', text: `[Workbench message ${id}]` }]);
+    // 1. The prompt's turn, which leaves a background agent running
+    child.emitLine({ type: 'system', subtype: 'init' });
+    child.emitLine(replay('go'));
+    child.emitLine(main('working'));
+    child.emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'a1', task_type: 'local_agent' }, { task_id: 'a2', task_type: 'local_agent' }] });
+    child.emitLine(result({ result: 'plan' }));
+    // 2. A notice read between turns starts one (init comes before the replay); the subagent talks first
+    child.emitLine({ type: 'assistant', parent_tool_use_id: 'toolu_a1', message: { content: [{ type: 'text', text: 'sub' }] } });
+    child.emitLine({ type: 'system', subtype: 'init' });
+    child.emitLine(marked(handle.send('notice', 'wbm-n1') as string));
+    child.emitLine(main('noted'));
+    child.emitLine(result({ result: 'noted' }));
+    // 3. The agent reports back: Claude Code's own continuation
+    child.emitLine({ type: 'system', subtype: 'task_notification', task_id: 'a1', status: 'completed' });
+    child.emitLine({ type: 'system', subtype: 'init' });
+    child.emitLine(main('agent done'));
+    child.emitLine(result({ result: 'continued' }));
+    // 4. A peer's message starts a turn
+    child.emitLine({ type: 'user', isReplay: true, isSynthetic: true, origin: { kind: 'peer', msg_id: 'm1' }, message: { content: 'hi' } });
+    child.emitLine(main('answer'));
+    child.emitLine(result({ result: 'peer answered' }));
+    // 5. A turn that began with a notice but takes in the last agent's report is the task's
+    child.emitLine(marked(handle.send('notice 2', 'wbm-n2') as string));
+    child.emitLine({ type: 'system', subtype: 'task_notification', task_id: 'a2', status: 'completed' });
+    child.emitLine(main('both'));
+    child.emitLine(result({ result: 'both' }));
+    await tick();
+    child.exit(0);
+    const outcome = await handle.done;
+    expect(outcome.results.map((r) => r.result)).toEqual(['plan', 'noted', 'continued', 'peer answered', 'both']);
+    expect(outcome.resultOrigins).toEqual(['task', 'message', 'task', 'message', 'task']);
+  });
+
+  it('counts every turn as the task\'s without open stdin', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go' });
+    const child = children[0];
+    child.emitLine(result());
+    child.emitLine(result());
+    await tick();
+    child.exit(0);
+    expect((await handle.done).resultOrigins).toEqual(['task', 'task']);
   });
 
   it('writes the prompt and closes stdin right away by default', async () => {

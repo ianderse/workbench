@@ -38,7 +38,8 @@ import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
 import { branchMergeBlocker } from '../../worktree/merge-guard';
 import { taskResync } from '../../task-resync';
-import { deliverToTask } from '../../task-messaging';
+import { clearStoppedByUser, markStoppedByUser } from '../../task-resync/user-stop';
+import { deliverToTask, noteTaskMergeBeforeDone } from '../../task-messaging';
 
 
 /**
@@ -238,6 +239,8 @@ export function registerTaskExecutionHandlers(
     // Cancel any pending fallback timer from a previous run's exit, so it can't stop the new run.
     // Named by project, or starting this task would cancel another project's stuck-run net
     cancelFallbackTimer(taskId, project.id);
+    // Started again: whatever the user stopped is over (task-resync/user-stop.ts)
+    clearStoppedByUser(getMainSpecDir(project, task));
 
     // The project travels with the watch: two projects can be running a task of the same spec id,
     // each writing its own plan file, and they need a watcher each
@@ -577,6 +580,8 @@ export function registerTaskExecutionHandlers(
     // project would kill the right run and then transition whichever project holds the id first
     const { task, project } = findTaskAndProject(taskId, projectId ?? stoppedProjectId);
     if (!task || !project) return;
+    // Before the state changes: nothing restarts a task the user stopped (task-resync/user-stop.ts)
+    markStoppedByUser(getMainSpecDir(project, task));
 
     // Stopped before implementation started: back to backlog; otherwise to review
     const hasPlan = hasStartedImplementation(project, task);
@@ -691,6 +696,11 @@ export function registerTaskExecutionHandlers(
       // deleting the worktree) or keepWorktree is requested
       if (status === 'done') {
         const worktreePath = findTaskWorktree(project.path, task.specId);
+        // A merge made outside Workbench is found from the task's branch, which the cleanup
+        // below deletes: look now (task-messaging/notices.ts)
+        if (task.status !== 'done' && (!worktreePath || options?.keepWorktree || options?.forceCleanup)) {
+          await noteTaskMergeBeforeDone(project, task);
+        }
         if (worktreePath) {
           if (options?.keepWorktree) {
             console.warn(`[TASK_UPDATE_STATUS] Marking task ${taskId} as done while keeping worktree at ${worktreePath}`);
@@ -761,6 +771,7 @@ export function registerTaskExecutionHandlers(
         // nothing while this project's run carried on, or start a second run over it
         if (status !== 'in_progress' && agentManager.isRunning(taskId, project.id)) {
           console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
+          markStoppedByUser(getMainSpecDir(project, task));
           agentManager.killTask(taskId, project.id);
           fileWatcher.unwatch(taskId, project.id).catch(() => undefined);
         }

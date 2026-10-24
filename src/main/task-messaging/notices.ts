@@ -24,7 +24,8 @@ import { taskSessionName } from '../../shared/utils/task-messaging';
 import { taskHooks, type TaskHookEvents } from '../task-hooks';
 import { foldTaskChangelog, getTaskChangelogPath, readTaskChangelog, type TaskChangelogTask } from '../task-changelog';
 import { deliverToTask, getTaskMessagingEnv, taskSpecDir } from './broker';
-import { MergeSync, takeTaskMerge, type MergeSyncOptions, type TaskMergeInfo } from './merge-sync';
+import { MergeSync, hasTaskMerge, recordTaskMerge, takeTaskMerge, type MergeSyncOptions, type TaskMergeInfo } from './merge-sync';
+import { isStoppedByUser } from '../task-resync/user-stop';
 
 /** Tasks that get notices: running, reviewed by AI, or waiting in the queue (their inbox) */
 const RECIPIENT_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_review']);
@@ -208,6 +209,16 @@ export class TaskNotices {
     pending.files.set(task.specId, set);
   }
 
+  /**
+   * A task is about to enter Done by hand, which deletes its branch: record now whether it was
+   * merged (outside Workbench), so its arrival in Done is still announced
+   */
+  async noteMergeBeforeDone(project: Project, task: Task): Promise<void> {
+    if (hasTaskMerge(project.id, task.specId)) return;
+    const merge = await this.mergeOf(project, task, await this.filesOf(project, task.specId));
+    if (merge) recordTaskMerge(project.id, task.specId, merge);
+  }
+
   // ---------------------------------------------------------------------------
   // Overlaps
   // ---------------------------------------------------------------------------
@@ -339,11 +350,13 @@ export class TaskNotices {
         phases?: Array<{ isError?: boolean; error?: string }>;
       };
       const last = info.phases?.at(-1);
-      const stopped = last?.isError === true && last.error === 'Stopped';
+      // The user's stop is recorded before the task enters Human Review; the run writes its
+      // "Stopped" phase later (and not at all when stopped before a step began)
+      const stopped = isStoppedByUser(taskSpecDir(project, specId)) || (last?.isError === true && last.error === 'Stopped');
       const text = info.validation?.summary?.trim() || info.summary?.trim() || '';
       return { ...splitSummary(text), stopped };
     } catch {
-      return { stopped: false };
+      return { stopped: isStoppedByUser(taskSpecDir(project, specId)) };
     }
   }
 
