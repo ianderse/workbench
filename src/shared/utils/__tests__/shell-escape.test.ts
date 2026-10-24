@@ -1,13 +1,13 @@
 /**
- * buildCdCommand: the cd syntax follows the terminal's shell kind, and the platform's default
- * shell when the terminal doesn't say
+ * buildCdCommand and buildUnsetEnvPrefix: the syntax follows the terminal's shell kind, and the
+ * platform's default shell when the terminal doesn't say
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const platform = vi.hoisted(() => ({ windows: false }));
 vi.mock('../../platform', () => ({ isWindows: () => platform.windows }));
 
-import { buildCdCommand, defaultShellKind, escapePowerShellArg } from '../shell-escape';
+import { buildCdCommand, buildUnsetEnvPrefix, defaultShellKind, escapePowerShellArg } from '../shell-escape';
 
 beforeEach(() => {
   platform.windows = false;
@@ -55,5 +55,24 @@ describe('escapePowerShellArg', () => {
 
   it('drops line breaks, which would submit the typed line early', () => {
     expect(escapePowerShellArg('a\r\nb\nc')).toBe("'abc'");
+  });
+});
+
+describe('buildUnsetEnvPrefix', () => {
+  it('removes the variable for the command in each shell', () => {
+    expect(buildUnsetEnvPrefix('CLAUDE_CONFIG_DIR', 'posix')).toBe('env -u CLAUDE_CONFIG_DIR ');
+    expect(buildUnsetEnvPrefix('CLAUDE_CONFIG_DIR', 'cmd')).toBe('set "CLAUDE_CONFIG_DIR=" && ');
+    // Not `$env:X = $null`, which Windows PowerShell 5.1 leaves behind as an empty string
+    expect(buildUnsetEnvPrefix('CLAUDE_CONFIG_DIR', 'powershell')).toBe(
+      'Remove-Item Env:\\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; '
+    );
+  });
+
+  it("uses the platform's default shell when no kind is given", () => {
+    expect(buildUnsetEnvPrefix('CLAUDE_CONFIG_DIR')).toBe('env -u CLAUDE_CONFIG_DIR ');
+    platform.windows = true;
+    expect(buildUnsetEnvPrefix('CLAUDE_CONFIG_DIR')).toBe(
+      'Remove-Item Env:\\CLAUDE_CONFIG_DIR -ErrorAction SilentlyContinue; '
+    );
   });
 });
