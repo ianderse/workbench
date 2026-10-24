@@ -13,6 +13,7 @@ import { createMergeResolverFn } from '../../ai/runners/merge-resolver';
 import { createPR } from '../../ai/runners/github/pr-creator';
 import { mergePR } from '../../ai/runners/github/pr-merger';
 import { localMerge } from '../../worktree/local-merge';
+import { loadClaudeRunInfo } from '../../claude-code/task-runner';
 import { taskHooks } from '../../task-hooks';
 import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
@@ -1523,8 +1524,10 @@ export function registerWorktreeHandlers(
   );
 
   /**
-   * Merge a task's branch into its base branch with plain git, in the project itself.
-   * Nothing is pushed and no pull request is involved; a merged task moves to Done.
+   * Merge a task's branch into its base branch with git, in the project itself: the base branch
+   * is pulled first (fast-forward), and conflicts are resolved by Claude Code in the task's
+   * worktree before the merge. Nothing is pushed and no pull request is involved; a merged task
+   * moves to Done.
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL,
@@ -1542,11 +1545,18 @@ export function registerWorktreeHandlers(
 
       localMerges.add(taskId);
       try {
+        const runInfo = loadClaudeRunInfo(path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId));
         const result = await localMerge({
           projectDir: project.path,
           worktreePath,
           targetBranch,
           dataDir: project.autoBuildPath,
+          taskTitle: task.title,
+          taskDescription: task.metadata?.userDescription || task.description,
+          verificationCommands: runInfo?.triage?.verification,
+          profileId: project.settings?.claudeProfileId,
+          onProgress: (step, params) =>
+            safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_LOCAL_PROGRESS, taskId, { step, params }),
         });
         if (result.success) await markTaskDone(task, project, worktreePath);
         return { success: true, data: result };

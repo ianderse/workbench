@@ -21,6 +21,7 @@ import type {
   WorktreeMergePROptions,
   WorktreeMergePRResult,
   MergePRProgress,
+  LocalMergeProgress,
   PullRequestState,
   ImageAttachment
 } from '../../shared/types';
@@ -90,6 +91,7 @@ export interface TaskAPI {
   mergeWorktreeLocal: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>>;
   getWorktreePRState: (taskId: string, projectId?: string) => Promise<IPCResult<PullRequestState>>;
   onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void) => () => void;
+  onLocalMergeProgress: (callback: (taskId: string, progress: LocalMergeProgress) => void) => () => void;
   onTaskListChanged: (callback: (projectId: string) => void) => () => void;
 
   // Task Event Listeners
@@ -239,6 +241,16 @@ export const createTaskAPI = (): TaskAPI => ({
     ipcRenderer.on(IPC_CHANNELS.TASK_MERGE_PR_PROGRESS, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.TASK_MERGE_PR_PROGRESS, handler);
+    };
+  },
+
+  onLocalMergeProgress: (callback: (taskId: string, progress: LocalMergeProgress) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, taskId: string, progress: LocalMergeProgress): void => {
+      callback(taskId, progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.TASK_MERGE_LOCAL_PROGRESS, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TASK_MERGE_LOCAL_PROGRESS, handler);
     };
   },
 
