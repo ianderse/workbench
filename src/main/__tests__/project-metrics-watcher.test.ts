@@ -51,7 +51,8 @@ describe('watching a project\'s metrics', () => {
       })
     );
 
-    const sessions = path.join(configRoot, 'projects', projectPath.replace(/\\/g, '/').replace(/^[a-zA-Z]:/, '').replace(/\//g, '-'));
+    // Named as Claude Code names it: every character that is not a letter or a digit becomes a dash
+    const sessions = path.join(configRoot, 'projects', projectPath.replace(/[^a-zA-Z0-9]/g, '-'));
     mkdirSync(sessions, { recursive: true });
     transcript = path.join(sessions, 'abc.jsonl');
     writeFileSync(transcript, '{"type":"user"}\n');

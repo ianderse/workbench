@@ -112,15 +112,27 @@ vi.mock('../../claude-code/session-spending', () => ({
 // what makes the order a window's own account has to be lifted out of worth testing against
 vi.mock('../../claude-profile/profile-config-dirs', async () => {
   const { homedir } = await import('os');
-  const { join } = await import('path');
+  const { default: nodePath } = await import('path');
   return {
     claudeConfigDirs: (extra: Array<string | undefined> = []) => {
-      const dirs = [join(homedir(), '.claude'), '/home/user/.claude', '/home/user/.claude-profiles/work'];
-      for (const dir of extra) if (dir && !dirs.includes(dir)) dirs.push(dir);
-      return dirs;
+      const dirs = [nodePath.join(homedir(), '.claude'), '/home/user/.claude', '/home/user/.claude-profiles/work'];
+      // Resolved and deduplicated exactly as the real `claudeConfigDirs` returns them, so a caller
+      // that resolves the dir it hands in finds it among these on every host
+      return [...new Set([...dirs, ...extra].filter((dir): dir is string => !!dir).map((dir) => nodePath.resolve(dir)))];
     },
   };
 });
+
+/**
+ * The accounts the mock above lists, in the spelling the handler passes on: `claudeConfigDirs` and
+ * `resolveSessionConfigDir` both resolve a config dir, which on a Windows host turns a POSIX
+ * literal into a drive-letter path. Resolving the fixtures too keeps every assertion about the
+ * command, and every path built from them, true on all three hosts.
+ */
+const OTHER_ACCOUNT_DIR = path.resolve('/home/user/.claude');
+const WORK_ACCOUNT_DIR = path.resolve('/home/user/.claude-profiles/work');
+/** The config dir of a profile a test hands to the handler itself */
+const PROFILE_CONFIG_DIR = path.resolve('/tmp/claude-config');
 
 // Mock PtyManager.writeToPty - the implementation now uses this instead of terminal.pty.write
 const mockWriteToPty = vi.fn();
@@ -391,7 +403,7 @@ describe('cli-integration-handler', () => {
           name: 'Work',
           isDefault: false,
           oauthToken: 'token-value',
-          configDir: '/tmp/claude-config',
+          configDir: PROFILE_CONFIG_DIR,
         })),
         getProfileToken: vi.fn(() => 'token-value'),
         markProfileUsed: vi.fn(),
@@ -414,7 +426,7 @@ describe('cli-integration-handler', () => {
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
-      const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
+      const configDir = getConfigDirCommand(platform, PROFILE_CONFIG_DIR);
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(configDir);
@@ -498,7 +510,7 @@ describe('cli-integration-handler', () => {
           id: 'prof-2',
           name: 'Work',
           isDefault: false,
-          configDir: '/tmp/claude-config',
+          configDir: PROFILE_CONFIG_DIR,
         })),
         getProfileToken: vi.fn(() => null),
         markProfileUsed: vi.fn(),
@@ -518,7 +530,7 @@ describe('cli-integration-handler', () => {
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
-      const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
+      const configDir = getConfigDirCommand(platform, PROFILE_CONFIG_DIR);
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(configDir);
@@ -784,7 +796,7 @@ describe('invokeCLIAsync', () => {
           id: 'prof-config',
           name: 'Work',
           isDefault: false,
-          configDir: '/tmp/claude-config',
+          configDir: PROFILE_CONFIG_DIR,
         })),
         getProfileToken: vi.fn(() => null),
         markProfileUsed: vi.fn(),
@@ -804,7 +816,7 @@ describe('invokeCLIAsync', () => {
       const written = mockWriteToPty.mock.calls[0][1] as string;
       const clearCmd = getClearPrefix(platform);
       const histPrefix = getHistoryPrefix(platform);
-      const configDir = getConfigDirCommand(platform, '/tmp/claude-config');
+      const configDir = getConfigDirCommand(platform, PROFILE_CONFIG_DIR);
 
       expect(written).toContain(histPrefix);
       expect(written).toContain(configDir);
@@ -1531,7 +1543,7 @@ describe('agent window sessions', () => {
       id: 'work',
       name: 'Work',
       isDefault: false,
-      configDir: '/home/user/.claude-profiles/work',
+      configDir: WORK_ACCOUNT_DIR,
     };
     mockInitializeClaudeProfileManager.mockResolvedValue({
       getActiveProfile: vi.fn(() => work),
@@ -1605,7 +1617,7 @@ describe('restoring an agent window', () => {
   const windowSwappedToDefaultAccount = (sessionId: string) => {
     mockLastAgentSession.mockResolvedValue({
       sessionId,
-      configDir: '/home/user/.claude-profiles/work',
+      configDir: WORK_ACCOUNT_DIR,
       startedAt: '2026-10-21T09:00:00.000Z',
       cwd: '/tmp/project',
     });
@@ -1631,24 +1643,24 @@ describe('restoring an agent window', () => {
   it('runs the session on the account whose transcripts hold it, not the one it started on', async () => {
     mockLastAgentSession.mockResolvedValue({
       sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-      configDir: '/home/user/.claude',
+      configDir: OTHER_ACCOUNT_DIR,
       startedAt: '2026-10-21T09:00:00.000Z',
       cwd: '/tmp/project',
     });
     // An account swap moved the transcript: it is the other account that holds it now
     mockFindSessionTranscript.mockImplementation(async (_sessionId: string, dirs: string[]) =>
-      dirs[0] === '/home/user/.claude-profiles/work' ? { file: '/t.jsonl', size: 10, modifiedMs: 1 } : null
+      dirs[0] === WORK_ACCOUNT_DIR ? { file: '/t.jsonl', size: 10, modifiedMs: 1 } : null
     );
 
     const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
 
     expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
-    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg('/home/user/.claude-profiles/work')}`);
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(WORK_ACCOUNT_DIR)}`);
     // The accounts are searched one at a time, so the one that answered is the one to run on, and
     // the wider search is asked without a working directory so it is the project-folder scan alone
     expect(mockFindSessionTranscript).toHaveBeenCalledWith(
       '0b7c6c1e-1234-4abc-9def-001122334455',
-      ['/home/user/.claude']
+      [OTHER_ACCOUNT_DIR]
     );
   });
 
@@ -1661,26 +1673,26 @@ describe('restoring an agent window', () => {
     const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
     mockLastAgentSession.mockResolvedValue({
       sessionId,
-      configDir: '/home/user/.claude',
+      configDir: OTHER_ACCOUNT_DIR,
       startedAt: '2026-10-21T09:00:00.000Z',
       cwd: '/tmp/project',
     });
     // The first account has a copy a swap left in some other project's folder, which only its scan
     // of every project folder finds; the second has the live transcript at the session's own path
     mockFindSessionTranscript.mockImplementation(async (_sessionId: string, dirs: string[]) =>
-      dirs[0] === '/home/user/.claude'
-        ? { file: '/home/user/.claude/projects/-other-project/stale.jsonl', size: 10, modifiedMs: 1 }
+      dirs[0] === OTHER_ACCOUNT_DIR
+        ? { file: path.join(OTHER_ACCOUNT_DIR, 'projects', '-other-project', 'stale.jsonl'), size: 10, modifiedMs: 1 }
         : null
     );
     mockStat.mockImplementation(async (file: string) => {
-      if (!file.startsWith('/home/user/.claude-profiles/work/')) throw new Error('ENOENT');
+      if (!file.startsWith(path.join(WORK_ACCOUNT_DIR, 'projects'))) throw new Error('ENOENT');
       return { isFile: () => true };
     });
 
     const written = await resume(createMockTerminal({ projectPath: '/tmp/project' }));
 
     expect(written).toContain(`--resume ${sessionId}`);
-    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg('/home/user/.claude-profiles/work')}`);
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(WORK_ACCOUNT_DIR)}`);
     // Settled before any account was scanned, so the stale copy never got to answer
     expect(mockFindSessionTranscript).not.toHaveBeenCalled();
   });
@@ -1695,7 +1707,7 @@ describe('restoring an agent window', () => {
    */
   it('resumes on the window\'s own account when a swap left the session under the default dir too', async () => {
     const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
-    const work = '/home/user/.claude-profiles/work';
+    const work = WORK_ACCOUNT_DIR;
     /** The window ran on the work account, and both it and the default dir hold the session */
     const sessionUnderBothAccounts = () => {
       mockLastAgentSession.mockResolvedValue({
@@ -1705,7 +1717,7 @@ describe('restoring an agent window', () => {
         cwd: '/tmp/project',
       });
       mockStat.mockImplementation(async (file: string) => {
-        if (file.startsWith(`${work}/`) || file.startsWith(path.join(DEFAULT_DIR, 'projects'))) {
+        if (file.startsWith(path.join(work, 'projects')) || file.startsWith(path.join(DEFAULT_DIR, 'projects'))) {
           return { isFile: () => true };
         }
         throw new Error('ENOENT');
@@ -1738,7 +1750,7 @@ describe('restoring an agent window', () => {
    */
   it('scans the window\'s own account first in the wider search as well', async () => {
     const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
-    const work = '/home/user/.claude-profiles/work';
+    const work = WORK_ACCOUNT_DIR;
     mockLastAgentSession.mockResolvedValue({
       sessionId,
       configDir: work,
@@ -1803,7 +1815,7 @@ describe('restoring an agent window', () => {
    */
   it('resumes on a non-default account without wiping the replayed scrollback', async () => {
     const sessionId = '0b7c6c1e-1234-4abc-9def-001122334455';
-    const work = '/home/user/.claude-profiles/work';
+    const work = WORK_ACCOUNT_DIR;
     /** The window's own session, held by the work account at the path Claude Code writes it to */
     const ownSessionOnWorkAccount = () => {
       mockLastAgentSession.mockResolvedValue({
@@ -1813,7 +1825,7 @@ describe('restoring an agent window', () => {
         cwd: '/tmp/project',
       });
       mockStat.mockImplementation(async (file: string) => {
-        if (!file.startsWith(`${work}/`)) throw new Error('ENOENT');
+        if (!file.startsWith(path.join(work, 'projects'))) throw new Error('ENOENT');
         return { isFile: () => true };
       });
     };
@@ -1840,7 +1852,7 @@ describe('restoring an agent window', () => {
     mockLastAgentSession.mockResolvedValue(undefined);
     mockLatestTranscript.mockResolvedValue({
       sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-      configDir: '/home/user/.claude-profiles/work',
+      configDir: WORK_ACCOUNT_DIR,
       file: '/t.jsonl',
       size: 10,
       modifiedMs: 1,
@@ -1851,13 +1863,13 @@ describe('restoring an agent window', () => {
     expect(written).toContain('--resume 0b7c6c1e-1234-4abc-9def-001122334455');
     expect(written).not.toContain('--continue');
     // And on the account the adopted transcript was found under
-    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg('/home/user/.claude-profiles/work')}`);
+    expect(written).toContain(`CLAUDE_CONFIG_DIR=${escapeShellArg(WORK_ACCOUNT_DIR)}`);
     // Recorded for the project, so what the conversation spends from here on reaches Metrics
     expect(mockRecordAgentSession).toHaveBeenCalledWith(
       '/tmp/project',
       expect.objectContaining({
         sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-        configDir: path.resolve('/home/user/.claude-profiles/work'),
+        configDir: WORK_ACCOUNT_DIR,
         cwd: '/tmp/project',
       })
     );
@@ -1871,7 +1883,7 @@ describe('restoring an agent window', () => {
     mockFindSessionTranscript.mockResolvedValue(null);
     mockLatestTranscript.mockResolvedValue({
       sessionId: '0b7c6c1e-1234-4abc-9def-001122334455',
-      configDir: '/home/user/.claude',
+      configDir: OTHER_ACCOUNT_DIR,
       file: '/t.jsonl',
       size: 10,
       modifiedMs: 1,
@@ -1911,7 +1923,7 @@ describe('restoring an agent window', () => {
     mockLastAgentSession.mockResolvedValue(undefined);
     mockLatestTranscript.mockResolvedValue({
       sessionId: '../../escape',
-      configDir: '/home/user/.claude',
+      configDir: OTHER_ACCOUNT_DIR,
       file: '/t.jsonl',
       size: 10,
       modifiedMs: 1,
