@@ -31,6 +31,7 @@ import { appLog } from '../app-logger';
 import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branch';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
+import { createRunMessaging } from '../task-messaging/run-messaging';
 
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
@@ -200,6 +201,7 @@ export class AgentManager extends EventEmitter {
 
     // Stopped while the worktree was being prepared
     if (entry.killed) {
+      config.messaging?.dispose();
       resolveDone();
       return;
     }
@@ -250,7 +252,11 @@ export class AgentManager extends EventEmitter {
         const message = error instanceof Error ? error.message : String(error);
         this.handleRunFinished(taskId, entry, { status: 'failed', error: message });
       })
-      .finally(resolveDone);
+      .finally(() => {
+        // The run's Workbench tools stop working with it
+        config.messaging?.dispose();
+        resolveDone();
+      });
   }
 
   /**
@@ -509,6 +515,8 @@ export class AgentManager extends EventEmitter {
     };
 
     if (isSelfImproveEnabled(project.settings)) config.selfImprovePrompt = SELF_IMPROVE_NUDGE;
+    // Parallel tasks message each other through Workbench (Settings > Agents)
+    if (taskSettings.taskMessaging) config.messaging = createRunMessaging(project.id, task.specId);
 
     if (await isGraphifyEnabled(project.path)) {
       try {

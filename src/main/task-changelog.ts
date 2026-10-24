@@ -10,6 +10,7 @@ import { existsSync } from 'fs';
 import { readFile } from 'fs/promises';
 import path from 'path';
 import type { TaskStatus } from '../shared/types';
+import { taskSessionName } from '../shared/utils/task-messaging';
 
 export const TASK_CHANGELOG_FILE = 'changelog.jsonl';
 
@@ -105,14 +106,22 @@ export function foldTaskChangelog(entries: TaskChangelogEntry[]): Map<string, Ta
   return tasks;
 }
 
-function describeTask(task: TaskChangelogTask): string {
+function describeTask(task: TaskChangelogTask, projectId?: string): string {
   const status = task.status ? STATUS_LABELS[task.status] : 'Unknown';
   const state = task.state && task.state !== task.status ? ` (${task.state.replace(/_/g, ' ')})` : '';
   const title = task.title ? ` "${task.title.replace(/"/g, "'")}"` : '';
   const shown = task.files.slice(0, 30);
   const more = task.files.length > shown.length ? `, and ${task.files.length - shown.length} more` : '';
   const files = shown.length ? `: ${shown.map((file) => `\`${file}\``).join(', ')}${more}` : ': no file changes yet';
-  return `- \`${task.task}\`${title}, ${status}${state}${files}`;
+  const session = projectId ? `, session \`${taskSessionName(projectId, task.task)}\`` : '';
+  return `- \`${task.task}\`${title}${session}, ${status}${state}${files}`;
+}
+
+/** Task messaging is on for the run: name each task's session, point at the live tools */
+export interface ParallelTasksMessaging {
+  projectId: string;
+  /** The session has Workbench's `list_parallel_tasks` and `message_task` tools */
+  tools: boolean;
 }
 
 /**
@@ -124,7 +133,8 @@ export async function buildParallelTasksPrompt(
   changelogPath: string,
   specId: string,
   specsDir: string,
-  promptPath: string = changelogPath
+  promptPath: string = changelogPath,
+  messaging?: ParallelTasksMessaging
 ): Promise<string> {
   const others = [...foldTaskChangelog(await readTaskChangelog(changelogPath)).values()].filter(
     (task) =>
@@ -134,10 +144,13 @@ export async function buildParallelTasksPrompt(
       existsSync(path.join(specsDir, task.task))
   );
   const list = others.length
-    ? `Other tasks whose changes are not merged yet, as of now:\n${others.map(describeTask).join('\n')}`
+    ? `Other tasks whose changes are not merged yet, as of now:\n${others.map((task) => describeTask(task, messaging?.projectId)).join('\n')}`
     : 'No other task has unmerged changes right now.';
+  const check = messaging?.tools
+    ? 'Before editing a file, check whether another task is changing it with `list_parallel_tasks` (the changelog is the fallback).'
+    : 'Before editing a file, check whether another task is changing it (re-read the changelog for newer entries during long work).';
   return `## Parallel tasks
 Other tasks of this project run in parallel in their own worktrees, and their branches are merged into the same base branch, so editing the same files causes merge conflicts. Workbench logs every task's states and the files it changes in \`${promptPath}\` (JSON Lines, newest last; don't modify it).
 ${list}
-Before editing a file, check whether another task is changing it (re-read the changelog for newer entries during long work). Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.`;
+${check} Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.`;
 }
