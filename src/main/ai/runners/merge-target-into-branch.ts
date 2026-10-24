@@ -47,7 +47,7 @@ export interface MergeTargetIntoBranchResult {
   error?: string;
 }
 
-const CONFLICT_MARKER = /^(<{7}|>{7})( |$)/m;
+export const CONFLICT_MARKER = /^(<{7}|>{7})( |$)/m;
 /** Target lines too generic to tell whether they survived (braces, punctuation) */
 const TRIVIAL_LINE = /^[\s{}()[\];,.]*$/;
 
@@ -57,16 +57,20 @@ function errorText(error: unknown): string {
   return String(stderr || stdout || (error instanceof Error ? error.message : error)).trim();
 }
 
-/** Lines the target branch added to each file (since `mergeBase`) that `HEAD` no longer has */
-async function findMissingTargetLines(
+/**
+ * Lines the target added to each file (from `mergeBase` to `targetCommit`) that `HEAD` no longer has.
+ * Also checks a task session's own merge of its base branch (`task-resync/verify.ts`)
+ */
+export async function findMissingTargetLines(
   git: (args: string[]) => Promise<string>,
   files: string[],
   mergeBase: string,
-  targetRef: string,
+  targetCommit: string,
 ): Promise<MissingTargetLines[]> {
   const missing: MissingTargetLines[] = [];
   for (const file of files) {
-    const diff = await git(['diff', '-U0', mergeBase, targetRef, '--', file]).catch(() => '');
+    // A literal pathspec: `pages/[id].tsx` is that file, not a pattern that also matches `pages/i.tsx`
+    const diff = await git(['--literal-pathspecs', 'diff', '-U0', mergeBase, targetCommit, '--', file]).catch(() => '');
     const added = diff
       .split('\n')
       .filter((line) => line.startsWith('+') && !line.startsWith('+++'))
@@ -88,9 +92,19 @@ export async function mergeTargetIntoBranch(config: MergeTargetIntoBranchConfig)
     (await runGit(args, { cwd: worktreePath, isolated: true, encoding: 'utf-8', maxBuffer: 20 * 1024 * 1024 })).stdout;
   const mergeAgent = config.mergeAgent ?? runMergeAgent;
   const isMerging = () => git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).then(() => true, () => false);
+  /** Paths with conflicts, NUL-separated so names come as they are (never quoted) */
+  const unmergedPaths = async () =>
+    (await git(['diff', '--name-only', '-z', '--diff-filter=U'])).split('\0').filter(Boolean);
 
   const before = (await git(['rev-parse', 'HEAD'])).trim();
-  const mergeBase = (await git(['merge-base', 'HEAD', targetRef]).catch(() => '')).trim();
+  // The target's commit, read once: the ref can move while Claude Code works (a commit on the base
+  // branch in the project, a fetch), and the checks are about the commit that was merged
+  let targetCommit: string;
+  try {
+    targetCommit = (await git(['rev-parse', '--verify', `${targetRef}^{commit}`])).trim();
+  } catch (error) {
+    return { success: false, conflictedFiles: [], error: `Could not find ${targetRef}: ${errorText(error)}` };
+  }
   const rollback = async () => {
     if (await isMerging()) await git(['merge', '--abort']).catch(() => undefined);
     const head = (await git(['rev-parse', 'HEAD']).catch(() => before)).trim();
@@ -100,16 +114,19 @@ export async function mergeTargetIntoBranch(config: MergeTargetIntoBranchConfig)
   let conflictedFiles: string[] = [];
   const summaries: string[] = [];
   try {
+    // By name, so the merge commit's message names the branch
     await git(['merge', '--no-ff', '--no-edit', targetRef]);
   } catch (error) {
-    conflictedFiles = (await git(['diff', '--name-only', '--diff-filter=U']).catch(() => ''))
-      .split('\n').map((file) => file.trim()).filter(Boolean);
+    conflictedFiles = await unmergedPaths().catch(() => []);
     if (conflictedFiles.length === 0) {
       await rollback();
       return { success: false, conflictedFiles, error: `Could not merge ${target} into the task branch: ${errorText(error)}` };
     }
+    // The commit actually merged, should the ref have moved since it was read
+    targetCommit = (await git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).catch(() => '')).trim() || targetCommit;
   }
   if (conflictedFiles.length === 0) return { success: true, conflictedFiles };
+  const mergeBase = (await git(['merge-base', before, targetCommit]).catch(() => '')).trim();
 
   // Conflicts: the merge agent resolves them, then the result is checked
   const agentInput: MergeAgentInput = {
@@ -129,19 +146,19 @@ export async function mergeTargetIntoBranch(config: MergeTargetIntoBranchConfig)
     if (first.status !== 'resolved') throw new Error(`Claude Code could not resolve the conflicts: ${first.summary}`);
 
     onProgress?.('verifying');
-    const unmerged = (await git(['diff', '--name-only', '--diff-filter=U'])).trim();
-    if (unmerged) throw new Error(`Conflicts remain in: ${unmerged.split('\n').join(', ')}`);
+    const unmerged = await unmergedPaths();
+    if (unmerged.length) throw new Error(`Conflicts remain in: ${unmerged.join(', ')}`);
     for (const file of conflictedFiles) {
       const content = await git(['show', `:${file}`]).catch(() => git(['show', `HEAD:${file}`]).catch(() => ''));
       if (CONFLICT_MARKER.test(content)) throw new Error(`Conflict markers remain in ${file}`);
     }
     if (await isMerging()) await git(['commit', '--no-edit']);
-    await git(['merge-base', '--is-ancestor', targetRef, 'HEAD']).catch(() => {
+    await git(['merge-base', '--is-ancestor', targetCommit, 'HEAD']).catch(() => {
       throw new Error(`The merge did not include ${target}`);
     });
 
     // Every line the target added to the conflicted files must survive
-    let missing = mergeBase ? await findMissingTargetLines(git, conflictedFiles, mergeBase, targetRef) : [];
+    let missing = mergeBase ? await findMissingTargetLines(git, conflictedFiles, mergeBase, targetCommit) : [];
     if (missing.length) {
       onProgress?.('resolving', { count: missing.length, files: missing.map(({ file }) => file).join(', ') });
       const second = await mergeAgent({ ...agentInput, missingLines: missing });
@@ -152,7 +169,7 @@ export async function mergeTargetIntoBranch(config: MergeTargetIntoBranchConfig)
         await git(['commit', '-m', `Restore changes from ${target} lost in the merge`]);
       }
       const dropped = new Set(second.intentionallyDropped.map(({ file, line }) => `${file}\0${line.trim()}`));
-      missing = (await findMissingTargetLines(git, conflictedFiles, mergeBase, targetRef))
+      missing = (await findMissingTargetLines(git, conflictedFiles, mergeBase, targetCommit))
         .map(({ file, lines }) => ({ file, lines: lines.filter((line) => !dropped.has(`${file}\0${line}`)) }))
         .filter(({ lines }) => lines.length);
       if (missing.length) {

@@ -4,7 +4,8 @@
  *
  * Merges a task's branch into the base branch chosen for the task with plain git, in the
  * project itself:
- * 1. Both the worktree and the project must have no uncommitted changes
+ * 1. Both the worktree and the project must have no uncommitted changes (a merge left over from an
+ *    interrupted attempt starts over)
  * 2. The base branch must be the one checked out in the project (git merges into HEAD)
  * 3. The base branch is pulled first when it tracks a remote (fast-forward only; offline or
  *    diverged, it merges as it is and the result carries a note)
@@ -12,7 +13,8 @@
  * 5. Conflicts: the base branch is merged into the task branch in the task's worktree, where the
  *    merge agent (Claude Code) resolves them and the result is checked
  *    (`ai/runners/merge-target-into-branch.ts`)
- * 6. `git merge <task branch>` in the project. Nothing is pushed and no PR is involved
+ * 6. `git merge <task branch>` in the project (after resolving, once the project is checked again:
+ *    it may have changed meanwhile). Nothing is pushed and no PR is involved
  *
  * A merge that fails is undone (`git merge --abort`, the worktree reset to where it was), so the
  * project stays as it was and the conflicted files are reported. All git calls are async.
@@ -49,6 +51,9 @@ function errorText(error: unknown): string {
   return String(stderr || stdout || (error instanceof Error ? error.message : error)).trim();
 }
 
+/** How long pulling the base branch may wait for its remote */
+export const PULL_FETCH_TIMEOUT_MS = 120_000;
+
 const lines = (text: string) => text.split('\n').map((line) => line.trim()).filter(Boolean);
 
 /** Merge a task's branch into its base branch, locally */
@@ -64,7 +69,37 @@ export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLoca
     (await cwd(['status', '--porcelain', '--untracked-files=no']))
       .split('\n')
       .filter((line) => line.trim() && !line.slice(3).startsWith(dataDir));
-  const unmergedFiles = async () => lines(await git(['diff', '--name-only', '--diff-filter=U']).catch(() => ''));
+  /** The commit a merge that stopped is merging (empty when no merge is in progress) */
+  const mergeHead = async (cwd: (args: string[]) => Promise<string>) =>
+    (await cwd(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).catch(() => '')).trim();
+  /** Files with conflicts in the project, NUL-separated so names come as they are (never quoted) */
+  const unmergedFiles = async () =>
+    (await git(['diff', '--name-only', '-z', '--diff-filter=U']).catch(() => '')).split('\0').filter(Boolean);
+  /**
+   * What keeps the merge out of the project, if anything: git merges into the checked-out branch,
+   * so the project has to be on the base branch, with nothing uncommitted and no merge in progress.
+   * With `abortLeftoverMerge` (the first check), a merge in progress is left over from an
+   * interrupted attempt and starts over; later it is someone's own merge and is never undone.
+   */
+  const projectProblem = async (abortLeftoverMerge = false): Promise<string | undefined> => {
+    let projectBranch: string;
+    try {
+      projectBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    } catch (error) {
+      return `Could not read the project's branch: ${errorText(error)}`;
+    }
+    if (projectBranch !== targetBranch) {
+      return `The project is on ${projectBranch || 'no branch'}. Check out ${targetBranch} there to merge into it.`;
+    }
+    if ((await uncommitted(git)).length) {
+      return `The project has uncommitted changes on ${targetBranch}. Commit or discard them before merging.`;
+    }
+    if (await mergeHead(git)) {
+      if (!abortLeftoverMerge) return 'A merge is in progress in the project. Finish or abort it before merging.';
+      await git(['merge', '--abort']).catch(() => undefined);
+    }
+    return undefined;
+  };
 
   onProgress?.('checking');
   // The task branch, as its worktree has it checked out
@@ -79,35 +114,23 @@ export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLoca
   }
   const base = { sourceBranch, targetBranch };
 
-  // Anything git has not committed would be left behind, so it has to be dealt with first
+  // A merge left over from an interrupted attempt (the app quit while Claude Code resolved it)
+  // starts over; anything else git has not committed would be left behind, so it has to be dealt
+  // with first
+  if (await mergeHead(worktreeGit)) await worktreeGit(['merge', '--abort']).catch(() => undefined);
   if ((await uncommitted(worktreeGit)).length) {
     return { ...base, success: false, error: "The task's worktree has uncommitted changes. Commit or discard them before merging." };
   }
 
-  // git merges into the checked-out branch, so the project has to be on the base branch
-  let projectBranch: string;
-  try {
-    projectBranch = (await git(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-  } catch (error) {
-    return { ...base, success: false, error: `Could not read the project's branch: ${errorText(error)}` };
-  }
-  if (projectBranch !== targetBranch) {
-    return {
-      ...base,
-      success: false,
-      error: `The project is on ${projectBranch || 'no branch'}. Check out ${targetBranch} there to merge into it.`,
-    };
-  }
-  if ((await uncommitted(git)).length) {
-    return { ...base, success: false, error: `The project has uncommitted changes on ${targetBranch}. Commit or discard them before merging.` };
-  }
-  // A merge left over from an interrupted attempt starts over
-  if (await git(['rev-parse', '-q', '--verify', 'MERGE_HEAD']).then(() => true, () => false)) {
-    await git(['merge', '--abort']).catch(() => undefined);
-  }
+  const notReady = await projectProblem(true);
+  if (notReady) return { ...base, success: false, error: notReady };
 
   // Pull the base branch (fast-forward only) when it tracks a remote
-  const pullNote = await pullTarget(git, targetBranch, onProgress);
+  const fetchTarget = async (args: string[]) => {
+    // Bounded, and never waits on a credential prompt nobody can answer
+    await runGit(args, { cwd: projectDir, isolated: true, timeout: PULL_FETCH_TIMEOUT_MS, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  };
+  const pullNote = await pullTarget(git, fetchTarget, targetBranch, onProgress);
   const result: WorktreeLocalMergeResult = { ...base, success: false, ...(pullNote ? { pullNote } : {}) };
 
   // Nothing to merge when the base branch already has every commit of the task branch
@@ -121,8 +144,12 @@ export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLoca
       await git(['merge', '--no-edit', sourceBranch]);
       return { ok: true };
     } catch (error) {
+      // Leave the project exactly as it was: only the merge started here (merging the task
+      // branch's commit) is undone, never one someone else has in progress there
+      const merging = await mergeHead(git);
+      const sourceCommit = (await git(['rev-parse', '-q', '--verify', `${sourceBranch}^{commit}`]).catch(() => '')).trim();
+      if (!merging || merging !== sourceCommit) return { ok: false, conflictedFiles: [], message: errorText(error) };
       const conflictedFiles = await unmergedFiles();
-      // Leave the project exactly as it was
       await git(['merge', '--abort']).catch(() => undefined);
       return { ok: false, conflictedFiles, message: errorText(error) };
     }
@@ -176,6 +203,18 @@ export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLoca
     };
   }
 
+  // The project may have changed while Claude Code worked: the task must not go into another
+  // branch, and a merge someone started there is theirs to finish
+  const changed = await projectProblem();
+  if (changed) {
+    return {
+      ...result,
+      success: false,
+      summary: resolved.summary,
+      error: `The project changed while Claude Code resolved the conflicts. ${changed}\nNothing was merged into ${targetBranch}. The task's branch keeps the resolved merge, so merging again is quick.`,
+    };
+  }
+
   const attempt = await mergeInProject();
   if (!attempt.ok) {
     return {
@@ -195,6 +234,7 @@ export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLoca
  */
 async function pullTarget(
   git: (args: string[]) => Promise<string>,
+  fetch: (args: string[]) => Promise<void>,
   targetBranch: string,
   onProgress: LocalMergeConfig['onProgress'],
 ): Promise<LocalMergePullNote | undefined> {
@@ -207,7 +247,7 @@ async function pullTarget(
   // A remote upstream is fetched first ('.' is a local branch: nothing to fetch)
   if (remote && remote !== '.' && mergeRef) {
     try {
-      await git(['fetch', remote, mergeRef]);
+      await fetch(['fetch', remote, mergeRef]);
     } catch (error) {
       return { reason: 'fetchFailed', upstream, detail: errorText(error) };
     }
