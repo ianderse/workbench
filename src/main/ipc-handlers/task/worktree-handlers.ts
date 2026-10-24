@@ -17,6 +17,7 @@ import { taskHooks } from '../../task-hooks';
 import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
 import { git } from '../../utils/git-exec';
+import { stageTaskWork } from '../../claude-code/stage-excludes';
 import { runTool, runToolScript } from '../../platform/runtime-exec';
 import { isWslRuntime } from '../../platform/shell-runtime';
 import {
@@ -581,11 +582,7 @@ export function registerWorktreeHandlers(
             if (applied) {
               // Stage all changed files
               try {
-                await git(['add', '-A'], {
-                  cwd: project.path,
-                  encoding: 'utf-8',
-                  isolated: true
-                });
+                await stageTaskWork(project.path, [], { encoding: 'utf-8', isolated: true });
                 debug('Staged merged files');
               } catch (gitErr) {
                 debug('Failed to stage merged files:', gitErr);
