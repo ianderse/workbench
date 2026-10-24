@@ -1313,8 +1313,9 @@ describe('cli-integration-handler - Helper Functions', () => {
       );
       const written = mockWriteToPty.mock.calls[0][1] as string;
       expect(written.startsWith("$env:PATH = 'C:\\npm'; & 'claude' --session-id ")).toBe(true);
-      expect(written).toMatch(/ --append-system-prompt 'The Graphify knowledge graph of this project is in C:\\My Repo\\\.workbench\\knowledge [^']*'/);
-      expect(written).toMatch(/ --append-system-prompt '## Project memory [^']*'/);
+      // One flag: Claude Code keeps only the last --append-system-prompt
+      expect(written.match(/ --append-system-prompt /g)).toHaveLength(1);
+      expect(written).toMatch(/ --append-system-prompt 'The Graphify knowledge graph of this project is in C:\\My Repo\\\.workbench\\knowledge [^']* ## Project memory [^']*'/);
     });
   });
 
