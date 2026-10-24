@@ -5,7 +5,7 @@
  * The MCP tools a task's Claude Code session gets (server `workbench`, tools
  * `mcp__workbench__<name>`), served by the app's local tools server with a token per run:
  *
- *   message_task         send a message to another task of the project (or "lead")
+ *   message_task         send a message to another task of the project
  *   list_parallel_tasks  the project's other unmerged tasks: status, session, files, live or not
  */
 import { taskSessionName } from '../../shared/utils/task-messaging';
@@ -36,7 +36,7 @@ export interface TaskRunTool {
 async function messageTask(context: TaskRunToolContext, args: Record<string, unknown>): Promise<string> {
   const target = typeof args.task === 'string' ? args.task : '';
   const message = typeof args.message === 'string' ? args.message : '';
-  if (!target.trim()) return 'not sent: say which task (its id, number or session name, or "lead")';
+  if (!target.trim()) return 'not sent: say which task (its id, number or session name)';
   const env = getTaskMessagingEnv();
   const me = env?.getTasks(context.projectId).find((t) => t.specId === context.specId);
   const outcome = await deliver(context.projectId, target, {
@@ -81,14 +81,14 @@ export const TASK_RUN_TOOLS: TaskRunTool[] = [
   {
     name: 'message_task',
     description:
-      'Send a short message to another task of this project (or "lead" for the project lead). Workbench delivers it whatever state the task is in: ' +
+      'Send a short message to another task of this project. Workbench delivers it whatever state the task is in: ' +
       'a running task reads it at its next step, a task between steps or not started reads it when it next runs. Use it when your change affects ' +
       "files, APIs or schemas the other task works with, when you are blocked on something it will settle, or to answer a question it sent you. " +
       'Returns what happened: delivered, queued or not sent (and why).',
     inputSchema: {
       type: 'object',
       properties: {
-        task: { type: 'string', description: 'The task: its id ("012-add-login"), number ("012"), session name ("wb-…"), or "lead"' },
+        task: { type: 'string', description: 'The task: its id ("012-add-login"), number ("012"), or session name ("wb-…")' },
         message: { type: 'string', description: `The message, up to ${MAX_MESSAGE_LENGTH} characters. Be specific and brief` },
       },
       required: ['task', 'message'],

@@ -23,6 +23,7 @@ export function createRunMessaging(projectId: string, specId: string): TaskRunMe
   let disposed = false;
 
   const openTools = (): Promise<TaskToolsSession> => {
+    // A failed open is forgotten, so the next phase tries again instead of running without tools
     tools ??= openMcpToolsSession({
       instructions: 'Message the parallel tasks of this Workbench project and see what they change.',
       tools: TASK_RUN_TOOLS.map(({ name, description, inputSchema, readOnly }) => ({
@@ -33,7 +34,11 @@ export function createRunMessaging(projectId: string, specId: string): TaskRunMe
       })),
       call: (name, args) => runTaskRunTool({ projectId, specId }, name, args),
     });
-    return tools;
+    const opening = tools;
+    opening.catch(() => {
+      if (tools === opening) tools = null;
+    });
+    return opening;
   };
 
   const sender = () => {
@@ -59,8 +64,8 @@ export function createRunMessaging(projectId: string, specId: string): TaskRunMe
     markRead: (ids) => {
       void markInboxRead(projectId, specId, ids).catch((error) => appLog.warn('[TaskMessaging] Could not update the inbox:', error));
     },
-    attach: (send) => {
-      const end = registerLiveRun({ projectId, specId, sessionName, send });
+    attach: (send, inPrompt) => {
+      const end = registerLiveRun({ projectId, specId, sessionName, send }, inPrompt);
       return (unreadIds) => {
         void end(unreadIds).catch((error) => appLog.warn('[TaskMessaging] Could not requeue unread messages:', error));
       };

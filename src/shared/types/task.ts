@@ -34,6 +34,8 @@ export interface ExecutionProgress {
   // When a phase completes, it's added to this array before transitioning to the next phase
   // This ensures that planning is marked complete before coding starts, etc.
   completedPhases?: CompletablePhase[];  // Phases that have successfully completed
+  /** The base branch the run is merging in after another task was merged into it (null: not syncing) */
+  syncingWith?: string | null;
 }
 
 export interface Subtask {

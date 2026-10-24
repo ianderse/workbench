@@ -8,12 +8,13 @@
  *
  * - a task started                      -> the other active tasks
  * - two tasks change the same files     -> both (once per pair and file)
- * - a task finished (Human Review)      -> active tasks that change the same files
+ * - a task finished (Human Review)      -> active tasks that change the same files, with its
+ *                                          summary and its "Decisions/API changes" line
  * - a task was merged                   -> every other unfinished task; the ones based on the branch
- *                                          it was merged into take it in (`merge-sync.ts`)
+ *                                          it was merged into take it in (`merge-sync.ts`, also
+ *                                          while notices are off)
  *
- * Notices are batched per target for a few seconds and deduplicated. The same transitions are
- * offered as lifecycle events (`onTaskLifecycle`) for the project lead.
+ * Notices are batched per target for a few seconds and deduplicated.
  */
 import { readFile } from 'fs/promises';
 import path from 'path';
@@ -23,7 +24,7 @@ import { taskSessionName } from '../../shared/utils/task-messaging';
 import { taskHooks, type TaskHookEvents } from '../task-hooks';
 import { foldTaskChangelog, getTaskChangelogPath, readTaskChangelog, type TaskChangelogTask } from '../task-changelog';
 import { deliverToTask, getTaskMessagingEnv, taskSpecDir } from './broker';
-import { MergeSync, takeTaskMerge, type MergeSyncOptions, type MergeVia, type TaskMergeInfo } from './merge-sync';
+import { MergeSync, takeTaskMerge, type MergeSyncOptions, type TaskMergeInfo } from './merge-sync';
 
 /** Tasks that get notices: running, reviewed by AI, or waiting in the queue (their inbox) */
 const RECIPIENT_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_review']);
@@ -31,24 +32,32 @@ const RECIPIENT_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_revi
 const UNMERGED_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_review', 'human_review', 'pr_created', 'error']);
 const MAX_FILES_LISTED = 10;
 const MAX_SUMMARY = 300;
+/**
+ * The line a finished task's summary ends with when it made decisions or changed APIs (the
+ * validate step asks for it): "Decisions/API changes: ..."
+ */
+const DECISIONS_LINE = /^[\s>*_-]*decisions(?:\s*(?:\/|and|&)\s*api changes)?[*_]*\s*:[*_]*\s*(.+)$/im;
+/** What a session writes when there is nothing to say */
+const NOTHING = /^(?:none|n\/a|no|-+|nothing(?: notable)?)\.?$/i;
 
-export type TaskLifecycleKind = 'started' | 'finished' | 'merged' | 'done' | 'failed';
+function clip(text: string, max: number): string | undefined {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (!flat) return undefined;
+  return flat.length > max ? `${flat.slice(0, max)}…` : flat;
+}
 
-/** A task's lifecycle step, for the project lead */
-export interface TaskLifecycleEvent {
-  kind: TaskLifecycleKind;
-  projectId: string;
-  specId: string;
-  title: string;
-  sessionName: string;
-  /** Files its branch changes (as the changelog and its edits know them) */
-  files: string[];
-  /** finished: its summary */
-  summary?: string;
-  /** merged: the branch it was merged into; done: its base branch */
-  baseBranch?: string;
-  /** merged: locally or through its pull request */
-  mergedVia?: MergeVia;
+/**
+ * A finished task's summary for its notice, and its "Decisions/API changes" line taken out of it
+ * (undefined when the summary has none, or says there are none)
+ */
+function splitSummary(text: string): { summary?: string; decisions?: string } {
+  const match = DECISIONS_LINE.exec(text);
+  if (!match) return { summary: clip(text, MAX_SUMMARY) };
+  const decisions = match[1].replace(/[*_]+$/, '').trim();
+  return {
+    summary: clip(text.replace(match[0], ''), MAX_SUMMARY),
+    decisions: NOTHING.test(decisions) ? undefined : clip(decisions, MAX_SUMMARY),
+  };
 }
 
 export interface TaskNoticesOptions {
@@ -64,26 +73,8 @@ export interface TaskNoticesOptions {
   isRunning?: MergeSyncOptions['isRunning'];
   /** The repository's default branch, for tasks and projects that name none */
   defaultBranch?: MergeSyncOptions['defaultBranch'];
-}
-
-const lifecycleHandlers = new Set<(event: TaskLifecycleEvent) => void>();
-
-/** Listen to task lifecycle steps (started, finished, merged, done, failed); returns an unsubscribe */
-export function onTaskLifecycle(handler: (event: TaskLifecycleEvent) => void): () => void {
-  lifecycleHandlers.add(handler);
-  return () => {
-    lifecycleHandlers.delete(handler);
-  };
-}
-
-function emitLifecycle(event: TaskLifecycleEvent): void {
-  for (const handler of lifecycleHandlers) {
-    try {
-      handler(event);
-    } catch {
-      // A failing listener never affects the notices
-    }
-  }
+  /** A task that is not running has to take in a merge: bring it back to In Progress (task-resync) */
+  requestResync?: MergeSyncOptions['requestResync'];
 }
 
 function describe(projectId: string, task: Pick<Task, 'specId' | 'title'>): string {
@@ -117,9 +108,13 @@ export class TaskNotices {
     this.batchMs = options.batchMs ?? 3000;
     this.editBatchMs = options.editBatchMs ?? 1000;
     this.mergeSync = new MergeSync({
-      queueNotice: (projectId, specId, text) => this.queueNotice(projectId, specId, text),
+      // Tasks take in a merge whether or not notices are on; only the notices follow the switch
+      queueNotice: (projectId, specId, text) => {
+        if (this.enabled()) this.queueNotice(projectId, specId, text);
+      },
       isRunning: options.isRunning,
       defaultBranch: options.defaultBranch,
+      requestResync: options.requestResync,
     });
   }
 
@@ -160,60 +155,40 @@ export class TaskNotices {
     const previous = this.lastStatus.get(taskKey);
     this.lastStatus.set(taskKey, status);
     if (previous === status) return;
+    // The first state machine status seen for a task since the app started is the state its
+    // machine was restored in (created on demand), not a transition. Statuses set without the
+    // machine (no `state`) still count; In Progress has its own check below
+    if (previous === undefined && state !== undefined && status !== 'in_progress') return;
 
     if (status === 'in_progress') {
       const fresh = previous === 'backlog' || previous === 'queue' || (previous === undefined && (!state || state === 'planning'));
-      if (!fresh) return;
-      const files = await this.filesOf(project, task.specId);
-      emitLifecycle({ kind: 'started', projectId: project.id, specId: task.specId, title: task.title, sessionName: taskSessionName(project.id, task.specId), files });
-      if (!this.enabled()) return;
+      if (!fresh || !this.enabled()) return;
       for (const other of this.recipients(project.id, task.specId)) {
         this.queueNotice(project.id, other.specId, `${describe(project.id, task)} started.`);
       }
       return;
     }
 
-    if (status === 'human_review' && state === 'error') {
-      emitLifecycle({
-        kind: 'failed', projectId: project.id, specId: task.specId, title: task.title,
-        sessionName: taskSessionName(project.id, task.specId), files: await this.filesOf(project, task.specId),
-      });
-      return;
-    }
-
-    if (status === 'human_review' && previous !== 'pr_created') {
+    // A run that ended in an error waits in Human Review too, but it didn't finish anything
+    if (status === 'human_review' && state !== 'error' && previous !== 'pr_created') {
+      if (!this.enabled()) return;
       const run = await this.runOf(project, task.specId);
       // A stopped run waits for the user too, but it didn't finish anything
       if (run.stopped) return;
       const files = await this.filesOf(project, task.specId);
-      const { summary } = run;
-      emitLifecycle({ kind: 'finished', projectId: project.id, specId: task.specId, title: task.title, sessionName: taskSessionName(project.id, task.specId), files, summary });
-      if (!this.enabled()) return;
+      const { summary, decisions } = run;
       await this.notifyOverlapping(project, task, files, (shared) =>
-        `${describe(project.id, task)} finished and waits for review (not merged yet). It changes files you also change: ${listFiles(shared)}.${summary ? ` Its summary: ${summary}` : ''}`);
+        `${describe(project.id, task)} finished and waits for review (not merged yet). It changes files you also change: ${listFiles(shared)}.` +
+        `${summary ? ` Its summary: ${summary}` : ''}${decisions ? `\nDecisions and API changes: ${decisions}` : ''}`);
       return;
     }
 
     if (status === 'done') {
       const files = await this.filesOf(project, task.specId);
-      const merge = await this.mergeOf(project, task);
-      emitLifecycle({
-        kind: merge ? 'merged' : 'done', projectId: project.id, specId: task.specId, title: task.title,
-        sessionName: taskSessionName(project.id, task.specId), files,
-        baseBranch: merge?.into ?? await this.mergeSync.baseOf(project, task),
-        ...(merge ? { mergedVia: merge.via } : {}),
-      });
+      const merge = await this.mergeOf(project, task, files);
       this.edited.delete(key(project.id, task.specId));
-      if (!merge || !this.enabled()) return;
+      if (!merge) return;
       await this.mergeSync.onMerged({ project, merged: task, who: describe(project.id, task), info: merge, files });
-      return;
-    }
-
-    if (status === 'error') {
-      emitLifecycle({
-        kind: 'failed', projectId: project.id, specId: task.specId, title: task.title,
-        sessionName: taskSessionName(project.id, task.specId), files: await this.filesOf(project, task.specId),
-      });
     }
   }
 
@@ -271,15 +246,18 @@ export class TaskNotices {
 
   /**
    * Where a task that entered Done was merged, and how: as Workbench recorded it, else a merged
-   * pull request, else its branch found in its base branch (merged locally); undefined: not merged
+   * pull request, else its branch found in its base branch (merged locally, when it changed
+   * `files`); undefined: not merged
    */
-  private async mergeOf(project: Project, task: Task): Promise<TaskMergeInfo | undefined> {
+  private async mergeOf(project: Project, task: Task, files: string[]): Promise<TaskMergeInfo | undefined> {
     const recorded = takeTaskMerge(project.id, task.specId);
     if (recorded) return recorded;
     const env = getTaskMessagingEnv();
     const current = env?.getTasks(project.id).find((t) => t.specId === task.specId) ?? task;
     const base = await this.mergeSync.baseOf(project, current);
     if (current.metadata?.prState === 'merged' || task.metadata?.prState === 'merged') return { into: base, via: 'pr' };
+    // A branch with no changes of its own is in its base branch without having been merged
+    if (files.length === 0) return undefined;
     const fold = await this.fold(project);
     return (await this.isMerged(project, current, fold.get(task.specId)?.branch, base)) ? { into: base, via: 'local' } : undefined;
   }
@@ -349,8 +327,11 @@ export class TaskNotices {
     return [...this.filesFrom(fold.get(specId), project.id, specId)].sort();
   }
 
-  /** The task's summary and whether its run was stopped, from its `claude_run.json` */
-  private async runOf(project: Project, specId: string): Promise<{ summary?: string; stopped: boolean }> {
+  /**
+   * The task's summary, its "Decisions/API changes" line and whether its run was stopped, from its
+   * `claude_run.json`
+   */
+  private async runOf(project: Project, specId: string): Promise<{ summary?: string; decisions?: string; stopped: boolean }> {
     try {
       const info = JSON.parse(await readFile(path.join(taskSpecDir(project, specId), 'claude_run.json'), 'utf-8')) as {
         summary?: string;
@@ -359,9 +340,8 @@ export class TaskNotices {
       };
       const last = info.phases?.at(-1);
       const stopped = last?.isError === true && last.error === 'Stopped';
-      const text = (info.validation?.summary || info.summary || '').replace(/\s+/g, ' ').trim();
-      const summary = text ? (text.length > MAX_SUMMARY ? `${text.slice(0, MAX_SUMMARY)}…` : text) : undefined;
-      return { summary, stopped };
+      const text = info.validation?.summary?.trim() || info.summary?.trim() || '';
+      return { ...splitSummary(text), stopped };
     } catch {
       return { stopped: false };
     }
@@ -370,7 +350,8 @@ export class TaskNotices {
   private async isMerged(project: Project, task: Task, branch: string | undefined, base: string): Promise<boolean> {
     if (!this.options.isMerged) return false;
     try {
-      return await this.options.isMerged(project, task, branch ?? getTaskWorktreeBranch(task.specId), base);
+      // The changelog names a detached worktree's branch `HEAD`
+      return await this.options.isMerged(project, task, branch && branch !== 'HEAD' ? branch : getTaskWorktreeBranch(task.specId), base);
     } catch {
       return false;
     }

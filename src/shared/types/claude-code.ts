@@ -77,8 +77,11 @@ export interface TaskTriage {
   source: 'auto' | 'fixed' | 'fallback';
 }
 
-/** Steps of a task run */
-export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise';
+/**
+ * Steps of a task run. `resync`: the task's base branch moved on (another task was merged into it)
+ * and the task's session merges it in, then resumes its work (`task-resync/`)
+ */
+export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise' | 'resync';
 
 export interface ClaudeRunPhase {
   name: ClaudeRunPhaseName;
@@ -93,6 +96,8 @@ export interface ClaudeRunPhase {
   numTurns?: number;
   isError?: boolean;
   error?: string;
+  /** resync: what was merged in, and whether the step also carried on with unfinished work */
+  resync?: { ref: string; into: string; continued: boolean };
 }
 
 /** What Claude Code loaded for the session (from the stream's `system/init` event) */

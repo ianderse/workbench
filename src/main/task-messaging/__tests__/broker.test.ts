@@ -3,7 +3,7 @@ import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Project, Task, TaskStatus } from '../../../shared/types';
-import { leadSessionName, taskSessionName } from '../../../shared/utils/task-messaging';
+import { taskSessionName } from '../../../shared/utils/task-messaging';
 import {
   configureTaskMessaging,
   deliver,
@@ -12,14 +12,13 @@ import {
   markInboxRead,
   noteNativeSend,
   notePeerMessage,
-  registerLeadTarget,
   registerLiveRun,
   resetTaskMessagingForTests,
   takeInbox,
   taskSpecDir,
 } from '../broker';
 import { readInbox, TASK_INBOX_FILE } from '../inbox';
-import type { TaskMessage } from '../types';
+import { WORKBENCH_TURN_PREFIXES } from '../../claude-code/phase-prompts';
 
 let root: string;
 let project: Project;
@@ -97,16 +96,6 @@ describe('deliver', () => {
     // Another project's session name is not one of ours
     expect((await deliver('p1', taskSessionName('p2', '002-live'), me, 'x')).status).toBe('refused');
   });
-
-  it('sends "lead" messages to the registered lead target, and refuses without one', async () => {
-    expect((await deliver('p1', 'lead', me, 'x')).detail).toBe('not sent: no project lead session');
-    const handler = vi.fn(async (_projectId: string, _message: TaskMessage) => ({ status: 'delivered' as const, detail: 'delivered: the lead reads it' }));
-    const off = registerLeadTarget(handler);
-    expect((await deliver('p1', leadSessionName('p1'), me, 'hi lead')).detail).toBe('delivered: the lead reads it');
-    expect(handler.mock.calls[0][1]).toMatchObject({ text: 'hi lead', from: me });
-    off();
-    expect((await deliver('p1', 'lead', me, 'x')).status).toBe('refused');
-  });
 });
 
 describe('live runs ending', () => {
@@ -119,6 +108,32 @@ describe('live runs ending', () => {
 
     const pending = await takeInbox('p1', '002-live');
     expect(pending.map((m) => [m.text, m.status])).toEqual([['unread one', 'queued']]);
+  });
+
+  it('writes messages queued between takeInbox and going live to the process, once', async () => {
+    const inPrompt = await deliver('p1', '003-queued', me, 'in the prompt');
+    const taken = await takeInbox('p1', '003-queued');
+    expect(taken.map((m) => m.id)).toEqual([inPrompt.messageId]);
+    // Arrives after the phase took its inbox, before its process attached
+    const late = await deliver('p1', '003-queued', me, 'arrived late');
+    expect(late.status).toBe('queued');
+
+    const send = vi.fn((_text: string, id: string) => id);
+    const end = registerLiveRun({ projectId: 'p1', specId: '003-queued', sessionName: 'wb-003', send }, taken.map((m) => m.id));
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(send.mock.calls[0]).toEqual([expect.stringContaining('arrived late'), late.messageId]);
+    const stored = await readInbox(taskSpecDir(project, '003-queued'));
+    expect(stored.find((m) => m.id === late.messageId)?.status).toBe('sent');
+    // Never read by the process: back to the inbox, not lost
+    await end([late.messageId!]);
+    expect((await takeInbox('p1', '003-queued')).map((m) => m.text)).toEqual(['in the prompt', 'arrived late']);
+  });
+
+  it('keeps flushed messages queued when the process refuses them', async () => {
+    await deliver('p1', '003-queued', me, 'late');
+    const end = registerLiveRun({ projectId: 'p1', specId: '003-queued', sessionName: 'wb-003', send: () => false }, []);
+    await end([]);
+    expect((await readInbox(taskSpecDir(project, '003-queued'))).map((m) => m.status)).toEqual(['queued']);
   });
 
   it('treats messages still marked sent as unread once the task is not live (a crash)', async () => {
@@ -162,7 +177,10 @@ describe('native SendMessage', () => {
 describe('formatting', () => {
   it('labels messages by sender and frames the inbox section', () => {
     expect(formatMessage({ from: { kind: 'workbench' }, text: 'Task 002 started.' })).toBe('[Workbench] Task 002 started.');
-    expect(formatMessage({ from: { kind: 'lead' }, text: 'Hold off.' })).toBe('[Project lead] Hold off.');
+    // The memory backfill recognises these turns by their prefix
+    for (const from of [{ kind: 'workbench' as const }, me]) {
+      expect(WORKBENCH_TURN_PREFIXES.some((prefix) => formatMessage({ from, text: 'x' }).startsWith(prefix))).toBe(true);
+    }
     const section = formatInboxSection([{ id: 'wbm-1', at: '', status: 'queued', from: { kind: 'workbench' }, text: 'x' }]);
     expect(section).toContain('Messages from parallel tasks and Workbench received while you were not running');
     expect(section).toContain('[Workbench] x');

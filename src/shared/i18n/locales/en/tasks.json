@@ -151,7 +151,8 @@
       "auth_failure_paused": "Auth required",
       "complete": "Complete",
       "failed": "Failed"
-    }
+    },
+    "syncingWith": "Syncing with {{branch}}"
   },
   "metadata": {
     "showMore": "Show more",

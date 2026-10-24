@@ -9,6 +9,7 @@
 
 import type { ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
+import { appLog } from '../app-logger';
 import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from './stream-types';
 
@@ -33,7 +34,8 @@ export interface ClaudeProcessOptions {
    * Keep stdin open while the turn runs, so `send()` can add user messages that Claude reads at
    * its next step. Needs `--input-format stream-json` and `--replay-user-messages` in `args`:
    * Claude Code echoes every user message it reads (`isReplay`), which is the read receipt.
-   * Stdin is closed when the turn's `result` arrives; the process then exits.
+   * Stdin is closed at a `result` when no background agent or shell is still running (Claude Code
+   * starts another turn when one finishes); the process then exits.
    */
   keepStdinOpen?: boolean;
   /**
@@ -41,6 +43,41 @@ export interface ClaudeProcessOptions {
    * `INITIAL_INPUT_ID` for the prompt the process started with.
    */
   onInputRead?: (id: string, text: string) => void;
+  /** keepStdinOpen: override `BACKGROUND_IDLE_CLOSE_MS` and `BACKGROUND_GRACE_CLOSE_MS` (tests) */
+  backgroundIdleCloseMs?: number;
+}
+
+/**
+ * keepStdinOpen: after a `result` while background tasks still run, stdin is closed anyway when the
+ * CLI writes nothing for this long, so a task that never reports back can't keep the run open
+ */
+export const BACKGROUND_IDLE_CLOSE_MS = 15 * 60 * 1000;
+/** keepStdinOpen: background tasks all finished after a `result` but no new turn started */
+export const BACKGROUND_GRACE_CLOSE_MS = 60 * 1000;
+
+/**
+ * Background agents and shells still running, from Claude Code's system messages:
+ * `background_tasks_changed` lists them all; `task_started` (backgrounded) and `task_notification`
+ * / `task_updated` (finished) keep the set current between those lists.
+ */
+export function trackBackgroundTasks(pending: Set<string>, message: ClaudeStreamMessage): void {
+  const raw = message as { type?: unknown; subtype?: unknown; tasks?: unknown; task_id?: unknown; is_backgrounded?: unknown; status?: unknown; patch?: { status?: unknown } };
+  if (raw.type !== 'system') return;
+  if (raw.subtype === 'background_tasks_changed' && Array.isArray(raw.tasks)) {
+    pending.clear();
+    for (const task of raw.tasks) {
+      const id = (task as { task_id?: unknown })?.task_id;
+      if (typeof id === 'string') pending.add(id);
+    }
+    return;
+  }
+  if (typeof raw.task_id !== 'string') return;
+  if (raw.subtype === 'task_started' && raw.is_backgrounded === true) pending.add(raw.task_id);
+  else if (raw.subtype === 'task_notification') pending.delete(raw.task_id);
+  else if (raw.subtype === 'task_updated') {
+    const status = raw.patch?.status;
+    if (typeof status === 'string' && status !== 'running' && status !== 'pending') pending.delete(raw.task_id);
+  }
 }
 
 /** Id `onInputRead` reports for the prompt a keep-open process started with */
@@ -135,7 +172,16 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
   const unread = new Map<string, string>();
   let stdinOpen = keepOpen;
   let initialRead = false;
+  // Background agents/shells still running, and the fallback that closes stdin if they never report
+  const backgroundTasks = new Set<string>();
+  let afterResult = false;
+  let idleTimer: NodeJS.Timeout | undefined;
+  const clearIdleTimer = () => {
+    if (idleTimer) clearTimeout(idleTimer);
+    idleTimer = undefined;
+  };
   const closeStdin = () => {
+    clearIdleTimer();
     if (!stdinOpen) return;
     stdinOpen = false;
     child.stdin?.end();
@@ -176,6 +222,7 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
         results.push(result);
       }
       if (keepOpen) {
+        trackBackgroundTasks(backgroundTasks, message);
         const read = matchReplayedInput(message, initialRead);
         if (read === INITIAL_INPUT_ID) {
           initialRead = true;
@@ -189,17 +236,37 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
       try {
         options.onMessage?.(message);
       } catch (error) {
-        console.error('[ClaudeCode] onMessage handler failed:', error);
+        appLog.error('[ClaudeCode] onMessage handler failed:', error);
       }
-      // The turn ended: no more messages for it (the process exits once stdin is closed)
-      if (message.type === 'result') closeStdin();
+      if (!keepOpen || !stdinOpen) return;
+      if (message.type === 'result') {
+        // The turn ended. With nothing left running the CLI is done: close stdin so it exits.
+        afterResult = true;
+        if (backgroundTasks.size === 0) {
+          closeStdin();
+          return;
+        }
+      } else if (message.type === 'assistant' || (message.type === 'system' && (message as { subtype?: unknown }).subtype === 'init')) {
+        // Another turn started (a background task reported back, or a message was read)
+        afterResult = false;
+        clearIdleTimer();
+        return;
+      }
+      if (!afterResult) return;
+      // Between turns while background tasks run: Claude Code starts another turn when they finish,
+      // so messages can still be read. Close after a silence in case they never report back, or
+      // soon when they all finished without a new turn starting.
+      clearIdleTimer();
+      idleTimer = setTimeout(closeStdin, backgroundTasks.size === 0
+        ? options.backgroundIdleCloseMs ?? BACKGROUND_GRACE_CLOSE_MS
+        : options.backgroundIdleCloseMs ?? BACKGROUND_IDLE_CLOSE_MS);
     };
 
     const notifyRead = (id: string, text: string) => {
       try {
         options.onInputRead?.(id, text);
       } catch (error) {
-        console.error('[ClaudeCode] onInputRead handler failed:', error);
+        appLog.error('[ClaudeCode] onInputRead handler failed:', error);
       }
     };
 
@@ -233,6 +300,7 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
 
     const finish = (exitCode: number | null, signal: NodeJS.Signals | null) => {
       if (timer) clearTimeout(timer);
+      clearIdleTimer();
       options.abortSignal?.removeEventListener('abort', onAbort);
       if (stdoutBuffer.trim()) handleLine(stdoutBuffer);
       stdoutBuffer = '';

@@ -133,6 +133,23 @@ describe('readUserTurns', () => {
     expect(await readUserTurns(file, 10_000)).toEqual(['always run the type checker before committing']);
   });
 
+  it("leaves out Workbench's notices and peer messages written into the session", async () => {
+    const file = path.join(tmp, 'messages.jsonl');
+    await writeFile(
+      file,
+      [
+        { type: 'user', message: { role: 'user', content: [{ type: 'text', text: '[Workbench] Task 002 was merged into main. Merge main into your branch now.' }, { type: 'text', text: '[Workbench message wbm-1a2b]' }] } },
+        { type: 'user', message: { role: 'user', content: '[Message from task 003-api "API" (session wb-x-003)]\nAlways use snake_case in the schema' } },
+        { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'Prefer small commits' }, { type: 'text', text: '[Workbench message wbm-ff00]' }] } },
+        { type: 'user', message: { role: 'user', content: 'prefer pnpm over npm' } },
+      ]
+        .map((line) => JSON.stringify(line))
+        .join('\n')
+    );
+
+    expect(await readUserTurns(file, 10_000)).toEqual(['prefer pnpm over npm']);
+  });
+
   it('stops at the character budget', async () => {
     const file = path.join(tmp, 'long.jsonl');
     const turn = 'x'.repeat(100);
