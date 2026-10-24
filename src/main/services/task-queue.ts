@@ -15,6 +15,11 @@
  * project run one at a time (`runExclusive`), so two triggers can't start the
  * same task twice or start more tasks than the limit allows.
  *
+ * A queued task with `metadata.dependsOnTaskIds` waits until every one of those tasks is done
+ * (merged): each task branches from the project's base branch, so a dependent task can only
+ * see its predecessor's code after the merge. A task whose PR is open (`pr_created`) is not
+ * merged yet and still blocks; a deleted or archived dependency counts as satisfied.
+ *
  * Tasks on a rate-limit hold are skipped: the rate-limit resume scheduler restarts
  * them at their reset time.
  */
@@ -54,13 +59,29 @@ export interface TaskQueueDeps {
 }
 
 /**
+ * Ids of the tasks this task still waits for: dependencies that exist, aren't archived and
+ * aren't done yet. A dependency that no longer exists (deleted) counts as satisfied.
+ */
+export function getUnmetDependencyIds(task: Task, tasks: readonly Task[]): string[] {
+  const ids = task.metadata?.dependsOnTaskIds;
+  if (!ids || ids.length === 0) return [];
+  return ids.filter((depId) => {
+    if (depId === task.id) return false;
+    const dep = tasks.find((t) => t.id === depId || t.specId === depId);
+    return !!dep && dep.status !== 'done' && !dep.metadata?.archivedAt;
+  });
+}
+
+/**
  * Queued tasks that may be promoted now, top of the Queue column first (the board's order:
  * unplaced tasks newest first, then the saved order): not archived and not waiting for a
- * rate limit to reset.
+ * rate limit to reset and not waiting for a task it depends on.
  */
 export function getPromotableQueuedTasks(tasks: Task[], now: number = Date.now(), queueOrder?: readonly string[]): Task[] {
   const queued = tasks.filter((t) => t.status === 'queue' && !t.metadata?.archivedAt);
-  return sortColumnTasks(queued, queueOrder).filter((t) => !isTaskOnRateLimitHold(t, now));
+  return sortColumnTasks(queued, queueOrder).filter(
+    (t) => !isTaskOnRateLimitHold(t, now) && getUnmetDependencyIds(t, tasks).length === 0
+  );
 }
 
 export class TaskQueue {

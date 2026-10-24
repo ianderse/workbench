@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
+import type { TaskBreakdown } from '../../shared/types/task-breakdown';
 import type {
   Task,
   IPCResult,
@@ -101,6 +102,8 @@ export interface TaskAPI {
   onTaskRateLimitHoldChange: (callback: (taskId: string, hold: RateLimitHold | null, projectId?: string) => void) => () => void;
   onTaskClaudeRunUpdate: (callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void) => () => void;
   setQueueOrder: (projectId: string, order: string[]) => void;
+  breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
+  cancelBreakDownTask: (requestId: string) => void;
   onTaskExecutionProgress: (
     callback: (taskId: string, progress: import('../../shared/types').ExecutionProgress, projectId?: string) => void
   ) => () => void;
@@ -314,6 +317,12 @@ export const createTaskAPI = (): TaskAPI => ({
 
   setQueueOrder: (projectId: string, order: string[]): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, projectId, order),
+
+  breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]): Promise<IPCResult<TaskBreakdown>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_BREAKDOWN, projectId, requestId, description, attachmentNames),
+
+  cancelBreakDownTask: (requestId: string): void =>
+    ipcRenderer.send(IPC_CHANNELS.TASK_BREAKDOWN_CANCEL, requestId),
 
   onTaskClaudeRunUpdate: (
     callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void

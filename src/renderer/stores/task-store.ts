@@ -1251,3 +1251,33 @@ export function getTaskProgress(task: Task): { completed: number; total: number;
   const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
   return { completed, total, percentage };
 }
+
+/**
+ * Move freshly created tasks to the Queue column in the given (dependency) order. The saved
+ * Queue order is sent first so the main-process queue promotes them in that order.
+ */
+export async function queueTasksInOrder(projectId: string, taskIds: string[]): Promise<void> {
+  const state = useTaskStore.getState();
+  const ids = new Set(taskIds);
+  const existing = (state.taskOrder?.queue ?? []).filter((id) => !ids.has(id));
+  if (state.taskOrder) {
+    state.setTaskOrder({ ...state.taskOrder, queue: [...existing, ...taskIds] });
+    state.saveTaskOrder(projectId);
+  } else {
+    window.electronAPI?.setQueueOrder?.(projectId, [...existing, ...taskIds]);
+  }
+  for (const id of taskIds) {
+    await persistTaskStatus(id, 'queue', undefined, projectId);
+  }
+}
+
+/** Titles of the tasks a task still waits for (not done yet); '' when none. A string, so selectors stay stable */
+export function unmetDependencyTitles(tasks: readonly Task[], task: Task): string {
+  const ids = task.metadata?.dependsOnTaskIds;
+  if (!ids || ids.length === 0) return '';
+  return ids
+    .map((id) => tasks.find((x) => x.id === id || x.specId === id))
+    .filter((dep): dep is Task => !!dep && dep.status !== 'done' && !dep.metadata?.archivedAt)
+    .map((dep) => dep.title)
+    .join(', ');
+}

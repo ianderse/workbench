@@ -18,7 +18,7 @@ import {
   JSON_ERROR_PREFIX,
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
-import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask } from '../stores/task-store';
+import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask, useTaskStore, unmetDependencyTitles } from '../stores/task-store';
 import type { Task, TaskStatus } from '../../shared/types';
 
 // Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
@@ -90,6 +90,10 @@ export const TaskCard = memo(function TaskCard({
   const [actionError, setActionError] = useState<string | null>(null);
   const stuckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // A string, so the selector returns a stable value
+  const waitsFor = useTaskStore((s) =>
+    task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task) : ''
+  );
   const isRunning = task.status === 'in_progress';
   // Validation (AI Review) also runs Claude Code, so it can be left stuck too (e.g. by an app quit)
   const isActive = isRunning || task.status === 'ai_review';
@@ -265,6 +269,11 @@ export const TaskCard = memo(function TaskCard({
         {sanitizedDescription && (
           <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2 wrap-anywhere">
             {sanitizedDescription}
+          </p>
+        )}
+        {waitsFor && (
+          <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1 wrap-anywhere" title={t('breakdown.waitsFor', { titles: waitsFor })}>
+            {t('breakdown.waitsFor', { titles: waitsFor })}
           </p>
         )}
         {actionError && (

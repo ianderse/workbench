@@ -4,6 +4,7 @@ import type { Task, TaskStatus } from '../../../shared/types';
 import {
   TaskQueue,
   getPromotableQueuedTasks,
+  getUnmetDependencyIds,
   MAX_FAILED_STARTS_PER_PASS
 } from '../task-queue';
 
@@ -62,6 +63,48 @@ describe('task queue helpers', () => {
     expect(getPromotableQueuedTasks(tasks, NOW).map((t) => t.id)).toEqual(['new', 'hold-expired', 'old']);
     // A saved Queue order puts arranged tasks after unarranged ones, in their saved order
     expect(getPromotableQueuedTasks(tasks, NOW, ['old', 'new']).map((t) => t.id)).toEqual(['hold-expired', 'old', 'new']);
+  });
+});
+
+describe('task dependencies', () => {
+  const dependent = (deps: string[]) => makeTask('b', 'queue', { metadata: { dependsOnTaskIds: deps } as Task['metadata'] });
+
+  it('waits for dependencies that are not done, including an open PR', () => {
+    for (const status of ['backlog', 'queue', 'in_progress', 'ai_review', 'human_review', 'pr_created', 'error'] as TaskStatus[]) {
+      const tasks = [makeTask('a', status), dependent(['a'])];
+      expect(getUnmetDependencyIds(tasks[1], tasks)).toEqual(['a']);
+      expect(getPromotableQueuedTasks(tasks, NOW).map((t) => t.id)).not.toContain('b');
+    }
+  });
+
+  it('is satisfied by done, archived or deleted dependencies', () => {
+    const done = [makeTask('a', 'done'), dependent(['a'])];
+    expect(getPromotableQueuedTasks(done, NOW).map((t) => t.id)).toEqual(['b']);
+    const archived = [makeTask('a', 'human_review', { metadata: { archivedAt: 'x' } as Task['metadata'] }), dependent(['a'])];
+    expect(getUnmetDependencyIds(archived[1], archived)).toEqual([]);
+    const deleted = [dependent(['gone'])];
+    expect(getPromotableQueuedTasks(deleted, NOW).map((t) => t.id)).toEqual(['b']);
+  });
+
+  it('starts independent tasks in parallel but holds dependents until the merge', async () => {
+    const { queue, startTask, tasks } = createHarness({
+      p1: [
+        makeTask('a', 'queue', { createdAt: new Date(NOW - 3000) }),
+        makeTask('c', 'queue', { createdAt: new Date(NOW - 2000) }),
+        makeTask('b', 'queue', { createdAt: new Date(NOW - 1000), metadata: { dependsOnTaskIds: ['a'] } as Task['metadata'] }),
+      ],
+    }, 3);
+
+    await queue.processProject('p1');
+    expect(startTask.mock.calls.map((c) => c[0]).sort()).toEqual(['a', 'c']);
+
+    tasks.p1.find((t) => t.id === 'a')!.status = 'pr_created';
+    await queue.processProject('p1');
+    expect(startTask).toHaveBeenCalledTimes(2);
+
+    tasks.p1.find((t) => t.id === 'a')!.status = 'done';
+    await queue.processProject('p1');
+    expect(startTask.mock.calls.map((c) => c[0])).toContain('b');
   });
 });
 

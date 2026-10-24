@@ -112,6 +112,18 @@ export const taskMock = {
   onTaskRateLimitHoldChange: () => () => {},
   onTaskClaudeRunUpdate: () => () => {},
   setQueueOrder: () => {},
+
+  breakDownTask: async () => ({
+    success: true,
+    data: {
+      tasks: [
+        { key: 't1', title: 'Set up the data model', description: 'Add the schema and migrations', dependsOn: [] },
+        { key: 't2', title: 'Build the API', description: 'Expose the data model over the API', dependsOn: ['t1'] },
+        { key: 't3', title: 'Build the UI', description: 'Add the screens that use the API', dependsOn: ['t2'] },
+      ],
+    },
+  }),
+  cancelBreakDownTask: () => {},
   onTaskExecutionProgress: () => () => {},
   onTaskLogsChanged: () => () => {},
   onTaskLogsStream: () => () => {},
