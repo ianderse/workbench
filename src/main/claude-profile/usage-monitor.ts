@@ -21,6 +21,7 @@ import { reactiveTokenRefresh, ensureValidToken } from './token-refresh';
 import { isProfileRateLimited } from './rate-limit-manager';
 import { getOperationRegistry } from './operation-registry';
 import { usesClaudeSubscription } from './profile-utils';
+import { appLog } from '../app-logger';
 
 // Re-export for backward compatibility
 export type { ApiProvider };
@@ -357,7 +358,7 @@ export class UsageMonitor extends EventEmitter {
       return;
     }
     this.checkUsageAndSwap({ allowSwap: false }).catch(error => {
-      console.error('[UsageMonitor] Usage refresh failed:', error);
+      appLog.error('[UsageMonitor] Usage refresh failed:', error);
     });
   }
 
@@ -585,10 +586,12 @@ export class UsageMonitor extends EventEmitter {
       // For the active profile, use the current detailed usage (fresh from the last poll), but
       // only when it is this profile's: right after an account switch it still belongs to the
       // previous account until the new one's usage is fetched
+      // (cached as of when it was fetched: right after a switch it is the stored, older snapshot)
       if (profile.id === activeProfileId && this.currentUsage && this.currentUsageProfileId === profile.id) {
         const summary = this.buildProfileUsageSummary(profile, this.currentUsage);
         profileResults[i] = summary;
-        this.allProfilesUsageCache.set(profile.id, { usage: summary, fetchedAt: now });
+        const fetchedAt = new Date(this.currentUsage.fetchedAt).getTime();
+        this.allProfilesUsageCache.set(profile.id, { usage: summary, fetchedAt: Number.isFinite(fetchedAt) ? Math.min(fetchedAt, now) : now });
         continue;
       }
 
