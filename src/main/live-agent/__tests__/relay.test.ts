@@ -229,6 +229,170 @@ describe('relay', () => {
     expect(await appendAndRead([notification])).toEqual(['message']);
   });
 
+  // ─── Calls and agents that end without a transcript result ─────────────────
+
+  const hookPort = () => JSON.parse(fs.readFileSync(path.join(flowDir, discoveryFiles()[0]), 'utf-8')).port as number;
+  const postHook = (body: Record<string, unknown>) => fetch(`http://127.0.0.1:${hookPort()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: SESSION_ID, cwd: workspace, transcript_path: transcript, ...body }),
+  });
+  const appendTo = (file: string, entries: object[]) =>
+    fs.appendFileSync(file, entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n');
+  const toolUse = (id: string, name = 'Bash') =>
+    ({ type: 'assistant', uuid: `a-${id}`, message: { role: 'assistant', content: [{ type: 'tool_use', id, name }] } });
+  const toolResult = (id: string, toolUseResult?: object) =>
+    ({ type: 'user', uuid: `r-${id}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id }] }, toolUseResult });
+  /** Claude Code 2.1.300+ records each API request's messages too, after the calls they hold were answered */
+  const requestBlob = (id: string, name = 'Bash') =>
+    ({ type: 'api-request-blob', hash: `h-${id}`, message: { role: 'assistant', content: [{ type: 'tool_use', id, name }] } });
+  const subagentsDir = () => path.join(path.dirname(transcript), SESSION_ID, 'subagents');
+
+  it('draws no running calls for answered ones an API request record repeats', async () => {
+    // The main agent's and a sub-agent's history, each with answered calls its request records repeat
+    appendTo(transcript, [toolUse('toolu_main'), toolResult('toolu_main'), requestBlob('toolu_main')]);
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    const subagentFile = path.join(subagentsDir(), 'agent-averifier.jsonl');
+    fs.writeFileSync(path.join(subagentsDir(), 'agent-averifier.meta.json'), JSON.stringify({ toolUseId: 'toolu_unknown_launch' }));
+    appendTo(subagentFile, [toolUse('toolu_sub'), toolResult('toolu_sub'), requestBlob('toolu_sub'), requestBlob('toolu_sub_read', 'Read')]);
+
+    relay.subscribe('window-a', workspace, flowDir);
+
+    expect(events().filter((event) => event.type === 'tool_call_start')).toEqual([]);
+    // The sub-agent is done with its calls: nothing of it is drawn
+    expect(events().some((event) => event.type === 'agent_spawn' && event.payload.name === 'toolu_unknown_launch')).toBe(false);
+  });
+
+  it('ends a call on its PostToolUse / PostToolUseFailure hook, before (or without) its transcript result', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    sent.length = 0;
+    await postHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'toolu_ok' });
+    await postHook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'toolu_bad' });
+    await postHook({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_use_id: 'toolu_ok' });
+    await postHook({ hook_event_name: 'PostToolUseFailure', tool_name: 'Bash', tool_use_id: 'toolu_bad' });
+    // The transcript's results, written later, don't end them again
+    appendTo(transcript, [toolUse('toolu_ok'), toolResult('toolu_ok'), toolResult('toolu_bad')]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+
+    const ends = events().filter((event) => event.type === 'tool_call_end').map((event) => event.payload);
+    expect(ends).toEqual([
+      { agent: 'orchestrator', tool: 'Bash', id: 'toolu_ok' },
+      { agent: 'orchestrator', tool: 'Bash', id: 'toolu_bad', isError: true },
+    ]);
+  });
+
+  it('ends the main agent\'s turn on StopFailure (an API error such as a rate limit)', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    sent.length = 0;
+    await postHook({ hook_event_name: 'StopFailure', error: 'rate_limit' });
+    expect(events()).toEqual([expect.objectContaining({ type: 'agent_complete', payload: { name: 'orchestrator' } })]);
+  });
+
+  it('finishes a foreground sub-agent its caller\'s turn ended without (interrupted), with the ones it waited on', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    appendTo(transcript, [toolUse('toolu_agent', 'Agent')]);
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    fs.writeFileSync(path.join(subagentsDir(), 'agent-aworker.meta.json'), JSON.stringify({ toolUseId: 'toolu_agent' }));
+    appendTo(path.join(subagentsDir(), 'agent-aworker.jsonl'), [toolUse('toolu_nested', 'Agent'), toolUse('toolu_sub_bash')]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events().some((event) => event.type === 'agent_spawn' && event.payload.name === 'toolu_nested')).toBe(true),
+      { timeout: 5000 }
+    );
+    sent.length = 0;
+
+    appendTo(transcript, [{ type: 'user', uuid: 'u-int', message: { role: 'user', content: '[Request interrupted by user]' } }]);
+    await postHook({ hook_event_name: 'Stop' });
+
+    const completed = events().filter((event) => event.type === 'agent_complete').map((event) => event.payload.name);
+    expect(completed).toEqual(['toolu_nested', 'toolu_agent', 'orchestrator']);
+  });
+
+  it('draws a forked skill\'s background agent (/code-review) and completes it on its report', async () => {
+    const agentId = 'aedfe971f6aff305a';
+    relay.subscribe('window-a', workspace, flowDir);
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    const forkFile = path.join(subagentsDir(), `agent-${agentId}.jsonl`);
+    // As Claude Code writes it: a sidecar marks the forked skill, its .meta.json names no launching call
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.forked-skill.json`), JSON.stringify({ skillName: 'code-review' }));
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: 'general-purpose', name: 'code-review', requestShape: 'background' }));
+    appendTo(forkFile, [toolUse('toolu_verifier', 'Agent')]);
+    appendTo(transcript, [
+      toolUse('toolu_skill', 'Skill'),
+      toolResult('toolu_skill', { success: true, status: 'forked', background: true, agentId }),
+    ]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_spawn', payload: { name: agentId, parent: 'orchestrator', satellite: true } }),
+        // Its own sub-agents hang off it, not off the main agent
+        expect.objectContaining({ type: 'agent_spawn', payload: expect.objectContaining({ name: 'toolu_verifier', parent: agentId }) }),
+      ])),
+      { timeout: 5000 }
+    );
+
+    // Its calls, reported by its hooks, are its own
+    sent.length = 0;
+    await postHook({ hook_event_name: 'PreToolUse', agent_id: agentId, tool_name: 'Bash', tool_use_id: 'toolu_fork_bash' });
+    expect(events()).toEqual([
+      expect.objectContaining({ type: 'tool_call_start', payload: { agent: agentId, tool: 'Bash', id: 'toolu_fork_bash' } }),
+    ]);
+
+    // Its report names its Skill call and its agent
+    appendTo(transcript, [{
+      type: 'queue-operation', operation: 'enqueue',
+      content: `<task-notification>\n<task-id>${agentId}</task-id>\n<tool-use-id>toolu_skill</tool-use-id>\n<status>failed</status>\n</task-notification>`,
+    }]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    expect(events()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'agent_complete', payload: { name: agentId } }),
+    ]));
+  });
+
+  it('finishes a sub-agent stopped by an API error (StopFailure inside it)', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    appendTo(transcript, [toolUse('toolu_bg', 'Agent'), toolResult('toolu_bg', { status: 'async_launched' })]);
+    fs.writeFileSync(path.join(subagentsDir(), 'agent-abg.meta.json'), JSON.stringify({ toolUseId: 'toolu_bg' }));
+    appendTo(path.join(subagentsDir(), 'agent-abg.jsonl'), [toolUse('toolu_bg_bash')]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events().some((event) => event.type === 'tool_call_start' && event.payload.id === 'toolu_bg_bash')).toBe(true),
+      { timeout: 5000 }
+    );
+    sent.length = 0;
+
+    await postHook({ hook_event_name: 'StopFailure', agent_id: 'abg', error: 'rate_limit' });
+
+    expect(events()).toEqual([expect.objectContaining({ type: 'agent_complete', payload: { name: 'toolu_bg' } })]);
+  });
+
+  it('takes a sub-agent whose transcript has long been quiet as stopped', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    appendTo(transcript, [toolUse('toolu_quiet', 'Agent'), toolResult('toolu_quiet', { status: 'async_launched' })]);
+    const file = path.join(subagentsDir(), 'agent-aquiet.jsonl');
+    fs.writeFileSync(path.join(subagentsDir(), 'agent-aquiet.meta.json'), JSON.stringify({ toolUseId: 'toolu_quiet' }));
+    appendTo(file, [toolUse('toolu_quiet_bash')]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events().some((event) => event.type === 'tool_call_start' && event.payload.id === 'toolu_quiet_bash')).toBe(true),
+      { timeout: 5000 }
+    );
+    expect(events().some((event) => event.type === 'agent_complete' && event.payload.name === 'toolu_quiet')).toBe(false);
+
+    // Its file was last written an hour ago (its agent died without a word)
+    const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    fs.utimesSync(file, anHourAgo, anHourAgo);
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_complete', payload: { name: 'toolu_quiet' } }),
+      ])),
+      { timeout: 6000 }
+    );
+  }, 10000);
+
   it('writes no discovery file for a project with Live agent off', () => {
     fs.rmSync(flowDir, { recursive: true });
     relay.subscribe('window-a', workspace, flowDir);
