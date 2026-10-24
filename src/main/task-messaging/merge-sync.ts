@@ -4,25 +4,31 @@
  *
  * When a task is merged, every other unfinished task of the project hears about it (In Progress,
  * AI Review, Human Review, PR Created, Error; no file filter), and the ones based on the branch
- * it was merged into take the change in:
+ * it was merged into take the change in. Each of those whose worktree branch lacks the merge gets a
+ * resync request (`task-resync/request.ts`; several merges coalesce into one, for the latest ref):
  *
  * - running (its run is live, or it is In Progress / AI Review): a `[Workbench]` notice tells it
- *   to merge that branch now (live stdin, or the inbox for its next step);
- * - not running: Workbench merges the branch into the task's worktree itself, when the worktree is
- *   clean, not mid-merge and not being merged right now. Conflicts are undone (the task's own merge
- *   resolves them later) and noted; nothing is pushed. One pull at a time per project;
+ *   to merge that branch now (live stdin, or the inbox for its next step). Should the run end
+ *   without doing it, the request is still there and the resync service takes over;
+ * - waiting in the Queue (a rate-limit hold): the request only; its run applies it when it resumes;
+ * - not running (Human Review for any reason, Error, PR Created after a merged PR): the resync
+ *   service (`requestResync`) moves it back to In Progress, where its own session merges the
+ *   branch and resumes its work, then validates (`task-resync/`);
+ * - with a pull request, after a local merge: an informational notice only. The local branch has
+ *   commits that are not pushed, and the task's next push would carry them into its pull request;
+ * - being merged itself right now: nothing (its branch is about to land in the base branch);
  * - based on another branch: an informational notice.
  *
  * The merged ref: a local merge's `<base>`; a merged PR's `origin/<base>` after one fetch in the
- * project (the local `<base>` when the fetch fails). No Claude merge agent runs here.
+ * project (the local `<base>` when the fetch fails). Checks run one task at a time per project.
  */
 import type { Project, Task, TaskStatus } from '../../shared/types';
 import { appLog } from '../app-logger';
-import { TaskLogWriter } from '../claude-code/task-log';
 import { git } from '../utils/git-exec';
 import { findTaskWorktree } from '../worktree-paths';
-import { isTaskBranchBusy, runBranchSync } from '../worktree/merge-guard';
-import { deliverToTask, getTaskMessagingEnv, isTaskLive, taskSpecDir } from './broker';
+import { isTaskBranchMerging } from '../worktree/merge-guard';
+import { recordResyncRequest } from '../task-resync/request';
+import { getTaskMessagingEnv, isTaskLive, taskSpecDir } from './broker';
 
 /** How a task was merged */
 export type MergeVia = 'local' | 'pr';
@@ -131,22 +137,30 @@ export async function pullIntoWorktree(params: {
 // =============================================================================
 
 export interface MergeSyncOptions {
-  /** Queue a `[Workbench]` notice for a task (batched by the notices) */
+  /** Queue a `[Workbench]` notice for a task (batched by the notices; dropped while they are off) */
   queueNotice: (projectId: string, specId: string, text: string) => void;
   /** Whether the task's run is active (the AgentManager in the app) */
   isRunning?: (projectId: string, task: Task) => boolean;
   /** The repository's default branch, for tasks and projects that name none */
   defaultBranch?: (project: Project) => Promise<string>;
-}
-
-function quoteTitle(title: string | undefined): string {
-  return title ? ` "${title.replace(/"/g, "'")}"` : '';
+  /** A task that is not running got a resync request: bring it back to In Progress to apply it */
+  requestResync?: (project: Project, task: Task) => void;
 }
 
 function listFiles(files: string[]): string {
   const shown = files.slice(0, MAX_FILES_LISTED);
   const more = files.length > shown.length ? ` and ${files.length - shown.length} more` : '';
   return `${shown.map((file) => `\`${file}\``).join(', ')}${more}`;
+}
+
+/**
+ * A local merge pushes nothing, so the local base branch is kept out of a task with a pull
+ * request: Merge PR pushes the task's branch, which would carry those commits into the PR
+ */
+export function keepsLocalMergeOut(info: { via: MergeVia }, task: Task): boolean {
+  if (info.via !== 'local') return false;
+  const { prUrl, prState } = task.metadata ?? {};
+  return task.status === 'pr_created' || (!!prUrl && prState !== 'merged' && prState !== 'closed');
 }
 
 interface MergeEvent {
@@ -158,14 +172,14 @@ interface MergeEvent {
   files: string[];
 }
 
-/** Tells the other tasks about a merge and brings the ones on the same base branch up to date */
+/** Tells the other tasks about a merge and has the ones on the same base branch take it in */
 export class MergeSync {
-  /** Pulls per project, one after another */
+  /** Checks per project, one after another */
   private readonly chains = new Map<string, Promise<void>>();
 
   constructor(private readonly options: MergeSyncOptions) {}
 
-  /** Wait for every scheduled pull (tests, shutdown) */
+  /** Wait for every scheduled check (tests, shutdown) */
   async flush(): Promise<void> {
     while (this.chains.size > 0) await Promise.all([...this.chains.values()]);
   }
@@ -187,13 +201,13 @@ export class MergeSync {
     return RUNNING_STATUSES.has(task.status) || isTaskLive(projectId, task.specId) || (this.options.isRunning?.(projectId, task) ?? false);
   }
 
-  /** A task was merged: notify the others, and pull it into the ones based on that branch */
+  /** A task was merged: notify the others, and have the ones based on that branch take it in */
   async onMerged(event: MergeEvent): Promise<void> {
     const { project, info } = event;
     const env = getTaskMessagingEnv();
     const recipients = (env?.getTasks(project.id) ?? []).filter((t) =>
       t.specId !== event.merged.specId
-      && MERGE_RECIPIENT_STATUSES.has(t.status)
+      && (MERGE_RECIPIENT_STATUSES.has(t.status) || t.status === 'queue')
       && !t.metadata?.archivedAt
       && t.metadata?.prState !== 'merged');
     if (recipients.length === 0) return;
@@ -206,7 +220,7 @@ export class MergeSync {
       const base = await this.baseOf(project, task, defaultBranch);
       if (base === info.into) {
         same.push(task);
-      } else {
+      } else if (task.status !== 'queue') {
         this.options.queueNotice(project.id, task.specId,
           `${event.who} was merged into \`${info.into}\`. That is not your base branch (\`${base}\`), so there is nothing to pull.`);
       }
@@ -215,10 +229,10 @@ export class MergeSync {
 
     const { ref, fetchNote } = await this.mergedRef(project, info);
     for (const task of same) {
-      if (this.running(project.id, task)) {
-        this.options.queueNotice(project.id, task.specId, this.mergeNowText(event, ref, fetchNote));
+      if (keepsLocalMergeOut(info, task)) {
+        this.options.queueNotice(project.id, task.specId, this.notPushedText(event));
       } else {
-        this.enqueue(project.id, () => this.pull(event, task.specId, ref, fetchNote));
+        this.enqueue(project.id, () => this.takeIn(event, task.specId, ref, fetchNote));
       }
     }
   }
@@ -248,10 +262,15 @@ export class MergeSync {
     ].filter(Boolean).join(' ');
   }
 
+  private notPushedText(event: MergeEvent): string {
+    const { into } = event.info;
+    return `${event.who} was merged into \`${into}\` locally and is not pushed yet, so it was not merged into your branch: your pull request merges against \`origin/${into}\`.`;
+  }
+
   private enqueue(projectId: string, job: () => Promise<void>): void {
     const previous = this.chains.get(projectId) ?? Promise.resolve();
     const next = previous.then(job).catch((error) => {
-      appLog.warn(`[MergeSync] A pull failed: ${errorText(error)}`);
+      appLog.warn(`[MergeSync] Taking in a merge failed: ${errorText(error)}`);
     });
     this.chains.set(projectId, next);
     void next.finally(() => {
@@ -259,73 +278,53 @@ export class MergeSync {
     });
   }
 
-  /** Merge `ref` into a task's worktree while the task is not running */
-  private async pull(event: MergeEvent, specId: string, ref: string, fetchNote?: string): Promise<void> {
+  /** Record the resync request of a task on the merged branch, and tell or wake the task */
+  private async takeIn(event: MergeEvent, specId: string, ref: string, fetchNote?: string): Promise<void> {
     const { project, info, merged } = event;
     const task = getTaskMessagingEnv()?.getTasks(project.id).find((t) => t.specId === specId);
-    if (!task || !MERGE_RECIPIENT_STATUSES.has(task.status) || task.metadata?.archivedAt) return;
-    if (this.running(project.id, task)) {
+    if (!task || task.metadata?.archivedAt || task.metadata?.prState === 'merged') return;
+    if (!MERGE_RECIPIENT_STATUSES.has(task.status) && task.status !== 'queue') return;
+    // It may have got a pull request while it waited
+    if (keepsLocalMergeOut(info, task)) {
+      this.options.queueNotice(project.id, specId, this.notPushedText(event));
+      return;
+    }
+    // Its own branch is going into the base branch right now
+    if (isTaskBranchMerging(project.id, task.id)) {
+      appLog.info(`[MergeSync] ${specId} is being merged, ${ref} is not taken into it`);
+      return;
+    }
+    const worktreePath = task.metadata?.useWorktree === false ? null : findTaskWorktree(project.path, specId);
+    if (!worktreePath) {
+      // Nothing of its own to sync: a running task in the project itself is told; the rest create
+      // their worktree from the base branch when they start
+      if (this.running(project.id, task)) this.options.queueNotice(project.id, specId, this.mergeNowText(event, ref, fetchNote));
+      return;
+    }
+    const upToDate = await git(['merge-base', '--is-ancestor', ref, 'HEAD'], { cwd: worktreePath, isolated: true })
+      .then(() => true, () => false);
+    if (upToDate) return;
+
+    try {
+      recordResyncRequest(taskSpecDir(project, specId), {
+        ref,
+        into: info.into,
+        via: info.via,
+        merged: { specId: merged.specId, title: merged.title, files: event.files },
+      });
+    } catch (error) {
+      appLog.warn(`[MergeSync] Could not record the resync request of ${specId}: ${errorText(error)}`);
+      return;
+    }
+
+    // Re-read: it may have started while its worktree was checked
+    const current = getTaskMessagingEnv()?.getTasks(project.id).find((t) => t.specId === specId) ?? task;
+    if (this.running(project.id, current)) {
       this.options.queueNotice(project.id, specId, this.mergeNowText(event, ref, fetchNote));
       return;
     }
-    const worktreePath = findTaskWorktree(project.path, specId);
-    if (!worktreePath) return;
-    if (isTaskBranchBusy(task.id)) {
-      appLog.info(`[MergeSync] ${specId} is being merged, ${ref} is not pulled into it`);
-      return;
-    }
-
-    // A run starting meanwhile waits for this pull to end (AgentManager calls waitForBranchSync)
-    const result: WorktreePullResult = await runBranchSync(task.id, () => pullIntoWorktree({
-      worktreePath,
-      ref,
-      dataDir: project.autoBuildPath,
-      // Re-checked right before the merge: the task may have started meanwhile
-      canMerge: () => {
-        const current = getTaskMessagingEnv()?.getTasks(project.id).find((t) => t.specId === specId) ?? task;
-        return !this.running(project.id, current);
-      },
-    }));
-
-    const mergedTask = `task ${merged.specId}${quoteTitle(merged.title)}`;
-    switch (result.status) {
-      case 'merged': {
-        const text = `\`${info.into}\` was merged into your branch after ${mergedTask} was merged into it.${event.files.length ? ` It changed ${listFiles(event.files)}.` : ''}`;
-        this.taskLog(project, specId, `Merged ${ref} into this task's branch after ${mergedTask} was merged`);
-        await deliverToTask(project.id, task, { kind: 'workbench' }, text);
-        return;
-      }
-      case 'conflicts': {
-        const text = `${mergedTask} was merged into \`${info.into}\`, your base branch. It conflicts with your branch in ${listFiles(result.files)}, so Workbench did not merge it; the conflicts will be resolved when this task is merged.`;
-        this.taskLog(project, specId, `${mergedTask} was merged into ${info.into}: conflicts with ${info.into} in ${result.files.join(', ')}; they will be resolved when this task is merged`);
-        await deliverToTask(project.id, task, { kind: 'workbench' }, text);
-        return;
-      }
-      case 'dirty': {
-        const text = `${mergedTask} was merged into \`${info.into}\`, your base branch. Your worktree has uncommitted changes, so Workbench did not merge it: when you run again, commit your work, run \`git merge --no-edit ${ref}\`, resolve any conflicts and commit.`;
-        await deliverToTask(project.id, task, { kind: 'workbench' }, text);
-        return;
-      }
-      case 'skipped':
-        this.options.queueNotice(project.id, specId, this.mergeNowText(event, ref, fetchNote));
-        return;
-      case 'failed':
-        appLog.warn(`[MergeSync] Could not merge ${ref} into ${specId}: ${result.error}`);
-        this.taskLog(project, specId, `Could not merge ${ref} into this task's branch after ${mergedTask} was merged`, result.error);
-        return;
-      default:
-        // Up to date, or a merge in progress there: nothing to do
-        return;
-    }
-  }
-
-  private taskLog(project: Project, specId: string, content: string, detail?: string): void {
-    try {
-      const log = new TaskLogWriter(taskSpecDir(project, specId), specId);
-      log.add('coding', 'info', content, detail ? { detail } : {});
-      log.saveNow();
-    } catch (error) {
-      appLog.warn(`[MergeSync] Could not write the task log of ${specId}: ${errorText(error)}`);
-    }
+    // Queued (a rate-limit hold, or waiting for a slot): its run applies the request when it starts
+    if (current.status === 'queue') return;
+    this.options.requestResync?.(project, current);
   }
 }

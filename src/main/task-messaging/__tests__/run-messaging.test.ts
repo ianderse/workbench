@@ -11,6 +11,7 @@ vi.mock('../../platform/shell-runtime', () => ({
   whenShellRuntimeReady: async () => ({}),
 }));
 
+import * as toolsServer from '../../insights/task-tools-server';
 import { closeTaskToolsServer } from '../../insights/task-tools-server';
 import { configureTaskMessaging, resetTaskMessagingForTests } from '../broker';
 import { createRunMessaging } from '../run-messaging';
@@ -47,8 +48,8 @@ describe('createRunMessaging', () => {
 
     const listed = await rpc(http, 'tools/list');
     expect(listed.body.result.tools.map((t: { name: string }) => t.name)).toEqual(['message_task', 'list_parallel_tasks']);
-    const called = await rpc(http, 'tools/call', { name: 'message_task', arguments: { task: 'lead', message: 'hi' } });
-    expect(called.body.result.content[0].text).toBe('not sent: no project lead session');
+    const called = await rpc(http, 'tools/call', { name: 'message_task', arguments: { task: 'nope', message: 'hi' } });
+    expect(called.body.result.content[0].text).toMatch(/^not sent: /);
     // The same token serves every phase of the run
     expect((await messaging.mcpServer(tmp))).toEqual(server);
 
@@ -56,5 +57,15 @@ describe('createRunMessaging', () => {
     await new Promise((resolve) => setTimeout(resolve, 5));
     expect((await rpc(http, 'tools/list')).status).toBe(401);
     expect(await messaging.mcpServer(tmp)).toBeUndefined();
+  });
+
+  it('opens the tools again for the next phase after a failed open', async () => {
+    const spy = vi.spyOn(toolsServer, 'openMcpToolsSession').mockRejectedValueOnce(new Error('port in use'));
+    const messaging = createRunMessaging('p1', '001-task');
+    expect(await messaging.mcpServer(tmp)).toBeUndefined();
+    expect((await messaging.mcpServer(tmp))?.type).toBe('http');
+    expect(spy).toHaveBeenCalledTimes(2);
+    spy.mockRestore();
+    messaging.dispose();
   });
 });

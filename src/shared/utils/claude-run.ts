@@ -42,13 +42,13 @@ export type TaskLogPhase = 'planning' | 'coding' | 'validation';
 /** Which run steps each log section covers */
 const RUN_PHASES_BY_LOG_PHASE: Record<TaskLogPhase, ClaudeRunPhaseName[]> = {
   planning: ['triage', 'plan'],
-  coding: ['implement', 'revise'],
+  coding: ['implement', 'revise', 'resync'],
   validation: ['validate']
 };
 
 /**
  * Total duration and cost of the run steps in a log section (triage + plan for planning,
- * implement + revise for coding, validate for validation). A field is left out when none of
+ * implement, revise and resync for coding, validate for validation). A field is left out when none of
  * the section's steps reported it.
  */
 export function summarizeLogPhase(

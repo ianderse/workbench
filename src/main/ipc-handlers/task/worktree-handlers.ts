@@ -16,7 +16,7 @@ import { localMerge } from '../../worktree/local-merge';
 import { loadClaudeRunInfo } from '../../claude-code/task-runner';
 import { taskHooks } from '../../task-hooks';
 import { recordTaskMerge } from '../../task-messaging/merge-sync';
-import { branchSyncs, localMerges, mergingPRs } from '../../worktree/merge-guard';
+import { branchSyncs, guardKey, localMerges, mergingPRs } from '../../worktree/merge-guard';
 import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
 import { git } from '../../utils/git-exec';
@@ -1473,10 +1473,13 @@ export function registerWorktreeHandlers(
       if (options?.targetBranch && !GIT_BRANCH_REGEX.test(options.targetBranch)) {
         return { success: false, error: 'Invalid target branch name' };
       }
-      if (mergingPRs.has(taskId)) return { success: false, error: 'This pull request is already being merged' };
-      if (branchSyncs.has(taskId)) return { success: false, error: "Workbench is merging the base branch into this task's branch. Try again in a moment." };
+      // Guards are held per project and task: another project's task of the same id is not this one
+      const mergeKey = guardKey(project.id, taskId);
+      if (mergingPRs.has(mergeKey)) return { success: false, error: 'This pull request is already being merged' };
+      if (localMerges.has(mergeKey)) return { success: false, error: "This task's branch is being merged locally" };
+      if (branchSyncs.has(mergeKey)) return { success: false, error: "Workbench is merging the base branch into this task's branch. Try again in a moment." };
 
-      mergingPRs.add(taskId);
+      mergingPRs.add(mergeKey);
       try {
         const result = await mergePR({
           projectDir: project.path,
@@ -1499,7 +1502,7 @@ export function registerWorktreeHandlers(
         console.error('[MERGE_PR] Exception in handler:', error);
         return { success: false, error: error instanceof Error ? error.message : 'Failed to merge the pull request' };
       } finally {
-        mergingPRs.delete(taskId);
+        mergingPRs.delete(mergeKey);
       }
     }
   );
@@ -1549,10 +1552,12 @@ export function registerWorktreeHandlers(
       if (!worktreePath) return { success: false, error: 'No worktree found for this task' };
       const targetBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
       if (!GIT_BRANCH_REGEX.test(targetBranch)) return { success: false, error: `Invalid base branch name: ${targetBranch}` };
-      if (localMerges.has(taskId)) return { success: false, error: "This task's branch is already being merged" };
-      if (branchSyncs.has(taskId)) return { success: false, error: "Workbench is merging the base branch into this task's branch. Try again in a moment." };
+      const mergeKey = guardKey(project.id, taskId);
+      if (localMerges.has(mergeKey)) return { success: false, error: "This task's branch is already being merged" };
+      if (mergingPRs.has(mergeKey)) return { success: false, error: "This task's pull request is being merged" };
+      if (branchSyncs.has(mergeKey)) return { success: false, error: "Workbench is merging the base branch into this task's branch. Try again in a moment." };
 
-      localMerges.add(taskId);
+      localMerges.add(mergeKey);
       try {
         const runInfo = loadClaudeRunInfo(path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId));
         const result = await localMerge({
@@ -1576,7 +1581,7 @@ export function registerWorktreeHandlers(
         console.error('[MERGE_LOCAL] Exception in handler:', error);
         return { success: false, error: error instanceof Error ? error.message : 'Failed to merge the task branch' };
       } finally {
-        localMerges.delete(taskId);
+        localMerges.delete(mergeKey);
       }
     }
   );

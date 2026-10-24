@@ -35,6 +35,7 @@ vi.mock('../../platform/runtime-exec', () => ({
   }),
   killRuntimeProcess: vi.fn(),
 }));
+vi.mock('../../app-logger', () => ({ appLog: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }));
 
 import { INITIAL_INPUT_ID, matchReplayedInput, startClaudeProcess } from '../process';
 import type { ClaudeStreamMessage } from '../stream-types';
@@ -102,6 +103,54 @@ describe('startClaudeProcess with stdin kept open', () => {
     const outcome = await handle.done;
     expect(outcome.results.map((r) => r.total_cost_usd)).toEqual([0.1, 0.15]);
     expect(outcome.result?.total_cost_usd).toBe(0.15);
+  });
+
+  it('keeps stdin open after a result while background tasks run and closes it after their turn', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true });
+    const child = children[0];
+    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 'b1', is_backgrounded: true });
+    child.emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [{ task_id: 'b1' }] });
+    child.emitLine(result());
+    await tick();
+    expect(child.stdinEnded).toBe(false);
+    expect(handle.send('still listening', 'wbm-late')).toBe('wbm-late');
+
+    // The background shell finishes: Claude Code runs a turn for its notification
+    child.emitLine({ type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed' });
+    child.emitLine({ type: 'system', subtype: 'background_tasks_changed', tasks: [] });
+    child.emitLine({ type: 'system', subtype: 'init' });
+    child.emitLine({ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } });
+    await tick();
+    expect(child.stdinEnded).toBe(false);
+    child.emitLine(result());
+    await tick();
+    expect(child.stdinEnded).toBe(true);
+    child.exit(0);
+    expect((await handle.done).results).toHaveLength(2);
+  });
+
+  it('closes stdin after a silence when background tasks never report back', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true, backgroundIdleCloseMs: 20 });
+    const child = children[0];
+    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 'a1', is_backgrounded: true });
+    child.emitLine(result());
+    await tick();
+    expect(child.stdinEnded).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    expect(child.stdinEnded).toBe(true);
+    child.exit(0);
+    await handle.done;
+  });
+
+  it('ignores foreground subagents when deciding the run is done', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp', env: {}, input: 'go', keepStdinOpen: true });
+    const child = children[0];
+    child.emitLine({ type: 'system', subtype: 'task_started', task_id: 'f1', is_backgrounded: false });
+    child.emitLine(result());
+    await tick();
+    expect(child.stdinEnded).toBe(true);
+    child.exit(0);
+    await handle.done;
   });
 
   it('writes the prompt and closes stdin right away by default', async () => {

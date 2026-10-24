@@ -132,6 +132,7 @@ import { registerTaskExecutionHandlers } from '../execution-handlers';
 import { registerTaskCRUDHandlers } from '../crud-handlers';
 import { invokeIpcHandler } from '../../ipc-registry';
 import { runTaskTool } from '../../../insights/task-tools';
+import { guardKey, localMerges, mergingPRs } from '../../../worktree/merge-guard';
 
 const TASK_ID = '001-add-login';
 
@@ -971,5 +972,35 @@ describe('plan file watcher', () => {
 
     const { fileWatcher } = await import('../../../file-watcher');
     expect(fileWatcher.unwatch).toHaveBeenCalledWith(TASK_ID, 'project-b');
+  });
+});
+
+describe('a task whose branch is being merged', () => {
+  afterEach(() => {
+    localMerges.clear();
+    mergingPRs.clear();
+  });
+
+  it('is not started, retried, revised or moved to In Progress, while the same id in another project is', async () => {
+    setupProjects('project-a', 'project-b', { 'project-a': makeTask('project-a', { status: 'human_review' }), 'project-b': makeTask('project-b', { status: 'human_review' }) });
+    localMerges.add(guardKey('project-b', TASK_ID));
+
+    await invokeIpcHandler(IPC_CHANNELS.TASK_START, TASK_ID, undefined, 'project-b');
+    const retry = await invokeIpcHandler<{ success: boolean; error?: string }>(IPC_CHANNELS.TASK_RETRY, TASK_ID, 'project-b');
+    mergingPRs.add(guardKey('project-b', TASK_ID));
+    localMerges.clear();
+    const review = await invokeIpcHandler<{ success: boolean; error?: string }>(
+      IPC_CHANNELS.TASK_REVIEW, TASK_ID, false, 'More', undefined, undefined, 'project-b');
+    const moved = await invokeIpcHandler<{ success: boolean; error?: string }>(
+      IPC_CHANNELS.TASK_UPDATE_STATUS, TASK_ID, 'in_progress', undefined, 'project-b');
+
+    expect(agentManager.startTask).not.toHaveBeenCalled();
+    expect(retry).toEqual({ success: false, error: expect.stringContaining('being merged') });
+    expect(review).toEqual({ success: false, error: expect.stringContaining('pull request is being merged') });
+    expect(moved).toEqual({ success: false, error: expect.stringContaining('pull request is being merged') });
+    expect(mocks.stateManager.handleUiEvent).not.toHaveBeenCalled();
+
+    await invokeIpcHandler(IPC_CHANNELS.TASK_START, TASK_ID, undefined, 'project-a');
+    expect(agentManager.startTask).toHaveBeenCalledWith(TASK_ID, expect.objectContaining({ project: expect.objectContaining({ id: 'project-a' }) }));
   });
 });

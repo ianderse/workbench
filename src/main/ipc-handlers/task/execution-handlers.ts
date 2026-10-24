@@ -36,6 +36,9 @@ import { taskQueue } from '../../services/task-queue';
 import { taskQueueOrder } from '../../services/task-queue-order';
 import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
+import { branchMergeBlocker } from '../../worktree/merge-guard';
+import { taskResync } from '../../task-resync';
+import { deliverToTask } from '../../task-messaging';
 
 
 /**
@@ -272,6 +275,13 @@ export function registerTaskExecutionHandlers(
       ? (projectStore.getProject(task.projectId) ?? foundProject)
       : foundProject;
 
+    // Not while the task's branch is being merged: the run would work on a branch that is moving
+    const merging = branchMergeBlocker(project.id, taskId);
+    if (merging) {
+      sendTaskError(taskId, merging, project.id);
+      return;
+    }
+
     // Git is required for worktree-based runs
     const gitStatus = await checkGitStatus(project.path);
     if (!gitStatus.isGitRepo) {
@@ -393,6 +403,8 @@ export function registerTaskExecutionHandlers(
     if (agentManager.isRunning(taskId, project.id)) {
       return { success: false, error: 'The task is still running. Stop it before retrying.' };
     }
+    const merging = branchMergeBlocker(project.id, taskId);
+    if (merging) return { success: false, error: merging };
 
     // Check that the task can start before throwing its work away
     const gitStatus = await checkGitStatus(project.path);
@@ -510,6 +522,32 @@ export function registerTaskExecutionHandlers(
 
   configureTaskQueue(agentManager, startTask);
 
+  // Tasks on a branch another task was merged into go back to In Progress to take it in
+  // (task-resync/): started here, or queued when the project is at its parallel task limit
+  taskResync.configure({
+    getProject: (projectId) => projectStore.getProject(projectId),
+    getTasks: (projectId) => projectStore.getTasks(projectId),
+    isRunning: (taskId, projectId) => agentManager.isRunning(taskId, projectId),
+    isAtParallelLimit,
+    start: (taskId, projectId) => startTask(taskId, projectId),
+    queue: async (project, task) => {
+      const planPath = getPlanPath(project, task);
+      if (!(await persistPlanStatus(planPath, 'queue', project.id))) {
+        await createPlanIfNotExists(planPath, task, 'queue');
+        projectStore.invalidateTasksCache(project.id);
+      }
+      safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, task.id, 'queue', project.id);
+      taskHooks.emit('state', { project, task, status: 'queue' });
+      taskQueue.request(project.id);
+    },
+    note: async (project, task, text) => {
+      await deliverToTask(project.id, task, { kind: 'workbench' }, text);
+    },
+    runExclusive: (projectId, fn) => taskQueue.runExclusive(projectId, fn),
+  });
+  // Requests left from before the app was closed, once the projects are loaded
+  setTimeout(() => taskResync.scan(projectStore.getProjects().map((p) => p.id)), 10_000).unref?.();
+
   // The board's Queue column order (top first): the queue starts the top task first
   onIpc(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, (_, projectId: string, order: string[]) => {
     if (typeof projectId !== 'string' || !Array.isArray(order)) return;
@@ -582,6 +620,8 @@ export function registerTaskExecutionHandlers(
       if (agentManager.isRunning(taskId, project.id)) {
         return { success: false, error: 'The task is still running. Stop it before requesting changes.' };
       }
+      const merging = branchMergeBlocker(project.id, taskId);
+      if (merging) return { success: false, error: merging };
 
       const auth = await checkClaudeCodeAuth();
       if (!auth.ok) {
@@ -726,6 +766,11 @@ export function registerTaskExecutionHandlers(
         }
 
         if (status === 'in_progress' && !agentManager.isRunning(taskId, project.id)) {
+          const merging = branchMergeBlocker(project.id, taskId);
+          if (merging) {
+            sendTaskError(taskId, merging, project.id);
+            return { success: false, error: merging };
+          }
           // Check git status and auth before the card moves
           const gitStatusCheck = await checkGitStatus(project.path);
           if (!gitStatusCheck.isGitRepo || !gitStatusCheck.hasCommits) {

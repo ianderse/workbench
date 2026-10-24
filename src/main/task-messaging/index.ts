@@ -1,6 +1,6 @@
 /**
- * Task messaging: parallel tasks message each other through Workbench (`broker.ts`), get its
- * notices about each other (`notices.ts`) and reach the project lead (`registerLeadTarget`).
+ * Task messaging: parallel tasks message each other through Workbench (`broker.ts`) and get its
+ * notices about each other (`notices.ts`).
  */
 import type { AppSettings } from '../../shared/types/settings';
 import { projectStore } from '../project-store';
@@ -10,11 +10,9 @@ import { git } from '../utils/git-exec';
 import { resolveDefaultBaseBranch } from '../utils/base-branch';
 import { configureTaskMessaging } from './broker';
 import { TaskNotices } from './notices';
+import { taskResync } from '../task-resync';
 
-export { deliver, deliverToTask, formatMessage, isTaskLive, registerLeadTarget, takeInbox } from './broker';
-export type { LeadTargetHandler, TaskMessagingEnv } from './broker';
-export { onTaskLifecycle, type TaskLifecycleEvent, type TaskLifecycleKind } from './notices';
-export type { DeliveryOutcome, MessageSender, TaskMessage, TaskRunMessaging } from './types';
+export { deliverToTask } from './broker';
 
 /** Whether task messaging is on (Settings > Agents) */
 export function isTaskMessagingEnabled(): boolean {
@@ -35,9 +33,12 @@ export function registerTaskMessaging(options: { isRunning?: (taskId: string, pr
     isEnabled: isTaskMessagingEnabled,
     isRunning: options.isRunning ? (projectId, task) => options.isRunning!(task.id, projectId) : undefined,
     defaultBranch: (project) => resolveDefaultBaseBranch(project.path),
-    // Merged locally: the task branch is in its base branch (a merged PR sets prState instead)
+    // Tasks on the merged branch that are not running go back to In Progress to take it in
+    requestResync: (project, task) => taskResync.request(project.id, task.id),
+    // Merged locally: the task branch is in its base branch (a merged PR sets prState instead).
+    // `HEAD` (a detached worktree) would name the project's own HEAD here
     isMerged: async (project, _task, branch, base) => {
-      if (!branch) return false;
+      if (!branch || branch === 'HEAD') return false;
       try {
         await git(['merge-base', '--is-ancestor', branch, base], { cwd: project.path, isolated: true, timeout: 15000 });
         return true;

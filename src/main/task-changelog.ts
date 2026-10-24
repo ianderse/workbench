@@ -55,6 +55,11 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   error: 'Error',
 };
 
+/** A task status as the board names it */
+export function taskStatusLabel(status: TaskStatus): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
 /** The project's changelog file */
 export function getTaskChangelogPath(projectPath: string, autoBuildPath: string | undefined): string {
   return path.join(projectPath, autoBuildPath || '.workbench', TASK_CHANGELOG_FILE);

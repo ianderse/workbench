@@ -2,9 +2,9 @@
  * Session names of task messaging
  * ===============================
  *
- * Every task run's Claude Code session is named `wb-<projectKey>-<specId>` (`--name`), and the
- * project's lead session `wb-<projectKey>-lead`, so sessions can address each other (native
- * `SendMessage`, Workbench's `message_task`) and Workbench can tell which task a name belongs to.
+ * Every task run's Claude Code session is named `wb-<projectKey>-<specId>` (`--name`), so sessions
+ * can address each other (native `SendMessage`, Workbench's `message_task`) and Workbench can tell
+ * which task a name belongs to.
  * Names only hold `[A-Za-z0-9_-]`, which Claude Code accepts without quotes.
  *
  * The project key is a short stable hash of the project id: two projects can hold the same spec
@@ -34,18 +34,14 @@ export function taskSessionName(projectId: string, specId: string): string {
   return `wb-${projectKey(projectId)}-${sanitize(specId)}`.slice(0, MAX_NAME_LENGTH);
 }
 
-/** Session name of the project's lead session */
-export function leadSessionName(projectId: string): string {
-  return `wb-${projectKey(projectId)}-lead`;
+export interface ParsedSessionName {
+  projectKey: string;
+  specId: string;
 }
 
-export type ParsedSessionName =
-  | { projectKey: string; lead: true }
-  | { projectKey: string; lead: false; specId: string };
-
-/** The project key and task (or lead) a session name stands for; null for other names */
+/** The project key and task a session name stands for; null for other names */
 export function parseSessionName(name: string): ParsedSessionName | null {
   const match = NAME_PATTERN.exec(name.trim().replace(/^@/, ''));
   if (!match) return null;
-  return match[2] === 'lead' ? { projectKey: match[1], lead: true } : { projectKey: match[1], lead: false, specId: match[2] };
+  return { projectKey: match[1], specId: match[2] };
 }

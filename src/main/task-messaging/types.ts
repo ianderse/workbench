@@ -1,10 +1,10 @@
 /**
- * Task messaging types: messages between parallel tasks, Workbench notices and the project lead.
+ * Task messaging types: messages between parallel tasks and Workbench notices.
  */
 
 /** Who wrote a message */
 export interface MessageSender {
-  kind: 'task' | 'lead' | 'workbench' | 'user';
+  kind: 'task' | 'workbench' | 'user';
   /** kind task: the sending task */
   specId?: string;
   title?: string;
@@ -54,10 +54,11 @@ export interface TaskRunMessaging {
   /** The phase's first prompt (with those messages) was read */
   markRead: (ids: string[]) => void;
   /**
-   * A phase process with open stdin started: messages for the task go to `send` from now on.
+   * A phase process with open stdin started: messages for the task go to `send` from now on, as
+   * do messages queued since `takeInbox` that are not in `inPrompt` (the ids its prompt carries).
    * Returns the function to call when the process ended, with the ids it never read.
    */
-  attach: (send: (text: string, id: string) => string | false) => (unreadIds: string[]) => void;
+  attach: (send: (text: string, id: string) => string | false, inPrompt?: string[]) => (unreadIds: string[]) => void;
   /** The session read a message written to its stdin */
   inputRead: (id: string) => void;
   /** A native message from another session (`origin.kind === 'peer'`) showed up in the stream */

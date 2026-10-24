@@ -32,7 +32,8 @@ import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branc
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 import { createRunMessaging } from '../task-messaging/run-messaging';
-import { waitForBranchSync } from '../worktree/merge-guard';
+import { branchMergeBlocker, waitForBranchSync } from '../worktree/merge-guard';
+import { readResyncRequest } from '../task-resync/request';
 
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
@@ -182,9 +183,12 @@ export class AgentManager extends EventEmitter {
 
     let config: TaskRunConfig;
     try {
+      // Never on a branch that is being merged (the start handlers refuse first; this covers the rest)
+      const blocker = branchMergeBlocker(projectId, taskId);
+      if (blocker) throw new Error(blocker);
       // The run counts as running from here, so no new pull starts; one already merging another
       // task's changes into the worktree ends first
-      await waitForBranchSync(taskId);
+      await waitForBranchSync(projectId, taskId);
       config = await this.buildRunConfig(taskId, options);
       entry.apiProfileActive = await this.isApiProfileActive();
     } catch (error) {
@@ -222,6 +226,8 @@ export class AgentManager extends EventEmitter {
           overallProgress: progress.overallProgress,
           message: progress.message,
           ...(progress.currentSubtask ? { currentSubtask: progress.currentSubtask } : {}),
+          // Always set, so the card's "Syncing with" label goes away with the next step
+          syncingWith: progress.syncingWith ?? null,
         };
         this.emit('execution-progress', taskId, data, projectId);
       },
@@ -485,9 +491,13 @@ export class AgentManager extends EventEmitter {
     }));
 
     const taskSettings = resolveClaudeCodeTaskSettings(settings.claudeCodeTasks);
+    // Another task was merged into the base branch since this one ran: whatever starts the run (the
+    // resync service, the queue, a rate-limit resume, the user) takes it in first (task-resync/)
+    const resync = task.metadata?.useWorktree !== false ? readResyncRequest(specDir) : undefined;
     // Starting a task whose last run went all the way through begins a new run (fresh triage
-    // and session) in the same worktree, instead of finishing again immediately
-    if (mode === 'start' && isClaudeRunFinished(loadClaudeRunInfo(specDir), taskSettings.validation)) {
+    // and session) in the same worktree, instead of finishing again immediately. Not for a resync:
+    // the session that did the work merges the base branch in and resumes
+    if (mode === 'start' && !resync && isClaudeRunFinished(loadClaudeRunInfo(specDir), taskSettings.validation)) {
       resetClaudeRunInfo(specDir);
     }
 
@@ -516,6 +526,7 @@ export class AgentManager extends EventEmitter {
         ? { feedback: options.feedback ?? '', feedbackAttachments }
         : {}),
       profileId: options.profileId,
+      ...(resync ? { resync } : {}),
     };
 
     if (isSelfImproveEnabled(project.settings)) config.selfImprovePrompt = SELF_IMPROVE_NUDGE;
