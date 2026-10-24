@@ -15,6 +15,8 @@ import { mergePR } from '../../ai/runners/github/pr-merger';
 import { localMerge } from '../../worktree/local-merge';
 import { loadClaudeRunInfo } from '../../claude-code/task-runner';
 import { taskHooks } from '../../task-hooks';
+import { recordTaskMerge } from '../../task-messaging/merge-sync';
+import { branchSyncs, localMerges, mergingPRs } from '../../worktree/merge-guard';
 import { resetTaskRunState } from './plan-file-utils';
 import { findTaskAndProject } from './shared';
 import { git } from '../../utils/git-exec';
@@ -699,6 +701,8 @@ export function registerWorktreeHandlers(
               } else {
                 // Full merge (not stage-only)
                 newStatus = 'done';
+                // The task branch is deleted below, so the merge is recorded for the other tasks
+                recordTaskMerge(project.id, task.specId, { into: effectiveBaseBranch, via: 'local' });
                 planStatus = 'completed';
                 message = 'Changes merged successfully';
                 staged = false;
@@ -1470,6 +1474,7 @@ export function registerWorktreeHandlers(
         return { success: false, error: 'Invalid target branch name' };
       }
       if (mergingPRs.has(taskId)) return { success: false, error: 'This pull request is already being merged' };
+      if (branchSyncs.has(taskId)) return { success: false, error: "Workbench is merging the base branch into this task's branch. Try again in a moment." };
 
       mergingPRs.add(taskId);
       try {
@@ -1485,7 +1490,10 @@ export function registerWorktreeHandlers(
           onProgress: (step, params) =>
             safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_PR_PROGRESS, taskId, { step, params }),
         });
-        if (result.success) await recordPRMerged(task, project, worktreePath);
+        if (result.success) {
+          recordTaskMerge(project.id, task.specId, { into: result.targetBranch || options?.targetBranch || task.metadata?.baseBranch || project.settings?.mainBranch || 'main', via: 'pr' });
+          await recordPRMerged(task, project, worktreePath);
+        }
         return { success: true, data: result };
       } catch (error) {
         console.error('[MERGE_PR] Exception in handler:', error);
@@ -1542,6 +1550,7 @@ export function registerWorktreeHandlers(
       const targetBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
       if (!GIT_BRANCH_REGEX.test(targetBranch)) return { success: false, error: `Invalid base branch name: ${targetBranch}` };
       if (localMerges.has(taskId)) return { success: false, error: "This task's branch is already being merged" };
+      if (branchSyncs.has(taskId)) return { success: false, error: "Workbench is merging the base branch into this task's branch. Try again in a moment." };
 
       localMerges.add(taskId);
       try {
@@ -1558,7 +1567,10 @@ export function registerWorktreeHandlers(
           onProgress: (step, params) =>
             safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_LOCAL_PROGRESS, taskId, { step, params }),
         });
-        if (result.success) await markTaskDone(task, project, worktreePath);
+        if (result.success) {
+          recordTaskMerge(project.id, task.specId, { into: targetBranch, via: 'local' });
+          await markTaskDone(task, project, worktreePath);
+        }
         return { success: true, data: result };
       } catch (error) {
         console.error('[MERGE_LOCAL] Exception in handler:', error);
@@ -1569,12 +1581,6 @@ export function registerWorktreeHandlers(
     }
   );
 }
-
-/** Tasks whose pull request is being merged */
-const mergingPRs = new Set<string>();
-
-/** Tasks whose branch is being merged locally */
-const localMerges = new Set<string>();
 
 /** Set fields of a task's metadata in the main project and its worktree */
 function writeTaskMetadataFields(project: Project, task: Task, worktreePath: string | null, fields: Record<string, unknown>): void {

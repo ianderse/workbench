@@ -32,6 +32,7 @@ import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branc
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 import { createRunMessaging } from '../task-messaging/run-messaging';
+import { waitForBranchSync } from '../worktree/merge-guard';
 
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
@@ -181,6 +182,9 @@ export class AgentManager extends EventEmitter {
 
     let config: TaskRunConfig;
     try {
+      // The run counts as running from here, so no new pull starts; one already merging another
+      // task's changes into the worktree ends first
+      await waitForBranchSync(taskId);
       config = await this.buildRunConfig(taskId, options);
       entry.apiProfileActive = await this.isApiProfileActive();
     } catch (error) {

@@ -152,5 +152,5 @@ export async function buildParallelTasksPrompt(
   return `## Parallel tasks
 Other tasks of this project run in parallel in their own worktrees, and their branches are merged into the same base branch, so editing the same files causes merge conflicts. Workbench logs every task's states and the files it changes in \`${promptPath}\` (JSON Lines, newest last; don't modify it).
 ${list}
-${check} Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.`;
+${check} Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.${messaging ? ' When another task is merged into your base branch, a `[Workbench]` notice tells you to merge it into your branch: do it right away, as the notice says.' : ''}`;
 }

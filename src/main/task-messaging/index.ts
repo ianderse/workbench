@@ -7,6 +7,7 @@ import { projectStore } from '../project-store';
 import { readSettingsFile } from '../settings-utils';
 import { resolveClaudeCodeTaskSettings } from '../claude-code/settings';
 import { git } from '../utils/git-exec';
+import { resolveDefaultBaseBranch } from '../utils/base-branch';
 import { configureTaskMessaging } from './broker';
 import { TaskNotices } from './notices';
 
@@ -24,7 +25,7 @@ export function isTaskMessagingEnabled(): boolean {
 let notices: TaskNotices | null = null;
 
 /** Start the broker and its notices (once, at app start); returns a function that stops them */
-export function registerTaskMessaging(): () => void {
+export function registerTaskMessaging(options: { isRunning?: (taskId: string, projectId: string) => boolean } = {}): () => void {
   configureTaskMessaging({
     getProject: (projectId) => projectStore.getProject(projectId),
     getTasks: (projectId) => projectStore.getTasks(projectId),
@@ -32,6 +33,8 @@ export function registerTaskMessaging(): () => void {
   notices?.stop();
   notices = new TaskNotices({
     isEnabled: isTaskMessagingEnabled,
+    isRunning: options.isRunning ? (projectId, task) => options.isRunning!(task.id, projectId) : undefined,
+    defaultBranch: (project) => resolveDefaultBaseBranch(project.path),
     // Merged locally: the task branch is in its base branch (a merged PR sets prState instead)
     isMerged: async (project, _task, branch, base) => {
       if (!branch) return false;
