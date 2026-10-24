@@ -40,6 +40,29 @@ Every creative builder has a graveyard of ideas. Each idea wants an evening you 
 
 Most tools in this space write their own agent harness, and none of them outperforms the one you already have installed. You see it in the results: a loop that plans worse, retries more, and spends more than Claude Code does on the same task. So why build another harness when one already works? Workbench runs on Claude Code rather than competing with it, using the same CLI with your own accounts, subagents, skills, and MCP servers, and spending its own effort on everything around the session instead.
 
+## Local LLMs with OMP
+
+Besides Claude Code, Workbench can run tasks, triage, Insights and agent windows through [OMP](https://github.com/can1357/oh-my-pi) (`omp`), which drives local models.
+
+1. Install OMP (for example `brew install can1357/tap/omp`) and check that `omp --version` works.
+2. Add your local server to `~/.omp/agent/models.yml`. Ollama example:
+
+   ```yaml
+   providers:
+     ollama:
+       baseUrl: http://localhost:11434/v1
+       api: openai-completions
+       apiKey: ollama
+       discovery:
+         type: openai-models-list
+   ```
+
+   LM Studio, llama.cpp, MLX and other OpenAI-compatible servers work the same way with their own `baseUrl`. Run `omp models` to confirm the models show up.
+3. In Settings > Agents, set Agent backend to OMP (local models). Workbench detects the CLI and lists its models.
+4. Map the four model sizes (Small, Standard, Large, Largest) to OMP models, and pick a thinking level per effort level. Triage chooses a size per task, so mapping all four to one model is fine.
+
+Limitations with OMP: MCP connectors, Claude accounts and account switching, usage and rate limit tracking, budgets, and resuming Claude sessions do not apply. Agent windows start `omp` (the Standard model, `--auto-approve` when permissions are skipped).
+
 ## Contribute
 
 Pull requests are temporarily not accepted, but every other kind of contribution is welcome. If something looks broken or missing, open an [issue](https://github.com/proactive-agent/workbench/issues) describing what you expected to happen instead. Ideas, questions, and features you would like to see belong in [discussions](https://github.com/proactive-agent/workbench/discussions), where they can be argued over before implementation.

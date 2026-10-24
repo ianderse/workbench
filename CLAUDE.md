@@ -39,9 +39,10 @@ reviews, requests changes (same session continues) or merges.
 
 ## Critical Rules
 
-**Claude Code CLI only** — All AI work (tasks, triage, Insights, titles, PR text, commit messages, merge conflict help)
-runs through the locally installed Claude Code CLI via `src/main/claude-code/`. Use `ClaudeTaskRun` for tasks and
-`runClaudeText()` for one-shot calls; never call the Anthropic API or an AI SDK directly for these.
+**AI work goes through the agent backend layer** — All AI work (tasks, triage, Insights, titles, PR text, commit messages,
+merge conflict help) runs through a local coding-agent CLI: Claude Code by default (`src/main/claude-code/`, `ClaudeTaskRun`
+for tasks, `runClaudeText()` for one-shot calls) or OMP when Settings > Agents selects it (`src/main/agent-backend/`).
+Never call the Anthropic API or an AI SDK directly for these.
 
 **i18n required** — All user-facing text uses `react-i18next` translation keys (see [i18n](#i18n)).
 
@@ -183,6 +184,16 @@ workbench/
 
 Claude Code docs: https://code.claude.com/docs/en/ (CLI reference, headless mode, sub-agents, model config,
 permission modes, worktrees, hooks, skills).
+
+### Agent backend (OMP)
+
+`AppSettings.agentBackend` (`src/shared/types/agent-backend.ts`, read in the main process with `isOmpBackend()` from
+`src/main/agent-backend/settings.ts`) picks Claude Code (default) or OMP (`omp`, local models from
+`~/.omp/agent/models.yml`). OMP maps triage's model tiers (haiku/sonnet/opus/fable) to OMP models and efforts to thinking
+levels. With OMP no Claude account is required (`checkClaudeCodeAuth` passes), the usage indicator and auth-failure modal are
+hidden, and agent windows launch `omp` (`buildOmpLaunchCommand` in `terminal/cli-integration-handler.ts`). OMP detection
+(`omp --version`, `omp models --json`, cached in the renderer refresh cache) is `ipc-handlers/agent-backend-handlers.ts`;
+the settings UI is `settings/AgentBackendSettings.tsx`.
 
 ### Task Directory
 
