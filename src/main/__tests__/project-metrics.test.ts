@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { getProjectCostMetrics, warmProjectMetrics } from '../project-metrics';
@@ -258,13 +258,18 @@ describe('agent window spending', () => {
 
     await getProjectCostMetrics([project('c', dir)]);
 
-    // The reading is kept with the session, so an unchanged transcript is not read again
+    // The reading is kept with the session, so an unchanged transcript is not read again. The turns
+    // and the totals Claude Code reported are kept with it too, because the project is reconciled
+    // from those and a cached session has to take part in that like a freshly read one.
     expect(storedSessions(dir)[0].spent).toEqual({
       totalCostUsd: 0.5,
       days: { '2026-10-20': 0.5 },
       transcript,
       size: expect.any(Number),
       modifiedMs: expect.any(Number),
+      estimate: { days: { '2026-10-20': 0.5 }, total: 0.5, undated: 0 },
+      lastDay: '2026-10-20',
+      runs: { [`run:${new Date(2026, 9, 20, 9).getTime()}`]: 0.5 },
     });
 
     unlinkSync(transcript);
@@ -272,6 +277,91 @@ describe('agent window spending', () => {
 
     expect(metrics.totalCostUsd).toBe(0.5);
     expect(metrics.daily).toEqual([{ date: '2026-10-20', costUsd: 0.5 }]);
+  });
+
+  describe('a process that wrote its total to more than one transcript', () => {
+    /** Two conversations one Claude Code process worked on, each carrying its running total */
+    const givenSharedProcess = (dir: string, first: number, second: number): string[] => {
+      const configDir = path.join(root, 'config');
+      const transcripts = path.join(configDir, 'projects', '-project');
+      mkdirSync(transcripts, { recursive: true });
+      const startTime = new Date(2026, 9, 20, 9).getTime();
+      const files = [
+        [path.join(transcripts, 'first.jsonl'), turn('2026-10-20', 10, 20), first],
+        [path.join(transcripts, 'second.jsonl'), turn('2026-10-21', 10, 20), second],
+      ] as const;
+      for (const [file, priced, totalCostUSD] of files) {
+        writeFileSync(file, [priced, JSON.stringify({ type: 'cost-state', startTime, totalCostUSD })].join('\n'));
+      }
+
+      mkdirSync(path.join(dir, '.workbench'), { recursive: true });
+      writeFileSync(
+        path.join(dir, '.workbench', 'agent-sessions.json'),
+        JSON.stringify({
+          version: 1,
+          sessions: [
+            { sessionId: 'first', configDir, startedAt: at('2026-10-20', 9) },
+            { sessionId: 'second', configDir, startedAt: at('2026-10-21', 9) },
+          ],
+        })
+      );
+      return files.map(([file]) => file);
+    };
+
+    it('counts its total once for the project, not once per transcript', async () => {
+      const dir = path.join(root, 'shared');
+      givenSharedProcess(dir, 103.9, 86.37);
+
+      const [metrics] = await getProjectCostMetrics([project('shared', dir)]);
+
+      // The process spent $103.90 in all; each conversation reports a figure of that same total
+      expect(metrics.totalCostUsd).toBeCloseTo(103.9, 6);
+      expect(metrics.daily).toEqual([
+        { date: '2026-10-20', costUsd: 51.95 },
+        { date: '2026-10-21', costUsd: 51.95 },
+      ]);
+    });
+
+    it('still counts it once when one transcript is read again and the other is not', async () => {
+      const dir = path.join(root, 'shared-again');
+      const [, second] = givenSharedProcess(dir, 103.9, 86.37);
+
+      // Read once, so both readings are kept with their sessions
+      await getProjectCostMetrics([project('shared-again', dir)]);
+      expect((await getProjectCostMetrics([project('shared-again', dir)]))[0].totalCostUsd).toBeCloseTo(103.9, 6);
+
+      // The process went on spending, and wrote its new total to the second conversation only
+      writeFileSync(
+        second,
+        `${readFileSync(second, 'utf-8')}\n` +
+          JSON.stringify({ type: 'cost-state', startTime: new Date(2026, 9, 20, 9).getTime(), totalCostUSD: 110 })
+      );
+      const [metrics] = await getProjectCostMetrics([project('shared-again', dir)]);
+
+      expect(metrics.totalCostUsd).toBeCloseTo(110, 6);
+    });
+
+    it('reads a transcript again when the reading kept with it predates the process totals', async () => {
+      const dir = path.join(root, 'older-store');
+      const [first] = givenSharedProcess(dir, 103.9, 86.37);
+      const stored = JSON.parse(readFileSync(path.join(dir, '.workbench', 'agent-sessions.json'), 'utf-8'));
+      const { size, mtimeMs } = statSync(first);
+      // What an older version kept: the scaled total and days, with nothing to recognize the
+      // process by, so adding it to the other transcript's total would count the same dollars twice
+      stored.sessions[0].spent = {
+        totalCostUsd: 103.9,
+        days: { '2026-10-20': 103.9 },
+        transcript: first,
+        size,
+        modifiedMs: mtimeMs,
+      };
+      writeFileSync(path.join(dir, '.workbench', 'agent-sessions.json'), JSON.stringify(stored));
+
+      const [metrics] = await getProjectCostMetrics([project('older-store', dir)]);
+
+      expect(metrics.totalCostUsd).toBeCloseTo(103.9, 6);
+      expect(storedSessions(dir)[0].spent.runs).toEqual({ [`run:${new Date(2026, 9, 20, 9).getTime()}`]: 103.9 });
+    });
   });
 
   describe('every Claude Code session of the project', () => {
