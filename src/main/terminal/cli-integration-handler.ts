@@ -47,6 +47,10 @@ import { findSessionTranscript, latestTranscript } from '../claude-code/session-
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
 import { appLog } from '../app-logger';
 import { claudeThemeFlag } from '../claude-cli-theme';
+import { isOmpBackend, getAgentBackendSettings } from '../agent-backend/settings';
+import { buildOmpAdvisorOverlay, resolveOmpAdvisor } from '../agent-backend/omp-args';
+import { app } from 'electron';
+import { getAugmentedEnv, getAugmentedEnvAsync } from '../env-utils';
 
 // ============================================================================
 // CLI DISPATCH UTILITIES
@@ -1575,6 +1579,69 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
 }
 
 /**
+ * Advisor flags for an interactive OMP window: `--advisor` when on, and `--config <file>` when the
+ * choice needs an overlay (advisor off, or a chosen advisor model). Unlike task runs, a window has no
+ * temp dir to clean up, so the overlay is one small file in the app's data folder that is rewritten
+ * on every launch.
+ */
+function ompAdvisorFlags(terminal: Pick<TerminalProcess, 'shellKind'>, omp: ReturnType<typeof getAgentBackendSettings>['omp']): string {
+  const advisor = resolveOmpAdvisor(omp);
+  let flags = advisor.mode === 'on' ? ' --advisor' : '';
+  const overlay = buildOmpAdvisorOverlay(advisor);
+  if (overlay) {
+    try {
+      const file = path.join(app.getPath('userData'), 'omp-advisor-overlay.yml');
+      fs.writeFileSync(file, overlay, 'utf-8');
+      flags += ` --config ${quoteFlagText(windowPath(terminal, file), shellKindOf(terminal))}`;
+    } catch (error) {
+      appLog.warn('[OMP] Could not write the advisor config overlay, the window starts with OMP\'s own advisor setting', error);
+    }
+  }
+  return flags;
+}
+
+/**
+ * The line that starts OMP (oh-my-pi, local models) in an agent window instead of Claude Code:
+ * the project's directory, `omp` with the Standard tier's model, `--auto-approve` for YOLO mode and
+ * the same Graphify / self-improve system prompt hints. No Claude account, config dir or session id
+ * is involved. `pathEnv` is the augmented PATH used when the command isn't an absolute path.
+ */
+export function buildOmpLaunchCommand(
+  terminal: Pick<TerminalProcess, 'shellKind' | 'graphifyOut' | 'selfImprove'>,
+  cwd: string | undefined,
+  dangerouslySkipPermissions: boolean | undefined,
+  pathEnv: string,
+  continueSession = false
+): string {
+  const shellKind = shellKindOf(terminal);
+  const omp = getAgentBackendSettings().omp;
+  const command = omp.command || 'omp';
+  const model = omp.models.sonnet?.trim();
+  const cwdCommand = buildCdCommand(windowPath(terminal, cwd), shellKind);
+  // A WSL window uses the distribution's own PATH
+  const pathPrefix = isWslWindow(terminal) || isAbsoluteExecutableCommand(command) ? '' : buildPathPrefix(pathEnv, shellKind);
+  const flags =
+    `${continueSession ? ' --continue' : ''}` +
+    `${model ? ` --model ${quoteFlagText(model, shellKind)}` : ''}` +
+    `${dangerouslySkipPermissions ? ' --auto-approve' : ''}` +
+    ompAdvisorFlags(terminal, omp) +
+    `${graphifyHintFlag(terminal)}${selfImproveFlag(terminal)}`;
+  return `${cwdCommand}${pathPrefix}${escapeShellCommand(command, shellKind)}${flags}`;
+}
+
+/** Type the OMP launch line into an agent window and name the window */
+function startOmp(terminal: TerminalProcess, command: string, getWindow: WindowGetter): void {
+  writeCliCommand(terminal, command);
+  if (shouldAutoRenameTerminal(terminal.title)) {
+    terminal.title = 'OMP';
+    safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_TITLE_CHANGE, terminal.id, 'OMP');
+  }
+  if (terminal.projectPath) {
+    SessionHandler.persistSession(terminal);
+  }
+}
+
+/**
  * Invoke Claude with optional profile override
  */
 export function invokeClaude(
@@ -1589,6 +1656,13 @@ export function invokeClaude(
   debugLog('[ClaudeIntegration:invokeClaude] Requested profile ID:', profileId);
   debugLog('[ClaudeIntegration:invokeClaude] CWD:', cwd);
   debugLog('[ClaudeIntegration:invokeClaude] Dangerously skip permissions:', dangerouslySkipPermissions);
+
+  if (isOmpBackend()) {
+    terminal.isCLIMode = true;
+    terminal.dangerouslySkipPermissions = dangerouslySkipPermissions;
+    startOmp(terminal, buildOmpLaunchCommand(terminal, cwd, dangerouslySkipPermissions, getAugmentedEnv().PATH || ''), getWindow);
+    return;
+  }
 
   // A new session gets an id of Workbench's own, so its spending can be read back later
   const newSessionId = crypto.randomUUID();
@@ -1704,6 +1778,12 @@ export function resumeClaude(
   try {
     terminal.isCLIMode = true;
 
+    if (isOmpBackend()) {
+      const ompCommand = buildOmpLaunchCommand(terminal, terminal.projectPath || terminal.cwd, terminal.dangerouslySkipPermissions, getAugmentedEnv().PATH || '', true);
+      startOmp(terminal, ompCommand, getWindow);
+      return;
+    }
+
     const { command: claudeCmd, env: claudeEnv } = getClaudeCliInvocation();
     const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
 
@@ -1782,6 +1862,13 @@ export async function invokeCLIAsync(
     terminal.dangerouslySkipPermissions = dangerouslySkipPermissions;
 
     const projectPath = cwd || terminal.projectPath || terminal.cwd;
+
+    // OMP backend: start omp instead (a Claude session id to resume means nothing to it)
+    if (isOmpBackend()) {
+      const pathEnv = (await getAugmentedEnvAsync()).PATH || '';
+      startOmp(terminal, buildOmpLaunchCommand(terminal, cwd, dangerouslySkipPermissions, pathEnv), getWindow);
+      return;
+    }
 
     // Dispatch to the appropriate CLI based on preferredCLI setting
     const settings = await readSettingsFileAsync();
@@ -1938,6 +2025,13 @@ export async function resumeClaudeAsync(
 
   try {
     terminal.isCLIMode = true;
+
+    if (isOmpBackend()) {
+      const pathEnv = (await getAugmentedEnvAsync()).PATH || '';
+      const ompCommand = buildOmpLaunchCommand(terminal, terminal.projectPath || terminal.cwd, terminal.dangerouslySkipPermissions, pathEnv, true);
+      startOmp(terminal, ompCommand, getWindow);
+      return;
+    }
 
     // Async CLI invocation - non-blocking
     // Add timeout protection for CLI detection (10s timeout)
