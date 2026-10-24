@@ -13,11 +13,11 @@ import { AgentEvent, SessionInfo, WatchedSession } from './lib/protocol'
 import { TranscriptParser, isActivityLine } from './lib/transcript-parser'
 import { readCompleteLines, readNewFileLines, foldPathCase } from './lib/fs-utils'
 import { createLogger } from './lib/logger'
-import { scanSubagentsDir, readSubagentNewLines, stopTailing } from './lib/subagent-watcher'
+import { scanSubagentsDir, readSubagentNewLines, stopTailing, fileIdleMs } from './lib/subagent-watcher'
 import { isWslUncPath, windowsToWsl, wslToWindows, type WslPathOptions } from '../../platform/wsl-paths'
 import {
   INACTIVITY_TIMEOUT_MS, BUSY_INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
-  SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, WORKSPACE_HASH_LENGTH, MAX_EVENT_BUFFER, HIDDEN_TOOLS,
+  SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, WORKSPACE_HASH_LENGTH, MAX_EVENT_BUFFER, HIDDEN_TOOLS, SUBAGENT_STALE_MS,
 } from './lib/constants'
 
 const log = createLogger('Relay')
@@ -239,6 +239,37 @@ function hasWorkInFlight(session: WatchedSession): boolean {
   return false
 }
 
+/**
+ * Finish the sub-agents whose transcripts have been quiet for SUBAGENT_STALE_MS,
+ * along with every sub-agent under them (one waiting on a busy sub-agent of its
+ * own is still working): one stopped without a word (e.g. killed with Claude
+ * Code) would otherwise stay drawn as running for as long as the session goes on.
+ */
+function settleStaleSubagents(session: WatchedSession, now = Date.now()): void {
+  if (session.sessionCompleted) return
+  const idleMs = new Map<string, number>()
+  for (const [filePath, state] of session.subagentWatchers) {
+    idleMs.set(state.agentName, Math.min(idleMs.get(state.agentName) ?? Infinity, fileIdleMs(filePath, now)))
+  }
+  const busy = (id: string, seen = new Set<string>()): boolean => {
+    if (seen.has(id)) return false
+    seen.add(id)
+    if ((idleMs.get(id) ?? Infinity) < SUBAGENT_STALE_MS) return true
+    for (const [childId, launch] of session.launches) {
+      if (launch.parent === id && !launch.finished && busy(childId, seen)) return true
+    }
+    return false
+  }
+  for (const id of idleMs.keys()) {
+    // Only one drawn as running (one never drawn gets its node if it works again)
+    if (!session.spawnedSubagents.has(id) || session.launches.get(id)?.finished || busy(id)) continue
+    log.info(`[session] ${session.sessionId.slice(0, SESSION_ID_DISPLAY)} sub-agent ${id} quiet, taken as stopped`)
+    // One shown without its launch being known is finished as one (see handleHookEvent)
+    if (!session.launches.has(id)) session.launches.set(id, { parent: ORCHESTRATOR_NAME, seenLive: false, background: false, finished: false })
+    parser.finishSubagent(id, session)
+  }
+}
+
 /** The session is active: note the time and restart its inactivity countdown */
 function touchSession(session: WatchedSession) {
   session.lastActivityTime = Date.now()
@@ -384,6 +415,7 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
       readSubagentNewLines(watcherDelegate, parser, subPath, sessionId)
     }
     scanSubagentsDir(watcherDelegate, parser, sessionId)
+    settleStaleSubagents(session)
   }, watchable ? POLL_FALLBACK_MS : WSL_POLL_MS)
 
   scanSubagentsDir(watcherDelegate, parser, sessionId)
@@ -433,6 +465,11 @@ function handleHookEvent(event: AgentEvent) {
     // A launch it recorded may have a sub-agent file waiting for it
     scanSubagentsDir(watcherDelegate, parser, sessionId)
     touchSession(session)
+    return
+  }
+  if (event.type === 'tool_call_end') {
+    parser.endToolFromHook(session, String(event.payload.agent), String(event.payload.id), event.payload.isError === true)
+    if (!session.sessionCompleted) touchSession(session)
     return
   }
   if (event.type !== 'agent_complete') {
