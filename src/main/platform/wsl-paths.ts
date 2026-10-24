@@ -6,6 +6,8 @@
  * `\\wsl.localhost\<distro>\...` (or the older `\\wsl$\<distro>\...`).
  */
 
+import path from 'path';
+
 export interface WslPathOptions {
   /** The WSL distribution the paths belong to (e.g. "Ubuntu") */
   distro: string;
@@ -27,6 +29,29 @@ export function normalizeMountRoot(mountRoot?: string): string {
 /** Whether the path points into a WSL distribution (`\\wsl.localhost\...` or `\\wsl$\...`) */
 export function isWslUncPath(p: string): boolean {
   return WSL_UNC_PATH.test(p);
+}
+
+/**
+ * A Windows path as a key that every spelling of the same folder shares: the older `\\wsl$\<distro>`
+ * alias folded onto `\\wsl.localhost\<distro>`, either slash normalized, and case folded away.
+ *
+ * Windows reaches one folder through all of those spellings, and the two UNC prefixes are both in
+ * everyday use — Explorer shows `\\wsl$\...`, so that is the spelling users paste when they add a
+ * project that lives in the distribution. Code that compares such paths as plain strings therefore
+ * decides against the user: a worktree that looks stale is deleted with the work in it
+ * (`worktreePathKey`, worktree/runtime-worktrees.ts), and a project that matches none of its
+ * sessions silently loses its spending in Metrics and its turns in the memory backfill
+ * (`belongsToProject`, self-improve/transcripts.ts).
+ *
+ * Only for paths already known to be Windows ones, which off Windows means paths translated into
+ * the host namespace: POSIX paths are case-sensitive, where two folders really can differ in case
+ * alone, and must be compared as they are.
+ */
+export function windowsPathKey(p: string): string {
+  const value = p.trim();
+  const unc = WSL_UNC_PATH.exec(value);
+  const canonical = unc ? `\\\\wsl.localhost\\${unc[1]}${unc[2] ? `\\${unc[2]}` : ''}` : value;
+  return path.win32.resolve(canonical).toLowerCase();
 }
 
 /** Join path parts with "/" and drop a trailing slash (but keep "/" itself) */

@@ -1,17 +1,20 @@
 import { mkdir, copyFile, cp, unlink } from 'fs/promises';
 import path, { dirname } from 'path';
 import { claudeProjectSlug, expandClaudeHome, isClaudeHomeInWsl } from '../platform/claude-home';
-import { toRuntimePath } from '../platform/shell-runtime';
 import { isNodeError } from '../utils/type-guards';
 
 /**
  * Convert a working directory path to the Claude projects path format.
- * Claude uses a sanitized path format: /Users/foo/bar -> -Users-foo-bar
  *
- * LIMITATION: This function has a known collision risk where paths containing dashes
+ * The rule itself lives in `claudeProjectSlug` (platform/claude-home.ts), which is also what finds
+ * a project's sessions, so the two can never disagree: every character that is not a letter or a
+ * digit becomes a dash, the drive letter on Windows included, and in WSL the Linux path Claude Code
+ * sees is what gets encoded.
+ *
+ * LIMITATION: This format has a known collision risk where paths containing dashes
  * can collide with paths using directory separators. For example:
- * - '/foo/bar-baz' -> 'foo-bar-baz'
- * - '/foo/bar/baz' -> 'foo-bar-baz'
+ * - '/foo/bar-baz' -> '-foo-bar-baz'
+ * - '/foo/bar/baz' -> '-foo-bar-baz'
  *
  * This behavior matches Claude CLI's existing convention for compatibility and is
  * accepted as a low-probability edge case in typical project directory structures.
@@ -20,14 +23,7 @@ import { isNodeError } from '../utils/type-guards';
  * @returns The sanitized path format used by Claude for project identification
  */
 function cwdToProjectPath(cwd: string): string {
-  // Claude Code inside WSL names the folder after the Linux path it sees (/mnt/c/foo/bar);
-  // toRuntimePath leaves a path that is already a Linux one as it is
-  if (isClaudeHomeInWsl()) return claudeProjectSlug(toRuntimePath(cwd));
-  // Normalize to forward slashes first (cross-platform: Windows C:\foo\bar -> C:/foo/bar)
-  const normalized = cwd.replace(/\\/g, '/');
-  // Remove Windows drive letter (C:, D:, etc.) to avoid colons in directory names
-  // Then replace all path separators with dashes (keeping leading dash for Unix paths)
-  return normalized.replace(/^[a-zA-Z]:/, '').replace(/\//g, '-');
+  return claudeProjectSlug(cwd);
 }
 
 /** Join onto a config dir: in WSL the dirs are UNC paths of the Linux home (Windows separators) */
