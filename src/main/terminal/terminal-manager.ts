@@ -22,6 +22,7 @@ import { SessionFollower, type FollowedRun } from './session-follower';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
+import { SESSION_SAVE_INTERVAL_MS } from '../terminal-session-store';
 
 export class TerminalManager {
   private terminals: Map<string, TerminalProcess> = new Map();
@@ -42,12 +43,13 @@ export class TerminalManager {
       }
     );
 
-    // Periodically save session data (every 30 seconds)
+    // Periodically save session data. The period is shared with the store, which reads the trail
+    // these saves leave to tell a run that is still going from one that is gone
     this.saveTimer = setInterval(() => {
       SessionHandler.persistAllSessionsAsync(this.terminals).catch((error) => {
         console.error('[TerminalManager] Failed to persist sessions:', error);
       });
-    }, 30000);
+    }, SESSION_SAVE_INTERVAL_MS);
   }
 
   /**
