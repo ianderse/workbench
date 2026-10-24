@@ -2,47 +2,9 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/postcss';
 import { resolve } from 'path';
-import { existsSync } from 'fs';
-import { createCipheriv, randomBytes } from 'crypto';
-
-// Load .env file for build-time constants (embedded API keys)
-const buildEnvPath = resolve(__dirname, '.env');
-if (existsSync(buildEnvPath)) process.loadEnvFile(buildEnvPath);
-
-/**
- * Build-time constants embedded via Vite `define`.
- *
- * In CI builds, these come from GitHub secrets.
- * In local development, these come from .env (loaded above).
- *
- * The `define` option replaces these values at build time, so they're
- * embedded in the bundle and available at runtime in packaged apps.
- */
-const embeddedKeys = {
-  '__UPDATER_GH_TOKEN__': JSON.stringify(encryptToken(process.env.UPDATER_GH_TOKEN)),
-};
-
-/**
- * GitHub token for update checks against the private release repository, encrypted with a
- * per-build key so the plain value is not in the bundle (see src/main/updater/github-token.ts)
- */
-function encryptToken(token: string | undefined) {
-  if (!token) return null;
-  const key = randomBytes(32);
-  const iv = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', key, iv);
-  const data = Buffer.concat([cipher.update(token, 'utf8'), cipher.final()]);
-  return {
-    data: data.toString('base64'),
-    key: key.toString('base64'),
-    iv: iv.toString('base64'),
-    tag: cipher.getAuthTag().toString('base64'),
-  };
-}
 
 export default defineConfig({
   main: {
-    define: embeddedKeys,
     plugins: [externalizeDepsPlugin({
       // Bundle these packages into the main process (they won't be in node_modules in packaged app)
       exclude: [

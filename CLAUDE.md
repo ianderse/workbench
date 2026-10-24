@@ -131,8 +131,8 @@ pre-release runs `beta-release.yml`. Each one builds the four platforms in a mat
 workflow adds `-beta` when the tag has no pre-release suffix) and uploads the installers and update manifests to that
 release with `gh release upload`.
 
-Builds are unsigned and not notarized: the repo holds no signing secrets. Auto-update against a private release repo
-also needs `UPDATER_GH_TOKEN` passed to `npm run build`, which no workflow does today.
+Builds are unsigned and not notarized: the repo holds no signing secrets. The release repository is public, so
+auto-update reads releases unauthenticated and the build needs no token.
 
 ## Project Structure
 
