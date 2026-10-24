@@ -93,6 +93,15 @@
     "deleteSelected": "Delete Selected",
     "archiveSelected": "Archive Selected"
   },
+  "relativeTime": {
+    "secondsAgo": "{{value}} sec ago",
+    "minutesAgo": "{{value}} min ago",
+    "hoursAgo": "{{value}} h ago",
+    "daysAgo": "{{value}} d ago",
+    "monthsAgo": "{{value}} mo ago",
+    "yearsAgo": "{{value}} y ago",
+    "unknown": "at an unknown time"
+  },
   "errors": {
     "generic": "An error occurred",
     "unknownError": "An unknown error occurred",
