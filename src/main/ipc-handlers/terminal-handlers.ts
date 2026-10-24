@@ -745,7 +745,7 @@ export function initializeUsageMonitorForwarding(getWindow: () => BrowserWindow 
   const monitor = getUsageMonitor();
 
   // Forward usage updates to every project window
-  monitor.on('usage-updated', (usage: ClaudeUsageSnapshot) => {
+  monitor.on('usage-updated', (usage: ClaudeUsageSnapshot | null) => {
     safeSendToRenderer(getWindow, IPC_CHANNELS.USAGE_UPDATED, usage);
   });
 

@@ -112,7 +112,8 @@ export function ClaudeAccountsSection() {
       return [t(`claudeAccounts.providers.${detected.provider}`), where].filter(Boolean).join(' · ');
     }
     const summary = usage.get(profile.id);
-    const email = summary?.profileEmail || profile.email;
+    // The account's own email first; the usage summary only fills in one it doesn't know
+    const email = profile.email || summary?.profileEmail;
     const parts: string[] = [];
     if (profile.isAuthenticated === false && !summary?.isAuthenticated) {
       parts.push(t('claudeAccounts.notSignedIn'));
@@ -121,7 +122,8 @@ export function ClaudeAccountsSection() {
     }
     if (summary?.needsReauthentication) parts.push(t('claudeAccounts.needsSignIn'));
     if (summary?.isRateLimited) parts.push(t('claudeAccounts.rateLimited'));
-    if (summary && summary.isAuthenticated && !summary.fetchError) {
+    // Usage only once it was fetched for this account (lastFetchedAt): never placeholder zeros
+    if (summary && summary.isAuthenticated && !summary.fetchError && summary.lastFetchedAt) {
       parts.push(t('claudeAccounts.usage', {
         session: Math.round(summary.sessionPercent),
         weekly: Math.round(summary.weeklyPercent)

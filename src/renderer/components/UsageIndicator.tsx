@@ -141,10 +141,12 @@ export function UsageIndicator() {
 
   useEffect(() => {
     // Listen for usage updates from main process
-    const unsubscribe = window.electronAPI.onUsageUpdated((snapshot: ClaudeUsageSnapshot) => {
+    // A null snapshot means the account in use changed to one whose usage isn't known yet: show
+    // the loading state until it arrives instead of the previous account's numbers
+    const unsubscribe = window.electronAPI.onUsageUpdated((snapshot: ClaudeUsageSnapshot | null) => {
       setUsage(snapshot);
-      setIsAvailable(true);
-      setIsLoading(false);
+      setIsAvailable(!!snapshot);
+      setIsLoading(!snapshot);
     });
 
     // Listen for all profiles usage updates (to know whether the active profile needs re-auth)

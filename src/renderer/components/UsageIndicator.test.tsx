@@ -7,7 +7,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { UsageIndicator } from './UsageIndicator';
 import { useSettingsStore } from '../stores/settings-store';
 
@@ -138,6 +138,28 @@ describe('UsageIndicator', () => {
       const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
       await waitFor(() => expect(usageTrigger).toHaveTextContent('45'));
       expect(usageTrigger).toHaveTextContent('55');
+    });
+
+    it('follows an account switch pushed by the main process right away', async () => {
+      let push: (usage: unknown) => void = () => {};
+      (window as any).electronAPI.onUsageUpdated = vi.fn((callback: (usage: unknown) => void) => {
+        push = callback;
+        return vi.fn();
+      });
+      render(<UsageIndicator />);
+      const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
+      await waitFor(() => expect(usageTrigger).toHaveTextContent('45'));
+
+      // Switched to an account with stored usage: its numbers, not the previous account's
+      act(() => push({ profileId: 'work', profileName: 'Work', sessionPercent: 12, weeklyPercent: 34, fetchedAt: new Date() }));
+      expect(usageTrigger).toHaveTextContent('12');
+      expect(usageTrigger).toHaveTextContent('34');
+      expect(usageTrigger).not.toHaveTextContent('45');
+
+      // Switched to an account whose usage was never fetched: waits for it
+      act(() => push(null));
+      expect(screen.getByText('Loading...')).toBeInTheDocument();
+      expect(screen.queryByText('34')).not.toBeInTheDocument();
     });
 
     it('leads with the 5-hour limit and lists the week, without other accounts', async () => {
