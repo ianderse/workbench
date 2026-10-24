@@ -4,6 +4,7 @@
 
 import type { NotificationSettings, CustomMcpServer } from './project';
 import type { ClaudeCodeTaskSettings } from './claude-code';
+import type { AgentBackendSettings } from './agent-backend';
 
 // Color theme types for multi-theme support
 export type ColorTheme = 'default';
@@ -309,6 +310,8 @@ export interface AppSettings {
   mcpConnectors?: McpConnectorSettings;
   // How tasks run in Claude Code: triage, planning, validation, budget (Settings > Claude Code)
   claudeCodeTasks?: Partial<ClaudeCodeTaskSettings>;
+  // Which agent CLI runs AI work: Claude Code (default) or OMP with local LLMs (Settings > Agents)
+  agentBackend?: Partial<AgentBackendSettings>;
   // Log order setting for task detail view
   logOrder?: 'chronological' | 'reverse-chronological';
   // Beta updates opt-in (receive pre-release updates)

@@ -24,6 +24,10 @@ import { getToolInfoAsync } from '../cli-tool-manager';
 import { getPathDelimiter } from '../platform';
 import { getShellRuntimeStatus, getWslInfo, toRuntimePath, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { appLog } from '../app-logger';
+import { getAgentBackendSettings } from '../agent-backend/settings';
+import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
+import { startOmpProcess } from '../agent-backend/omp-process';
+import { isOmpNotice, isOmpTextDelta } from '../agent-backend/omp-translate';
 import { INSIGHTS_ERROR_CODES, formatInsightsError } from '../../shared/constants/insights';
 import { CLAUDE_EFFORTS, CLAUDE_MODEL_ALIASES } from '../../shared/types/claude-code';
 import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-code';
@@ -319,6 +323,8 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
   const { projectDir, message, history = [], abortSignal, attachments, graphify } = config;
 
   try {
+    const backend = getAgentBackendSettings();
+    if (backend.kind === 'omp') return await runInsightsWithOmp(config, backend.omp, onStream);
     await whenShellRuntimeReady();
     const wsl = getWslInfo();
     if (wsl) {
@@ -405,4 +411,102 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     }
     throw error;
   }
+}
+
+// =============================================================================
+// OMP backend
+// =============================================================================
+
+/**
+ * An Insights turn through OMP (oh-my-pi). The OMP events arrive translated into Claude's
+ * stream messages, so the UI sees the same events as with Claude Code.
+ *
+ * Differences from the Claude Code turn: OMP cannot take Workbench's task tools MCP server on the
+ * command line, so the chat is read-only exploration (task ideas stay task suggestions), and its
+ * bash tool cannot be limited to graphify's searches, so it stays off (the memory graph prompt is
+ * left out). The turn is not persisted as an OMP session: the conversation history is part of the
+ * prompt, like with Claude Code.
+ */
+async function runInsightsWithOmp(
+  config: InsightsRunConfig,
+  settings: ReturnType<typeof getAgentBackendSettings>['omp'],
+  onStream?: InsightsStreamCallback,
+): Promise<InsightsResult> {
+  const { projectDir, message, history = [], abortSignal, attachments } = config;
+  const state = createStreamState();
+  let streamedInMessage = 0;
+  let separate = false;
+
+  const emitText = (text: string) => {
+    if (separate && state.text) {
+      // Separate text written before and after tool use
+      state.text += '\n\n';
+      onStream?.({ type: 'text-delta', text: '\n\n' });
+    }
+    separate = false;
+    state.text += text;
+    onStream?.({ type: 'text-delta', text });
+  };
+
+  const handle = await startOmpProcess({
+    settings,
+    cwd: projectDir,
+    prompt: buildMessageContent(buildConversationPrompt(message, history), attachments) as ClaudeUserContentBlock[],
+    model: toClaudeModel(config.model),
+    effort: toClaudeEffort(config.thinkingLevel),
+    tools: OMP_READ_ONLY_TOOLS,
+    appendSystemPrompt: buildSystemPrompt(projectDir, { taskTools: false }),
+    emitDeltas: true,
+    abortSignal,
+    onMessage: (event: ClaudeStreamMessage) => {
+      if (isOmpTextDelta(event)) {
+        streamedInMessage += event.text.length;
+        emitText(event.text);
+        return;
+      }
+      if (isOmpNotice(event)) {
+        // Advisor notes and OMP notices are not part of the answer: keep them in the app log
+        appLog.info(`[OMP] ${event.source === 'advisor' ? 'Advisor note' : 'Notice'} (${event.level}): ${event.text}`);
+        return;
+      }
+      const raw = event as unknown as Record<string, unknown>;
+      if (raw.type === 'assistant') {
+        const content = (raw.message as { content?: Array<Record<string, unknown>> } | undefined)?.content ?? [];
+        if (streamedInMessage === 0) {
+          // The model did not stream: show the finished text
+          const text = content.filter((b) => b.type === 'text').map((b) => String(b.text ?? '')).join('\n');
+          if (text) emitText(text);
+        }
+        streamedInMessage = 0;
+        separate = true;
+        for (const block of content) {
+          if (block.type !== 'tool_use') continue;
+          const name = String(block.name ?? 'tool');
+          const input = extractToolInput((block.input ?? {}) as Record<string, unknown>);
+          state.toolNames.set(String(block.id ?? ''), name);
+          state.toolCalls.push({ name, input });
+          onStream?.({ type: 'tool-start', name, input });
+        }
+        return;
+      }
+      handleInsightsEvent(event, state, onStream);
+    },
+  });
+  const outcome = await handle.done;
+
+  if (outcome.aborted || abortSignal?.aborted) {
+    const abortError = new Error('Insights request was cancelled');
+    abortError.name = 'AbortError';
+    throw abortError;
+  }
+  if (state.result?.isError) {
+    throw new Error(state.result.text?.trim() || `OMP failed (${state.result.subtype ?? 'error'})`);
+  }
+  if (outcome.exitCode !== 0 && !state.result) {
+    throw new Error(outcome.stderr.trim() || `OMP exited with code ${outcome.exitCode}`);
+  }
+
+  const text = state.text.trim() ? state.text : (state.result?.text ?? '');
+  if (!text.trim()) throw new Error(EMPTY_RESPONSE_ERROR);
+  return { text, taskSuggestion: extractTaskSuggestion(text), toolCalls: state.toolCalls };
 }

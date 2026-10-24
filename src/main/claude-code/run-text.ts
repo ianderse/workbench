@@ -10,7 +10,11 @@
 import { resolveClaudeEnv } from './env';
 import { startClaudeProcess } from './process';
 import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-code';
+import type { OmpBackendSettings } from '../../shared/types/agent-backend';
 import type { ClaudeUserContentBlock } from './stream-types';
+import { getAgentBackendSettings } from '../agent-backend/settings';
+import { ompToolsFromClaude } from '../agent-backend/omp-args';
+import { startOmpProcess } from '../agent-backend/omp-process';
 
 /** Built-in tools for read-only exploration of a project */
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'] as const;
@@ -57,6 +61,9 @@ class ClaudeCodeRunError extends Error {
 
 /** Run Claude Code once and return its answer */
 export async function runClaudeText(options: RunClaudeTextOptions): Promise<RunClaudeTextResult> {
+  const backend = getAgentBackendSettings();
+  if (backend.kind === 'omp') return runOmpText(options, backend.omp);
+
   const { command, env } = await resolveClaudeEnv({ profileId: options.profileId });
   const tools = options.tools ?? [];
   const usesContentBlocks = typeof options.prompt !== 'string';
@@ -89,21 +96,24 @@ export async function runClaudeText(options: RunClaudeTextOptions): Promise<RunC
     abortSignal: options.abortSignal,
     timeoutMs: options.timeoutMs ?? 5 * 60 * 1000,
   });
-  const outcome = await handle.done;
+  return collectResult(await handle.done, 'Claude Code');
+}
 
+/** The answer of a finished run, or the error it ended with */
+function collectResult(outcome: Awaited<ReturnType<typeof startClaudeProcess>['done']>, label: string): RunClaudeTextResult {
   if (outcome.aborted) {
-    const error = new ClaudeCodeRunError('Claude Code run was cancelled');
+    const error = new ClaudeCodeRunError(`${label} run was cancelled`);
     error.name = 'AbortError';
     throw error;
   }
-  if (outcome.timedOut) throw new ClaudeCodeRunError('Claude Code run timed out', outcome.stderr);
+  if (outcome.timedOut) throw new ClaudeCodeRunError(`${label} run timed out`, outcome.stderr);
 
   const result = outcome.result;
   if (!result) {
-    throw new ClaudeCodeRunError(outcome.stderr.trim() || `Claude Code exited with code ${outcome.exitCode}`, outcome.stderr);
+    throw new ClaudeCodeRunError(outcome.stderr.trim() || `${label} exited with code ${outcome.exitCode}`, outcome.stderr);
   }
   if (result.is_error || result.subtype !== 'success') {
-    const message = result.errors?.join('; ') || result.result || `Claude Code failed (${result.subtype})`;
+    const message = result.errors?.join('; ') || result.result || `${label} failed (${result.subtype})`;
     throw new ClaudeCodeRunError(message, outcome.stderr);
   }
   return {
@@ -112,4 +122,27 @@ export async function runClaudeText(options: RunClaudeTextOptions): Promise<RunC
     sessionId: result.session_id,
     costUsd: result.total_cost_usd,
   };
+}
+
+/**
+ * The same call through OMP (oh-my-pi): no session, utility mode (no extensions or skills).
+ * OMP cannot scope Bash to a command prefix, so `Bash(git log *)` rules enable its bash tool whole;
+ * `maxTurns` has no equivalent and the run is bounded by the timeout.
+ */
+async function runOmpText(options: RunClaudeTextOptions, settings: OmpBackendSettings): Promise<RunClaudeTextResult> {
+  const handle = await startOmpProcess({
+    settings,
+    cwd: options.cwd ?? process.cwd(),
+    prompt: options.prompt,
+    model: options.model ?? 'haiku',
+    effort: options.effort,
+    tools: ompToolsFromClaude(options.tools, options.allowedTools),
+    systemPrompt: options.systemPrompt,
+    appendSystemPrompt: options.appendSystemPrompt,
+    jsonSchema: options.jsonSchema,
+    oneShot: true,
+    abortSignal: options.abortSignal,
+    timeoutMs: options.timeoutMs ?? 5 * 60 * 1000,
+  });
+  return collectResult(await handle.done, 'OMP');
 }

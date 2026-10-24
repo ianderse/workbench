@@ -175,6 +175,8 @@ function resolveWslTool(tool: RuntimeTool, command: string | undefined, info: Ws
     const runtimePath = toRuntimePath(command);
     if (runtimePath.startsWith('/')) return runtimePath;
   }
+  // A bare command name (e.g. `omp`, launched with the `claude` tool slot) resolves on the distro's PATH
+  if (command && !/[\\/]/.test(command) && !/\.(exe|cmd|bat)$/i.test(command)) return command;
   const name = WSL_TOOL_NAMES[tool];
   return info.tools[name]?.path ?? name;
 }

@@ -154,6 +154,8 @@ export interface ClaudeRunInfo {
    * change of runtime starts a new session.
    */
   runtime?: ClaudeRuntime;
+  /** Agent backend that made `sessionId` (unset = Claude Code); a backend change starts a new session */
+  backend?: 'claude' | 'omp';
   triage?: TaskTriage;
   /** Approved plan (Markdown), when the task was planned */
   plan?: string;

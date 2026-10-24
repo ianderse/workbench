@@ -63,6 +63,11 @@ import type { ExecutionPhase } from '../../shared/constants/phase-protocol';
 import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
 import { DATA_DIR_NAMES } from '../../shared/constants';
 import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
+import { appLog } from '../app-logger';
+import { getAgentBackendSettings } from '../agent-backend/settings';
+import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
+import { startOmpProcess } from '../agent-backend/omp-process';
+import { isOmpNotice, isOmpTodos } from '../agent-backend/omp-translate';
 
 export const CLAUDE_RUN_FILE = 'claude_run.json';
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -209,9 +214,9 @@ const VALIDATION_SCHEMA = {
   required: ['status', 'summary', 'checks', 'findings'],
 };
 
-function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string): string {
+function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string, omp = false): string {
   const sections = [
-    `You are running autonomously inside Workbench, a desktop app that hands coding tasks to Claude Code. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
+    `You are running autonomously inside Workbench, a desktop app that hands coding tasks to ${omp ? 'a coding agent' : 'Claude Code'}. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
     config.isolated === false
       ? `## Environment
 - Your working directory is the user's project checkout on branch \`${config.branch}\` (this task runs without a separate worktree). Keep changes focused on the task.
@@ -223,10 +228,14 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, paral
 - Workbench keeps its own task files in \`${specDirRelative}\`. Don't modify or commit them.`,
     `## How to work
 - Follow the project's CLAUDE.md, conventions and existing patterns. Keep the change focused on the task.
-- Track work with the task list (TaskCreate / TaskUpdate) only when it has several distinct steps worth tracking; skip it for small changes.
+${omp
+  ? `- Track work with the todo tool only when it has several distinct steps worth tracking; skip it for small changes.
+- Do the work yourself in this conversation.
+`
+  : `- Track work with the task list (TaskCreate / TaskUpdate) only when it has several distinct steps worth tracking; skip it for small changes.
 - Use subagents only when they help: broad searches whose raw output you don't need, or independent investigations that can run in parallel. Do the implementation itself in this conversation.
 - Use skills and MCP tools when they fit the task.
-- Verify your work with the project's own checks (tests, type checker, linter, build) for the code you changed, and fix failures you caused. Show evidence rather than asserting success.
+`}- Verify your work with the project's own checks (tests, type checker, linter, build) for the code you changed, and fix failures you caused. Show evidence rather than asserting success.
 - When the work is done, commit it in this worktree with a descriptive message. Don't push.
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
@@ -330,6 +339,8 @@ export class ClaudeTaskRun {
   /** Agent tool_use id -> description, for labeling subagent activity in the log */
   private subagentLabels = new Map<string, string>();
   private rejectedRateLimitResetAt: string | undefined;
+  /** The current phase reports its own cost (OMP), not the running total of the session (Claude Code) */
+  private costIsPerRun = false;
   private saveTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
@@ -495,6 +506,16 @@ export class ClaudeTaskRun {
       this.info.runtime = runtime;
       this.saveInfo();
     }
+    // A session belongs to the backend that made it (Claude Code transcript or OMP session file)
+    const backend = getAgentBackendSettings().kind;
+    if (this.info.sessionId && (this.info.backend ?? 'claude') !== backend) {
+      this.emitLog(`The agent backend is now ${backend === 'omp' ? 'OMP' : 'Claude Code'}, so this step starts a new session`);
+      this.info.sessionId = undefined;
+    }
+    if ((this.info.backend ?? 'claude') !== backend) {
+      this.info.backend = backend;
+      this.saveInfo();
+    }
 
     const resumeSessionId = this.info.sessionId;
     const continuing = name === 'implement' && this.info.phases.some((p) => p.name === 'implement');
@@ -523,9 +544,10 @@ export class ClaudeTaskRun {
       model,
       effort,
       permissionMode: name === 'plan' ? 'plan' : this.config.isolated === false ? 'auto' : 'bypassPermissions',
-      sessionId,
+      // OMP picks the session id itself: it is stored when the run reports it
+      sessionId: backend === 'omp' ? resumeSessionId : sessionId,
     });
-    if (!this.info.sessionId) this.info.sessionId = sessionId;
+    if (!this.info.sessionId && backend !== 'omp') this.info.sessionId = sessionId;
     this.saveInfo();
 
     const outcome = await this.runClaude({
@@ -662,7 +684,7 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
       case 'validate':
         text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.validate}
 1. Run ${verificationHint(triage)}. Fix failures your change caused.
-2. Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task. Fix only findings that affect correctness or the task's requirements; don't gold-plate.
+2. Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${getAgentBackendSettings().kind === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.
 3. Commit any remaining changes.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
@@ -727,6 +749,8 @@ no notes came with the request, so review the change against the task with fresh
     logPhase: TaskLogPhase;
   }): Promise<PhaseResult> {
     if (this.stopped) return { stopped: true };
+    if (getAgentBackendSettings().kind === 'omp') return this.runOmp(params);
+    this.costIsPerRun = false;
     const { settings } = this.config;
     // Stay on the profile that holds the session transcript, unless the caller switched profiles
     // (rate-limit swap); then the transcript is copied to the new profile below
@@ -832,6 +856,76 @@ no notes came with the request, so review the change against the task with fresh
     return { result, stopped: false };
   }
 
+  /**
+   * One phase through OMP (oh-my-pi) instead of Claude Code. The JSON event stream is translated
+   * into Claude's stream messages, so `handleMessage` and everything behind it is shared.
+   * Not supported: connectors (MCP), a budget cap, a fallback model, subagent/skill commands.
+   */
+  private async runOmp(params: {
+    name: Exclude<ClaudeRunPhaseName, 'triage'>;
+    model: string;
+    effort: ClaudeEffort;
+    sessionId: string;
+    resume: boolean;
+    input: ClaudeUserContentBlock[];
+    jsonSchema?: Record<string, unknown>;
+    logPhase: TaskLogPhase;
+  }): Promise<PhaseResult> {
+    const { omp } = getAgentBackendSettings();
+    this.costIsPerRun = true;
+    const specDirRelative = (getWslInfo() ? path.posix : path).join('.workbench', DATA_DIR_NAMES.tasks, this.config.specId);
+    const parallelTasksPrompt = this.config.changelogPath
+      ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir), toRuntimePath(this.config.changelogPath))
+      : undefined;
+    const planning = params.name === 'plan';
+    const systemPrompt = buildSystemPrompt(this.config, specDirRelative, parallelTasksPrompt, true);
+    if (Object.keys(buildMcpConfig(this.config.connectorIds, this.config.connectorSettings).mcpServers).length > 0) {
+      appLog.info('[OMP] Connectors (MCP servers) are not available with the OMP backend and are ignored');
+    }
+    if (this.config.isolated === false) {
+      appLog.info('[OMP] This task runs in the project checkout; OMP has no auto mode, so tool calls are approved without review');
+    }
+
+    this.rejectedRateLimitResetAt = undefined;
+    const handle = await startOmpProcess({
+      settings: omp,
+      cwd: this.config.worktreePath,
+      env: this.config.extraEnv,
+      prompt: params.input,
+      model: params.model,
+      effort: params.effort,
+      // Planning is read-only (OMP has no plan permission mode): fewer tools and a note in the prompt
+      tools: planning ? OMP_READ_ONLY_TOOLS : 'all',
+      autoApprove: !planning,
+      appendSystemPrompt: planning
+        ? `${systemPrompt}\n\nYou are in planning mode: do not modify files, run only read-only commands, and finish with the implementation plan.`
+        : systemPrompt,
+      session: { dir: path.join(this.config.specDir, 'omp-sessions'), resume: params.resume ? params.sessionId : undefined },
+      jsonSchema: params.jsonSchema,
+      maxTimeMinutes: omp.maxPhaseMinutes,
+      abortSignal: this.abortController.signal,
+      onMessage: (message) => {
+        this.handleMessage(message, params.logPhase);
+      },
+      onStderr: (chunk) => {
+        const line = chunk.trim();
+        if (line) this.emitLog(line);
+      },
+    });
+    this.current = handle;
+    if (this.stopped) handle.stop();
+    const outcome = await handle.done;
+    this.current = null;
+
+    if (this.stopped || outcome.aborted) return { stopped: true };
+    const result = outcome.result;
+    if (!result) {
+      const error = outcome.stderr.trim().split('\n').slice(-3).join(' ') || `OMP exited with code ${outcome.exitCode}`;
+      return { stopped: false, error };
+    }
+    return { result, stopped: false };
+  }
+
   /** Apply one stream message; returns a signal for rate-limit or auth problems */
   private handleMessage(message: ClaudeStreamMessage, logPhase: TaskLogPhase): 'rate_limit' | 'auth' | undefined {
     if (isInitMessage(message)) {
@@ -874,6 +968,28 @@ no notes came with the request, so review the change against the task with fresh
       for (const block of message.message.content) {
         if (block.type === 'tool_result') this.onToolResult(block as ClaudeToolResultBlock, logPhase, message.parent_tool_use_id !== null);
       }
+      return undefined;
+    }
+
+    if (isOmpTodos(message)) {
+      this.subtasks = message.todos.map((todo, index) => ({
+        id: String(index + 1),
+        title: todo.content,
+        description: '',
+        status: todo.status,
+      }));
+      this.emitSubtasks();
+      return undefined;
+    }
+
+    if (isOmpNotice(message)) {
+      // Advisor notes and OMP notices go to the task log only: they are not part of the answer
+      const label = message.source === 'advisor' ? 'Advisor' : 'OMP notice';
+      const severity = message.severity ? ` (${message.severity})` : '';
+      const advisor = message.advisor ? ` [${message.advisor}]` : '';
+      const line = `${label}${advisor}${severity}: ${message.text}`;
+      this.log.add(logPhase, 'info', line);
+      this.emitLog(line);
       return undefined;
     }
 
@@ -968,13 +1084,19 @@ no notes came with the request, so review the change against the task with fresh
   /** Report a file the session (or one of its subagents) is editing inside the worktree */
   private reportEditedFile(name: string, input: Record<string, unknown>): void {
     if (!FILE_EDIT_TOOLS.has(name)) return;
-    const target = input.file_path ?? input.notebook_path;
-    if (typeof target !== 'string' || !target) return;
-    // In WSL the session reports Linux paths (/mnt/c/...); compare them as host paths
-    const hostTarget = toHostPath(target);
-    const relative = path.relative(this.config.worktreePath, path.resolve(this.config.worktreePath, hostTarget));
-    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return;
-    this.callbacks.onFilesEdited?.([relative.split(path.sep).join('/')]);
+    // `file_paths`: one patch touching several files (OMP)
+    const targets = [input.file_path ?? input.notebook_path, ...(Array.isArray(input.file_paths) ? input.file_paths : [])];
+    const files: string[] = [];
+    for (const target of targets) {
+      if (typeof target !== 'string' || !target) continue;
+      // In WSL the session reports Linux paths (/mnt/c/...); compare them as host paths
+      const hostTarget = toHostPath(target);
+      const relative = path.relative(this.config.worktreePath, path.resolve(this.config.worktreePath, hostTarget));
+      if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) continue;
+      const file = relative.split(path.sep).join('/');
+      if (!files.includes(file)) files.push(file);
+    }
+    if (files.length > 0) this.callbacks.onFilesEdited?.(files);
   }
 
   private onToolResult(block: ClaudeToolResultBlock, logPhase: TaskLogPhase, inSubagent: boolean): void {
@@ -1032,7 +1154,7 @@ no notes came with the request, so review the change against the task with fresh
       // keeps climbing over the phases (the transcript's `cost-state` lines show the same running
       // total under one `startTime`, see `session-spending.ts`). This phase's share is therefore
       // the difference. Triage is left out because it runs as a session of its own.
-      const earlier = this.info.phases
+      const earlier = this.costIsPerRun ? 0 : this.info.phases
         .filter((p) => p !== phase && p.name !== 'triage' && p.sessionId === (result.session_id ?? phase.sessionId))
         .reduce((sum, p) => sum + (p.costUsd ?? 0), 0);
       costUsd = Math.max(result.total_cost_usd - earlier, 0);
