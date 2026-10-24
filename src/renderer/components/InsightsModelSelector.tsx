@@ -15,6 +15,8 @@ import { cn } from '../lib/utils';
 import { DEFAULT_AGENT_PROFILES, AVAILABLE_MODELS, THINKING_LEVELS } from '../../shared/constants';
 import type { InsightsModelConfig } from '../../shared/types';
 import { CustomModelModal } from './CustomModelModal';
+import { useSettingsStore } from '../stores/settings-store';
+import { CLAUDE_MODEL_ALIASES } from '../../shared/types/claude-code';
 
 interface InsightsModelSelectorProps {
   currentConfig?: InsightsModelConfig;
@@ -35,13 +37,21 @@ function shortModelLabel(model: string): string {
   return label.replace(/^Claude\s+/, '');
 }
 
+/** "omlx/Qwen3.8-27B-oQ8e-mtp" → "Qwen3.8-27B-oQ8e-mtp" */
+function shortOmpModel(model: string): string {
+  return model.slice(model.indexOf('/') + 1);
+}
+
 export function InsightsModelSelector({
   currentConfig,
   onConfigChange,
   disabled
 }: InsightsModelSelectorProps) {
-  const { t } = useTranslation('common');
+  const { t } = useTranslation(['common', 'settings']);
   const [showCustomModal, setShowCustomModal] = useState(false);
+  const ompModels = useSettingsStore((state) =>
+    state.settings.agentBackend?.kind === 'omp' ? state.settings.agentBackend.omp?.models ?? {} : undefined
+  );
 
   // Resolve the effective model/effort: an explicit config wins, otherwise the Balanced profile
   const balanced = DEFAULT_AGENT_PROFILES.find((p) => p.id === 'balanced');
@@ -60,6 +70,71 @@ export function InsightsModelSelector({
 
   const renderCheck = (selected: boolean) =>
     selected ? <Check className="ml-3 h-4 w-4 shrink-0 text-(--menu-check)" strokeWidth={2} /> : <span className="ml-3 w-4 shrink-0" />;
+
+  // OMP: the four Workbench sizes, labelled with the local model each one is mapped to (Settings > Agents)
+  if (ompModels) {
+    const ompLabel = (alias: string) => {
+      const mapped = ompModels[alias as keyof typeof ompModels]?.trim();
+      return mapped ? shortOmpModel(mapped) : t('settings:agentBackend.ompDefault');
+    };
+    const activeAlias = (CLAUDE_MODEL_ALIASES as readonly string[]).includes(activeModel) ? activeModel : 'sonnet';
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            className="inline-flex h-7 max-w-[22rem] items-center gap-1.5 rounded-md px-2 text-sm text-foreground transition-colors hover:bg-nav-hover focus-visible:outline-none focus-visible:shadow-(--shadow-focus) disabled:pointer-events-none disabled:opacity-50 data-[state=open]:bg-nav-hover"
+            disabled={disabled}
+            title={t('insights.model.title', { name: `${ompLabel(activeAlias)} · ${effortLabel(activeThinking)}` })}
+          >
+            <span className="truncate">{ompLabel(activeAlias)}</span>
+            <span className="shrink-0 text-muted-foreground">{effortLabel(activeThinking)}</span>
+            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          </button>
+        </DropdownMenuTrigger>
+
+        <DropdownMenuContent align="end" sideOffset={6} className="w-80 rounded-xl p-1.5">
+          {CLAUDE_MODEL_ALIASES.map((alias) => (
+            <DropdownMenuItem
+              key={alias}
+              onSelect={() => select(alias, activeThinking)}
+              className={cn(menuItemClass, 'flex items-center')}
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm text-foreground">{ompLabel(alias)}</div>
+                <div className="text-[0.8125rem] text-muted-foreground">{t(`settings:agentBackend.tiers.${alias}`)}</div>
+              </div>
+              {renderCheck(activeAlias === alias)}
+            </DropdownMenuItem>
+          ))}
+
+          <DropdownMenuSeparator className="mx-2 my-1.5" />
+
+          <DropdownMenuSub>
+            <DropdownMenuSubTrigger className={cn(menuItemClass, 'flex h-10 items-center text-sm')}>
+              <span className="flex-1">{t('insights.model.effort')}</span>
+              <span className="mr-1 text-muted-foreground">{effortLabel(activeThinking)}</span>
+            </DropdownMenuSubTrigger>
+            <DropdownMenuSubContent sideOffset={6} className="w-56 rounded-xl p-1.5">
+              {THINKING_LEVELS.map((level) => (
+                <DropdownMenuItem
+                  key={level.value}
+                  onSelect={() => select(activeAlias, level.value)}
+                  className={cn(menuItemClass, 'flex items-center')}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-foreground">{effortLabel(level.value)}</div>
+                    <div className="text-[0.8125rem] text-muted-foreground">{t(`insights.model.effortDescriptions.${level.value}`)}</div>
+                  </div>
+                  {renderCheck(activeThinking === level.value)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuSubContent>
+          </DropdownMenuSub>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
 
   return (
     <>

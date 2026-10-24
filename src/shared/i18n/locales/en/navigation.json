@@ -9,7 +9,8 @@
   "items": {
     "kanban": "Kanban",
     "terminals": "Agents",
-    "insights": "{{agent}}",
+    "insights": "Claude",
+    "insightsChat": "Chat",
     "projects": "Projects",
     "memory": "Graph"
   },

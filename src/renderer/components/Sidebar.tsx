@@ -150,7 +150,8 @@ export function Sidebar({
 
   const renderNavItem = (item: NavItem) => {
     const isActive = activeView === item.id;
-    const label = t(item.labelKey);
+    // Under OMP the Insights page is a plain chat, so it isn't named after the backend
+    const label = t(item.id === 'insights' && settings.agentBackend?.kind === 'omp' ? 'navigation:items.insightsChat' : item.labelKey);
 
     const button = (
       <button
