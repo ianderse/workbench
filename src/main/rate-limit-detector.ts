@@ -4,7 +4,6 @@
  */
 
 import { getClaudeProfileManager } from './claude-profile-manager';
-import { getUsageMonitor } from './claude-profile/usage-monitor';
 import { debugLog } from '../shared/utils/debug-logger';
 import { findStandaloneLimitReset } from './claude-profile/rate-limit-manager';
 
@@ -261,43 +260,9 @@ export function getBestAvailableProfileEnv(): BestProfileEnvResult {
         reason: swapReason
       });
 
-      // Trigger a usage refresh so the UI shows the new active profile
-      // This updates the UsageIndicator in the header
-      // We use fire-and-forget pattern to avoid making this function async
-      try {
-        const usageMonitor = getUsageMonitor();
-        // Force refresh all profiles usage data, which will emit 'all-profiles-usage-updated' event
-        // The UI components listen for this and will update automatically
-        usageMonitor.getAllProfilesUsage(true).then((allProfilesUsage) => {
-          if (allProfilesUsage) {
-            // Find the new active profile in allProfiles and emit its usage
-            // This ensures UsageIndicator.usage state also updates to show the new active account
-            const newActiveProfile = allProfilesUsage.allProfiles.find(p => p.isActive);
-            if (newActiveProfile) {
-              // Construct a ClaudeUsageSnapshot for the new active profile
-              const newActiveUsage = {
-                profileId: newActiveProfile.profileId,
-                profileName: newActiveProfile.profileName,
-                profileEmail: newActiveProfile.profileEmail,
-                sessionPercent: newActiveProfile.sessionPercent,
-                weeklyPercent: newActiveProfile.weeklyPercent,
-                sessionResetTimestamp: newActiveProfile.sessionResetTimestamp,
-                weeklyResetTimestamp: newActiveProfile.weeklyResetTimestamp,
-                fetchedAt: allProfilesUsage.fetchedAt,
-                needsReauthentication: newActiveProfile.needsReauthentication,
-              };
-              usageMonitor.emit('usage-updated', newActiveUsage);
-            }
-            // Also emit all-profiles-usage-updated for the other profiles list
-            usageMonitor.emit('all-profiles-usage-updated', allProfilesUsage);
-          }
-        }).catch((err) => {
-          console.warn('[RateLimitDetector] Failed to refresh usage after swap:', err);
-        });
-      } catch (err) {
-        // Usage monitor may not be initialized yet, that's OK
-        console.warn('[RateLimitDetector] Could not trigger usage refresh:', err);
-      }
+      // The usage monitor follows the switch (setActiveProfile notifies it): it shows the new
+      // account's stored usage at once and fetches fresh usage. Emitting a list fetched here could
+      // land after that fresh usage and show stale numbers again.
 
       const profileEnv = profileManager.getProfileEnv(bestProfile.id);
 

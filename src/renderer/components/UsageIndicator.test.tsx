@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { UsageIndicator } from './UsageIndicator';
+import { UsageIndicator, USAGE_LOADING_TIMEOUT_MS } from './UsageIndicator';
 import { useSettingsStore } from '../stores/settings-store';
 
 vi.mock('../stores/settings-store', () => ({
@@ -160,6 +160,27 @@ describe('UsageIndicator', () => {
       act(() => push(null));
       expect(screen.getByText('Loading...')).toBeInTheDocument();
       expect(screen.queryByText('34')).not.toBeInTheDocument();
+    });
+
+    it('stops showing Loading when the new account\'s usage never arrives', async () => {
+      let push: (usage: unknown) => void = () => {};
+      (window as any).electronAPI.onUsageUpdated = vi.fn((callback: (usage: unknown) => void) => {
+        push = callback;
+        return vi.fn();
+      });
+      render(<UsageIndicator />);
+      const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
+      await waitFor(() => expect(usageTrigger).toHaveTextContent('45'));
+
+      vi.useFakeTimers();
+      try {
+        act(() => push(null));
+        expect(screen.getByText('Loading...')).toBeInTheDocument();
+        act(() => { vi.advanceTimersByTime(USAGE_LOADING_TIMEOUT_MS); });
+        expect(screen.queryByText('Loading...')).not.toBeInTheDocument();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('leads with the 5-hour limit and lists the week, without other accounts', async () => {
