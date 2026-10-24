@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback, useState, useMemo, forwardRef, useImper
 import { useDroppable } from '@dnd-kit/core';
 import '@xterm/xterm/css/xterm.css';
 import {
+  buildPendingTaskSession,
   buildTaskWorktreeConfig,
   getTaskSessionRequest,
   useTerminalStore,
@@ -674,12 +675,7 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
       setAssociatedTask(id, taskId);
       void applyWorktreeConfig(buildTaskWorktreeConfig(request, id), {
         title: selectedTask.title,
-        session: {
-          taskId: request.taskId,
-          sessionId: request.sessionId,
-          profileId: request.profileId,
-          configDir: request.configDir
-        }
+        session: buildPendingTaskSession(request)
       });
       return;
     }

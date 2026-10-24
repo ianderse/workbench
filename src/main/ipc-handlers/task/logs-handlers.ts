@@ -10,6 +10,7 @@ import { isValidTaskId } from '../../utils/spec-path-helpers';
 import { debugLog } from '../../../shared/utils/debug-logger';
 import { ensureAbsolutePath } from '../../utils/path-helpers';
 import { safeSendToRenderer } from '../utils';
+import { senderWindowId } from '../window-handlers';
 
 /**
  * Register task logs handlers
@@ -101,7 +102,7 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
    */
   handleIpc(
     IPC_CHANNELS.TASK_LOGS_WATCH,
-    async (_, projectId: string, specId: string): Promise<IPCResult> => {
+    async (event, projectId: string, specId: string): Promise<IPCResult> => {
       try {
         if (!isValidTaskId(specId)) {
           return { success: false, error: 'Invalid spec ID' };
@@ -127,7 +128,9 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
         // Start watching even if specDir doesn't exist yet — the poll loop
         // in TaskLogService handles missing files gracefully and will pick up
         // task_logs.json once the agent creates it during execution.
-        taskLogService.startWatching(specId, specDir, absoluteProjectPath, specsRelPath, projectId);
+        // The watch belongs to the window that asked for it: a window closed with the task dialog
+        // open never unwatches, and the registry releases it by that id
+        taskLogService.startWatching(specId, specDir, absoluteProjectPath, specsRelPath, projectId, senderWindowId(event));
         return { success: true };
       } catch (error) {
         console.error('[TASK_LOGS_WATCH] Failed to start watching task logs:', error);
@@ -144,19 +147,20 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
    */
   handleIpc(
     IPC_CHANNELS.TASK_LOGS_UNWATCH,
-    async (_, projectId: string, specId: string): Promise<IPCResult> => {
+    async (event, projectId: string, specId: string): Promise<IPCResult> => {
       try {
         if (!isValidTaskId(specId)) {
           return { success: false, error: 'Invalid spec ID' };
         }
 
-        // Watches are counted per spec directory, so one window's unwatch leaves another
-        // window watching the same task alone
+        // Watches are held per spec directory by the windows viewing it, so one window's unwatch
+        // leaves another window watching the same task alone
         const project = projectStore.getProject(projectId);
         if (!project) {
-          // The project is gone (removed while its task was open): nothing can be watching
-          // it any more, and its directory can no longer be worked out
-          taskLogService.stopWatchingSpec(specId);
+          // The project is gone (removed while its task was open): its directory can no longer be
+          // worked out, but the id it was removed under still narrows this to its own watches, so
+          // another project's watch of a task with the same spec id is left alone
+          taskLogService.stopWatchingSpec(specId, projectId);
           return { success: true };
         }
         const specDir = path.join(
@@ -165,7 +169,7 @@ export function registerTaskLogsHandlers(getMainWindow: () => BrowserWindow | nu
           specId
         );
 
-        taskLogService.stopWatching(specDir);
+        taskLogService.stopWatching(specDir, senderWindowId(event));
         return { success: true };
       } catch (error) {
         console.error('Failed to stop watching task logs:', error);

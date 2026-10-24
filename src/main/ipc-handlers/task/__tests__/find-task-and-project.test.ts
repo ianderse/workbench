@@ -11,10 +11,22 @@ import type { Task, Project } from '../../../../shared/types';
 const mockProjects: Project[] = [];
 const mockTasksByProject: Map<string, Task[]> = new Map();
 
+const logger = vi.hoisted(() => ({ warn: vi.fn() }));
+vi.mock('../../../app-logger', () => ({
+  appLog: { warn: logger.warn, info: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+/** Which projects `getTasks` was asked to scan; `getTasks` reads the filesystem when it has to */
+const scanned: string[] = [];
+
 vi.mock('../../../project-store', () => ({
   projectStore: {
     getProjects: () => mockProjects,
-    getTasks: (projectId: string) => mockTasksByProject.get(projectId) || []
+    getTasks: (projectId: string) => {
+      scanned.push(projectId);
+      return mockTasksByProject.get(projectId) || [];
+    },
+    getCachedTasks: (projectId: string) => mockTasksByProject.get(projectId)
   }
 }));
 
@@ -49,6 +61,8 @@ describe('findTaskAndProject', () => {
   beforeEach(() => {
     mockProjects.length = 0;
     mockTasksByProject.clear();
+    // Without this the "does not warn" cases would pass on a warning left by an earlier test
+    logger.warn.mockClear();
   });
 
   it('should find task by specId without projectId (backward compatibility)', () => {
@@ -141,6 +155,33 @@ describe('findTaskAndProject', () => {
     expect(result.project).toBe(project);
   });
 
+  it('should log a warning when two projects hold the id and no projectId was given', () => {
+    // The caller gets the first project either way, so the log is the only trace that the answer
+    // was a guess: a caller that acts on a task's run has to send the project instead. It goes
+    // through appLog, because console output is invisible in a bundled Electron build
+    const projectA = createProject({ id: 'proj-a' });
+    const projectB = createProject({ id: 'proj-b' });
+
+    mockProjects.push(projectA, projectB);
+    mockTasksByProject.set('proj-a', [createTask({ specId: '001-add-login', projectId: 'proj-a' })]);
+    mockTasksByProject.set('proj-b', [createTask({ specId: '001-add-login', projectId: 'proj-b' })]);
+
+    const result = findTaskAndProject('001-add-login');
+
+    expect(result.project).toBe(projectA);
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('exists in more than one project'));
+  });
+
+  it('should not warn when only one project holds the id', () => {
+    mockProjects.push(createProject({ id: 'proj-a' }), createProject({ id: 'proj-b' }));
+    mockTasksByProject.set('proj-a', [createTask({ specId: '001-add-login', projectId: 'proj-a' })]);
+    mockTasksByProject.set('proj-b', []);
+
+    findTaskAndProject('001-add-login');
+
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
   it('should log warning when provided projectId is not found', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -153,5 +194,46 @@ describe('findTaskAndProject', () => {
       // Flexible match on the rest of the message
     );
     warnSpy.mockRestore();
+  });
+});
+
+/**
+ * `getTasks` scans a project's spec directories synchronously whenever its cache has gone cold, and
+ * the file-watcher events that reach this without a project arrive every few seconds while a task
+ * writes its plan file. Looking past the project that answers would block the main process over and
+ * over - CLAUDE.md's "never block the main process" rule is about exactly this.
+ */
+describe('findTaskAndProject without a projectId', () => {
+  beforeEach(() => {
+    scanned.length = 0;
+  });
+
+  it('stops scanning at the project that holds the task', () => {
+    const [first, second, third] = ['project-1', 'project-2', 'project-3'].map((id) =>
+      createProject({ id })
+    );
+    mockProjects.length = 0;
+    mockProjects.push(first, second, third);
+    mockTasksByProject.clear();
+    mockTasksByProject.set(first.id, []);
+    mockTasksByProject.set(second.id, [createTask({ specId: 'wanted', projectId: second.id })]);
+    mockTasksByProject.set(third.id, [createTask({ specId: 'wanted', projectId: third.id })]);
+
+    const { project } = findTaskAndProject('wanted');
+
+    expect(project?.id).toBe(second.id);
+    // The third project holds the id too, but nothing scanned it
+    expect(scanned).toEqual([first.id, second.id]);
+  });
+
+  it('scans every project only when none of them holds the task', () => {
+    const projects = ['project-1', 'project-2'].map((id) => createProject({ id }));
+    mockProjects.length = 0;
+    mockProjects.push(...projects);
+    mockTasksByProject.clear();
+    for (const p of projects) mockTasksByProject.set(p.id, []);
+
+    expect(findTaskAndProject('missing').task).toBeUndefined();
+    expect(scanned).toEqual(projects.map((p) => p.id));
   });
 });

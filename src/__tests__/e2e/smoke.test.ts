@@ -347,10 +347,10 @@ describe('E2E Smoke Tests', () => {
       });
 
       // Step 2: Start the task (simulates clicking "Run" button)
-      const startTask = electronAPI['startTask'] as (id: string, options?: object) => void;
+      const startTask = electronAPI['startTask'] as (id: string, options?: object, projectId?: string) => void;
       startTask('task-001');
 
-      expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:start', 'task-001', undefined);
+      expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:start', 'task-001', undefined, undefined);
 
       // Step 3: Register progress listener to track task execution
       const progressCallback = vi.fn();
@@ -494,7 +494,9 @@ describe('E2E Smoke Tests', () => {
       const stopTask = electronAPI['stopTask'] as (id: string) => void;
       stopTask('task-001');
 
-      expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:stop', 'task-001');
+      // The board's project travels with these calls as a trailing argument: a task id is only
+      // unique within a project, so the main process must never infer which project's run to act on
+      expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:stop', 'task-001', undefined);
     });
 
     it('should handle task resume flow', async () => {
@@ -502,10 +504,12 @@ describe('E2E Smoke Tests', () => {
       const electronAPI = exposedApis['electronAPI'] as Record<string, unknown>;
 
       // Resume task with options
-      const startTask = electronAPI['startTask'] as (id: string, options?: object) => void;
-      startTask('task-001', { resume: true });
+      const startTask = electronAPI['startTask'] as (id: string, options?: object, projectId?: string) => void;
+      startTask('task-001', { resume: true }, 'project-001');
 
-      expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:start', 'task-001', { resume: true });
+      // The project of the board the resume was pressed on travels with the call (see the stop
+      // flow above): without it the main process can only search the projects for the task id
+      expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:start', 'task-001', { resume: true }, 'project-001');
     });
 
     it('should handle task list retrieval', async () => {
@@ -763,13 +767,17 @@ describe('E2E Smoke Tests', () => {
 
       const updateTask = electronAPI['updateTask'] as (
         id: string,
-        updates: object
+        updates: object,
+        projectId?: string
       ) => Promise<unknown>;
-      const result = await updateTask('task-001', { title: 'Updated Task Title' });
+      const result = await updateTask('task-001', { title: 'Updated Task Title' }, 'project-001');
 
-      expect(mockIpcRenderer.invoke).toHaveBeenCalledWith('task:update', 'task-001', {
-        title: 'Updated Task Title'
-      });
+      expect(mockIpcRenderer.invoke).toHaveBeenCalledWith(
+        'task:update',
+        'task-001',
+        { title: 'Updated Task Title' },
+        'project-001'
+      );
       expect(result).toMatchObject({
         success: true,
         data: expect.objectContaining({
@@ -849,7 +857,7 @@ describe('E2E Smoke Tests', () => {
       const deleteTask = electronAPI['deleteTask'] as (id: string) => Promise<unknown>;
       const deleteResult = await deleteTask('task-001');
 
-      expect(mockIpcRenderer.invoke).toHaveBeenCalledWith('task:delete', 'task-001');
+      expect(mockIpcRenderer.invoke).toHaveBeenCalledWith('task:delete', 'task-001', undefined);
       expect(deleteResult).toMatchObject({ success: true });
 
       // Verify task no longer in list
@@ -1223,6 +1231,7 @@ describe('E2E Smoke Tests', () => {
         true,
         'Looks good!',
         undefined,
+        undefined,
         undefined
       );
       expect(result).toMatchObject({
@@ -1256,6 +1265,7 @@ describe('E2E Smoke Tests', () => {
         'task-001',
         false,
         'Missing error handling',
+        undefined,
         undefined,
         undefined
       );
@@ -1295,6 +1305,7 @@ describe('E2E Smoke Tests', () => {
         false,
         'UI issue shown in screenshots',
         screenshots,
+        undefined,
         undefined
       );
     });

@@ -390,14 +390,21 @@ export function registerWorktreeHandlers(
   getMainWindow: () => BrowserWindow | null
 ): void {
   /**
+   * The `projectId` every handler below takes last is the project of the board the user acted on.
+   * A task id is only unique inside its project, so searching the projects for it answers with
+   * whichever project happens to hold a task of that id: merging, opening a pull request for or
+   * discarding that project's worktree instead of the one the user meant. The search stays as the
+   * fallback for a caller that cannot name a project.
+   */
+  /**
    * Get the worktree status for a task
    * Per-spec architecture: Each spec has its own worktree at .workbench/worktrees/tasks/{spec-name}/
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_STATUS,
-    async (_, taskId: string): Promise<IPCResult<WorktreeStatus>> => {
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<WorktreeStatus>> => {
       try {
-        const { task, project } = findTaskAndProject(taskId);
+        const { task, project } = findTaskAndProject(taskId, projectId);
         if (!task || !project) {
           return { success: false, error: 'Task not found' };
         }
@@ -480,7 +487,7 @@ export function registerWorktreeHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE,
-    async (_, taskId: string, options?: { noCommit?: boolean }): Promise<IPCResult<WorktreeMergeResult>> => {
+    async (_, taskId: string, options?: { noCommit?: boolean }, projectId?: string): Promise<IPCResult<WorktreeMergeResult>> => {
       const isDebugMode = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
       const debug = (...args: unknown[]) => {
         if (isDebugMode) {
@@ -491,7 +498,7 @@ export function registerWorktreeHandlers(
       try {
         debug('Handler called with taskId:', taskId, 'options:', options);
 
-        const { task, project } = findTaskAndProject(taskId);
+        const { task, project } = findTaskAndProject(taskId, projectId);
         if (!task || !project) {
           debug('Task or project not found');
           return { success: false, error: 'Task not found' };
@@ -895,10 +902,10 @@ export function registerWorktreeHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE_PREVIEW,
-    async (_, taskId: string): Promise<IPCResult<WorktreeMergeResult>> => {
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<WorktreeMergeResult>> => {
       console.warn('[IPC] TASK_WORKTREE_MERGE_PREVIEW called with taskId:', taskId);
       try {
-        const { task, project } = findTaskAndProject(taskId);
+        const { task, project } = findTaskAndProject(taskId, projectId);
         if (!task || !project) {
           console.error('[IPC] Task not found:', taskId);
           return { success: false, error: 'Task not found' };
@@ -1028,9 +1035,9 @@ export function registerWorktreeHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_DISCARD,
-    async (_, taskId: string, skipStatusChange?: boolean): Promise<IPCResult<WorktreeDiscardResult>> => {
+    async (_, taskId: string, skipStatusChange?: boolean, projectId?: string): Promise<IPCResult<WorktreeDiscardResult>> => {
       try {
-        const { task, project } = findTaskAndProject(taskId);
+        const { task, project } = findTaskAndProject(taskId, projectId);
         if (!task || !project) {
           return { success: false, error: 'Task not found' };
         }
@@ -1242,9 +1249,9 @@ export function registerWorktreeHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_CLEAR_STAGED_STATE,
-    async (_, taskId: string): Promise<IPCResult<{ cleared: boolean }>> => {
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<{ cleared: boolean }>> => {
       try {
-        const { task, project } = findTaskAndProject(taskId);
+        const { task, project } = findTaskAndProject(taskId, projectId);
         if (!task || !project) {
           return { success: false, error: 'Task not found' };
         }
@@ -1318,7 +1325,7 @@ export function registerWorktreeHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_CREATE_PR,
-    async (_, taskId: string, options?: WorktreeCreatePROptions): Promise<IPCResult<WorktreeCreatePRResult>> => {
+    async (_, taskId: string, options?: WorktreeCreatePROptions, projectId?: string): Promise<IPCResult<WorktreeCreatePRResult>> => {
       const isDebugMode = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
       const debug = (...args: unknown[]) => {
         if (isDebugMode) {
@@ -1329,7 +1336,7 @@ export function registerWorktreeHandlers(
       try {
         debug('Handler called with taskId:', taskId, 'options:', options);
 
-        const { task, project } = findTaskAndProject(taskId);
+        const { task, project } = findTaskAndProject(taskId, projectId);
         if (!task || !project) {
           debug('Task or project not found');
           return { success: false, error: 'Task not found' };
@@ -1448,8 +1455,8 @@ export function registerWorktreeHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE_PR,
-    async (_, taskId: string, options?: WorktreeMergePROptions): Promise<IPCResult<WorktreeMergePRResult>> => {
-      const { task, project } = findTaskAndProject(taskId);
+    async (_, taskId: string, options?: WorktreeMergePROptions, projectId?: string): Promise<IPCResult<WorktreeMergePRResult>> => {
+      const { task, project } = findTaskAndProject(taskId, projectId);
       if (!task || !project) return { success: false, error: 'Task not found' };
       const prUrl = task.metadata?.prUrl;
       if (!prUrl) return { success: false, error: 'This task has no pull request' };
@@ -1491,8 +1498,8 @@ export function registerWorktreeHandlers(
   /** Read a task's PR state from GitHub and store it in the task metadata */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_PR_STATE,
-    async (_, taskId: string): Promise<IPCResult<PullRequestState>> => {
-      const { task, project } = findTaskAndProject(taskId);
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<PullRequestState>> => {
+      const { task, project } = findTaskAndProject(taskId, projectId);
       if (!task || !project) return { success: false, error: 'Task not found' };
       const prUrl = task.metadata?.prUrl;
       if (!prUrl) return { success: false, error: 'This task has no pull request' };
@@ -1521,8 +1528,8 @@ export function registerWorktreeHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL,
-    async (_, taskId: string): Promise<IPCResult<WorktreeLocalMergeResult>> => {
-      const { task, project } = findTaskAndProject(taskId);
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<WorktreeLocalMergeResult>> => {
+      const { task, project } = findTaskAndProject(taskId, projectId);
       if (!task || !project) return { success: false, error: 'Task not found' };
       if (task.status === 'in_progress' || task.status === 'ai_review') {
         return { success: false, error: 'Stop the task before merging its branch' };
@@ -1575,7 +1582,7 @@ async function recordPRMerged(task: Task, project: Project, worktreePath: string
 /** Move a merged task to Done (state machine, else the plan files) */
 async function markTaskDone(task: Task, project: Project, worktreePath: string): Promise<void> {
   taskStateManager.handleUiEvent(task.id, { type: 'MARK_DONE' }, task, project);
-  if (taskStateManager.getCurrentState(task.id) !== 'done') {
+  if (taskStateManager.getCurrentState(task.id, project.id) !== 'done') {
     const specsBaseDir = getSpecsDir(project.autoBuildPath);
     await persistPlanStatus(path.join(project.path, specsBaseDir, task.specId, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN), 'done', project.id);
     await persistPlanStatus(path.join(worktreePath, specsBaseDir, task.specId, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN), 'done');

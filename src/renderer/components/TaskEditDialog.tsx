@@ -130,10 +130,11 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       pushNewBranches: pushNewBranches === gitOptions.projectPushNewBranches ? undefined : pushNewBranches
     };
 
-    const success = await persistUpdateTask(task.id, {
-      description: trimmedDescription,
-      metadata: metadataUpdates
-    });
+    const success = await persistUpdateTask(
+      task.id,
+      { description: trimmedDescription, metadata: metadataUpdates },
+      task.projectId
+    );
 
     if (success) {
       onOpenChange(false);

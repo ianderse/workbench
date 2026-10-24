@@ -14,6 +14,13 @@ export interface TerminalTaskSessionOptions {
   configDir?: string;
   /** Task the session belongs to: while it runs, the window follows the session read-only */
   taskId?: string;
+  /**
+   * Project the task belongs to. A task id is only unique within a project, so the main process
+   * needs it to find the right run among the projects that may be running a task of this id.
+   * Optional because a window restored from a saved session, or an older renderer, sends the
+   * request without one; the session is then resumed instead of followed.
+   */
+  projectId?: string;
 }
 
 import type { IPCResult } from './common';
@@ -149,35 +156,43 @@ export interface ElectronAPI {
   saveKanbanPreferences: (projectId: string, preferences: KanbanPreferences) => Promise<IPCResult>;
 
   // Task operations
+  //
+  // The calls that reach a task's Claude Code run - start, stop, retry, review, status change,
+  // running check, recovery and delete - take the id of the project whose board the user acted on
+  // as their last argument. A task id is only unique inside its project, and runs are held per
+  // project and task, so the main process cannot work the project out from the task id alone:
+  // searching for the id finds a project that holds such a task, not the one running it. The
+  // worktree calls below carry it for the same reason: without it a merge, a pull request or a
+  // discard can land on another project's worktree.
   getTasks: (projectId: string, options?: { forceRefresh?: boolean }) => Promise<IPCResult<Task[]>>;
   createTask: (projectId: string, title: string, description: string, metadata?: TaskMetadata) => Promise<IPCResult<Task>>;
-  deleteTask: (taskId: string) => Promise<IPCResult>;
-  updateTask: (taskId: string, updates: { title?: string; description?: string }) => Promise<IPCResult<Task>>;
-  startTask: (taskId: string, options?: TaskStartOptions) => void;
-  stopTask: (taskId: string) => void;
-  retryTask: (taskId: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
-  submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[], options?: TaskReviewOptions) => Promise<IPCResult>;
-  updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean }) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
-  recoverStuckTask: (taskId: string, options?: TaskRecoveryOptions) => Promise<IPCResult<TaskRecoveryResult>>;
-  checkTaskRunning: (taskId: string) => Promise<IPCResult<boolean>>;
+  deleteTask: (taskId: string, projectId?: string) => Promise<IPCResult>;
+  updateTask: (taskId: string, updates: { title?: string; description?: string }, projectId?: string) => Promise<IPCResult<Task>>;
+  startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
+  stopTask: (taskId: string, projectId?: string) => void;
+  retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
+  submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[], options?: TaskReviewOptions, projectId?: string) => Promise<IPCResult>;
+  updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean; keepWorktree?: boolean }, projectId?: string) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
+  recoverStuckTask: (taskId: string, options?: TaskRecoveryOptions, projectId?: string) => Promise<IPCResult<TaskRecoveryResult>>;
+  checkTaskRunning: (taskId: string, projectId?: string) => Promise<IPCResult<boolean>>;
 
   // Image operations
   loadImageThumbnail: (projectPath: string, specId: string, imagePath: string) => Promise<IPCResult<string>>;
 
   // Worktree change detection
-  checkWorktreeChanges: (taskId: string) => Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>>;
+  checkWorktreeChanges: (taskId: string, projectId?: string) => Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>>;
 
   // Workspace management (for human review)
   // Per-spec architecture: Each spec has its own worktree at .worktrees/{spec-name}/
-  getWorktreeStatus: (taskId: string) => Promise<IPCResult<WorktreeStatus>>;
-  mergeWorktree: (taskId: string, options?: { noCommit?: boolean }) => Promise<IPCResult<WorktreeMergeResult>>;
-  mergeWorktreePreview: (taskId: string) => Promise<IPCResult<WorktreeMergeResult>>;
-  createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
-  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
-  mergeWorktreeLocal: (taskId: string) => Promise<IPCResult<WorktreeLocalMergeResult>>;
-  getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
-  discardWorktree: (taskId: string, skipStatusChange?: boolean) => Promise<IPCResult<WorktreeDiscardResult>>;
-  clearStagedState: (taskId: string) => Promise<IPCResult<{ cleared: boolean }>>;
+  getWorktreeStatus: (taskId: string, projectId?: string) => Promise<IPCResult<WorktreeStatus>>;
+  mergeWorktree: (taskId: string, options?: { noCommit?: boolean }, projectId?: string) => Promise<IPCResult<WorktreeMergeResult>>;
+  mergeWorktreePreview: (taskId: string, projectId?: string) => Promise<IPCResult<WorktreeMergeResult>>;
+  createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions, projectId?: string) => Promise<IPCResult<WorktreeCreatePRResult>>;
+  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions, projectId?: string) => Promise<IPCResult<WorktreeMergePRResult>>;
+  mergeWorktreeLocal: (taskId: string, projectId?: string) => Promise<IPCResult<WorktreeLocalMergeResult>>;
+  getWorktreePRState: (taskId: string, projectId?: string) => Promise<IPCResult<PullRequestState>>;
+  discardWorktree: (taskId: string, skipStatusChange?: boolean, projectId?: string) => Promise<IPCResult<WorktreeDiscardResult>>;
+  clearStagedState: (taskId: string, projectId?: string) => Promise<IPCResult<{ cleared: boolean }>>;
   listWorktrees: (projectId: string, options?: { includeStats?: boolean }) => Promise<IPCResult<WorktreeListResult>>;
 
   // Task archive operations
@@ -473,12 +488,12 @@ export interface ElectronAPI {
   buildGraphifyIndex: (projectId: string) => Promise<IPCResult<import('./cli').GraphifyIndexInfo>>;
   /** The project's CLAUDE.md stats, or null when it has none */
   getProjectIndex: (projectId: string) => Promise<IPCResult<import('./cli').ProjectIndexInfo | null>>;
-  /** Write (or rewrite) the project's CLAUDE.md with a short `/init` run */
-  buildProjectIndex: (projectId: string) => Promise<IPCResult<import('./cli').ProjectIndexInfo>>;
+  /** Give the project a CLAUDE.md: the one set aside while the index was off, else a `/init` run */
+  buildProjectIndex: (projectId: string, restore?: boolean) => Promise<IPCResult<import('./cli').ProjectIndexInfo>>;
   /** Whether a project index build is running for the project */
   isProjectIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
-  /** Remove the project's CLAUDE.md, which is what switching Use CLAUDE.md off does */
-  deleteProjectIndex: (projectId: string) => Promise<IPCResult>;
+  /** Move the project's CLAUDE.md aside, which is what switching Use CLAUDE.md off does */
+  stashProjectIndex: (projectId: string) => Promise<IPCResult>;
   /** The project's memory index stats, or null when it has never been built */
   getMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo | null>>;
   /** Build (or rebuild) the project's memories from its past Claude Code sessions */

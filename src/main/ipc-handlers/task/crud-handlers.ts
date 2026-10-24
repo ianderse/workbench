@@ -72,7 +72,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       // and actors are recreated with fresh task data
       if (options?.forceRefresh) {
         projectStore.invalidateTasksCache(projectId);
-        taskStateManager.clearAllTasks();
+        taskStateManager.clearAllTasks(projectId);
         console.warn('[IPC] TASK_LIST cache and task state cleared for forceRefresh');
       }
 
@@ -245,18 +245,24 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    */
   handleIpc(
     IPC_CHANNELS.TASK_DELETE,
-    async (_, taskId: string): Promise<IPCResult> => {
+    async (_, taskId: string, projectId?: string): Promise<IPCResult> => {
       const { rm } = await import('fs/promises');
 
-      // Find task and project
-      const { task, project } = findTaskAndProject(taskId);
+      // Find task and project. `projectId` is the board the delete was asked from; a task id is
+      // only unique inside a project, so without it the task is searched for across projects
+      const { task, project } = findTaskAndProject(taskId, projectId);
 
       if (!task || !project) {
         return { success: false, error: 'Task or project not found' };
       }
 
-      // Check if task is currently running
-      const isRunning = agentManager.isRunning(taskId);
+      // Whether a run owns the task this delete is about to tear down, asked of the project whose
+      // spec dirs and worktree it will remove - the one resolved above, which is `projectId` when
+      // the request carried one. Asking with the request's optional id instead would let the guard
+      // and the delete disagree: with no id sent and two projects running a task of this spec id,
+      // AgentManager has no run it could be meaning and answers "not running", and the delete would
+      // go ahead under a run still writing to those very directories
+      const isRunning = agentManager.isRunning(taskId, project.id);
       if (isRunning) {
         return { success: false, error: 'Cannot delete a running task. Stop the task first.' };
       }
@@ -319,7 +325,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       // stale actor (stuck in a terminal state like 'human_review'), causing
       // the new task's events to be silently dropped and the task to appear
       // stuck forever.
-      taskStateManager.clearTask(taskId);
+      taskStateManager.clearTask(taskId, project.id);
 
       // Invalidate cache since a task was deleted
       projectStore.invalidateTasksCache(project.id);
@@ -345,11 +351,14 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
     async (
       _,
       taskId: string,
-      updates: { title?: string; description?: string; metadata?: Partial<TaskMetadata> }
+      updates: { title?: string; description?: string; metadata?: Partial<TaskMetadata> },
+      projectId?: string
     ): Promise<IPCResult<Task>> => {
       try {
-        // Find task and project
-        const { task, project } = findTaskAndProject(taskId);
+        // The board the edit was made on: searching the projects for the task id would write the
+        // edit into whichever project happens to hold that id first, and `metadata.baseBranch` is
+        // among the fields this writes, so it also decides what a later run branches from
+        const { task, project } = findTaskAndProject(taskId, projectId);
 
         if (!task || !project) {
           return { success: false, error: 'Task not found' };
@@ -595,8 +604,8 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
    */
   handleIpc(
     IPC_CHANNELS.TASK_CHECK_WORKTREE_CHANGES,
-    async (_, taskId: string): Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>> => {
-      const { task, project } = findTaskAndProject(taskId);
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>> => {
+      const { task, project } = findTaskAndProject(taskId, projectId);
       if (!task || !project) {
         return { success: true, data: { hasChanges: false } };
       }

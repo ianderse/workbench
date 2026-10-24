@@ -41,8 +41,21 @@ import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
 /**
  * Feedback typed in "Request changes" with "Start over" ticked, held until the task that was
  * reset actually starts (it may first wait in the queue for a free slot).
+ *
+ * Held per project and task: a task id is its spec id (`001-<slug>`), which every project numbers
+ * from its own start, so two projects can hold the same one. Keyed by the task alone, a second
+ * project starting its own `001-x` popped the entry queued for the first project's restart - that
+ * project's agent was handed another project's reviewer notes and screenshots as "what the
+ * discarded attempt got wrong", and the restart they were written for ran with no feedback at all.
+ *
+ * Both the writer and the readers have resolved the task's project by the time they touch this
+ * map, so the project is part of the key rather than an optional extra: there is no entry here
+ * whose project is unknown, and therefore nothing to guess about.
  */
 const pendingRestartFeedback = new Map<string, { feedback?: string; feedbackImagePaths?: string[] }>();
+
+/** The key a task's held restart feedback lives under */
+const restartFeedbackKey = (projectId: string, taskId: string): string => `${projectId}\u0000${taskId}`;
 
 const AUTH_REQUIRED_MESSAGE = 'Authentication required. Sign in to a Claude account or activate an API profile in Settings > Accounts before starting tasks.';
 
@@ -173,7 +186,10 @@ function saveFeedbackImages(specDir: string, images: ImageAttachment[] | undefin
  * Start queued tasks whenever a project has free In Progress slots (see services/task-queue.ts).
  * Passes are requested after every status change, and use the same start flow as TASK_START.
  */
-function configureTaskQueue(agentManager: AgentManager, startTask: (taskId: string) => Promise<void>): void {
+function configureTaskQueue(
+  agentManager: AgentManager,
+  startTask: (taskId: string, projectId?: string) => Promise<void>
+): void {
   taskQueue.configure({
     listProjectIds: () => projectStore.getProjects().map((p) => p.id),
     listTasks: (projectId) => projectStore.getTasks(projectId),
@@ -182,11 +198,13 @@ function configureTaskQueue(agentManager: AgentManager, startTask: (taskId: stri
       projectStore.getProject(projectId)?.settings?.maxParallelTasks
     ),
     getQueueOrder: (projectId) => taskQueueOrder.get(projectId),
-    isTaskRunning: (taskId) => agentManager.isRunning(taskId),
-    startTask: async (taskId) => {
-      await startTask(taskId);
+    isTaskRunning: (taskId, projectId) => agentManager.isRunning(taskId, projectId),
+    startTask: async (taskId, projectId) => {
+      // The queue promotes one project's tasks at a time and says which, so the start never has
+      // to guess the project from the task id
+      await startTask(taskId, projectId);
       // startTask reports problems (git, auth) to the renderer; it started when the machine is active
-      return XSTATE_ACTIVE_STATES.has(taskStateManager.getCurrentState(taskId) ?? '');
+      return XSTATE_ACTIVE_STATES.has(taskStateManager.getCurrentState(taskId, projectId) ?? '');
     },
   });
   // Any status change may free a slot (a task leaving In Progress) or queue a task
@@ -214,11 +232,13 @@ export function registerTaskExecutionHandlers(
     feedback?: string,
     feedbackImagePaths?: string[]
   ): void => {
-    // Cancel any pending fallback timer from a previous run's exit, so it can't
-    // stop the new run
-    cancelFallbackTimer(taskId);
+    // Cancel any pending fallback timer from a previous run's exit, so it can't stop the new run.
+    // Named by project, or starting this task would cancel another project's stuck-run net
+    cancelFallbackTimer(taskId, project.id);
 
-    fileWatcher.watch(taskId, getMainSpecDir(project, task)).catch((err) => {
+    // The project travels with the watch: two projects can be running a task of the same spec id,
+    // each writing its own plan file, and they need a watcher each
+    fileWatcher.watch(taskId, getMainSpecDir(project, task), project.id).catch((err) => {
       console.error(`[TASK_START] Failed to watch spec dir for ${taskId}:`, err);
     });
 
@@ -232,13 +252,17 @@ export function registerTaskExecutionHandlers(
    * Start (or continue) a task. Shared by the TASK_START IPC handler and the
    * rate-limit resume scheduler. The Claude Code run continues from its saved
    * state (claude_run.json), so a resumed task doesn't triage or plan again.
+   *
+   * `projectId` names the task's project, which callers that know it (the queue, the resume
+   * scheduler, a retry) pass: a task id is only unique inside a project, so without it the
+   * lookup below has to settle for whichever project holds the id first.
    */
-  const startTask = async (taskId: string): Promise<void> => {
+  const startTask = async (taskId: string, projectId?: string): Promise<void> => {
     console.warn('[TASK_START] Received request for taskId:', taskId);
 
     // First search all projects to find the task, then verify the project matches
     // task.projectId to prevent cross-project contamination
-    const { task, project: foundProject } = findTaskAndProject(taskId);
+    const { task, project: foundProject } = findTaskAndProject(taskId, projectId);
     if (!task || !foundProject) {
       console.warn('[TASK_START] Task or project not found for taskId:', taskId);
       sendTaskError(taskId, 'Task or project not found');
@@ -280,14 +304,14 @@ export function registerTaskExecutionHandlers(
     // Clear stale tracking state from any previous run so that:
     // - terminalEventSeen doesn't suppress future PROCESS_EXITED events
     // - lastSequenceByTask doesn't drop events from the new run
-    taskStateManager.prepareForRestart(taskId);
+    taskStateManager.prepareForRestart(taskId, project.id);
 
     // Move the card to In Progress right away. XState is the source of truth (task data
     // is the fallback after an app restart):
     // - queued (rate-limit hold released) / fresh start: PLANNING_STARTED
     // - human_review / error: USER_RESUMED (coding) when implementation already started,
     //   otherwise PLANNING_STARTED (the run triages/plans first)
-    const currentXState = taskStateManager.getCurrentState(taskId);
+    const currentXState = taskStateManager.getCurrentState(taskId, project.id);
     const resumable = currentXState
       ? currentXState === 'human_review' || currentXState === 'error'
       : task.status === 'human_review' || task.status === 'error';
@@ -295,23 +319,29 @@ export function registerTaskExecutionHandlers(
     console.warn('[TASK_START] XState:', currentXState, '| task status:', task.status, '->', event);
     taskStateManager.handleUiEvent(taskId, { type: event }, task, project);
 
-    // A task reset by "Start over" carries the reviewer's feedback into its fresh run
-    const restart = pendingRestartFeedback.get(taskId);
-    pendingRestartFeedback.delete(taskId);
+    // A task reset by "Start over" carries the reviewer's feedback into its fresh run. The
+    // feedback is the one left on this project's task: another project's restart of a task with
+    // the same spec id has its own entry, which this start must not take
+    const feedbackKey = restartFeedbackKey(project.id, taskId);
+    const restart = pendingRestartFeedback.get(feedbackKey);
+    pendingRestartFeedback.delete(feedbackKey);
     launchRun(taskId, task, project, 'start', restart?.feedback, restart?.feedbackImagePaths);
   };
 
   /**
-   * Start a task
+   * Start a task. `projectId` is the project of the board the start was pressed on (the Insights
+   * task tools send their chat's project): a task id is only unique inside its project, so
+   * without it the lookup in `startTask` has to settle for whichever project holds the id and
+   * could start another project's task of the same name.
    */
   onIpc(
     IPC_CHANNELS.TASK_START,
-    async (_, taskId: string, _options?: TaskStartOptions) => {
+    async (_, taskId: string, _options?: TaskStartOptions, projectId?: string) => {
       if (!getMainWindow()) {
         console.warn('[TASK_START] No main window found');
         return;
       }
-      await startTask(taskId);
+      await startTask(taskId, projectId);
     }
   );
 
@@ -333,13 +363,15 @@ export function registerTaskExecutionHandlers(
    *
    * Used by Retry and by "Request changes" with "Start over" ticked; in the latter case the
    * reviewer's feedback and images are kept for the fresh run.
+   *
+   * `projectId` is the project the user acted on, sent by the renderer with the request.
    */
   const restartTaskFromScratch = async (
     taskId: string,
+    projectId?: string,
     options?: { feedback?: string; images?: ImageAttachment[] }
   ): Promise<IPCResult<{ action: 'started' | 'queued' }>> => {
-    pendingRestartFeedback.delete(taskId);
-    const { task, project: foundProject } = findTaskAndProject(taskId);
+    const { task, project: foundProject } = findTaskAndProject(taskId, projectId);
     if (!task || !foundProject) {
       return { success: false, error: 'Task not found' };
     }
@@ -347,7 +379,18 @@ export function registerTaskExecutionHandlers(
       ? (projectStore.getProject(task.projectId) ?? foundProject)
       : foundProject;
 
-    if (agentManager.isRunning(taskId)) {
+    // Drop whatever an earlier "Start over" left waiting for this project's task, so a Retry with
+    // no feedback doesn't hand the fresh run notes about an attempt it knows nothing about. The
+    // project has to be resolved first to say whose entry that is, which is why this is not the
+    // first thing the restart does
+    pendingRestartFeedback.delete(restartFeedbackKey(project.id, taskId));
+
+    // The run is looked up by the project whose worktree and branch this is about to throw away -
+    // the one resolved above - so the guard and the reset cannot disagree. Asking with the
+    // request's optional id would answer about a project this restart is not touching, and with no
+    // id sent and two projects running the task id AgentManager refuses and answers "not running",
+    // which would discard a live run's work
+    if (agentManager.isRunning(taskId, project.id)) {
       return { success: false, error: 'The task is still running. Stop it before retrying.' };
     }
 
@@ -362,8 +405,10 @@ export function registerTaskExecutionHandlers(
     }
 
     try {
-      cancelFallbackTimer(taskId);
-      await fileWatcher.unwatch(taskId).catch(() => undefined);
+      cancelFallbackTimer(taskId, project.id);
+      // The watcher closed is the one on the spec dir this restart is about to reset, named by
+      // the project resolved above - not whichever project's watcher carries the task id
+      await fileWatcher.unwatch(taskId, project.id).catch(() => undefined);
       clearRateLimitHold(project, task, getMainWindow);
 
       // 1. Revert the code: remove the worktree and its branch. Tasks that run in the
@@ -379,7 +424,7 @@ export function registerTaskExecutionHandlers(
       //    happened in it, then forget it: the state machine is rebuilt from the reset plan file
       const specDir = getMainSpecDir(project, task);
       archiveCurrentRun(specDir);
-      taskStateManager.clearTask(taskId);
+      taskStateManager.clearTask(taskId, project.id);
       const queue = isAtParallelLimit(project, taskId);
       await resetTaskToInitialState(project, task, { status: queue ? 'queue' : 'backlog' });
 
@@ -390,7 +435,7 @@ export function registerTaskExecutionHandlers(
       //    the reset, which empties the spec dir of everything a run produced
       const feedback = options?.feedback?.trim();
       if (feedback || options?.images?.length) {
-        pendingRestartFeedback.set(taskId, {
+        pendingRestartFeedback.set(restartFeedbackKey(project.id, taskId), {
           feedback,
           feedbackImagePaths: saveFeedbackImages(specDir, options?.images)
         });
@@ -404,7 +449,8 @@ export function registerTaskExecutionHandlers(
         return { success: true, data: { action: 'queued' } };
       }
       console.warn(`[TASK_RESTART] ${taskId} reset; starting it again`);
-      await startTask(taskId);
+      // The project whose task was just reset, so the fresh run is the one this reset prepared
+      await startTask(taskId, project.id);
       return { success: true, data: { action: 'started' } };
     } catch (error) {
       console.error('[TASK_RESTART] Failed to retry task:', error);
@@ -414,7 +460,8 @@ export function registerTaskExecutionHandlers(
 
   handleIpc(
     IPC_CHANNELS.TASK_RETRY,
-    (_, taskId: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> => restartTaskFromScratch(taskId)
+    (_, taskId: string, projectId?: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> =>
+      restartTaskFromScratch(taskId, projectId)
   );
 
   /**
@@ -429,7 +476,8 @@ export function registerTaskExecutionHandlers(
       // Hold already released (user started/moved the task)
       return;
     }
-    if (agentManager.isRunning(taskId)) {
+    // The scheduler knows the project of every task it holds, so the run lookup is exact here
+    if (agentManager.isRunning(taskId, projectId)) {
       clearRateLimitHold(project, task, getMainWindow);
       return;
     }
@@ -441,7 +489,7 @@ export function registerTaskExecutionHandlers(
     }
 
     console.warn(`[RateLimitResume] Hold expired for ${taskId}, resuming`);
-    await startTask(taskId);
+    await startTask(taskId, projectId);
   };
 
   rateLimitResumeScheduler.configure({
@@ -471,13 +519,25 @@ export function registerTaskExecutionHandlers(
   /**
    * Stop a task
    */
-  onIpc(IPC_CHANNELS.TASK_STOP, (_, taskId: string) => {
-    agentManager.killTask(taskId);
-    fileWatcher.unwatch(taskId).catch((err) => {
+  onIpc(IPC_CHANNELS.TASK_STOP, (_, taskId: string, projectId?: string) => {
+    // AgentManager holds its runs per project and task, so the project of the board the user
+    // pressed Stop on comes over with the request. When it is missing (an older renderer, or a
+    // main-process caller such as the Insights task tools) the bare task id goes through
+    // instead: it stops the single run that carries the id and refuses only while two projects
+    // run it, which is the one case where no answer exists. Looking the project up from the task
+    // id would invent one - the first project holding the id, running the task or not - and
+    // stopping that project's absent run is how the button came to do nothing at all.
+    const stoppedProjectId = agentManager.killTask(taskId, projectId);
+    // The watcher to close belongs to the run that was just stopped: the project the stop came
+    // from, or - when it sent none - the project whose run AgentManager found. Closing by task id
+    // alone would silence the plan updates of another project's live run
+    fileWatcher.unwatch(taskId, projectId ?? stoppedProjectId).catch((err) => {
       console.error('[TASK_STOP] Failed to unwatch:', err);
     });
 
-    const { task, project } = findTaskAndProject(taskId);
+    // The card to move is the one whose run was just stopped. Without that, a stop sent with no
+    // project would kill the right run and then transition whichever project holds the id first
+    const { task, project } = findTaskAndProject(taskId, projectId ?? stoppedProjectId);
     if (!task || !project) return;
 
     // Stopped before implementation started: back to backlog; otherwise to review
@@ -485,7 +545,7 @@ export function registerTaskExecutionHandlers(
     taskStateManager.handleUiEvent(taskId, { type: 'USER_STOPPED', hasPlan }, task, project);
 
     // Clear stale tracking state so a subsequent restart works correctly
-    taskStateManager.prepareForRestart(taskId);
+    taskStateManager.prepareForRestart(taskId, project.id);
   });
 
   /**
@@ -501,9 +561,10 @@ export function registerTaskExecutionHandlers(
       approved: boolean,
       feedback?: string,
       images?: ImageAttachment[],
-      options?: TaskReviewOptions
+      options?: TaskReviewOptions,
+      projectId?: string
     ): Promise<IPCResult> => {
-      const { task, project } = findTaskAndProject(taskId);
+      const { task, project } = findTaskAndProject(taskId, projectId);
       if (!task || !project) {
         return { success: false, error: 'Task not found' };
       }
@@ -513,7 +574,12 @@ export function registerTaskExecutionHandlers(
         return { success: true };
       }
 
-      if (agentManager.isRunning(taskId)) {
+      // Asked of the project whose task the revision will run in - the one resolved above, which
+      // is the request's `projectId` whenever it sent one. Asking with that optional id instead
+      // would guard a different project from the one `launchRun` below starts, and with no id sent
+      // and two projects running the task id AgentManager refuses, so a second run would be
+      // launched over this project's live one
+      if (agentManager.isRunning(taskId, project.id)) {
         return { success: false, error: 'The task is still running. Stop it before requesting changes.' };
       }
 
@@ -541,17 +607,22 @@ export function registerTaskExecutionHandlers(
       // "Start over": throw the attempt away (worktree, branch and run history) and redo the
       // task from scratch, with the feedback as the reviewer's notes on the discarded attempt
       if (options?.startOver) {
-        const restarted = await restartTaskFromScratch(taskId, { feedback, images });
+        // The project this review is about, so the restart resolves the same task this handler did
+        const restarted = await restartTaskFromScratch(taskId, project.id, { feedback, images });
         return restarted.success ? { success: true } : { success: false, error: restarted.error };
       }
 
       const feedbackImagePaths = saveFeedbackImages(getMainSpecDir(project, task), images);
 
       // Clear stale tracking state before starting the revision
-      taskStateManager.prepareForRestart(taskId);
+      taskStateManager.prepareForRestart(taskId, project.id);
       taskStateManager.handleUiEvent(taskId, { type: 'USER_RESUMED' }, task, project);
 
-      launchRun(taskId, task, project, 'revise', feedback?.trim() || 'No feedback provided', feedbackImagePaths);
+      // The feedback goes over as the reviewer left it, empty included: a reviewer who asked for
+      // the changes in screenshots alone said plenty, and standing a "No feedback provided"
+      // placeholder in for the text they didn't type told the run the opposite. The run composes
+      // what to say from the text and the images together (`reviewerFeedback` in task-runner.ts)
+      launchRun(taskId, task, project, 'revise', feedback?.trim(), feedbackImagePaths);
       return { success: true };
     }
   );
@@ -567,9 +638,10 @@ export function registerTaskExecutionHandlers(
       _,
       taskId: string,
       status: TaskStatus,
-      options?: { forceCleanup?: boolean; keepWorktree?: boolean }
+      options?: { forceCleanup?: boolean; keepWorktree?: boolean },
+      projectId?: string
     ): Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }> => {
-      const { task, project } = findTaskAndProject(taskId);
+      const { task, project } = findTaskAndProject(taskId, projectId);
       if (!task || !project) {
         return { success: false, error: 'Task not found' };
       }
@@ -641,11 +713,16 @@ export function registerTaskExecutionHandlers(
         }
 
         // Stop the run when the task is moved away from In Progress (e.g., back to backlog)
-        // BEFORE the machine transition, so the run's late events can't move it back
+        // BEFORE the machine transition, so the run's late events can't move it back.
+        // Every run lookup here names the project this handler acts on - the one resolved from the
+        // task id, which is the request's `projectId` whenever it sent one. The request's optional
+        // id is not a substitute: with none sent and another project running a task of this spec
+        // id, AgentManager would answer about that project, so moving the card would stop or start
+        // nothing while this project's run carried on, or start a second run over it
         if (status !== 'in_progress' && agentManager.isRunning(taskId, project.id)) {
           console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
           agentManager.killTask(taskId, project.id);
-          fileWatcher.unwatch(taskId).catch(() => undefined);
+          fileWatcher.unwatch(taskId, project.id).catch(() => undefined);
         }
 
         if (status === 'in_progress' && !agentManager.isRunning(taskId, project.id)) {
@@ -661,7 +738,7 @@ export function registerTaskExecutionHandlers(
             sendTaskError(taskId, auth.error, project.id);
             return { success: false, error: auth.error };
           }
-          taskStateManager.prepareForRestart(taskId);
+          taskStateManager.prepareForRestart(taskId, project.id);
         }
 
         const handledByMachine = taskStateManager.handleManualStatusChange(taskId, status, task, project);
@@ -701,8 +778,12 @@ export function registerTaskExecutionHandlers(
    */
   handleIpc(
     IPC_CHANNELS.TASK_CHECK_RUNNING,
-    async (_, taskId: string): Promise<IPCResult<boolean>> => {
-      return { success: true, data: agentManager.isRunning(taskId) };
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<boolean>> => {
+      // The project of the card that is asking: runs are held per project and task, and a task
+      // id alone belongs to as many tasks as there are projects holding it. Searching the
+      // projects for the id would answer about whichever one came first - "not running" for a
+      // task that is running, which is what makes a card offer to recover a live run.
+      return { success: true, data: agentManager.isRunning(taskId, projectId) };
     }
   );
 
@@ -716,21 +797,28 @@ export function registerTaskExecutionHandlers(
     async (
       _,
       taskId: string,
-      options?: { targetStatus?: TaskStatus; autoRestart?: boolean }
+      options?: { targetStatus?: TaskStatus; autoRestart?: boolean },
+      projectId?: string
     ): Promise<IPCResult<{ taskId: string; recovered: boolean; newStatus: TaskStatus; message: string; autoRestarted?: boolean }>> => {
       const autoRestart = options?.autoRestart ?? false;
 
-      if (agentManager.isRunning(taskId)) {
+      // The task is resolved before the run is looked up, because recovery rewrites that task's
+      // plan files and forgets its state machine: the project it is about to write to is the
+      // project whose run has to be idle. Asking AgentManager with the request's optional id
+      // instead would check a project this recovery is not touching, and with no id sent and two
+      // projects running a task of this spec id it refuses and answers "not running", letting
+      // recovery rewrite the plan file under this project's live run
+      const { task, project } = findTaskAndProject(taskId, projectId);
+      if (!task || !project) {
+        return { success: false, error: 'Task not found' };
+      }
+
+      if (agentManager.isRunning(taskId, project.id)) {
         return {
           success: false,
           error: 'Task is still running. Stop it first before recovering.',
           data: { taskId, recovered: false, newStatus: 'in_progress', message: 'Task is still running' }
         };
-      }
-
-      const { task, project } = findTaskAndProject(taskId);
-      if (!task || !project) {
-        return { success: false, error: 'Task not found' };
       }
 
       // Where the run got to decides the recovery status
@@ -787,9 +875,9 @@ export function registerTaskExecutionHandlers(
           return { success: false, error: 'Failed to write plan file during recovery' };
         }
         // The XState actor still thinks the task is active: rebuild it from the files
-        taskStateManager.clearTask(taskId);
+        taskStateManager.clearTask(taskId, project.id);
 
-        fileWatcher.unwatch(taskId).catch((err) => {
+        fileWatcher.unwatch(taskId, project.id).catch((err) => {
           console.error('[TASK_RECOVER_STUCK] Failed to unwatch:', err);
         });
 

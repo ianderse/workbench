@@ -86,11 +86,14 @@ describe('File Watcher Integration', () => {
       const errorHandler = vi.fn();
       watcher.on('error', errorHandler);
 
-      await watcher.watch('task-1', TEST_SPEC_DIR);
+      await watcher.watch('task-1', TEST_SPEC_DIR, 'project-a');
 
+      // The project the watch was started for travels with the event, so a listener does not have
+      // to search the projects for a task id that several of them can hold
       expect(errorHandler).toHaveBeenCalledWith(
         'task-1',
-        expect.stringContaining('not found')
+        expect.stringContaining('not found'),
+        'project-a'
       );
     });
 
@@ -129,11 +132,11 @@ describe('File Watcher Integration', () => {
       const progressHandler = vi.fn();
       watcher.on('progress', progressHandler);
 
-      await watcher.watch('task-1', TEST_SPEC_DIR);
+      await watcher.watch('task-1', TEST_SPEC_DIR, 'project-a');
 
       expect(progressHandler).toHaveBeenCalledWith('task-1', expect.objectContaining({
         feature: 'Test Feature'
-      }));
+      }), 'project-a');
     });
 
     it('should emit progress on file change', async () => {
@@ -146,7 +149,7 @@ describe('File Watcher Integration', () => {
       const progressHandler = vi.fn();
       watcher.on('progress', progressHandler);
 
-      await watcher.watch('task-1', TEST_SPEC_DIR);
+      await watcher.watch('task-1', TEST_SPEC_DIR, 'project-a');
       progressHandler.mockClear();
 
       // Update file
@@ -175,7 +178,7 @@ describe('File Watcher Integration', () => {
             ])
           })
         ])
-      }));
+      }), 'project-a');
     });
 
     it('should handle file parse errors gracefully', async () => {
@@ -213,12 +216,12 @@ describe('File Watcher Integration', () => {
       const errorHandler = vi.fn();
       watcher.on('error', errorHandler);
 
-      await watcher.watch('task-1', TEST_SPEC_DIR);
+      await watcher.watch('task-1', TEST_SPEC_DIR, 'project-a');
 
       // Simulate watcher error
       mockWatcher.emit('error', new Error('Watch failed'));
 
-      expect(errorHandler).toHaveBeenCalledWith('task-1', 'Watch failed');
+      expect(errorHandler).toHaveBeenCalledWith('task-1', 'Watch failed', 'project-a');
     });
 
     it('should stop watching task when unwatched', async () => {
