@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   Plus,
-  RefreshCw,
   PanelLeft
 } from 'lucide-react';
 import { AgentNodeIcon, GraphIcon, InsightsIcon, KanbanIcon, ProjectIcon, SettingsIcon as Settings } from './icons/app-icons';
@@ -15,25 +14,13 @@ import {
   TooltipProvider,
   TooltipTrigger
 } from './ui/tooltip';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle
-} from './ui/dialog';
 import { cn } from '../lib/utils';
-import {
-  useProjectStore,
-  initializeProject
-} from '../stores/project-store';
+import { useProjectStore } from '../stores/project-store';
 import { useSettingsStore, saveSettings } from '../stores/settings-store';
-import { AddProjectModal } from './AddProjectModal';
 import { GitSetupModal } from './GitSetupModal';
 
 import { UsageIndicator } from './UsageIndicator';
-import type { Project, GitStatus } from '../../shared/types';
+import type { GitStatus } from '../../shared/types';
 
 export type SidebarView = 'projects' | 'kanban' | 'terminals' | 'insights' | 'memory';
 
@@ -80,12 +67,8 @@ export function Sidebar({
     if (selectedProjectId) void refreshMemoryGraph(selectedProjectId);
   }, [selectedProjectId, refreshMemoryGraph]);
 
-  const [showAddProjectModal, setShowAddProjectModal] = useState(false);
-  const [showInitDialog, setShowInitDialog] = useState(false);
   const [showGitSetupModal, setShowGitSetupModal] = useState(false);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
-  const [pendingProject, setPendingProject] = useState<Project | null>(null);
-  const [isInitializing, setIsInitializing] = useState(false);
 
   const selectedProject = projects.find((p) => p.id === selectedProjectId);
 
@@ -118,36 +101,6 @@ export function Sidebar({
     };
     checkGit();
   }, [selectedProject]);
-
-  const handleProjectAdded = (project: Project, needsInit: boolean) => {
-    if (needsInit) {
-      setPendingProject(project);
-      setShowInitDialog(true);
-    }
-  };
-
-  const handleInitialize = async () => {
-    if (!pendingProject) return;
-
-    const projectId = pendingProject.id;
-    setIsInitializing(true);
-    try {
-      const result = await initializeProject(projectId);
-      if (result?.success) {
-        // Clear pendingProject FIRST before closing dialog
-        // This prevents onOpenChange from triggering skip logic
-        setPendingProject(null);
-        setShowInitDialog(false);
-      }
-    } finally {
-      setIsInitializing(false);
-    }
-  };
-
-  const handleSkipInit = () => {
-    setShowInitDialog(false);
-    setPendingProject(null);
-  };
 
   const handleGitInitialized = async () => {
     // Refresh git status after initialization
@@ -312,60 +265,6 @@ export function Sidebar({
           {!isCollapsed && <UsageIndicator />}
         </div>
       </aside>
-
-      {/* Initialize Workbench Dialog */}
-      <Dialog open={showInitDialog} onOpenChange={(open) => {
-        // Only allow closing if user manually closes (not during initialization)
-        if (!open && !isInitializing) {
-          handleSkipInit();
-        }
-      }}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {t('dialogs:initialize.title')}
-            </DialogTitle>
-            <DialogDescription>
-              {t('dialogs:initialize.description')}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-4">
-            <div className="rounded-xl bg-segment-track px-4 py-3 text-sm">
-              <p className="text-foreground mb-2">{t('dialogs:initialize.willDo')}</p>
-              <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                <li>{t('dialogs:initialize.createFolder')}</li>
-                <li>{t('dialogs:initialize.setupSpecs')}</li>
-              </ul>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={handleSkipInit} disabled={isInitializing}>
-              {t('common:buttons.skip')}
-            </Button>
-            <Button
-              size="sm"
-              onClick={handleInitialize}
-              disabled={isInitializing}
-            >
-              {isInitializing ? (
-                <>
-                  <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                  {t('common:labels.initializing')}
-                </>
-              ) : (
-                t('common:buttons.initialize')
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add Project Modal */}
-      <AddProjectModal
-        open={showAddProjectModal}
-        onOpenChange={setShowAddProjectModal}
-        onProjectAdded={handleProjectAdded}
-      />
 
       {/* Git Setup Modal */}
       <GitSetupModal
