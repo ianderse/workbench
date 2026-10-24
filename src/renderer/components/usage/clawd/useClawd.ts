@@ -103,6 +103,17 @@ function newMz(): Mz {
 
 const rnd = (n: number) => Math.floor(Math.random() * n);
 
+/** Nobody asked for a running crab: with this on, the scene stands still */
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+}
+
+/** Frame of the soul act the still scene borrows: the spirit out, hanging over the body */
+const SOUL_HANG_FRAME = 30;
+
+/** How long a click's still answer is held before the scene goes back to resting */
+const STILL_PET_MS = 1_200;
+
 export function useClawd(input: ClawdInput) {
   const mz = useRef<Mz>(newMz());
   const live = useRef(input);
@@ -111,10 +122,54 @@ export function useClawd(input: ClawdInput) {
   /** Click handler lives in a ref so the scene never has to re-subscribe */
   const pet = useRef<() => void>(() => {});
 
+  // Reduced motion: no timer, just the crab standing in the middle of the scene. The usage is
+  // in the dependencies, so the hearts still follow the limit as it is used up - with nothing
+  // moving, the tick loop is no longer there to pick the new value up.
   useEffect(() => {
-    if (!input.active) return;
+    if (!input.active || !prefersReducedMotion()) return;
+    const pct = input.sessionPercent;
+    mz.current.pct = pct;
+    const gone = heartHalves(pct) === 0;
+    const x = Math.max(0, input.span - MASCOT_W) / 2;
 
-    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    /** The standing scene, holding whatever a click has just left in it */
+    const paint = (reaction: 'love' | 'soul' | null): void => {
+      // The soul's own frame comes from the animation, stopped where the spirit hangs at the top
+      const act = reaction === 'soul' ? stepAct('soul', SOUL_HANG_FRAME) : null;
+      setRender({
+        geo: getClawdGeo(act ? act.frame : makeFrame(gone ? { flip: true, eyes: 'x' } : {})),
+        x, lift: 0,
+        bubble: '', bubbleKind: '', bubbleY: 22, zzz: null, sweat: null, dust: [], confetti: [],
+        // The heart over the middle of him, at full opacity, halfway along the path it would fly
+        love: reaction === 'love' ? { x: x + MASCOT_W / 2 - 5, y: 30, opacity: 1 } : null,
+        soul: act ? { rects: getSoulGeo(act.soul, act.soulT), x: x + 9.5 * 2, y: 6 * 2.2, opacity: 0.85 } : null,
+        beat: 1,
+        shownFraction: pct == null ? null : Math.min(1, Math.max(0, (100 - pct) / 100)),
+      });
+    };
+
+    paint(null);
+
+    // Asking for reduced motion asks for less animation nobody set off, not for a mascot that
+    // ignores being clicked, so petting still answers - it just answers standing still. He shows
+    // the same heart as the walking crab, or, with the limit used up, the same soul leaving his
+    // body, each held in place for a moment instead of floating up, and no click animation plays.
+    let reset: ReturnType<typeof setTimeout> | undefined;
+    pet.current = () => {
+      clearTimeout(reset);
+      paint(gone ? 'soul' : 'love');
+      reset = setTimeout(() => paint(null), STILL_PET_MS);
+    };
+
+    return () => {
+      clearTimeout(reset);
+      pet.current = () => {};
+    };
+  }, [input.active, input.sessionPercent, input.span]);
+
+  useEffect(() => {
+    if (!input.active || prefersReducedMotion()) return;
+
     const m = mz.current;
 
     const startAct = (name: string) => {
@@ -194,8 +249,17 @@ export function useClawd(input: ClawdInput) {
       m.tick++;
       setMood();
 
-      const span = Math.max(0, live.current.span - MASCOT_W);
-      if (m.x < 0) m.x = span / 2;
+      const width = live.current.span;
+      const span = Math.max(0, width - MASCOT_W);
+      // He comes in at the middle, but only once the scene has reported its width: the first
+      // ticks can run before it does, and taking that zero for his starting point would park him
+      // at the left edge with nothing left to move him back. A scene narrower than he is reports
+      // a width all the same, and there the single position it has for him is the left edge - so
+      // it is the width, not the walkable span it leaves, that says whether to keep waiting.
+      if (m.x < 0) {
+        if (width <= 0) return MOOD_FRAME_MS;
+        m.x = span / 2;
+      }
       if (m.x > span) m.x = span;
       // The scene may have narrowed since the target was picked, or he walks into the wall forever.
       if (m.target != null && m.target > span) m.target = span;
@@ -457,20 +521,6 @@ export function useClawd(input: ClawdInput) {
 
       return m.act && CLAWD_SEQS[m.act] ? CLAWD_FRAME_MS : MOOD_FRAME_MS;
     };
-
-    if (reduced) {
-      // Nobody asked for a running crab: show him standing, with the right hearts.
-      setMood();
-      const halves = heartHalves(m.pct);
-      setRender({
-        geo: getClawdGeo(makeFrame(halves === 0 ? { flip: true, eyes: 'x' } : {})),
-        x: Math.max(0, live.current.span - MASCOT_W) / 2, lift: 0,
-        bubble: '', bubbleKind: '', bubbleY: 22, zzz: null, sweat: null, dust: [], confetti: [],
-        love: null, soul: null, beat: 1,
-        shownFraction: m.pct == null ? null : Math.min(1, Math.max(0, (100 - m.pct) / 100)),
-      });
-      return;
-    }
 
     startAct(ENTRANCE_ACTS[rnd(ENTRANCE_ACTS.length)]);
 
