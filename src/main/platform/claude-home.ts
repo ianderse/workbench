@@ -15,7 +15,7 @@
 import { homedir } from 'os';
 import path from 'path';
 import { isMacOS, isWindows } from './index';
-import { getWslInfo } from './shell-runtime';
+import { getWslInfo, toRuntimePath } from './shell-runtime';
 import { wslToWindows } from './wsl-paths';
 
 /** The home dir Claude Code runs with (a host path: the Linux home's UNC path in WSL) */
@@ -50,11 +50,19 @@ export function expandClaudeHome(p: string | undefined): string | undefined {
 }
 
 /**
- * Folder name Claude Code uses for a project under `<config dir>/projects`: the project's path
- * (as the OS Claude Code runs on sees it) with every slash and backslash replaced by a dash.
+ * Folder name Claude Code uses for a project under `<config dir>/projects`: the project's path (as
+ * the OS Claude Code runs on sees it) with every character that is not a letter or a digit replaced
+ * by a dash. Separators, dots, spaces, underscores and the colon of a Windows drive letter all go
+ * the same way, so `/home/me/.config/fish` becomes `-home-me--config-fish` and `C:\Users\me\my app`
+ * becomes `C--Users-me-my-app`. A narrower rule would build names that exist nowhere on disk, which
+ * reads as the project simply having no sessions.
+ *
+ * In WSL Claude Code runs inside the distribution and names the folder after the Linux path it sees
+ * there, so a host path is translated first; a path that already is a Linux one is left as it is.
  */
 export function claudeProjectSlug(projectPath: string): string {
-  return projectPath.replace(/[/\\]/g, '-');
+  const asClaudeCodeSeesIt = isClaudeHomeInWsl() ? toRuntimePath(projectPath) : projectPath;
+  return asClaudeCodeSeesIt.replace(/[^a-zA-Z0-9]/g, '-');
 }
 
 /**
