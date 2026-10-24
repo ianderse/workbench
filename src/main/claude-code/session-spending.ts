@@ -5,20 +5,35 @@
  * Claude Code keeps it in the session transcript instead
  * (`<configDir>/projects/<project>/<sessionId>.jsonl`), in two forms that are read together here:
  *
- * - Every `cost-state` line carries the running total of the process that wrote it. Claude Code
- *   writes one at a checkpoint and when the session exits, so it is the authoritative figure but
- *   an occasional one, and it carries no timestamp of its own. Each process run (`startTime`) is
- *   followed separately and the runs are added up: a run reports only what it spent itself, and a
- *   resumed session starts counting at zero again.
+ * - Every `cost-state` line carries a running total, named after the `startTime` of the cost
+ *   accounting it belongs to. Claude Code writes one at a checkpoint and when the session exits,
+ *   so it is the authoritative figure but an occasional one, and it carries no timestamp of its
+ *   own. That total is *not* per process: Claude Code restores the accounting when a session is
+ *   resumed, so the figure keeps climbing over every `--resume` of the session (a task's plan,
+ *   implement and validate phases read as one accounting that counts up through all three), and
+ *   whichever process holds it writes it into every transcript it goes on to touch, so two
+ *   conversations one window worked on both report the same figure. A `startTime` is therefore
+ *   worth counting once, at the highest total ever seen for it; adding up what each transcript
+ *   reports would count the same dollars as many times as there are transcripts.
  * - Every assistant record carries the tokens its request used, its model and its own timestamp.
  *   Priced per model (`session-pricing.ts`), those give what each turn cost on the day it
  *   happened - including the turns since the last `cost-state` line, which is what makes a session
- *   that is still running show up in the chart after each answer.
+ *   that is still running show up in the chart after each answer. A turn belongs to the one
+ *   transcript it was written in, so turns are simply added up.
  *
- * The turns divide the session's spending over the days; the total is whichever of the two is
- * larger, so a session never reports less than Claude Code's own figure, and the days are scaled
- * to it. That keeps a conversation resumed weeks later booked on the days it was really spent
- * instead of landing in one lump on the day it was picked up again.
+ * Reading a transcript therefore yields both: the turns, unscaled, and the highest total each
+ * `startTime` reported in it (`TranscriptSpending`). `combineSpending()` reconciles them - the
+ * turns divide the spending over the days, the total is whichever of the two is larger, so nothing
+ * ever reports less than Claude Code's own figure, and the days are scaled to it. That keeps a
+ * conversation resumed weeks later booked on the days it was really spent instead of landing in one
+ * lump on the day it was picked up again.
+ *
+ * Only the caller that holds every transcript of a project (`project-metrics.ts`) can recognize a
+ * `startTime` across them, which is why reconciling happens there rather than transcript by
+ * transcript. It is done per set of transcripts that share an accounting, though, not over the
+ * project in one go: comparing a reported total against an estimate only means anything when both
+ * describe the same work, so a session whose turns carry no price must not be weighed against a
+ * different session's priced turns.
  *
  * One API response is written to the transcript as several records (one per content block), all
  * repeating the same usage, so requests are counted once by their request id.
@@ -35,6 +50,22 @@ export interface SessionSpending {
   totalCostUsd: number;
   byDay: Map<string, number>;
 }
+
+/**
+ * What one transcript holds before it is reconciled with the others: the turns as they were priced,
+ * and the totals the cost accountings it mentions reported. Kept apart from the reconciled figures
+ * because the same accounting can appear in several transcripts and must only be counted once.
+ */
+export interface SpendingParts {
+  estimate: TurnEstimate;
+  /** Day of the last record in the transcript, where what has no day of its own is booked */
+  lastDay: string | null;
+  /** Highest total each cost accounting reported here, by the key `runKey()` gives it */
+  runTotals: Map<string, number>;
+}
+
+/** A transcript's own reconciled spending, together with what the project needs to reconcile it */
+export interface TranscriptSpending extends SessionSpending, SpendingParts {}
 
 /** A session's transcript as it is on disk, which says whether a reading of it is still current */
 export interface TranscriptFile {
@@ -196,7 +227,7 @@ export async function findSessionTranscript(
 }
 
 /** What the turns of a transcript are estimated to have cost, per day */
-interface TurnEstimate {
+export interface TurnEstimate {
   byDay: Map<string, number>;
   total: number;
   /** Turns whose day could not be read, booked on the session's last day */
@@ -225,15 +256,41 @@ function bookTurn(line: AssistantLine, fallbackDay: string | null, counted: Set<
 }
 
 /**
+ * The key a cost accounting is counted under. Its `startTime` names it across transcripts, which
+ * is what lets the same accounting be recognized in two of them. A line that carries no usable
+ * `startTime` cannot be matched that way, so the transcript it was found in stands in for it: the
+ * total is still counted, but only against this one transcript, where it cannot wrongly displace
+ * another transcript's unknown accounting or be silently merged with it.
+ *
+ * A `cost-state` line also carries a `sessionId`, and it is deliberately not the key: in every
+ * transcript examined it simply repeats the transcript's own name, so it says which conversation
+ * the line was written in, not which accounting the money belongs to. Keying on it would be the
+ * same as not deduplicating at all.
+ *
+ * `startTime` is a millisecond stamp, so two unrelated processes starting in the same millisecond
+ * would be merged and the smaller total dropped. Measured against the sessions on this machine
+ * (352 transcripts across both config dirs) that case does not appear: there are two shared
+ * `startTime` values, and both behave as one accounting whose running total was written into two
+ * conversations - $14.40 beside $0.41 for a 32-second conversation the same process ran first, and
+ * $49.75 beside $49.68. In both the larger figure already covers the smaller, which is what makes
+ * the highest total per accounting the right answer and summing them the wrong one.
+ */
+export function runKey(startTime: unknown, file: string): string {
+  return typeof startTime === 'number' && startTime > 0 ? `run:${startTime}` : `file:${file}`;
+}
+
+/**
  * What the transcript says the session has spent, per day: the turns priced per model, scaled so
- * the session's total is never below what Claude Code itself last reported.
+ * the session's total is never below what Claude Code itself last reported. The unscaled turns and
+ * the totals Claude Code reported come back along with it, for a caller that holds several
+ * transcripts and has to reconcile them together.
  *
  * A transcript that cannot be read through (deleted, replaced, out of file handles) gives up what
  * it has read so far rather than failing the whole of Metrics.
  */
-export async function readTranscriptSpending(file: string): Promise<SessionSpending> {
-  /** Highest total each process run has reported */
-  const runTotals = new Map<number, number>();
+export async function readTranscriptSpending(file: string): Promise<TranscriptSpending> {
+  /** Highest total each cost accounting has reported in this transcript */
+  const runTotals = new Map<string, number>();
   const estimate: TurnEstimate = { byDay: new Map(), total: 0, undated: 0 };
   const counted = new Set<string>();
   let lastTimestamp: string | undefined;
@@ -258,7 +315,7 @@ export async function readTranscriptSpending(file: string): Promise<SessionSpend
             continue;
           }
           if (data.type !== 'cost-state') continue;
-          const run = typeof data.startTime === 'number' ? data.startTime : 0;
+          const run = runKey(data.startTime, file);
           const total = spentUsd(data.totalCostUSD);
           if (total > (runTotals.get(run) ?? 0)) runTotals.set(run, total);
           continue;
@@ -278,29 +335,115 @@ export async function readTranscriptSpending(file: string): Promise<SessionSpend
     appLog.warn(`[SessionSpending] Could not read the session transcript ${file}:`, error);
   }
 
-  return combine(estimate, runTotals, dayOf(lastTimestamp));
+  const parts: SpendingParts = { estimate, lastDay: dayOf(lastTimestamp), runTotals };
+  return { ...combineSpending([parts]), ...parts };
 }
 
 /**
- * The session's spending per day: what the turns are estimated to have cost, scaled to the total
- * the runs reported when that is higher (it covers work the turns do not price, such as a model
- * with no published price). When no turn could be priced, the reported total is booked on the
- * session's last day, which is all that is known about it.
+ * The spending of one or more transcripts per day: what their turns are estimated to have cost,
+ * scaled to the total the cost accountings reported when that is higher (it covers work the turns
+ * do not price, such as a model with no published price). Each accounting counts once, at the
+ * highest total it reported in any of the transcripts, so a figure one process wrote into several
+ * of them is not counted again per transcript.
+ *
+ * When no turn could be priced, the reported total is booked on the last day any of the transcripts
+ * was written on, which is all that is known about it.
  */
-function combine(estimate: TurnEstimate, runTotals: Map<number, number>, lastDay: string | null): SessionSpending {
-  const reported = [...runTotals.values()].reduce((sum, total) => sum + total, 0);
-  const totalCostUsd = Math.max(estimate.total, reported);
+export function combineSpending(parts: Iterable<SpendingParts>): SessionSpending {
   const byDay = new Map<string, number>();
+  let totalCostUsd = 0;
 
-  if (estimate.total <= 0) {
-    if (totalCostUsd > 0 && lastDay) byDay.set(lastDay, totalCostUsd);
-    return { totalCostUsd, byDay };
+  for (const group of groupBySharedAccounting([...parts])) {
+    const reconciled = reconcileGroup(group);
+    totalCostUsd += reconciled.totalCostUsd;
+    for (const [day, costUsd] of reconciled.byDay) byDay.set(day, (byDay.get(day) ?? 0) + costUsd);
   }
 
-  const scale = totalCostUsd / estimate.total;
-  for (const [day, costUsd] of estimate.byDay) byDay.set(day, costUsd * scale);
-  if (estimate.undated > 0 && lastDay) {
-    byDay.set(lastDay, (byDay.get(lastDay) ?? 0) + estimate.undated * scale);
+  return { totalCostUsd, byDay };
+}
+
+/**
+ * The transcripts split into the sets that have to be reconciled together: two transcripts belong
+ * to the same set when a cost accounting wrote into both, directly or through a chain of others.
+ *
+ * Reconciling the whole project in one go would be wrong, because `Math.max` is only meaningful
+ * between two measurements of the *same* work. A session Claude Code could not price (a model with
+ * no published price prices its turns at nothing) reports a total and no estimate; a session that
+ * is still running has priced turns and has not written a total yet. Compared across the project,
+ * the first one's total would swallow the second one's turns - the money would go missing from the
+ * total and, worse, be smeared over days the first session never ran on. Compared within a set,
+ * each is reconciled against its own work, and an accounting that reached several transcripts is
+ * still only counted once.
+ */
+function groupBySharedAccounting(all: SpendingParts[]): SpendingParts[][] {
+  // Union-find over the transcripts, joined by every accounting key they have in common
+  const parent = all.map((_, index) => index);
+  const find = (index: number): number => {
+    while (parent[index] !== index) {
+      parent[index] = parent[parent[index]];
+      index = parent[index];
+    }
+    return index;
+  };
+  const union = (a: number, b: number): void => {
+    const rootA = find(a);
+    const rootB = find(b);
+    if (rootA !== rootB) parent[rootB] = rootA;
+  };
+
+  const firstHolder = new Map<string, number>();
+  all.forEach((part, index) => {
+    for (const run of part.runTotals.keys()) {
+      const holder = firstHolder.get(run);
+      if (holder === undefined) firstHolder.set(run, index);
+      else union(holder, index);
+    }
+  });
+
+  const sets = new Map<number, SpendingParts[]>();
+  all.forEach((part, index) => {
+    const root = find(index);
+    const set = sets.get(root);
+    if (set) set.push(part);
+    else sets.set(root, [part]);
+  });
+  return [...sets.values()];
+}
+
+/**
+ * What one such set spent per day: its turns priced per model, scaled to the total its accountings
+ * reported when that is higher (which covers work the turns do not price), with each accounting
+ * counted once at the highest total it reported in any of the set's transcripts.
+ */
+function reconcileGroup(group: SpendingParts[]): SessionSpending {
+  const byDay = new Map<string, number>();
+  const runTotals = new Map<string, number>();
+  let estimated = 0;
+  let lastDay: string | null = null;
+
+  for (const part of group) {
+    estimated += part.estimate.total;
+    for (const [day, costUsd] of part.estimate.byDay) byDay.set(day, (byDay.get(day) ?? 0) + costUsd);
+    // Turns with no readable day belong to the transcript they were read from, not to the newest one
+    if (part.estimate.undated > 0 && part.lastDay) {
+      byDay.set(part.lastDay, (byDay.get(part.lastDay) ?? 0) + part.estimate.undated);
+    }
+    for (const [run, total] of part.runTotals) {
+      if (total > (runTotals.get(run) ?? 0)) runTotals.set(run, total);
+    }
+    if (part.lastDay && (!lastDay || part.lastDay > lastDay)) lastDay = part.lastDay;
   }
+
+  const reported = [...runTotals.values()].reduce((sum, total) => sum + total, 0);
+  const totalCostUsd = Math.max(estimated, reported);
+
+  if (estimated <= 0) {
+    const onLastDay = new Map<string, number>();
+    if (totalCostUsd > 0 && lastDay) onLastDay.set(lastDay, totalCostUsd);
+    return { totalCostUsd, byDay: onLastDay };
+  }
+
+  const scale = totalCostUsd / estimated;
+  for (const [day, costUsd] of byDay) byDay.set(day, costUsd * scale);
   return { totalCostUsd, byDay };
 }

@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
-import { findSessionTranscript, latestTranscript, readTranscriptSpending } from '../claude-code/session-spending';
+import {
+  combineSpending,
+  findSessionTranscript,
+  latestTranscript,
+  readTranscriptSpending,
+} from '../claude-code/session-spending';
 
 // The profile manager is not running in tests; only the config dirs passed in are searched
 vi.mock('../claude-profile-manager', () => ({ getClaudeProfileManager: () => ({ getProfileConfigDirs: () => [] }) }));
@@ -102,10 +107,10 @@ describe('session spending', () => {
     writeTranscript('.claude', 'abc', [
       turn(at('2026-10-19', 9), 10_000),
       costState(started('2026-10-19', 9), 0.25),
-      // Resumed two days later: a new process, whose total starts again at zero
+      // Resumed two days later: the session's cost accounting is restored with it, so the total it
+      // reports goes on climbing from what the first day cost instead of starting again at zero
       turn(at('2026-10-21', 9), 30_000),
-      costState(started('2026-10-21', 9), 0),
-      costState(started('2026-10-21', 9), 0.75),
+      costState(started('2026-10-19', 9), 1),
     ]);
 
     const spending = await spendingOf('abc', configDirs('.claude'));
@@ -115,6 +120,73 @@ describe('session spending', () => {
       ['2026-10-19', 0.25],
       ['2026-10-21', 0.75],
     ]);
+  });
+
+  it('counts the total one process reported in two transcripts once, not once per transcript', async () => {
+    // One Claude Code process worked on both conversations and wrote its own running total to each
+    const process = started('2026-10-20', 9);
+    writeTranscript('.claude', 'first', [turn(at('2026-10-20', 10), 10_000), costState(process, 80)]);
+    writeTranscript('.claude', 'second', [turn(at('2026-10-21', 10), 10_000), costState(process, 100)]);
+
+    const first = await spendingOf('first', configDirs('.claude'));
+    const second = await spendingOf('second', configDirs('.claude'));
+    const together = combineSpending([first!, second!]);
+
+    // Each conversation on its own still reports what Claude Code reported in it
+    expect(first?.totalCostUsd).toBe(80);
+    expect(second?.totalCostUsd).toBe(100);
+    // Together they are the one process's $100, not $180
+    expect(together.totalCostUsd).toBe(100);
+    expect(days(together)).toEqual([
+      ['2026-10-20', 50],
+      ['2026-10-21', 50],
+    ]);
+  });
+
+  /**
+   * The reconciliation is per set of transcripts that share a cost accounting, not per project.
+   * Reconciling the project in one go let a session Claude Code could not price swallow another
+   * session's priced turns: the money went missing from the total and was booked on days the
+   * other session never ran on.
+   */
+  it('does not let one session\'s reported total swallow another session\'s priced turns', async () => {
+    // Finished on a model with no published price, so its turns price to nothing and only Claude
+    // Code's own figure says what it cost
+    writeTranscript('.claude', 'unpriced', [
+      JSON.stringify({
+        type: 'assistant',
+        requestId: 'req-unpriced',
+        timestamp: at('2026-10-20', 10),
+        message: { id: 'msg-unpriced', model: 'some-unpublished-model', usage: { output_tokens: 10_000 } },
+      }),
+      costState(started('2026-10-20', 9), 20),
+    ]);
+    // Still running on the next day: its turns are priced, and it has written no total yet
+    writeTranscript('.claude', 'running', [turn(at('2026-10-21', 10), 200_000)]);
+
+    const unpriced = await spendingOf('unpriced', configDirs('.claude'));
+    const running = await spendingOf('running', configDirs('.claude'));
+    const together = combineSpending([unpriced!, running!]);
+
+    expect(unpriced?.totalCostUsd).toBe(20);
+    expect(running?.totalCostUsd).toBeCloseTo(5, 6);
+    // Both are counted, each on its own day: no accounting is shared, so neither caps the other
+    expect(together.totalCostUsd).toBeCloseTo(25, 6);
+    expect(days(together)).toEqual([
+      ['2026-10-20', 20],
+      ['2026-10-21', 5],
+    ]);
+  });
+
+  it('keeps the totals of two transcripts apart when the process that wrote them is unknown', async () => {
+    writeTranscript('.claude', 'first', [message(at('2026-10-20', 10)), costState(0, 2)]);
+    writeTranscript('.claude', 'second', [message(at('2026-10-21', 10)), costState(0, 3)]);
+
+    const first = await spendingOf('first', configDirs('.claude'));
+    const second = await spendingOf('second', configDirs('.claude'));
+
+    // Neither line says which process it belongs to, so neither total can stand in for the other
+    expect(combineSpending([first!, second!]).totalCostUsd).toBe(5);
   });
 
   it('counts what the session spent since the last total it wrote', async () => {
@@ -200,7 +272,9 @@ describe('session spending', () => {
   it('gives up what it read when the transcript cannot be read through', async () => {
     const spending = await readTranscriptSpending(path.join(root, 'no-such-file.jsonl'));
 
-    expect(spending).toEqual({ totalCostUsd: 0, byDay: new Map() });
+    expect(spending.totalCostUsd).toBe(0);
+    expect(spending.byDay.size).toBe(0);
+    expect(spending.runTotals.size).toBe(0);
   });
 
   describe('the session a restored window continues', () => {
