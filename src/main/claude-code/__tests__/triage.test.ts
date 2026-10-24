@@ -75,6 +75,11 @@ describe('triageTask verification commands', () => {
     ]);
   });
 
+  it('keeps a script run in a workspace, which the root package.json does not define', async () => {
+    const commands = ['npm run -w pkg test', 'npm run --workspace=pkg lint', 'npm run --workspaces check'];
+    expect(await verificationFor(commands)).toEqual(commands);
+  });
+
   it('leaves the commands alone when the project has no package.json', async () => {
     rmSync(path.join(cwd, 'package.json'));
     expect(await verificationFor(['npm run typecheck'])).toEqual(['npm run typecheck']);

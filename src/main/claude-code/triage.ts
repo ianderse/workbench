@@ -123,6 +123,20 @@ function packageScripts(cwd: string): Set<string> | null {
 }
 
 /**
+ * The script a `npm run ...` command names, or null when the command is not one to check here.
+ *
+ * A flag can stand between `run` and the script name (`npm run -w pkg test`, `npm run
+ * --workspaces test`), and a script selected by a workspace flag lives in that package's own
+ * package.json rather than the one read here. Such a command is left alone, instead of being
+ * read as naming the flag itself as its script and dropped as a script the project never defines.
+ */
+function runScriptName(command: string): string | null {
+  const rest = /^\s*(?:npm|yarn|pnpm|bun)\s+run\s+(\S+)/.exec(command)?.[1];
+  if (!rest || rest.startsWith('-')) return null;
+  return /^[\w:.-]+$/.test(rest) ? rest : null;
+}
+
+/**
  * Drop `npm run <script>` commands the project doesn't define. Triage is told to list only
  * commands it found evidence for, but it does sometimes name a conventional script that isn't
  * there (`npm run typecheck`); the run then treats that command as a check and can report it
@@ -132,7 +146,7 @@ function keepRunnableChecks(verification: string[], cwd: string): string[] {
   const scripts = packageScripts(cwd);
   if (!scripts) return verification;
   return verification.filter((command) => {
-    const script = /^\s*(?:npm|yarn|pnpm|bun)\s+run\s+([\w:.-]+)/.exec(command)?.[1];
+    const script = runScriptName(command);
     return !script || scripts.has(script);
   });
 }
