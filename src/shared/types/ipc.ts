@@ -323,7 +323,8 @@ export interface ElectronAPI {
    */
   requestAllProfilesUsage: (forceRefresh?: boolean) => Promise<IPCResult<AllProfilesUsage | null>>;
   /** Listen for usage data updates */
-  onUsageUpdated: (callback: (usage: ClaudeUsageSnapshot) => void) => () => void;
+  /** Usage of the account in use; null right after switching to an account whose usage isn't known yet */
+  onUsageUpdated: (callback: (usage: ClaudeUsageSnapshot | null) => void) => () => void;
   /** Listen for proactive swap notifications */
   onProactiveSwapNotification: (callback: (notification: {
     fromProfile: { id: string; name: string };
