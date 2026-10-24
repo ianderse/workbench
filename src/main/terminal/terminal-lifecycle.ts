@@ -16,10 +16,9 @@ import type {
   TerminalOperationResult
 } from './types';
 import { isWindows } from '../platform';
-import { whenShellRuntimeReady } from '../platform/shell-runtime';
+import { getWslInfo, toHostPath, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
-import { getClaudeCodeEnv } from '../claude-code-settings';
 import { getGraphifyOutDir, hasGraphifyGraph } from '../graphify-paths';
 import { isSelfImproveEnabledForPath } from '../self-improve/setting';
 import { LIVE_AGENT_TERMINAL_ENV } from '../live-agent/project-setup';
@@ -37,6 +36,19 @@ export interface RestoreOptions {
  * Data handler function type
  */
 export type DataHandlerFn = (terminal: TerminalProcess, data: string) => void;
+
+/**
+ * Where a window with no folder of its own opens.
+ *
+ * While the session runs in WSL that is the distribution's home, kept as the host path everything
+ * the app stores is kept as (`\\wsl.localhost\<distro>\home\<user>`) and translated back when the
+ * PTY starts. The Windows home would land the window on `/mnt/c/Users/<user>`, a directory that is
+ * the user's in name only: nothing of the Linux setup is there.
+ */
+function runtimeHome(): string {
+  const wslHome = getWslInfo()?.home;
+  return wslHome ? toHostPath(wslHome) : os.homedir();
+}
 
 /**
  * Create a new terminal process
@@ -68,17 +80,13 @@ export async function createTerminal(
     // For auth terminals, don't inject existing OAuth token - we want a fresh login
     const profileEnv = skipOAuthToken ? {} : PtyManager.getActiveProfileEnv();
 
-    // Read env vars from Claude Code CLI settings files (.claude/settings.json hierarchy)
-    const claudeCodeEnv = getClaudeCodeEnv(projectPath);
-    if (Object.keys(claudeCodeEnv).length > 0) {
-      debugLog('[TerminalLifecycle] Injecting Claude Code settings env vars:', Object.keys(claudeCodeEnv));
-    }
-
     // Merge environment variables (lowest to highest precedence):
-    // 1. Claude Code settings env (from settings.json hierarchy)
-    // 2. Profile env (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN)
-    // 3. Custom env from TerminalCreateOptions
-    const mergedEnv: Record<string, string> = { ...claudeCodeEnv, ...profileEnv, ...(customEnv || {}) };
+    // 1. Profile env (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN)
+    // 2. Custom env from TerminalCreateOptions
+    // The `env` of Claude Code's settings files isn't copied in: Claude Code applies it itself, from
+    // the config dir it runs with. Copying ~/.claude's in overrode the account in use when that
+    // account has its own dir (a Bedrock ~/.claude turned a subscription window into Bedrock).
+    const mergedEnv: Record<string, string> = { ...profileEnv, ...(customEnv || {}) };
 
     // Point Claude Code's /graphify command at the project's memory graph (.workbench/knowledge)
     // instead of graphify-out in the working directory
@@ -101,21 +109,21 @@ export async function createTerminal(
       debugLog('[TerminalLifecycle] Setting CLAUDE_CONFIG_DIR:', mergedEnv.CLAUDE_CONFIG_DIR);
     }
 
+    // The window's shell and its home depend on the runtime (WSL or native), decided at startup: a
+    // window restored right after launch waits for it. In WSL, PtyManager translates the path values
+    // (CLAUDE_CONFIG_DIR, GRAPHIFY_OUT) to Linux paths and passes the window's variables through WSLENV.
+    await whenShellRuntimeReady();
+
     // Validate cwd exists - if the directory doesn't exist (e.g., worktree removed),
     // fall back to project path to prevent shell exit with code 1
     let effectiveCwd = cwd;
     if (cwd && !existsSync(cwd)) {
-      debugLog('[TerminalLifecycle] Terminal cwd does not exist, falling back:', cwd, '->', projectPath || os.homedir());
-      effectiveCwd = projectPath || os.homedir();
+      debugLog('[TerminalLifecycle] Terminal cwd does not exist, falling back:', cwd, '->', projectPath || runtimeHome());
+      effectiveCwd = projectPath || runtimeHome();
     }
 
-    // The window's shell depends on the runtime (WSL or native), decided at startup: a window
-    // restored right after launch waits for it. In WSL, PtyManager translates the path values
-    // (CLAUDE_CONFIG_DIR, GRAPHIFY_OUT) to Linux paths and passes the window's variables through WSLENV.
-    await whenShellRuntimeReady();
-
     const { pty: ptyProcess, shellKind, wrapInBash } = PtyManager.spawnPtyProcess(
-      effectiveCwd || os.homedir(),
+      effectiveCwd || runtimeHome(),
       cols,
       rows,
       mergedEnv
@@ -123,7 +131,7 @@ export async function createTerminal(
 
     debugLog('[TerminalLifecycle] PTY process spawned, pid:', ptyProcess.pid, 'shellKind:', shellKind);
 
-    const terminalCwd = effectiveCwd || os.homedir();
+    const terminalCwd = effectiveCwd || runtimeHome();
     const terminal: TerminalProcess = {
       id,
       pty: ptyProcess,
@@ -194,12 +202,16 @@ export async function restoreTerminal(
   const storedBufferLen = storedSession?.outputBuffer?.length ?? 0;
   debugLog('[TerminalLifecycle] OutputBuffer info - passed session:', passedBufferLen, 'bytes, stored session:', storedBufferLen, 'bytes');
 
+  // Which home a window with no folder falls back to depends on the runtime, which is decided at
+  // startup: a window restored right after launch waits for it
+  await whenShellRuntimeReady();
+
   // Validate cwd exists - if the directory was deleted (e.g., worktree removed),
   // fall back to project path to prevent shell exit with code 1
   let effectiveCwd = session.cwd;
   if (!existsSync(session.cwd)) {
     debugLog('[TerminalLifecycle] Session cwd does not exist, falling back to project path:', session.cwd, '->', session.projectPath);
-    effectiveCwd = session.projectPath || os.homedir();
+    effectiveCwd = session.projectPath || runtimeHome();
   }
 
   const result = await createTerminal(

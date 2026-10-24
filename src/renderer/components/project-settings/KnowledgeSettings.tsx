@@ -19,7 +19,9 @@ interface KnowledgeSettingsProps {
 /**
  * Project page "Knowledge" section: what agents get to know about the project (the Graphify
  * knowledge graph and CLAUDE.md). Use Graphify is on while the project's `.workbench/knowledge`
- * folder exists (switching it off removes the folder); CLAUDE.md is saved in `.workbench/settings.json`.
+ * folder exists (switching it off removes the folder); Use CLAUDE.md is on while the project has a
+ * CLAUDE.md (switching it off sets the file aside), and the setting is saved in
+ * `.workbench/settings.json`.
  */
 export function KnowledgeSettings({ projectId, settings, setSettings }: KnowledgeSettingsProps) {
   const { t } = useTranslation('settings');
@@ -42,9 +44,10 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
   const buildMemoryIndexIfEmpty = useSelfImproveStore((state) => state.buildIfEmpty);
 
   /**
-   * The switch is the project's CLAUDE.md: switching it on for a project that has none writes one
-   * with `/init` (the switch waits for that run), and switching it off deletes the file, the way
-   * Use Graphify removes the project's knowledge folder.
+   * The switch is the project's CLAUDE.md: switching it off moves the file out of the project root
+   * (under `.workbench`, never deleted: it may be the user's own, uncommitted work), and switching
+   * it on brings that file back, or writes one with `/init` when the project has none waiting (the
+   * switch waits for that run).
    */
   const toggleClaudeMd = async (enabled: boolean) => {
     const next = { ...settings, useClaudeMd: enabled };
@@ -53,8 +56,16 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
       setSettings(settings);
       return;
     }
-    if (enabled) await writeProjectIndexIfMissing(projectId);
-    else await removeProjectIndex(projectId);
+    if (enabled) {
+      await writeProjectIndexIfMissing(projectId);
+      return;
+    }
+    // The file is what the sessions read, so a move that failed leaves it in use: the switch goes
+    // back on rather than claiming the project has stopped using a CLAUDE.md that is still there
+    if (!(await removeProjectIndex(projectId))) {
+      setSettings(settings);
+      await updateProjectSettings(projectId, settings);
+    }
   };
 
   /**
@@ -88,8 +99,8 @@ export function KnowledgeSettings({ projectId, settings, setSettings }: Knowledg
   return (
     <SettingsSection title={t('projectSections.knowledge.title')}>
       <SettingsRows>
-        {/* On only while the project has a CLAUDE.md: switching it on for a project without one
-            writes it (Project index) and waits while that runs, switching it off deletes it */}
+        {/* On only while the project has a CLAUDE.md: switching it on restores the file set aside
+            earlier or writes one (Project index), waiting while that runs; off moves it aside */}
         <SettingsRow
           label={t('projectSections.general.useClaudeMd')}
           description={t('projectSections.general.useClaudeMdDescription')}

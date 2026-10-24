@@ -10,17 +10,17 @@ import { invokeIpc } from './ipc-utils';
 export interface ProjectIndexAPI {
   /** The project's CLAUDE.md stats, or null when it has none */
   getProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndexInfo | null>>;
-  /** Write (or rewrite) the project's CLAUDE.md with a short `/init` run */
-  buildProjectIndex: (projectId: string) => Promise<IPCResult<ProjectIndexInfo>>;
+  /** Give the project a CLAUDE.md: the one set aside while the index was off, else a `/init` run */
+  buildProjectIndex: (projectId: string, restore?: boolean) => Promise<IPCResult<ProjectIndexInfo>>;
   /** Whether a project index build is running for the project */
   isProjectIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
-  /** Remove the project's CLAUDE.md, which is what switching Use CLAUDE.md off does */
-  deleteProjectIndex: (projectId: string) => Promise<IPCResult>;
+  /** Move the project's CLAUDE.md aside, which is what switching Use CLAUDE.md off does */
+  stashProjectIndex: (projectId: string) => Promise<IPCResult>;
 }
 
 export const createProjectIndexAPI = (): ProjectIndexAPI => ({
   getProjectIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_GET, projectId),
-  buildProjectIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_BUILD, projectId),
+  buildProjectIndex: (projectId: string, restore?: boolean) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_BUILD, projectId, restore),
   isProjectIndexBuilding: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_IS_BUILDING, projectId),
-  deleteProjectIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_DELETE, projectId),
+  stashProjectIndex: (projectId: string) => invokeIpc(IPC_CHANNELS.PROJECT_INDEX_STASH, projectId),
 });

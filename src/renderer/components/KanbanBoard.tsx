@@ -570,7 +570,9 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
       newStatus = 'queue';
     }
 
-    const result = await persistTaskStatus(taskId, newStatus);
+    // The board's own task carries its project, which the main process needs to stop the run
+    // of a task moved out of In Progress
+    const result = await persistTaskStatus(taskId, newStatus, undefined, task?.projectId);
 
     if (!result.success) {
       if (result.worktreeExists) {

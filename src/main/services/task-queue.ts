@@ -38,7 +38,12 @@ export interface TaskQueueDeps {
   /** Saved order of the project's Queue column (task ids, as the board keeps it). */
   getQueueOrder?: (projectId: string) => string[];
   /** Whether a task already has an active run. */
-  isTaskRunning?: (taskId: string) => boolean;
+  /**
+   * Whether a task already has a run. The project is given because a task id is only unique within
+   * one: without it, a task id that two projects are running resolves to neither, reads as not
+   * running, and a promotion pass starts a second run of its own project's task over the first.
+   */
+  isTaskRunning?: (taskId: string, projectId: string) => boolean;
   /**
    * Start a queued task (moves it to In Progress). Resolves to whether it started;
    * a false result or a thrown error counts as a failed start.
@@ -160,7 +165,7 @@ export class TaskQueue {
 
       const queueOrder = deps.getQueueOrder?.(projectId) ?? [];
       const next = getPromotableQueuedTasks(tasks, Date.now(), queueOrder).find(
-        (t) => !started.has(t.id) && !failed.has(t.id) && !deps.isTaskRunning?.(t.id)
+        (t) => !started.has(t.id) && !failed.has(t.id) && !deps.isTaskRunning?.(t.id, projectId)
       );
       if (!next) return;
 

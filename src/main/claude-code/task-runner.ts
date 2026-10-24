@@ -62,6 +62,7 @@ import type { McpConnectorSettings } from '../../shared/types/settings';
 import type { ExecutionPhase } from '../../shared/constants/phase-protocol';
 import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
 import { DATA_DIR_NAMES } from '../../shared/constants';
+import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
 
 export const CLAUDE_RUN_FILE = 'claude_run.json';
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
@@ -243,15 +244,56 @@ function taskBlock(config: TaskRunConfig): string {
  * What a discarded attempt got wrong, for a run started over from "Request changes" with
  * "Start over" ticked. Empty for a normal start and for a revision (which quotes the feedback
  * as the change to apply).
+ *
+ * The reviewer can say it in screenshots alone, so notes with no text still introduce the images
+ * that are attached to the same turn - without a sentence naming them, they arrive looking like
+ * part of the task rather than a verdict on the attempt being discarded.
+ *
+ * `images` is how many images the turn really carries, which is the caller's to count: an
+ * attachment that is too large or cannot be read is dropped from the turn, and a sentence
+ * introducing images that are not there would leave the model looking for them.
  */
-function restartNotes(config: TaskRunConfig): string {
-  const feedback = config.mode === 'start' ? config.feedback?.trim() : '';
-  if (!feedback) return '';
-  return `\n\nAn earlier attempt at this task was discarded and you are starting it over. The reviewer's notes on that attempt:
+function restartNotes(config: TaskRunConfig, images: number): string {
+  if (config.mode !== 'start') return '';
+  const feedback = config.feedback?.trim();
+  if (!feedback && images === 0) return '';
+  const opening = `\n\nAn earlier attempt at this task was discarded and you are starting it over. The reviewer's notes on that attempt:`;
+  if (!feedback) {
+    return `${opening}\n\n${images === 1 ? 'the attached image' : `the ${images} attached images`}.`;
+  }
+  return `${opening}
 
 <feedback>
 ${feedback}
 </feedback>`;
+}
+
+/**
+ * What the reviewer asked for, as the `revise` turn states it. Empty when they asked for it in no
+ * way at all, which only the caller can phrase sensibly.
+ *
+ * The reviewer can say it in screenshots alone, so a request with no text points at the images
+ * attached to the same turn instead of quoting an empty `<feedback>` block. The handler used to
+ * substitute "No feedback provided" for the missing text, which told the model there was nothing
+ * to go on while the request itself sat in the attachments it had just been handed.
+ *
+ * `images` is how many images the turn really carries, which is the caller's to count. A request
+ * whose only screenshot was too large to attach has to read as the empty request it has become -
+ * pointing at an image that was dropped would send the model after something it was never given,
+ * and would also keep it from the "no notes came with the request" wording that is the one honest
+ * instruction left.
+ */
+function reviewerFeedback(config: TaskRunConfig, images: number): string {
+  const feedback = config.feedback?.trim();
+  if (feedback) {
+    return `
+
+<feedback>
+${feedback}
+</feedback>`;
+  }
+  if (images === 0) return '';
+  return `\n\n${images === 1 ? 'see the attached image' : `see the ${images} attached images`}.`;
 }
 
 function verificationHint(triage: TaskTriage | undefined): string {
@@ -393,11 +435,17 @@ export class ClaudeTaskRun {
     if (settings.triage === 'fixed') {
       triage = fixedTriage(settings, this.config.title, 'fixed', 'Fixed model and effort from Settings > Agents');
     } else {
+      // Triage is a text-only run: it is handed the attachments' filenames, never their bytes, so
+      // what it can refer to is every image the reviewer attached and not the smaller set the
+      // phases themselves manage to carry
+      const named = this.config.feedbackAttachments?.length ?? 0;
       try {
         ({ triage, costUsd: triageCost } = await triageTask({
           description: revision
-            ? `${this.config.description}\n\nThis task was already implemented. Assess only the follow-up change the reviewer requested:\n${this.config.feedback ?? ''}`
-            : `${this.config.description}${restartNotes(this.config)}`,
+            // Triage sizes the follow-up from the same statement of it the revise turn gets, with
+            // the image filenames it already lists standing in for feedback the reviewer drew
+            ? `${this.config.description}\n\nThis task was already implemented. Assess only the follow-up change the reviewer requested:${reviewerFeedback(this.config, named) || '\n\nthey left no notes with the request.'}`
+            : `${this.config.description}${restartNotes(this.config, named)}`,
           cwd: this.config.worktreePath,
           attachmentNames: (revision ? this.config.feedbackAttachments ?? [] : this.config.attachments).map((a) => a.filename),
           settings,
@@ -565,21 +613,36 @@ export class ClaudeTaskRun {
 
   private buildInput(name: Exclude<ClaudeRunPhaseName, 'triage'>, continuing: boolean, resume: boolean): ClaudeUserContentBlock[] {
     const triage = this.info.triage;
+
+    // The attachments are turned into blocks before the prompt is written, because the prompt has
+    // to describe the images that will really be in the turn. Reading them is what decides that:
+    // an image over `MAX_IMAGE_BYTES`, or one that cannot be read at all, is dropped here, and a
+    // reviewer who said everything in one oversized screenshot would otherwise be quoted as
+    // "see the attached image" in a turn carrying no image whatsoever.
+    //
+    // The task's attachments go with the session's first turn; feedback images with the revision.
+    // Like the Claude chat: images as images, PDFs as documents, text files inlined
+    const taskBlocks = buildAttachmentBlocks(this.readAttachments(resume ? [] : this.config.attachments));
+    const feedbackBlocks = buildAttachmentBlocks(
+      this.readAttachments(name === 'revise' || !resume ? this.config.feedbackAttachments ?? [] : [])
+    );
+    const feedbackImages = feedbackBlocks.filter((block) => block.type === 'image').length;
+
     const blocks: ClaudeUserContentBlock[] = [];
     let text: string;
 
     switch (name) {
       case 'plan':
-        text = `${taskBlock(this.config)}${restartNotes(this.config)}
+        text = `${taskBlock(this.config)}${restartNotes(this.config, feedbackImages)}
 
 Explore the codebase as needed and produce an implementation plan for this task. Don't change any files yet.
 The plan should name the files to change, the approach and why, edge cases, and how to verify the result (${verificationHint(triage)}).`;
         break;
       case 'implement':
         if (continuing && resume) {
-          text = `Continue the task from where you left off. Check \`git status\` and \`git log\` to see what is already done, then finish the work.`;
+          text = `${PHASE_PROMPT_OPENINGS.continuing} Check \`git status\` and \`git log\` to see what is already done, then finish the work.`;
         } else if (this.info.plan && resume) {
-          text = `The plan is approved. Implement it now, verify it with ${verificationHint(triage)}, and commit the result.`;
+          text = `${PHASE_PROMPT_OPENINGS.planApproved}, verify it with ${verificationHint(triage)}, and commit the result.`;
         } else if (continuing || this.info.plan) {
           // A new session for work that started in another one (the runtime changed): the task,
           // the approved plan and what was done so far go with the first message
@@ -587,39 +650,49 @@ The plan should name the files to change, the approach and why, edge cases, and 
           const started = continuing
             ? '\n\nAn earlier session already worked on this task in this worktree. Check `git status` and `git log` to see what is already done.'
             : '';
-          text = `${taskBlock(this.config)}${restartNotes(this.config)}${plan}${started}
+          text = `${taskBlock(this.config)}${restartNotes(this.config, feedbackImages)}${plan}${started}
 
 Implement this task${plan ? ' as planned' : ''}. Verify it with ${verificationHint(triage)}, then commit the result.`;
         } else {
-          text = `${taskBlock(this.config)}${restartNotes(this.config)}
+          text = `${taskBlock(this.config)}${restartNotes(this.config, feedbackImages)}
 
 Implement this task. Verify it with ${verificationHint(triage)}, then commit the result.`;
         }
         break;
       case 'validate':
-        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}Before handing this off, validate the work:
+        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.validate}
 1. Run ${verificationHint(triage)}. Fix failures your change caused.
 2. Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task. Fix only findings that affect correctness or the task's requirements; don't gold-plate.
 3. Commit any remaining changes.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
-      case 'revise':
-        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}The reviewer requested changes:
+      case 'revise': {
+        const opening = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.revise}`;
+        const requested = reviewerFeedback(this.config, feedbackImages);
+        // Nothing to apply when the reviewer sent the request back empty: saying so and asking for
+        // another look is the only honest instruction left, where "apply them" would point at air
+        text = requested
+          ? `${opening}${requested}
 
-<feedback>
-${this.config.feedback ?? ''}
-</feedback>
+Apply them, verify with ${verificationHint(triage)}, and commit the result.`
+          : `${opening}
 
-Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
+no notes came with the request, so review the change against the task with fresh eyes and fix whatever does not meet it. Verify with ${verificationHint(triage)}, and commit the result.`;
         break;
+      }
     }
     blocks.push({ type: 'text', text });
+    blocks.push(...taskBlocks, ...feedbackBlocks);
+    return blocks;
+  }
 
-    // The task's attachments go with the session's first turn; feedback images with the revision.
-    // Like the Claude chat: images as images, PDFs as documents, text files inlined
-    const attachments = name === 'revise'
-      ? [...(resume ? [] : this.config.attachments), ...(this.config.feedbackAttachments ?? [])]
-      : resume ? [] : [...this.config.attachments, ...(this.config.feedbackAttachments ?? [])];
+  /**
+   * The attachments as the turn can carry them: read from disk, with the ones the request cannot
+   * hold left out. An image over `MAX_IMAGE_BYTES` (or any other file over `MAX_ATTACHMENT_BYTES`)
+   * and one that cannot be read are both reported to the task's log and dropped, so what comes
+   * back is exactly what the prompt may refer to.
+   */
+  private readAttachments(attachments: TaskAttachment[]): ImageAttachment[] {
     const files: ImageAttachment[] = [];
     for (const attachment of attachments) {
       try {
@@ -640,8 +713,7 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
         this.emitLog(`Could not attach ${attachment.filename}`);
       }
     }
-    blocks.push(...buildAttachmentBlocks(files));
-    return blocks;
+    return files;
   }
 
   private async runClaude(params: {
@@ -955,7 +1027,11 @@ Apply them, verify with ${verificationHint(triage)}, and commit the result.`;
   private endPhase(phase: ClaudeRunPhase, fields: Partial<ClaudeRunPhase>, result?: ClaudeResultMessage): void {
     let costUsd = phase.costUsd;
     if (result?.total_cost_usd !== undefined) {
-      // A resumed session reports its cumulative cost: this phase's share is the difference
+      // A resumed session reports what the whole session has cost, not what this `--resume` spent:
+      // Claude Code restores the session's cost accounting along with its messages, so the figure
+      // keeps climbing over the phases (the transcript's `cost-state` lines show the same running
+      // total under one `startTime`, see `session-spending.ts`). This phase's share is therefore
+      // the difference. Triage is left out because it runs as a session of its own.
       const earlier = this.info.phases
         .filter((p) => p !== phase && p.name !== 'triage' && p.sessionId === (result.session_id ?? phase.sessionId))
         .reduce((sum, p) => sum + (p.costUsd ?? 0), 0);

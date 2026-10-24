@@ -181,6 +181,29 @@ describe('agent windows in WSL', () => {
     expect(line).toContain(`env -u ANTHROPIC_API_KEY '${CLAUDE}' --resume abc-123`);
   });
 
+  it("resumes a session in the Linux home's ~/.claude with CLAUDE_CONFIG_DIR removed", async () => {
+    // The window carries the work account's dir from the time it was spawned; this session's
+    // transcript is in the default dir, which Claude Code reads only while the variable is absent
+    profileManager.getProfile.mockReturnValue({
+      id: 'work',
+      name: 'Work',
+      isDefault: false,
+      configDir: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude-work',
+    });
+    await invokeCLIAsync(createTerminal(), PROJECT, 'work', () => null, false, {
+      resumeSessionId: 'abc-123',
+      configDir: '~/.claude',
+    });
+
+    const line = written();
+    // One env removes both variables, instead of a second env wrapping the first
+    expect(line).toContain(
+      `cd '${LINUX_PROJECT}' && env -u CLAUDE_CONFIG_DIR -u ANTHROPIC_API_KEY '${CLAUDE}' --resume abc-123`
+    );
+    expect(line).not.toContain('CLAUDE_CONFIG_DIR=');
+    expect(line).not.toContain('.claude-work');
+  });
+
   it("treats the Linux home's ~/.claude as the default config dir", () => {
     expect(resolveSessionConfigDir('~/.claude')).toBeUndefined();
     expect(resolveSessionConfigDir('\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude')).toBeUndefined();

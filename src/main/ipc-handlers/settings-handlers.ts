@@ -1,6 +1,6 @@
 import { ipcMain, dialog, app, shell, session, BrowserWindow } from 'electron';
 import { existsSync, writeFileSync, mkdirSync, statSync } from 'fs';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import path from 'path';
 
 import { IPC_CHANNELS, DEFAULT_APP_SETTINGS, SPELL_CHECK_LANGUAGE_MAP, DEFAULT_SPELL_CHECK_LANGUAGE, sanitizeColorTheme } from '../../shared/constants';
@@ -10,10 +10,12 @@ import type {
   IPCResult
 } from '../../shared/types';
 import { AgentManager } from '../agent';
+import { appLog } from '../app-logger';
 import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { taskQueue } from '../services/task-queue';
 import { configureTools, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache, type ToolConfig } from '../cli-tool-manager';
+import { isMacOS, isWindows } from '../platform';
 import { git } from '../utils/git-exec';
 import { getWslInfo, reprobeWslTools } from '../platform/shell-runtime';
 import { getWslExePath } from '../platform/wsl-detect';
@@ -42,6 +44,103 @@ function toolConfigFromSettings(settings: Partial<AppSettings>): ToolConfig {
     claudePath: settings.claudePath,
     wslToolPaths: settings.wslToolPaths,
   };
+}
+
+/**
+ * How long an emulator is watched after it starts before it counts as open.
+ *
+ * The walk through the Linux emulators below has to tell "installed and working" from "installed
+ * but unable to open a window", which is what an emulator does with no DISPLAY or no session bus:
+ * it starts and exits non-zero within a few tens of milliseconds. Waiting a little covers that
+ * without waiting on a window that stays up, which only closes when the user closes it, so the
+ * handler still answers in well under a second even when every candidate fails in turn.
+ */
+const TERMINAL_STARTUP_GRACE_MS = 400;
+
+/**
+ * Open a terminal emulator and leave it running.
+ *
+ * The window outlives this call, so the program is started detached and let go of rather than
+ * waited for: `cmd /K` and xterm only return when the user closes the window, and waiting for that
+ * from an IPC handler froze the whole app. The promise answers whether the program opened a
+ * window, which is what the walk through the Linux emulators below needs, and nothing more: it
+ * rejects when the program cannot be started at all and when it gives up during the grace period,
+ * and resolves once that period passes with the program still up, or earlier if it exits cleanly
+ * (an emulator that hands the window to a server of its own, such as gnome-terminal, returns
+ * straight away with status 0).
+ *
+ * An emulator slower to give up than the grace period has therefore already been reported as
+ * open, and that answer cannot be taken back. Nothing is started in its place either, because by
+ * then a failure cannot be told from the user closing a window whose shell happened to end badly:
+ * the child is detached with its output discarded, so no exit code, signal or stream here
+ * separates the two, and starting the next emulator on a guess would put a window on the screen
+ * seconds after the user deliberately closed one. The failures that really do leave the screen
+ * empty are not in that blind spot anyway - no display and no session bus are decided in tens of
+ * milliseconds, well inside the grace period, while a hung D-Bus activation only gives up after
+ * GDBus's 25 s default, far beyond any wait worth holding the user in - so what is left to do
+ * with a late failure is leave a trace of it. Both ways an emulator can fail are logged, with how
+ * long it lasted, which is what makes a window that never appeared explainable afterwards.
+ */
+function openTerminalWindow(
+  command: string,
+  args: string[],
+  options: { cwd?: string } = {}
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const child = spawn(command, args, {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
+    });
+    let settled = false;
+    const settle = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(grace);
+      if (error) reject(error);
+      else resolve();
+    };
+    const grace = setTimeout(() => settle(), TERMINAL_STARTUP_GRACE_MS);
+    // The window is on its own from here: neither the child nor this timer may hold the app open
+    grace.unref();
+    /**
+     * A failure that only showed after the grace period, when `success` has already been
+     * answered. All that is left is to leave a trace of it, so that a user reporting a terminal
+     * that never opened can be answered from the log. How long the program lasted goes in the
+     * line because it is the one thing that tells the two readings apart for a human: a quarter
+     * of a minute points at an emulator that gave up on its own, hours at a window that was used
+     * and then closed on a shell that had failed. Both ways an emulator can fail come through
+     * here: it can exit non-zero, and it can report that it could not be started at all, which is
+     * just as late and just as invisible.
+     */
+    const lateFailure = (what: string): void => {
+      appLog.warn(`[Terminal] ${command} was reported as open, then ${what} after ${Date.now() - startedAt} ms`);
+    };
+    child.once('error', (error: Error) => {
+      // Within the grace period this is the ENOENT of an emulator that is not installed, which
+      // the walk needs as its answer so it can move straight on to the next candidate
+      if (!settled) {
+        settle(error);
+        return;
+      }
+      lateFailure(`failed to start: ${error.message}`);
+    });
+    child.once('spawn', () => child.unref());
+    child.once('exit', (code, signal) => {
+      if (code === 0) {
+        settle();
+        return;
+      }
+      const status = signal ? `on ${signal}` : `with code ${code ?? 1}`;
+      if (!settled) {
+        settle(new Error(`${command} exited ${status}`));
+        return;
+      }
+      lateFailure(`exited ${status}`);
+    });
+  });
 }
 
 /**
@@ -422,28 +521,18 @@ export function registerSettingsHandlers(
           };
         }
 
-        const platform = process.platform;
+        // Non-null only while the session's tools run in WSL, which is Windows only
+        const wsl = getWslInfo();
 
-        if (platform === 'darwin') {
-          // macOS: Use execFileSync with argument array to prevent injection
-          execFileSync('open', ['-a', 'Terminal', resolvedPath], { stdio: 'ignore' });
-        } else if (platform === 'win32' && getWslInfo()) {
-          // Tools run in WSL: a WSL console in that folder (its own window, not waited for)
-          const wsl = getWslInfo()!;
-          spawn(getWslExePath(), ['-d', wsl.distro, '--cd', resolvedPath], {
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: false,
-          }).unref();
-        } else if (platform === 'win32') {
-          // Windows: Use cmd.exe directly with argument array
-          // /C tells cmd to execute the command and terminate
-          // /K keeps the window open after executing cd
-          execFileSync('cmd.exe', ['/K', 'cd', '/d', resolvedPath], {
-            stdio: 'ignore',
-            windowsHide: false,
-            shell: false  // Explicitly disable shell to prevent injection
-          });
+        if (isMacOS()) {
+          // macOS: an argument array, never a command line, so no path can inject a command
+          await openTerminalWindow('open', ['-a', 'Terminal', resolvedPath]);
+        } else if (wsl) {
+          // Tools run in WSL: a WSL console in that folder
+          await openTerminalWindow(getWslExePath(), ['-d', wsl.distro, '--cd', resolvedPath]);
+        } else if (isWindows()) {
+          // Windows: cmd.exe with an argument array. /K keeps the window open after the cd.
+          await openTerminalWindow('cmd.exe', ['/K', 'cd', '/d', resolvedPath]);
         } else {
           // Linux: Try common terminal emulators with argument arrays
           // Note: xterm uses cwd option to avoid shell injection vulnerabilities
@@ -454,16 +543,22 @@ export function registerSettingsHandlers(
             { cmd: 'xterm', args: ['-e', 'bash'], useCwd: true }
           ];
 
+          /**
+           * The candidates are tried in order and the walk stops at the first one that opens a
+           * window, so the emulators are only ever started one at a time. Each attempt is settled
+           * within the grace period, which keeps the whole walk under a second even when every
+           * candidate has to be tried, and it is settled for good: an emulator that gives up
+           * after that has already been reported as open and is left alone rather than replaced,
+           * for the reasons openTerminalWindow gives.
+           */
           let opened = false;
           for (const { cmd, args, useCwd } of terminals) {
             try {
-              execFileSync(cmd, args, {
-                stdio: 'ignore',
-                ...(useCwd ? { cwd: resolvedPath } : {})
-              });
+              await openTerminalWindow(cmd, args, { cwd: useCwd ? resolvedPath : undefined });
               opened = true;
               break;
             } catch {
+              // Not installed, or it started and gave up straight away: try the next emulator
             }
           }
 

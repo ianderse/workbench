@@ -26,9 +26,31 @@ export function useSettings() {
     colorTheme: currentSettings.colorTheme
   });
 
-  // Sync with store
+  /**
+   * Follow the store, one key at a time.
+   *
+   * Some rows write straight to the store so the change can be seen at once - the theme and the UI
+   * scale for live preview, the shell and the interface font because other parts of the app read
+   * them - while the dialog's own edits sit in this state until the autosave debounce fires.
+   * Replacing this state with the store's whenever the store changed therefore threw away whatever
+   * the user had edited but not yet saved: picking a shell right after changing a dialog-only row
+   * silently lost that row. Only the keys the store itself just changed are taken, so a live
+   * preview and a pending edit no longer compete for the same state.
+   */
+  const lastStoreSettings = useRef<AppSettings>(currentSettings);
   useEffect(() => {
-    setSettings(currentSettings);
+    const previous = lastStoreSettings.current;
+    lastStoreSettings.current = currentSettings;
+    if (previous === currentSettings) return;
+    const changed = (Object.keys(currentSettings) as Array<keyof AppSettings>).filter(
+      (key) => currentSettings[key] !== previous[key]
+    );
+    if (changed.length === 0) return;
+    setSettings((local) => {
+      const next = { ...local };
+      for (const key of changed) next[key] = currentSettings[key] as never;
+      return next;
+    });
   }, [currentSettings]);
 
   // Load settings on mount

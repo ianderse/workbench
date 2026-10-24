@@ -27,6 +27,12 @@ import type {
 
 export interface TaskAPI {
   // Task Operations
+  //
+  // The calls that reach a task's run or its worktree (start, stop, retry, review, status
+  // change, running check, recovery, delete, merge, pull request, discard) take the project of
+  // the board the user acted on as their last argument: a
+  // task id is only unique inside its project, so the main process cannot infer it (see the same
+  // note on ElectronAPI in shared/types/ipc.ts).
   getTasks: (projectId: string, options?: { forceRefresh?: boolean }) => Promise<IPCResult<Task[]>>;
   createTask: (
     projectId: string,
@@ -34,51 +40,55 @@ export interface TaskAPI {
     description: string,
     metadata?: TaskMetadata
   ) => Promise<IPCResult<Task>>;
-  deleteTask: (taskId: string) => Promise<IPCResult>;
+  deleteTask: (taskId: string, projectId?: string) => Promise<IPCResult>;
   updateTask: (
     taskId: string,
-    updates: { title?: string; description?: string }
+    updates: { title?: string; description?: string },
+    projectId?: string
   ) => Promise<IPCResult<Task>>;
-  startTask: (taskId: string, options?: TaskStartOptions) => void;
-  stopTask: (taskId: string) => void;
-  retryTask: (taskId: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
+  startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
+  stopTask: (taskId: string, projectId?: string) => void;
+  retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
   submitReview: (
     taskId: string,
     approved: boolean,
     feedback?: string,
     images?: ImageAttachment[],
-    options?: TaskReviewOptions
+    options?: TaskReviewOptions,
+    projectId?: string
   ) => Promise<IPCResult>;
   updateTaskStatus: (
     taskId: string,
     status: TaskStatus,
-    options?: { forceCleanup?: boolean; keepWorktree?: boolean }
+    options?: { forceCleanup?: boolean; keepWorktree?: boolean },
+    projectId?: string
   ) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
   recoverStuckTask: (
     taskId: string,
-    options?: import('../../shared/types').TaskRecoveryOptions
+    options?: import('../../shared/types').TaskRecoveryOptions,
+    projectId?: string
   ) => Promise<IPCResult<TaskRecoveryResult>>;
-  checkTaskRunning: (taskId: string) => Promise<IPCResult<boolean>>;
+  checkTaskRunning: (taskId: string, projectId?: string) => Promise<IPCResult<boolean>>;
 
   // Worktree Change Detection
-  checkWorktreeChanges: (taskId: string) => Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>>;
+  checkWorktreeChanges: (taskId: string, projectId?: string) => Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>>;
 
   // Image Operations
   loadImageThumbnail: (projectPath: string, specId: string, imagePath: string) => Promise<IPCResult<string>>;
 
   // Workspace Management (for human review)
-  getWorktreeStatus: (taskId: string) => Promise<IPCResult<import('../../shared/types').WorktreeStatus>>;
-  mergeWorktree: (taskId: string, options?: { noCommit?: boolean }) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
-  mergeWorktreePreview: (taskId: string) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
-  discardWorktree: (taskId: string, skipStatusChange?: boolean) => Promise<IPCResult<import('../../shared/types').WorktreeDiscardResult>>;
-  clearStagedState: (taskId: string) => Promise<IPCResult<{ cleared: boolean }>>;
+  getWorktreeStatus: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeStatus>>;
+  mergeWorktree: (taskId: string, options?: { noCommit?: boolean }, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
+  mergeWorktreePreview: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
+  discardWorktree: (taskId: string, skipStatusChange?: boolean, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeDiscardResult>>;
+  clearStagedState: (taskId: string, projectId?: string) => Promise<IPCResult<{ cleared: boolean }>>;
   listWorktrees: (projectId: string, options?: { includeStats?: boolean }) => Promise<IPCResult<import('../../shared/types').WorktreeListResult>>;
   archiveTasks: (projectId: string, taskIds: string[], version?: string) => Promise<IPCResult<boolean>>;
   unarchiveTasks: (projectId: string, taskIds: string[]) => Promise<IPCResult<boolean>>;
-  createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions) => Promise<IPCResult<WorktreeCreatePRResult>>;
-  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions) => Promise<IPCResult<WorktreeMergePRResult>>;
-  mergeWorktreeLocal: (taskId: string) => Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>>;
-  getWorktreePRState: (taskId: string) => Promise<IPCResult<PullRequestState>>;
+  createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions, projectId?: string) => Promise<IPCResult<WorktreeCreatePRResult>>;
+  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions, projectId?: string) => Promise<IPCResult<WorktreeMergePRResult>>;
+  mergeWorktreeLocal: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>>;
+  getWorktreePRState: (taskId: string, projectId?: string) => Promise<IPCResult<PullRequestState>>;
   onMergePRProgress: (callback: (taskId: string, progress: MergePRProgress) => void) => () => void;
   onTaskListChanged: (callback: (projectId: string) => void) => () => void;
 
@@ -120,72 +130,76 @@ export const createTaskAPI = (): TaskAPI => ({
   ): Promise<IPCResult<Task>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_CREATE, projectId, title, description, metadata),
 
-  deleteTask: (taskId: string): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_DELETE, taskId),
+  deleteTask: (taskId: string, projectId?: string): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_DELETE, taskId, projectId),
 
   updateTask: (
     taskId: string,
-    updates: { title?: string; description?: string }
+    updates: { title?: string; description?: string },
+    projectId?: string
   ): Promise<IPCResult<Task>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE, taskId, updates),
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE, taskId, updates, projectId),
 
-  startTask: (taskId: string, options?: TaskStartOptions): void =>
-    ipcRenderer.send(IPC_CHANNELS.TASK_START, taskId, options),
+  startTask: (taskId: string, options?: TaskStartOptions, projectId?: string): void =>
+    ipcRenderer.send(IPC_CHANNELS.TASK_START, taskId, options, projectId),
 
-  stopTask: (taskId: string): void =>
-    ipcRenderer.send(IPC_CHANNELS.TASK_STOP, taskId),
+  stopTask: (taskId: string, projectId?: string): void =>
+    ipcRenderer.send(IPC_CHANNELS.TASK_STOP, taskId, projectId),
 
-  retryTask: (taskId: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_RETRY, taskId),
+  retryTask: (taskId: string, projectId?: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_RETRY, taskId, projectId),
 
   submitReview: (
     taskId: string,
     approved: boolean,
     feedback?: string,
     images?: ImageAttachment[],
-    options?: TaskReviewOptions
+    options?: TaskReviewOptions,
+    projectId?: string
   ): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_REVIEW, taskId, approved, feedback, images, options),
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_REVIEW, taskId, approved, feedback, images, options, projectId),
 
   updateTaskStatus: (
     taskId: string,
     status: TaskStatus,
-    options?: { forceCleanup?: boolean; keepWorktree?: boolean }
+    options?: { forceCleanup?: boolean; keepWorktree?: boolean },
+    projectId?: string
   ): Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE_STATUS, taskId, status, options),
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_UPDATE_STATUS, taskId, status, options, projectId),
 
   recoverStuckTask: (
     taskId: string,
-    options?: import('../../shared/types').TaskRecoveryOptions
+    options?: import('../../shared/types').TaskRecoveryOptions,
+    projectId?: string
   ): Promise<IPCResult<TaskRecoveryResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_RECOVER_STUCK, taskId, options),
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_RECOVER_STUCK, taskId, options, projectId),
 
-  checkTaskRunning: (taskId: string): Promise<IPCResult<boolean>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_CHECK_RUNNING, taskId),
+  checkTaskRunning: (taskId: string, projectId?: string): Promise<IPCResult<boolean>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_CHECK_RUNNING, taskId, projectId),
 
   // Worktree Change Detection
-  checkWorktreeChanges: (taskId: string): Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_CHECK_WORKTREE_CHANGES, taskId),
+  checkWorktreeChanges: (taskId: string, projectId?: string): Promise<IPCResult<{ hasChanges: boolean; worktreePath?: string; changedFileCount?: number }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_CHECK_WORKTREE_CHANGES, taskId, projectId),
 
   // Image Operations
   loadImageThumbnail: (projectPath: string, specId: string, imagePath: string): Promise<IPCResult<string>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LOAD_IMAGE_THUMBNAIL, projectPath, specId, imagePath),
 
   // Workspace Management
-  getWorktreeStatus: (taskId: string): Promise<IPCResult<import('../../shared/types').WorktreeStatus>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_STATUS, taskId),
+  getWorktreeStatus: (taskId: string, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeStatus>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_STATUS, taskId, projectId),
 
-  mergeWorktree: (taskId: string, options?: { noCommit?: boolean }): Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE, taskId, options),
+  mergeWorktree: (taskId: string, options?: { noCommit?: boolean }, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE, taskId, options, projectId),
 
-  mergeWorktreePreview: (taskId: string): Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_PREVIEW, taskId),
+  mergeWorktreePreview: (taskId: string, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_PREVIEW, taskId, projectId),
 
-  discardWorktree: (taskId: string, skipStatusChange?: boolean): Promise<IPCResult<import('../../shared/types').WorktreeDiscardResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_DISCARD, taskId, skipStatusChange),
+  discardWorktree: (taskId: string, skipStatusChange?: boolean, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeDiscardResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_DISCARD, taskId, skipStatusChange, projectId),
 
-  clearStagedState: (taskId: string): Promise<IPCResult<{ cleared: boolean }>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_CLEAR_STAGED_STATE, taskId),
+  clearStagedState: (taskId: string, projectId?: string): Promise<IPCResult<{ cleared: boolean }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_CLEAR_STAGED_STATE, taskId, projectId),
 
   listWorktrees: (projectId: string, options?: { includeStats?: boolean }): Promise<IPCResult<import('../../shared/types').WorktreeListResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LIST_WORKTREES, projectId, options),
@@ -196,17 +210,17 @@ export const createTaskAPI = (): TaskAPI => ({
   unarchiveTasks: (projectId: string, taskIds: string[]): Promise<IPCResult<boolean>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_UNARCHIVE, projectId, taskIds),
 
-  createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions): Promise<IPCResult<WorktreeCreatePRResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_CREATE_PR, taskId, options),
+  createWorktreePR: (taskId: string, options?: WorktreeCreatePROptions, projectId?: string): Promise<IPCResult<WorktreeCreatePRResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_CREATE_PR, taskId, options, projectId),
 
-  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions): Promise<IPCResult<WorktreeMergePRResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, taskId, options),
+  mergeWorktreePR: (taskId: string, options?: WorktreeMergePROptions, projectId?: string): Promise<IPCResult<WorktreeMergePRResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, taskId, options, projectId),
 
-  mergeWorktreeLocal: (taskId: string): Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL, taskId),
+  mergeWorktreeLocal: (taskId: string, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeLocalMergeResult>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE_LOCAL, taskId, projectId),
 
-  getWorktreePRState: (taskId: string): Promise<IPCResult<PullRequestState>> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_PR_STATE, taskId),
+  getWorktreePRState: (taskId: string, projectId?: string): Promise<IPCResult<PullRequestState>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_PR_STATE, taskId, projectId),
 
   onTaskListChanged: (callback: (projectId: string) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, projectId: string): void => {

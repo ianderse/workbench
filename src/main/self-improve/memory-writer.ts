@@ -64,6 +64,40 @@ function renderMemory(draft: MemoryDraft, modified: string): string {
   ].join('\n');
 }
 
+/** What an index line points at, which is how two indexes are told to hold the same memory */
+const indexTarget = (line: string): string | null => /\]\(([^)]+)\)/.exec(line)?.[1] ?? null;
+
+/**
+ * Union of two memory indexes.
+ *
+ * `MEMORY.md` is the user's own index file: Claude Code writes lines into it, but the user may also
+ * have put headings or notes of their own there, so the first index is kept exactly as it stands and
+ * only the lines of the second one that name a memory the first does not mention are appended.
+ * Duplicate guidance is something a later session folds together on its own. The placeholder comment
+ * goes as soon as there is a real line, since it only ever stood in for an empty index.
+ */
+export function mergeIndexes(into: string, from: string): string {
+  const isStub = (line: string) => line.trim() === MEMORY_INDEX_STUB.trim();
+
+  const kept = into.split('\n').filter((line) => !isStub(line));
+  while (kept.length > 0 && kept[kept.length - 1].trim() === '') kept.pop();
+  // A line that links to no file is keyed by its own text, so hand-written prose is not duplicated
+  const known = new Set(kept.map((line) => indexTarget(line) ?? line.trim()).filter((key) => key !== ''));
+
+  const added: string[] = [];
+  for (const line of from.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '' || isStub(line)) continue;
+    const key = indexTarget(trimmed) ?? trimmed;
+    if (known.has(key)) continue;
+    known.add(key);
+    added.push(trimmed);
+  }
+
+  const lines = [...kept, ...added];
+  return lines.length === 0 ? MEMORY_INDEX_STUB : `${lines.join('\n')}\n`;
+}
+
 /** Existing index lines, keyed by the file they link to, so rewriting keeps what is already there */
 async function readIndexEntries(projectPath: string): Promise<Map<string, string>> {
   const entries = new Map<string, string>();
@@ -72,7 +106,7 @@ async function readIndexEntries(projectPath: string): Promise<Map<string, string
     for (const line of content.split('\n')) {
       const trimmed = line.trim();
       if (!trimmed.startsWith('-')) continue;
-      const target = /\]\(([^)]+)\)/.exec(trimmed)?.[1];
+      const target = indexTarget(trimmed);
       if (target) entries.set(target, trimmed);
     }
   } catch {
@@ -86,15 +120,19 @@ async function readIndexEntries(projectPath: string): Promise<Map<string, string
  *
  * Existing memories are kept: a draft whose slug is already there is skipped rather than overwritten,
  * because a memory on disk may have been edited by hand or refined by a later session, and this
- * writer only ever adds. Returns the names actually written.
+ * writer only ever adds. The index is merged for the same reason, rather than rebuilt from the lines
+ * this writer can parse: anything else the user wrote into it stays. Returns the names written.
  */
 export async function writeMemories(projectPath: string, drafts: MemoryDraft[]): Promise<string[]> {
   const dir = getCompengDir(projectPath);
   await mkdir(dir, { recursive: true });
 
+  const indexPath = getMemoryIndexPath(projectPath);
+  const existingIndex = await readIfPresent(indexPath);
   const entries = await readIndexEntries(projectPath);
   const modified = new Date().toISOString();
   const written: string[] = [];
+  const added: string[] = [];
 
   for (const draft of drafts) {
     if (entries.size >= MAX_MEMORIES) break;
@@ -103,16 +141,33 @@ export async function writeMemories(projectPath: string, drafts: MemoryDraft[]):
     if (entries.has(filename)) continue;
 
     await writeFile(path.join(dir, filename), renderMemory({ ...draft, name }, modified), 'utf-8');
-    entries.set(filename, `- [${draft.title}](${filename}) — ${draft.description}`);
+    const line = `- [${draft.title}](${filename}) — ${draft.description}`;
+    entries.set(filename, line);
+    added.push(line);
     written.push(name);
   }
 
-  const index = entries.size === 0 ? MEMORY_INDEX_STUB : `${[...entries.values()].join('\n')}\n`;
-  await writeFile(getMemoryIndexPath(projectPath), index, 'utf-8');
+  await writeFile(indexPath, mergeIndexes(existingIndex ?? '', added.join('\n')), 'utf-8');
   return written;
 }
 
 /** How many memories the project holds, by its index */
 export async function countMemories(projectPath: string): Promise<number> {
   return (await readIndexEntries(projectPath)).size;
+}
+
+/**
+ * What the project already remembers, one line per memory, for a prompt that has to be told not to
+ * write them again. The index line is what says it: it names the memory and states its rule.
+ */
+export async function listMemories(projectPath: string): Promise<string[]> {
+  return [...(await readIndexEntries(projectPath)).values()].map((line) => line.replace(/^[-*]\s*/, ''));
+}
+
+async function readIfPresent(file: string): Promise<string | null> {
+  try {
+    return await readFile(file, 'utf-8');
+  } catch {
+    return null;
+  }
 }

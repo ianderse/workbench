@@ -9,6 +9,12 @@
  *
  * Every tool goes through the same IPC handler as the UI (see `ipc-registry.ts`) and the
  * board's move rules, so the chat can't do anything the board wouldn't allow.
+ *
+ * A task id is only unique inside its project, so every one of those calls ends with the chat's
+ * own project (`context.projectId`), exactly as the board sends the project of the card the user
+ * acted on. Without it the handlers would have to search the projects for the id and could answer
+ * with another project's task of the same id, and the run lookups refuse an id two projects run
+ * rather than guess, which would turn a stop or a retry into a reported failure.
  */
 
 import { IPC_CHANNELS } from '../../shared/constants';
@@ -114,10 +120,10 @@ async function startOrQueue(context: TaskToolContext, task: Task): Promise<'star
     (t) => t.id !== task.id && t.status === 'in_progress' && !t.metadata?.archivedAt
   ).length;
   if (running >= maxParallel) {
-    await ipc(IPC_CHANNELS.TASK_UPDATE_STATUS, task.id, 'queue');
+    await ipc(IPC_CHANNELS.TASK_UPDATE_STATUS, task.id, 'queue', undefined, context.projectId);
     return 'queued';
   }
-  await invokeIpcHandler(IPC_CHANNELS.TASK_START, task.id);
+  await invokeIpcHandler(IPC_CHANNELS.TASK_START, task.id, undefined, context.projectId);
   return 'started';
 }
 
@@ -162,7 +168,7 @@ export const TASK_TOOLS: TaskTool[] = [
       const run = task.claudeRun;
       let worktree: WorktreeStatus | undefined;
       try {
-        worktree = await ipc<WorktreeStatus>(IPC_CHANNELS.TASK_WORKTREE_STATUS, task.id);
+        worktree = await ipc<WorktreeStatus>(IPC_CHANNELS.TASK_WORKTREE_STATUS, task.id, context.projectId);
       } catch {
         worktree = undefined;
       }
@@ -281,7 +287,7 @@ export const TASK_TOOLS: TaskTool[] = [
         ...(text(args.title) ? { title: text(args.title) } : {}),
         ...(text(args.description) ? { description: text(args.description) } : {}),
         ...(Object.keys(metadata).length ? { metadata } : {}),
-      });
+      }, context.projectId);
       return summarize(updated ?? findTask(context, task.id));
     },
   },
@@ -304,7 +310,7 @@ export const TASK_TOOLS: TaskTool[] = [
     run: async (context, args) => {
       const task = findTask(context, args.taskId);
       if (task.status !== 'in_progress' && task.status !== 'ai_review') throw new Error('The task is not running');
-      await invokeIpcHandler(IPC_CHANNELS.TASK_STOP, task.id);
+      await invokeIpcHandler(IPC_CHANNELS.TASK_STOP, task.id, context.projectId);
       return summarize(findTask(context, task.id));
     },
   },
@@ -330,7 +336,7 @@ export const TASK_TOOLS: TaskTool[] = [
       const options = to === 'done' && args.worktree
         ? (args.worktree === 'delete' ? { forceCleanup: true } : { keepWorktree: true })
         : undefined;
-      const result = await invokeIpcHandler<IPCResult & { worktreeExists?: boolean }>(IPC_CHANNELS.TASK_UPDATE_STATUS, task.id, to, options);
+      const result = await invokeIpcHandler<IPCResult & { worktreeExists?: boolean }>(IPC_CHANNELS.TASK_UPDATE_STATUS, task.id, to, options, context.projectId);
       if (!result.success) {
         if (result.worktreeExists) {
           throw new Error('The task still has a worktree. Ask the user whether to keep it or delete it, then move it again with worktree "keep" or "delete".');
@@ -347,7 +353,7 @@ export const TASK_TOOLS: TaskTool[] = [
     mutates: true,
     run: async (context, args) => {
       const task = findTask(context, args.taskId);
-      const result = await ipc<{ action: 'started' | 'queued' }>(IPC_CHANNELS.TASK_RETRY, task.id);
+      const result = await ipc<{ action: 'started' | 'queued' }>(IPC_CHANNELS.TASK_RETRY, task.id, context.projectId);
       return { id: task.id, action: result.action };
     },
   },
@@ -364,7 +370,7 @@ export const TASK_TOOLS: TaskTool[] = [
       const task = findTask(context, args.taskId);
       const feedback = text(args.feedback);
       if (!feedback) throw new Error('feedback is required');
-      await ipc(IPC_CHANNELS.TASK_REVIEW, task.id, false, feedback);
+      await ipc(IPC_CHANNELS.TASK_REVIEW, task.id, false, feedback, undefined, undefined, context.projectId);
       return { id: task.id, action: 'revising' };
     },
   },
@@ -388,7 +394,7 @@ export const TASK_TOOLS: TaskTool[] = [
         targetBranch: text(args.targetBranch),
         title: text(args.title),
         draft: args.draft === true,
-      });
+      }, context.projectId);
       return { id: task.id, prUrl: result.prUrl, alreadyExists: result.alreadyExists === true };
     },
   },
@@ -403,7 +409,7 @@ export const TASK_TOOLS: TaskTool[] = [
     mutates: true,
     run: async (context, args) => {
       const task = findTask(context, args.taskId);
-      const result = await ipc<WorktreeMergePRResult>(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, task.id, { targetBranch: text(args.targetBranch) });
+      const result = await ipc<WorktreeMergePRResult>(IPC_CHANNELS.TASK_WORKTREE_MERGE_PR, task.id, { targetBranch: text(args.targetBranch) }, context.projectId);
       if (!result.success) throw new Error(result.error || 'The pull request could not be merged');
       return { id: task.id, ...result };
     },
@@ -439,7 +445,7 @@ export const TASK_TOOLS: TaskTool[] = [
     mutates: true,
     run: async (context, args) => {
       const task = findTask(context, args.taskId);
-      await ipc(IPC_CHANNELS.TASK_DELETE, task.id);
+      await ipc(IPC_CHANNELS.TASK_DELETE, task.id, context.projectId);
       return { deleted: task.id };
     },
   },

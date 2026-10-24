@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 import { SettingsRow, SegmentedControl, type SegmentedOption } from './SettingsRow';
 import { Button } from '../ui/button';
-import { useSettingsStore } from '../../stores/settings-store';
+import { useSettingsStore, saveSettings } from '../../stores/settings-store';
 import { isWindows } from '../../lib/os-detection';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import { cn } from '../../lib/utils';
@@ -15,6 +15,21 @@ interface WindowsShellSelectorProps {
 }
 
 const WSL_CACHE_KEY = 'wsl-availability';
+
+/**
+ * How a row that is about to relaunch the app gets everything the user edited onto disk first.
+ *
+ * The settings dialog saves its whole settings object after a short pause, so until that timer
+ * fires a theme or a font the user just picked lives only in the dialog's state. Saving this row's
+ * value on its own and relaunching would throw those edits away, and the dialog is the only place
+ * that knows what is pending, so it provides its flush and this row awaits it. The context is
+ * declared here, beside its only consumer, so the dialog does not have to thread a prop through
+ * the Appearance section to reach one button. It reports whether everything is saved: a failed
+ * save must leave the app running rather than restart it into the old shell.
+ */
+const SettingsFlushContext = createContext<(() => Promise<boolean>) | null>(null);
+
+export const SettingsFlushProvider = SettingsFlushContext.Provider;
 
 /**
  * Windows shell row (Appearance, Windows only): PWSH runs native tools, WSL runs everything in
@@ -30,6 +45,8 @@ export function WindowsShellSelector({ settings, onSettingsChange }: WindowsShel
     onWindows ? readRefreshCache<WslAvailability>(WSL_CACHE_KEY) ?? null : null
   );
   const [checking, setChecking] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const flushDialogSave = useContext(SettingsFlushContext);
 
   const checkWsl = useCallback(async () => {
     setChecking(true);
@@ -79,6 +96,21 @@ export function WindowsShellSelector({ settings, onSettingsChange }: WindowsShel
     updateStoreSettings({ windowsShell });
   };
 
+  // The dialog saves what the user changed after a short pause, so the restart has to get it all
+  // on disk first: relaunching before that save lands starts the app on the old shell, and takes
+  // every other pending edit with it. Outside the dialog there is nothing else pending, so this
+  // row's own value is the whole change. A failed save leaves the app running.
+  const persistPending = flushDialogSave ?? (() => saveSettings({ windowsShell: value }));
+
+  const restart = async () => {
+    setRestarting(true);
+    if (await persistPending()) {
+      await window.electronAPI.relaunchApp();
+      return;
+    }
+    setRestarting(false);
+  };
+
   const options: SegmentedOption<WindowsShell>[] = [
     { value: 'pwsh', label: t('theme.windowsShellPwsh') },
     { value: 'wsl', label: t('theme.windowsShellWsl'), disabled: !wslAvailable }
@@ -124,7 +156,7 @@ export function WindowsShellSelector({ settings, onSettingsChange }: WindowsShel
         </Button>
       )}
       {needsRestart && (
-        <Button variant="outline" size="sm" onClick={() => void window.electronAPI.relaunchApp()}>
+        <Button variant="outline" size="sm" disabled={restarting} onClick={() => void restart()}>
           {t('theme.restartToApply')}
         </Button>
       )}

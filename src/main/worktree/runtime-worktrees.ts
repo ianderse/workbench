@@ -9,7 +9,9 @@
  *
  * - New worktrees get relative links (`worktree.useRelativePaths`, git 2.48+) when every git that
  *   may open the repository supports them: relative links set the `relativeWorktrees` repository
- *   extension, and older git then refuses the whole repository.
+ *   extension, and older git then refuses the whole repository. That is both runtimes' git on
+ *   Windows, and on macOS also the system git (`/usr/bin/git`, Xcode's), which other tools run
+ *   even when a newer Homebrew git comes first on PATH.
  * - Links in the other runtime's format are repaired (`git worktree repair <paths>`) before a
  *   prune, and for every project when the app starts in a different runtime than last time.
  *
@@ -18,10 +20,12 @@
 
 import { existsSync, promises as fs } from 'fs';
 import path from 'path';
+import { appLog } from '../app-logger';
 import { getToolInfoAsync } from '../cli-tool-manager';
-import { isWindows } from '../platform';
+import { isMacOS, isWindows } from '../platform';
+import { runTool } from '../platform/runtime-exec';
 import { getWslInfo, isWslRuntime } from '../platform/shell-runtime';
-import { wslToWindows } from '../platform/wsl-paths';
+import { isWslUncPath, windowsPathKey, wslToWindows } from '../platform/wsl-paths';
 import { git } from '../utils/git-exec';
 
 /** First git version with `worktree.useRelativePaths` */
@@ -67,33 +71,74 @@ export function setWslPathHints(hints: WslPathHints | undefined): void {
   wslHints = { ...(hints ?? {}) };
 }
 
+/**
+ * macOS ships git at this path (Xcode's, 2.39 at the time of writing). Homebrew git can be first
+ * on PATH while Xcode, IDEs and other tools still run this one, so it also has to be able to read
+ * the repository.
+ */
+const MACOS_SYSTEM_GIT = '/usr/bin/git';
+
+const SYSTEM_GIT_TIMEOUT_MS = 10_000;
+
+/** Whether macOS's system git reads relative links; undefined until asked, probed once */
+let macosSystemGitRelative: boolean | undefined;
+
 /** Back to the startup state (tests) */
 export function resetRuntimeWorktreesForTests(): void {
   knownVersions = {};
   wslHints = {};
+  macosSystemGitRelative = undefined;
 }
 
-/** The git version of the runtime this session runs its tools in */
-async function currentGitVersion(): Promise<string | null> {
+/** The git of the runtime this session runs its tools in */
+async function currentGit(): Promise<{ version: string | null; path: string | null }> {
   const wsl = getWslInfo();
-  if (wsl) return wsl.tools.git.path ? wsl.tools.git.version : null;
+  if (wsl) return { version: wsl.tools.git.path ? wsl.tools.git.version : null, path: wsl.tools.git.path };
   const info = await getToolInfoAsync('git');
-  return info.found ? info.version ?? null : null;
+  return { version: info.found ? info.version ?? null : null, path: info.found ? info.path ?? null : null };
 }
 
 /**
- * Whether new worktrees get relative links. Off Windows: when git is 2.48+. On Windows: when the
- * git of this runtime is 2.48+ and the other runtime's git is known to be 2.48+ (or known to be
- * missing); unknown means absolute links, which an older git can still open.
+ * Whether macOS's system git could read relative worktree links (true off macOS, and when there
+ * is no `/usr/bin/git`). A repository with relative links sets the `relativeWorktrees` extension,
+ * which older git refuses altogether — so when that git doesn't answer, or is older than 2.48,
+ * new worktrees get absolute links, which every git can open.
+ */
+async function macosSystemGitSupportsRelative(currentGitPath: string | null): Promise<boolean> {
+  if (!isMacOS() || !existsSync(MACOS_SYSTEM_GIT)) return true;
+  // The session already runs the system git: its version was checked by the caller. Both paths are
+  // POSIX ones, so they are compared by POSIX rules rather than the host's.
+  if (currentGitPath && path.posix.resolve(currentGitPath) === MACOS_SYSTEM_GIT) return true;
+  if (macosSystemGitRelative === undefined) {
+    try {
+      const { stdout } = await runTool('git', ['--version'], {
+        command: MACOS_SYSTEM_GIT,
+        timeout: SYSTEM_GIT_TIMEOUT_MS,
+      });
+      macosSystemGitRelative = gitSupportsRelativeWorktrees(stdout.match(/\d+\.\d+(?:\.\d+)?/)?.[0] ?? null);
+    } catch {
+      macosSystemGitRelative = false;
+    }
+  }
+  return macosSystemGitRelative;
+}
+
+/**
+ * Whether new worktrees get relative links: only when every git that may open the repository is
+ * 2.48+. Off Windows that is the git of this session, plus macOS's system git when it is another
+ * binary. On Windows it is the git of this runtime and the other runtime's git, which has to be
+ * known to be 2.48+ (or known to be missing); unknown means absolute links, which an older git
+ * can still open.
  */
 export async function useRelativeWorktreePaths(): Promise<boolean> {
-  let current: string | null;
+  let current: { version: string | null; path: string | null };
   try {
-    current = await currentGitVersion();
+    current = await currentGit();
   } catch {
     return false;
   }
-  if (!gitSupportsRelativeWorktrees(current)) return false;
+  if (!gitSupportsRelativeWorktrees(current.version)) return false;
+  if (!(await macosSystemGitSupportsRelative(current.path))) return false;
   if (!isWindows()) return true;
   const other = isWslRuntime() ? knownVersions.native : knownVersions.wsl;
   return other === null || gitSupportsRelativeWorktrees(other);
@@ -119,13 +164,28 @@ export interface RecordedWorktree {
 const DRIVE_PATH = /^[A-Za-z]:[\\/]/;
 
 /**
+ * A worktree path as a key that two spellings of the same folder share, so a registered worktree
+ * cannot look stale over the spelling alone - and a worktree that looks stale is deleted with the
+ * uncommitted work in it. The Windows rule lives in `windowsPathKey` because the same mismatch
+ * loses a project its spending and its memories (`belongsToProject`), and one rule in one place is
+ * what keeps the two from drifting apart. Off Windows the path is only resolved, as paths there are
+ * case-sensitive.
+ */
+export function worktreePathKey(worktreePath: string): string {
+  const value = worktreePath.trim();
+  return isWindows() ? windowsPathKey(value) : path.resolve(value);
+}
+
+/**
  * The worktree folder from a `gitdir` file's content (`<worktree>/.git`, as the git that wrote it
  * sees it): `C:/x/.git`, `/mnt/c/x/.git`, `/home/u/x/.git` or relative to `adminDir`.
  */
 export function parseRecordedGitdir(content: string, adminDir: string, hints: WslPathHints = wslHints): RecordedWorktree {
   const value = content.trim();
   const strip = (p: string) => p.replace(/[\\/]\.git[\\/]?$/, '');
-  if (DRIVE_PATH.test(value) || value.startsWith('\\\\')) {
+  // Windows git writes a path in the WSL home with forward slashes (`//wsl.localhost/<distro>/…`),
+  // which would otherwise be read as a path inside the distribution
+  if (DRIVE_PATH.test(value) || value.startsWith('\\\\') || isWslUncPath(value)) {
     return { path: path.win32.normalize(strip(value)), format: 'windows' };
   }
   if (value.startsWith('/')) {
@@ -149,6 +209,26 @@ function isForeignFormat(format: RecordedWorktree['format']): boolean {
 
 /** The linked worktrees the project's repository records, with existing folders */
 export async function listRecordedWorktrees(projectPath: string): Promise<RecordedWorktree[]> {
+  return (await listWorktreeRegistrations(projectPath)).filter((entry) => entry.onDisk).map(({ onDisk: _onDisk, id: _id, adminDir: _adminDir, ...entry }) => entry);
+}
+
+/** A registration under `.git/worktrees`, whether or not its folder is still there */
+interface WorktreeRegistration extends RecordedWorktree {
+  /** Name of its admin directory, which is how git refers to it */
+  id: string;
+  adminDir: string;
+  /** Whether the folder the link names is still on disk */
+  onDisk: boolean;
+}
+
+/**
+ * Every worktree the project's repository records, classified by whether its folder is still there.
+ *
+ * Reading the admin directories rather than asking git is what lets a link the other runtime's git
+ * cannot follow still be resolved: `parseRecordedGitdir` translates between the two namespaces,
+ * where git only knows its own.
+ */
+async function listWorktreeRegistrations(projectPath: string): Promise<WorktreeRegistration[]> {
   const adminRoot = path.join(projectPath, '.git', 'worktrees');
   let ids: string[];
   try {
@@ -157,13 +237,18 @@ export async function listRecordedWorktrees(projectPath: string): Promise<Record
     // No linked worktrees, or the project is itself a worktree / submodule (a .git file)
     return [];
   }
-  const recorded: RecordedWorktree[] = [];
+  const recorded: WorktreeRegistration[] = [];
   for (const id of ids) {
     const adminDir = path.join(adminRoot, id);
     try {
       const content = await fs.readFile(path.join(adminDir, 'gitdir'), 'utf-8');
       const entry = parseRecordedGitdir(content, adminDir);
-      if (entry.path && existsSync(path.join(entry.path, '.git'))) recorded.push(entry);
+      recorded.push({
+        ...entry,
+        id,
+        adminDir,
+        onDisk: !!entry.path && existsSync(path.join(entry.path, '.git')),
+      });
     } catch {
       // Not a worktree entry
     }
@@ -208,5 +293,64 @@ export async function repairProjectWorktrees(projectPath: string, options: { all
  * wrote, so the prune doesn't drop them as broken. No git call when there are none.
  */
 export async function repairForeignWorktrees(projectPath: string): Promise<void> {
-  await repairProjectWorktrees(projectPath);
+  const { error } = await repairProjectWorktrees(projectPath);
+  if (error) appLog.warn(`[RuntimeWorktrees] Could not repair the worktrees of ${projectPath}: ${error}`);
+}
+
+/**
+ * Drop the worktree registrations nothing can resolve any more, and only those.
+ *
+ * Pruning is how a worktree deleted outside the app stops blocking its task: without it the next
+ * `worktree add` fails because the branch is still claimed by a registration nothing can reach.
+ * The danger is the opposite case - a prune drops any registration whose link this git cannot
+ * follow, and a link written by the other runtime's git is exactly that, so a worktree still on
+ * disk would be unregistered and the caller that deletes the folder git no longer tracks would
+ * take the task's uncommitted work with it.
+ *
+ * Which is which is decided per registration, not per project: `parseRecordedGitdir` resolves a
+ * link in either runtime's namespace, so a folder that is still there is recognized as such
+ * whatever wrote the link. When nothing is at risk, `git worktree prune` does the whole job. When
+ * something is, the stale registrations are removed one at a time instead - leaving the project
+ * unprunable because one *other* worktree has an unrepairable link would turn a state that heals
+ * itself into a task that can never start again, and the reason would only be in the log.
+ *
+ * "Stale" means a link that resolved to a folder which is gone. A link that could not be resolved
+ * at all is a different thing and is never removed: `parseRecordedGitdir` answers with no path when
+ * it cannot translate the recorded gitdir - a WSL-written path while the distribution's name is not
+ * known yet, which a task start can hit before the runtime check has filled the hints in - and the
+ * folder behind such a link is very often right there on disk. Treating it as stale would
+ * unregister a live worktree, and the caller that deletes the folder git no longer tracks would
+ * take the task's uncommitted work with it, which is the one outcome this exists to prevent.
+ *
+ * Off Windows no link can be foreign, so this is the plain prune it has always been.
+ */
+export async function pruneWorktrees(projectPath: string): Promise<void> {
+  const registrations = await listWorktreeRegistrations(projectPath);
+  const unresolved = registrations.filter((entry) => !entry.path);
+  const unfollowable = registrations.filter((entry) => entry.onDisk && isForeignFormat(entry.format));
+  const atRisk = unresolved.length + unfollowable.length;
+
+  if (atRisk === 0) {
+    await git(await worktreeGitArgs(['worktree', 'prune']), { cwd: projectPath, isolated: true }).catch((error) => {
+      appLog.warn(`[RuntimeWorktrees] Pruning ${projectPath} failed:`, error);
+    });
+    return;
+  }
+
+  // Only a link that resolved, to a folder that is not there
+  const stale = registrations.filter((entry) => entry.path && !entry.onDisk);
+  appLog.warn(
+    `[RuntimeWorktrees] Not pruning ${projectPath} as a whole: ${atRisk} worktree(s) have a link this git cannot `
+      + `follow or that could not be resolved at all, and a prune would unregister them so their folders are `
+      + `deleted as untracked. Removing ${stale.length} registration(s) whose folder is really gone instead.`
+  );
+  for (const entry of stale) {
+    try {
+      // What `git worktree prune` does to such an entry, done only to the entries that deserve it
+      await fs.rm(entry.adminDir, { recursive: true, force: true });
+      appLog.info(`[RuntimeWorktrees] Removed the stale worktree registration ${entry.id} of ${projectPath}`);
+    } catch (error) {
+      appLog.warn(`[RuntimeWorktrees] Could not remove the stale worktree registration ${entry.id}:`, error);
+    }
+  }
 }

@@ -110,7 +110,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   // Event Handlers
   const handleStartStop = async () => {
     if (state.isRunning && !state.isStuck) {
-      stopTask(task.id);
+      stopTask(task.id, task.projectId);
     } else {
       setActionError(null);
       // If task is incomplete, validate and reload plan before starting
@@ -131,7 +131,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   const handleRetry = async () => {
     setIsRetrying(true);
     setActionError(null);
-    const result = await retryTask(task.id);
+    const result = await retryTask(task.id, task.projectId);
     setIsRetrying(false);
     if (result.success) {
       state.setIsStuck(false);
@@ -149,7 +149,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     }
     state.setIsSubmitting(true);
     const wasStartOver = state.startOver;
-    await submitReview(task.id, false, state.feedback, state.feedbackImages, { startOver: wasStartOver });
+    await submitReview(task.id, false, state.feedback, state.feedbackImages, { startOver: wasStartOver }, task.projectId);
     state.setIsSubmitting(false);
     if (wasStartOver) void state.reloadPreviousRuns();
     state.setFeedback('');
@@ -160,7 +160,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   const handleDelete = async () => {
     state.setIsDeleting(true);
     state.setDeleteError(null);
-    const result = await deleteTask(task.id);
+    const result = await deleteTask(task.id, task.projectId);
     if (result.success) {
       state.setShowDeleteDialog(false);
       onOpenChange(false);
@@ -170,10 +170,13 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     state.setIsDeleting(false);
   };
 
+  // The worktree calls below take the task's own project last: a task id is only unique inside
+  // its project, so without it the main process would search the projects for the id and could
+  // open a pull request for, or merge, another project's worktree of the same name
   const handleCreatePR = async (options: WorktreeCreatePROptions) => {
     state.setIsCreatingPR(true);
     try {
-      const result = await window.electronAPI.createWorktreePR(task.id, options);
+      const result = await window.electronAPI.createWorktreePR(task.id, options, task.projectId);
       if (result.success && result.data) {
         // Update single task in store with new status and prUrl (more efficient than reloading all tasks)
         // The task waits in Human Review (PR Created) until its PR is merged
@@ -197,7 +200,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
 
   // A merged PR moves the task to Done
   const handleMergePR = async (options: WorktreeMergePROptions): Promise<WorktreeMergePRResult> => {
-    const result = await window.electronAPI.mergeWorktreePR(task.id, options);
+    const result = await window.electronAPI.mergeWorktreePR(task.id, options, task.projectId);
     if (!result.success || !result.data) return { success: false, error: result.error };
     if (result.data.success) {
       useTaskStore.getState().updateTask(task.id, { status: 'done', metadata: { ...task.metadata, prState: 'merged' } });
@@ -207,7 +210,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
 
   // A local merge (plain git, nothing pushed) moves the task to Done
   const handleLocalMerge = async (): Promise<WorktreeLocalMergeResult> => {
-    const result = await window.electronAPI.mergeWorktreeLocal(task.id);
+    const result = await window.electronAPI.mergeWorktreeLocal(task.id, task.projectId);
     if (!result.success || !result.data) return { success: false, error: result.error };
     if (result.data.success) {
       useTaskStore.getState().updateTask(task.id, { status: 'done' });
@@ -222,12 +225,12 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   useEffect(() => {
     if (!open || !prUrl || prState || prStateRequested.current) return;
     prStateRequested.current = true;
-    void window.electronAPI.getWorktreePRState(task.id).then((result) => {
+    void window.electronAPI.getWorktreePRState(task.id, task.projectId).then((result) => {
       if (!result.success || !result.data) return;
       const current = useTaskStore.getState().tasks.find((candidate) => candidate.id === task.id);
       if (current) useTaskStore.getState().updateTask(task.id, { metadata: { ...current.metadata, prState: result.data } });
     });
-  }, [open, prUrl, prState, task.id]);
+  }, [open, prUrl, prState, task.id, task.projectId]);
   // Only an open PR can be merged, and not while the task runs
   const canMergePR = !!prUrl && prState === 'open' && task.status !== 'in_progress' && task.status !== 'ai_review';
 
@@ -470,14 +473,16 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                         {task.metadata?.attachedImages && task.metadata.attachedImages.length > 0 && (
                           <TaskAttachments task={task} attachments={task.metadata.attachedImages} />
                         )}
-                        {/* With the Request changes section and the previous runs above them, the
-                            current run's logs need a heading of their own to stand apart */}
+                        {/* With the previous runs listed above them, the current run's logs need a
+                            heading of their own to stand apart. Review state says nothing about
+                            that: a task started over is running again long before it comes back
+                            for review, and its heading says so. */}
                         <TaskLogs
                           phaseLogs={state.phaseLogs}
                           runPhases={task.claudeRun?.phases}
                           legacyLogs={task.logs}
                           isSettled={isTaskRunSettled(task.status)}
-                          heading={state.needsReview && state.previousRuns.length > 0 ? {
+                          heading={state.previousRuns.length > 0 ? {
                             title: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningTitle' : 'tasks:currentRun.title'),
                             description: t(isTaskSessionActive(task) ? 'tasks:currentRun.runningDescription' : 'tasks:currentRun.description')
                           } : undefined}

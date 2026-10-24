@@ -328,8 +328,21 @@ describe('TaskEditDialog Logic', () => {
         title: 'Updated Title'
       });
 
-      expect(mockUpdateTask).toHaveBeenCalledWith('task-1', { title: 'Updated Title' });
+      // The edit names the project the card belongs to: a task id is only unique within a project,
+      // so without it the main process would write the edit into whichever project holds that id
+      // first - and `metadata.baseBranch` is among the fields this persists
+      expect(mockUpdateTask).toHaveBeenCalledWith('task-1', { title: 'Updated Title' }, 'project-1');
       expect(result).toBe(true);
+    });
+
+    it('prefers a project the caller names over the board the task is on', async () => {
+      const task = createTestTask({ id: 'task-1' });
+      useTaskStore.setState({ tasks: [task] });
+      mockUpdateTask.mockResolvedValueOnce({ success: true, data: task });
+
+      await persistUpdateTask('task-1', { title: 'Updated Title' }, 'project-2');
+
+      expect(mockUpdateTask).toHaveBeenCalledWith('task-1', { title: 'Updated Title' }, 'project-2');
     });
 
     it('should return false on API error', async () => {

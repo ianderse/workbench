@@ -25,9 +25,10 @@ import { getClaudeProfileManager } from '../claude-profile-manager';
 import { getOperationRegistry } from '../claude-profile/operation-registry';
 import { getAPIProfileEnv } from '../services/profile';
 import { getSpecsDir } from '../../shared/constants';
+import { getTaskWorktreeBranch } from '../../shared/utils/claude-run';
 import type { AppSettings } from '../../shared/types/settings';
 import { appLog } from '../app-logger';
-import { resolveBaseBranch } from '../utils/base-branch';
+import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branch';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 
@@ -76,6 +77,17 @@ interface RunEntry {
  */
 const runKey = (projectId: string, taskId: string): string => `${projectId}\u0000${taskId}`;
 
+/**
+ * The id a run is registered under in the operation registry (account swaps). The registry keys
+ * its operations by whatever id it is handed, so a bare task id would let the second project's
+ * run overwrite the first's registration, and the first run to finish would unregister whichever
+ * entry was left - leaving one run without a swap registration and the other with a stale one
+ * pointing at a run that has ended. The registry and its other reader (`usage-monitor.ts`, which
+ * groups ids by profile and logs them) treat the id as opaque, so naming the project here is
+ * free; it is spelled out rather than reusing `runKey` because it is read by people in logs.
+ */
+const operationId = (projectId: string, taskId: string): string => `task:${projectId}:${taskId}`;
+
 export class AgentManager extends EventEmitter {
   private state = new AgentState();
   private runs = new Map<string, RunEntry>();
@@ -88,17 +100,35 @@ export class AgentManager extends EventEmitter {
 
   /**
    * The key a task's run is held under. Callers that know the project get exactly it;
-   * the rest take the one run with that task id (projects rarely share one).
+   * the rest take the one run with that task id.
+   *
+   * Everything the user does to a run now names its project: the board sends the project the card
+   * belongs to, and the handlers pass that through rather than working one out. The bare task id
+   * still has to answer, though, for callers that genuinely have none - the Insights task tools, a
+   * renderer older than the field it now sends - and for internal callers that never had one.
+   *
+   * With two projects running the same task id there is no run such a caller can be meaning, and
+   * the arbitrary first match would stop or restart a run the user never touched, so that case is
+   * logged and refused: the caller reads it as "not running", which the user can repeat from the
+   * project's own board, where the project travels with the request.
    */
   private keyOf(taskId: string, projectId?: string): string | undefined {
     if (projectId) {
       const key = runKey(projectId, taskId);
       return this.runs.has(key) || this.lastOptions.has(key) ? key : undefined;
     }
+    let found: string | undefined;
     for (const [key, entry] of this.runs) {
-      if (entry.taskId === taskId) return key;
+      if (entry.taskId !== taskId) continue;
+      if (found !== undefined) {
+        appLog.warn(
+          `[AgentManager] ${taskId} is running in more than one project and no project was named, doing nothing`
+        );
+        return undefined;
+      }
+      found = key;
     }
-    return undefined;
+    return found;
   }
 
   // ============================================
@@ -157,7 +187,7 @@ export class AgentManager extends EventEmitter {
       appLog.error(`[AgentManager] Could not start task ${taskId}:`, message);
       if (this.runs.get(key) === entry) {
         this.runs.delete(key);
-        this.state.removeRunning(taskId);
+        this.state.removeRunning(taskId, projectId);
       }
       resolveDone();
       if (entry.killed) return;
@@ -200,7 +230,7 @@ export class AgentManager extends EventEmitter {
       },
       onRunInfo: (info) => {
         if (entry.killed) return;
-        if (info.sessionId) this.state.updateTaskSession(taskId, info.sessionId);
+        if (info.sessionId) this.state.updateTaskSession(taskId, info.sessionId, undefined, projectId);
         this.emit('run-info', taskId, info, projectId);
       },
       onSubtasks: (subtasks) => {
@@ -225,17 +255,23 @@ export class AgentManager extends EventEmitter {
 
   /**
    * Stop a task's run. Its outcome is not reported (callers send USER_STOPPED themselves).
+   *
+   * Returns the project of the run it stopped, or undefined when there was none to stop. A caller
+   * that had no project to name - and so let the bare task id find the single run carrying it -
+   * needs that answer to go on to the right project's task: looking it up from the task id again
+   * would pick the first project holding the id, which is not necessarily the one just stopped.
    */
-  killTask(taskId: string, projectId?: string): boolean {
+  killTask(taskId: string, projectId?: string): string | undefined {
     const key = this.keyOf(taskId, projectId);
     const entry = key ? this.runs.get(key) : undefined;
-    if (!key || !entry) return false;
+    if (!key || !entry) return undefined;
     entry.killed = true;
     entry.run?.stop();
     this.runs.delete(key);
-    this.state.removeRunning(taskId);
-    getOperationRegistry().unregisterOperation(taskId);
-    return true;
+    // The run the key found owns the project, which the caller may not have named
+    this.state.removeRunning(taskId, entry.projectId);
+    getOperationRegistry().unregisterOperation(operationId(entry.projectId, taskId));
+    return entry.projectId;
   }
 
   /** Stop all runs and wait (bounded) for them to wind down */
@@ -313,29 +349,39 @@ export class AgentManager extends EventEmitter {
     return this.state.getRunningTasksByProfile();
   }
 
-  /** Record which profile a task uses */
+  /**
+   * Record which profile a task uses.
+   *
+   * The project is optional here, as it is on the lookups below, only because a task id alone is
+   * what the callers outside this file have: naming it is what keeps two projects' same-named
+   * tasks apart, so everything inside this file passes it.
+   */
   assignProfileToTask(
     taskId: string,
     profileId: string,
     profileName: string,
-    reason: 'proactive' | 'reactive' | 'manual'
+    reason: 'proactive' | 'reactive' | 'manual',
+    projectId?: string
   ): void {
-    this.state.assignProfileToTask(taskId, profileId, profileName, reason);
+    this.state.assignProfileToTask(taskId, profileId, profileName, reason, projectId);
   }
 
   /** Profile assignment of a task */
-  getTaskProfileAssignment(taskId: string): { profileId: string; profileName: string; reason: string } | undefined {
-    return this.state.getTaskProfileAssignment(taskId);
+  getTaskProfileAssignment(
+    taskId: string,
+    projectId?: string
+  ): { profileId: string; profileName: string; reason: string } | undefined {
+    return this.state.getTaskProfileAssignment(taskId, projectId);
   }
 
   /** Update the Claude Code session ID of a task */
-  updateTaskSession(taskId: string, sessionId: string): void {
-    this.state.updateTaskSession(taskId, sessionId);
+  updateTaskSession(taskId: string, sessionId: string, projectId?: string): void {
+    this.state.updateTaskSession(taskId, sessionId, undefined, projectId);
   }
 
   /** Claude Code session ID of a task */
-  getTaskSessionId(taskId: string): string | undefined {
-    return this.state.getTaskSessionId(taskId);
+  getTaskSessionId(taskId: string, projectId?: string): string | undefined {
+    return this.state.getTaskSessionId(taskId, projectId);
   }
 
   // ============================================
@@ -346,19 +392,46 @@ export class AgentManager extends EventEmitter {
     const { project, task, mode } = options;
     const specDir = path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId);
 
-    // The base branch a task was created with may have been deleted or renamed since; stand in
-    // for it with a branch that still exists, so the task can still be started
-    const wantedBaseBranch = task.metadata?.baseBranch || project.settings?.mainBranch || 'main';
-    const { branch: baseBranch, missing } = await resolveBaseBranch(project.path, wantedBaseBranch, [
-      project.settings?.mainBranch,
-      'main',
-      await this.getCurrentBranch(project.path),
-    ]);
-    if (missing) {
-      const message = `Base branch "${missing}" no longer exists; starting from "${baseBranch}" instead.`;
-      appLog.warn(`[AgentManager] ${message}`);
-      this.emit('log', taskId, `${message}\n`, project.id);
-    }
+    // A base branch the user chose - on the task, or as the project's main branch - may have been
+    // deleted or renamed since. Nothing stands in for it: this throws, `launch()` turns the message
+    // into a recoverable failure, and the user gives the task a base branch that exists instead of
+    // getting a run built on code they never chose. A branch the repository has never heard of is
+    // not the same thing as a branch that is gone - a teammate may have pushed it, or it may have
+    // been typed in by hand - so resolving fetches it once before it calls it missing. With
+    // nothing chosen there is no choice to honour, so the repository is asked what its default
+    // branch is rather than assuming `main`, which would fail on every project whose default is
+    // `master`
+    const chosenBaseBranch = task.metadata?.baseBranch || project.settings?.mainBranch;
+
+    // That strictness is about the one moment the base branch decides what the work is built on:
+    // the task's branch being cut from it. It happens once per task - `createOrGetWorktree` only
+    // looks the base branch up when `workbench/<specId>` does not exist yet, and otherwise attaches
+    // the worktree to that branch and never reads the base at all (its steps 4 and 6) - and a task
+    // that runs in the project itself never branches from anything. Failing every mode on a missing
+    // base branch therefore stranded exactly the tasks that need it least: a finished task in Human
+    // Review whose base branch had since been merged and deleted could not be revised or continued,
+    // and the message asked for a restart, which throws the finished work away.
+    const branchingFromBase =
+      task.metadata?.useWorktree !== false
+      && !(await this.localBranchExists(project.path, getTaskWorktreeBranch(task.specId)));
+
+    // With nothing branched from it, the base branch is only ever read as text: the system prompt
+    // names it as what the worktree was cut from and the validation step diffs against it. The
+    // branch the user chose is the honest answer there - it is what this worktree really came from -
+    // and when it is gone that diff fails in the agent's own shell, where it can say so, which beats
+    // naming some other branch the work was never based on. Nothing else reads this value: the
+    // parallel-tasks changelog goes to the task's own metadata for its base branch
+    // (`task-changelog-writer.ts`), not here.
+    //
+    // A task with no base branch chosen asks the repository for its default, which substitutes for
+    // no choice of the user's rather than for a choice. That answer is required only when a branch
+    // is about to be cut from it; a run that needs no worktree can live in a directory that is not
+    // a git repository at all, or in one freshly `git init`ed with no commit, and there the
+    // detection has nothing to answer with. Failing to start over a value that is only going to be
+    // printed would make those runs impossible, so the name stands in as a label instead.
+    const baseBranch = chosenBaseBranch
+      ? (branchingFromBase ? await resolveBaseBranch(project.path, chosenBaseBranch) : chosenBaseBranch)
+      : await this.detectBaseBranch(project.path, branchingFromBase);
 
     let worktreePath: string;
     let branch: string;
@@ -427,8 +500,11 @@ export class AgentManager extends EventEmitter {
       changelogPath: project.autoBuildPath ? getTaskChangelogPath(project.path, project.autoBuildPath) : undefined,
       mode,
       // revise: the change to apply. start: what a discarded attempt got wrong, when the
-      // reviewer asked for the task to be started over
-      ...(mode === 'revise' || options.feedback ? { feedback: options.feedback ?? '', feedbackAttachments } : {}),
+      // reviewer asked for the task to be started over. Reviewer notes can be screenshots with
+      // nothing typed, so the images alone are enough to carry over
+      ...(mode === 'revise' || options.feedback || feedbackAttachments.length > 0
+        ? { feedback: options.feedback ?? '', feedbackAttachments }
+        : {}),
       profileId: options.profileId,
     };
 
@@ -453,6 +529,41 @@ export class AgentManager extends EventEmitter {
     }
 
     return config;
+  }
+
+  /**
+   * The repository's default branch, for a task that named none.
+   *
+   * `required` is false when nothing will be branched from it, and then a repository that cannot
+   * name a default - no git, or no commit yet - gives up the name `main` as a label rather than
+   * failing the run. It is never a start point in that case, so no work can be built on the wrong
+   * branch by it.
+   */
+  private async detectBaseBranch(projectPath: string, required: boolean): Promise<string> {
+    if (required) return resolveDefaultBaseBranch(projectPath);
+    try {
+      return await resolveDefaultBaseBranch(projectPath);
+    } catch (error) {
+      appLog.info(`[AgentManager] ${projectPath} names no default branch, using "main" as the label: ${String(error)}`);
+      return 'main';
+    }
+  }
+
+  /**
+   * Whether the repository already has the task's own branch, which is what decides whether a run
+   * is about to cut that branch from the base branch.
+   *
+   * A git call that fails answers no, so the strict base-branch resolution still runs: it exists to
+   * catch a missing base before `git worktree add` does, and skipping it because git hiccuped would
+   * move that failure to where the user only sees git's own words.
+   */
+  private async localBranchExists(cwd: string, branch: string): Promise<boolean> {
+    try {
+      const { stdout } = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], { cwd });
+      return stdout.trim().length > 0;
+    } catch {
+      return false;
+    }
   }
 
   private async getCurrentBranch(cwd: string): Promise<string | null> {
@@ -528,14 +639,24 @@ export class AgentManager extends EventEmitter {
       const profileManager = getClaudeProfileManager();
       const profile = entry.profileId ? profileManager.getProfile(entry.profileId) : profileManager.getActiveProfile();
       if (!profile) return;
-      this.state.assignProfileToTask(taskId, profile.id, profile.name, entry.profileId ? 'reactive' : 'proactive');
-      // No stopFn: restartTask stops the run itself
-      getOperationRegistry().registerOperation(
+      this.state.assignProfileToTask(
         taskId,
+        profile.id,
+        profile.name,
+        entry.profileId ? 'reactive' : 'proactive',
+        entry.projectId
+      );
+      // No stopFn: restartTask stops the run itself. Both the id the run is registered under and
+      // the swap name the project as well as the task, because a task id only tells the projects
+      // apart together with it: left out, the second project's run would replace the first's
+      // registration, and restartTask would take whichever run happens to carry that id, so a
+      // rate-limit swap here could stop and restart another project's run instead of this one
+      getOperationRegistry().registerOperation(
+        operationId(entry.projectId, taskId),
         'task-execution',
         profile.id,
         profile.name,
-        (newProfileId: string) => this.restartTask(taskId, newProfileId),
+        (newProfileId: string) => this.restartTask(taskId, newProfileId, entry.projectId),
         { metadata: { projectPath: entry.options.project.path, specId: entry.options.task.specId } }
       );
     } catch (error) {
@@ -552,8 +673,8 @@ export class AgentManager extends EventEmitter {
     const key = runKey(entry.projectId, taskId);
     if (this.runs.get(key) === entry) {
       this.runs.delete(key);
-      this.state.removeRunning(taskId);
-      getOperationRegistry().unregisterOperation(taskId);
+      this.state.removeRunning(taskId, entry.projectId);
+      getOperationRegistry().unregisterOperation(operationId(entry.projectId, taskId));
     }
     // Stopped by the user or replaced by a restart: nothing to report
     if (entry.killed || outcome.status === 'stopped') return;

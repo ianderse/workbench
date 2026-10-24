@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 import {
   isWslUncPath,
   normalizeMountRoot,
+  windowsPathKey,
   windowsToWsl,
   wslToWindows
 } from '../wsl-paths';
@@ -103,7 +104,48 @@ describe('helpers', () => {
   });
 
   it('names Claude Code project folders like Claude Code does', () => {
+    // Claude Code replaces every character that is not a letter or a digit, so a dot, a space and
+    // an underscore all become a dash, and a narrower rule would name folders that exist nowhere
     expect(claudeProjectSlug('/home/me/repo')).toBe('-home-me-repo');
-    expect(claudeProjectSlug('C:\\Users\\me\\repo')).toBe('C:-Users-me-repo');
+    expect(claudeProjectSlug('/home/me/.config/fish')).toBe('-home-me--config-fish');
+    expect(claudeProjectSlug('/home/me/my_repo/My App')).toBe('-home-me-my-repo-My-App');
+    expect(claudeProjectSlug('/repo/.workbench/worktrees/tasks/014-cache')).toBe(
+      '-repo--workbench-worktrees-tasks-014-cache'
+    );
+    // The drive letter stays: Claude Code on Windows turns its colon into a dash like any other
+    expect(claudeProjectSlug('C:\\Users\\me\\repo')).toBe('C--Users-me-repo');
+    expect(claudeProjectSlug('D:/work/app.v2')).toBe('D--work-app-v2');
+  });
+});
+
+describe('windowsPathKey', () => {
+  it('reads the two WSL UNC prefixes as the same folder', () => {
+    // Explorer shows the older alias, so it is the spelling users paste when they add a project
+    // that lives in the distribution, while every path the app translates back uses the newer one
+    expect(windowsPathKey('\\\\wsl$\\Ubuntu\\home\\me\\app')).toBe(
+      windowsPathKey('\\\\wsl.localhost\\Ubuntu\\home\\me\\app')
+    );
+    // Either slash, and the distribution name without regard to case
+    expect(windowsPathKey('//wsl.localhost/Ubuntu/home/me/app')).toBe(windowsPathKey('\\\\wsl$\\Ubuntu\\home\\me\\app'));
+    expect(windowsPathKey('\\\\WSL$\\ubuntu\\home\\me\\app')).toBe(windowsPathKey('\\\\wsl.localhost\\Ubuntu\\home\\me\\app'));
+    // The distribution root itself, which has nothing after the name
+    expect(windowsPathKey('\\\\wsl$\\Ubuntu')).toBe(windowsPathKey('\\\\wsl.localhost\\Ubuntu'));
+  });
+
+  it('folds the case of a drive path, as Windows itself does', () => {
+    expect(windowsPathKey('c:/users/me/app')).toBe(windowsPathKey('C:\\Users\\me\\app'));
+    expect(windowsPathKey('C:\\Users\\me\\app\\')).toBe(windowsPathKey('C:\\Users\\me\\app'));
+  });
+
+  it('keeps different folders different', () => {
+    expect(windowsPathKey('\\\\wsl$\\Ubuntu\\home\\me\\app')).not.toBe(
+      windowsPathKey('\\\\wsl$\\Ubuntu\\home\\me\\app-old')
+    );
+    // Two distributions have their own files
+    expect(windowsPathKey('\\\\wsl$\\Debian\\home\\me\\app')).not.toBe(
+      windowsPathKey('\\\\wsl.localhost\\Ubuntu\\home\\me\\app')
+    );
+    // A share that only reads like one of the prefixes is left alone
+    expect(windowsPathKey('\\\\wslbackup\\Ubuntu\\home\\me\\app')).toBe('\\\\wslbackup\\ubuntu\\home\\me\\app');
   });
 });

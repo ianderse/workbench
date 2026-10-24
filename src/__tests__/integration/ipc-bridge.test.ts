@@ -132,17 +132,28 @@ describe('IPC Bridge Integration', () => {
       });
 
       it('should have startTask method using send', async () => {
-        const startTask = electronAPI['startTask'] as (id: string, options?: object) => void;
-        startTask('task-id', { parallel: true });
+        const startTask = electronAPI['startTask'] as (id: string, options?: object, projectId?: string) => void;
+        startTask('task-id', { parallel: true }, 'project-id');
 
-        expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:start', 'task-id', { parallel: true });
+        // The board's project travels with the start as a trailing argument: a task id is only
+        // unique within a project, so the main process must never infer whose task to start
+        expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:start', 'task-id', { parallel: true }, 'project-id');
       });
 
       it('should have stopTask method using send', async () => {
-        const stopTask = electronAPI['stopTask'] as (id: string) => void;
+        const stopTask = electronAPI['stopTask'] as (id: string, projectId?: string) => void;
+        stopTask('task-id', 'project-id');
+
+        // A task id is only unique within a project, so the board's project travels with the call:
+        // the main process must never infer which project's run to stop
+        expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:stop', 'task-id', 'project-id');
+      });
+
+      it('forwards stopTask without a project when the caller has none', async () => {
+        const stopTask = electronAPI['stopTask'] as (id: string, projectId?: string) => void;
         stopTask('task-id');
 
-        expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:stop', 'task-id');
+        expect(mockIpcRenderer.send).toHaveBeenCalledWith('task:stop', 'task-id', undefined);
       });
 
       it('should have submitReview method', async () => {
@@ -150,9 +161,11 @@ describe('IPC Bridge Integration', () => {
           id: string,
           approved: boolean,
           feedback?: string,
-          images?: unknown[]
+          images?: unknown[],
+          options?: unknown,
+          projectId?: string
         ) => Promise<unknown>;
-        await submitReview('task-id', false, 'Needs more work');
+        await submitReview('task-id', false, 'Needs more work', undefined, undefined, 'project-id');
 
         expect(mockIpcRenderer.invoke).toHaveBeenCalledWith(
           'task:review',
@@ -160,7 +173,8 @@ describe('IPC Bridge Integration', () => {
           false,
           'Needs more work',
           undefined,
-          undefined
+          undefined,
+          'project-id'
         );
       });
     });

@@ -14,6 +14,10 @@
  * own transcripts (`claude-code/session-spending.ts`). The sessions a task owns are left to the
  * task's own figures, so nothing is counted twice.
  *
+ * The project's transcripts are reconciled together, not one at a time: a Claude Code process
+ * writes its running total into every transcript it touches, so several of them can report the
+ * same figure, and the total of each `startTime` is counted once across the whole project.
+ *
  * A session is read once: what it had spent is kept with it and read again only when its
  * transcript has changed, so a refresh only reads what is new. All file access is async so the
  * main process stays responsive.
@@ -33,12 +37,14 @@ import {
 } from './agent-session-store';
 import { findProjectSessions } from './claude-code/project-sessions';
 import {
+  combineSpending,
   dayOf,
   findSessionTranscript,
   readTranscriptSpending,
   spentUsd,
-  type SessionSpending,
+  type SpendingParts,
   type TranscriptFile,
+  type TranscriptSpending,
 } from './claude-code/session-spending';
 import { claudeConfigDirs } from './claude-profile/profile-config-dirs';
 import type { ClaudeRunInfo } from '../shared/types/claude-code';
@@ -121,16 +127,64 @@ function taskSessionIds(runs: Array<Partial<ClaudeRunInfo> | null>): Set<string>
   return ids;
 }
 
-/** What a reading of a session's transcript, or the reading kept from last time, says it spent */
-function cachedSpending(cached: AgentSessionSpending | undefined): SessionSpending {
-  if (!cached) return { totalCostUsd: 0, byDay: new Map() };
-  return { totalCostUsd: spentUsd(cached.totalCostUsd), byDay: new Map(Object.entries(cached.days ?? {})) };
+/** What a reading kept from last time contributes to the project's spending */
+function cachedSpending(cached: AgentSessionSpending | undefined): SpendingParts {
+  const empty = { byDay: new Map<string, number>(), total: 0, undated: 0 };
+  if (!cached) return { estimate: empty, lastDay: null, runTotals: new Map() };
+  if (cached.estimate && cached.runs) {
+    return {
+      estimate: {
+        byDay: new Map(Object.entries(cached.estimate.days ?? {})),
+        total: spentUsd(cached.estimate.total),
+        undated: spentUsd(cached.estimate.undated),
+      },
+      lastDay: cached.lastDay ?? null,
+      runTotals: new Map(Object.entries(cached.runs)),
+    };
+  }
+  // A reading from before the accountings were kept: the scaled days are all that is left of it, so
+  // it stands in as a priced estimate of its own. That cannot be matched against another
+  // transcript, but a reading this old only survives once the transcript itself is gone - while the
+  // file is still there, `isCurrent()` reads it again to get the accountings back.
+  return {
+    estimate: {
+      byDay: new Map(Object.entries(cached.days ?? {})),
+      total: spentUsd(cached.totalCostUsd),
+      undated: 0,
+    },
+    lastDay: null,
+    runTotals: new Map(),
+  };
 }
 
-/** Whether what was read from this transcript last time still describes the file on disk */
+/** What to keep with a session so the next refresh neither re-reads nor miscounts its transcript */
+function toCache(spending: TranscriptSpending, transcript: TranscriptFile): AgentSessionSpending {
+  return {
+    totalCostUsd: spending.totalCostUsd,
+    days: Object.fromEntries(spending.byDay),
+    transcript: transcript.file,
+    size: transcript.size,
+    modifiedMs: transcript.modifiedMs,
+    estimate: {
+      days: Object.fromEntries(spending.estimate.byDay),
+      total: spending.estimate.total,
+      undated: spending.estimate.undated,
+    },
+    lastDay: spending.lastDay,
+    runs: Object.fromEntries(spending.runTotals),
+  };
+}
+
+/**
+ * Whether what was read from this transcript last time still describes the file on disk, and holds
+ * everything reconciling the project needs. A reading from before the cost accountings were kept
+ * with it is read again once, so its total can be recognized in the other transcripts that carry
+ * it instead of being added to them.
+ */
 function isCurrent(cached: AgentSessionSpending | undefined, transcript: TranscriptFile): boolean {
   return (
     !!cached &&
+    !!cached.runs &&
     cached.transcript === transcript.file &&
     cached.size === transcript.size &&
     cached.modifiedMs === transcript.modifiedMs
@@ -187,35 +241,37 @@ async function countableSessions(project: Project, taskSessions: Set<string>): P
  * The transcripts are read one at a time (a project can hold hundreds of sessions and a transcript
  * can be large), and a session whose transcript has not changed since the last refresh is not read
  * again - what it spent is kept with the session.
+ *
+ * The readings are reconciled here rather than one by one, because one Claude Code process writes
+ * its running total into every transcript it touches: a session that is only part of what that
+ * process spent still reports the whole figure, so counting each transcript's total on its own
+ * would charge the project for the same dollars twice. `combineSpending()` recognizes the
+ * accounting by its `startTime` across the project's transcripts and counts it once.
  */
 async function bookSessionSpending(project: Project, taskSessions: Set<string>, byDay: Map<string, number>): Promise<number> {
   const sessions = await countableSessions(project, taskSessions);
   if (sessions.length === 0) return 0;
 
   const read = new Map<string, AgentSessionSpending>();
-  let total = 0;
+  const parts: SpendingParts[] = [];
 
   for (const { session, transcript } of sessions) {
-    let spending: SessionSpending;
-    if (!transcript || isCurrent(session.spent, transcript)) {
+    const cached = session.spent;
+    if (!transcript || isCurrent(cached, transcript)) {
       // Unchanged, or gone: what was read from it last time is what the session spent
-      spending = cachedSpending(session.spent);
-    } else {
-      spending = await readTranscriptSpending(transcript.file);
-      read.set(session.sessionId, {
-        totalCostUsd: spending.totalCostUsd,
-        days: Object.fromEntries(spending.byDay),
-        transcript: transcript.file,
-        size: transcript.size,
-        modifiedMs: transcript.modifiedMs,
-      });
+      parts.push(cachedSpending(cached));
+      continue;
     }
-    total += spending.totalCostUsd;
-    for (const [day, costUsd] of spending.byDay) addSpending(byDay, day, costUsd);
+    const spending = await readTranscriptSpending(transcript.file);
+    parts.push(spending);
+    read.set(session.sessionId, toCache(spending, transcript));
   }
 
   await cacheAgentSessionSpending(project.path, read);
-  return total;
+
+  const spending = combineSpending(parts);
+  for (const [day, costUsd] of spending.byDay) addSpending(byDay, day, costUsd);
+  return spending.totalCostUsd;
 }
 
 /** Projects whose sessions have been read once since the app started */

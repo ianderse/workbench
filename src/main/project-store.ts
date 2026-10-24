@@ -334,6 +334,18 @@ export class ProjectStore {
    * Get tasks for a project by scanning specs directory
    * Implements caching with 3-second TTL to prevent excessive worktree scanning
    */
+  /**
+   * The project's tasks only when they are already in hand.
+   *
+   * `getTasks` scans the project's spec directories synchronously when its cache has gone cold, so
+   * a caller on a hot path - a file-watcher event, which can arrive every few seconds while a task
+   * writes its plan - must not reach for it speculatively. This answers for free or not at all.
+   */
+  getCachedTasks(projectId: string): Task[] | undefined {
+    const cached = this.tasksCache.get(projectId);
+    return cached && Date.now() - cached.timestamp < this.CACHE_TTL_MS ? cached.tasks : undefined;
+  }
+
   getTasks(projectId: string): Task[] {
     // Check cache first
     const cached = this.tasksCache.get(projectId);

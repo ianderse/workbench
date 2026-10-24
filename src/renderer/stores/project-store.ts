@@ -1,11 +1,23 @@
 import { create } from 'zustand';
 import type { Project, ProjectSettings, AutoBuildVersionInfo, InitializationResult } from '../../shared/types';
+import { debugLog } from '../../shared/utils/debug-logger';
 
 // localStorage keys for persisting project state (legacy - now using IPC)
 const LAST_SELECTED_PROJECT_KEY = 'lastSelectedProjectId';
 
 /** Where a window opened for a project remembers the project it shows (per window, kept across reloads) */
 const WINDOW_PROJECT_KEY = 'windowProjectId';
+
+/**
+ * Stored instead of a project id when the window has deliberately moved off its project and onto
+ * no project at all.
+ *
+ * Nothing stored means the window has not chosen yet and still shows the project it was opened
+ * for, so "no project" needs a value of its own: without one, a window whose only project was
+ * removed would fall straight back to that removed project. Project ids are UUIDs, so this can
+ * never be mistaken for one.
+ */
+const NO_WINDOW_PROJECT = '__none__';
 
 /**
  * Project this window was opened for ("New window" on the Projects page).
@@ -26,10 +38,10 @@ function readWindowProject(): string | null {
   }
 }
 
+/** Records the window's choice; a null project is a choice too, and is kept as such */
 function writeWindowProject(projectId: string | null): void {
   try {
-    if (projectId) sessionStorage.setItem(WINDOW_PROJECT_KEY, projectId);
-    else sessionStorage.removeItem(WINDOW_PROJECT_KEY);
+    sessionStorage.setItem(WINDOW_PROJECT_KEY, projectId ?? NO_WINDOW_PROJECT);
   } catch {
     // Storage blocked: the window still works, it just forgets on reload
   }
@@ -38,11 +50,27 @@ function writeWindowProject(projectId: string | null): void {
 /** The project a window opened for a project should show: what it last switched to, else the one it was opened for */
 function windowProjectId(): string | null {
   const assigned = assignedProjectId();
-  return assigned ? readWindowProject() ?? assigned : null;
+  if (!assigned) return null;
+  const stored = readWindowProject();
+  // The window chose no project, which outranks the one it was opened for
+  if (stored === NO_WINDOW_PROJECT) return null;
+  return stored ?? assigned;
 }
 
 // Debounce timer for saving tab state
 let saveTabStateTimeout: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Whether this window has set its own tabs since it loaded.
+ *
+ * The stored tab state is an echo of what a window last saved, so it is only worth restoring
+ * while the window has no tabs of its own. Afterwards the in-memory state is the newer of the
+ * two, and restoring the stored one again would undo the change that triggered the reload: a
+ * project added anywhere makes every window reload its projects, and the window that opened a
+ * tab for that project would lose it again, leaving the board and Settings on different
+ * projects.
+ */
+let tabsSetInThisWindow = false;
 
 interface ProjectState {
   projects: Project[];
@@ -96,19 +124,76 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       projects: [...state.projects, project]
     })),
 
-  removeProject: (projectId) =>
-    set((state) => {
-      const isSelectedProject = state.selectedProjectId === projectId;
-      // Forget the removed project if it was the selected one
-      if (isSelectedProject) {
-        if (assignedProjectId()) writeWindowProject(null);
-        else localStorage.removeItem(LAST_SELECTED_PROJECT_KEY);
+  removeProject: (projectId) => {
+    const state = get();
+    const projects = state.projects.filter((p) => p.id !== projectId);
+    // The tab for a project that is gone goes with it in every window, rather than sitting in
+    // the bar until the next project-list reload happens to clean it up
+    const openProjectIds = state.openProjectIds.filter((id) => id !== projectId);
+    const tabOrder = state.tabOrder.filter((id) => id !== projectId);
+
+    // A window showing the project that was just removed would keep showing it: it falls back
+    // to the project it was opened with whenever it has stored none, so forgetting is not
+    // enough and it is pointed at another project instead - at none when that was the last
+    // project there was, which is recorded rather than forgotten so the fallback cannot bring
+    // the removed project back.
+    //
+    // The comparison is against windowProjectId() rather than the project this window was
+    // opened for, because the two part company as soon as the user switches the window to
+    // another project: a window opened for the removed project but switched away from it has
+    // nothing to re-point, while a window switched onto the removed project has. It is also
+    // the fallback this guards against, since windowProjectId() is what a project-list reload
+    // puts the window back on, and it answers null for a window that was not opened for a
+    // project at all, which has no choice of its own to repair - the shared last-selected key
+    // below is where such a window remembers its project.
+    if (windowProjectId() === projectId) {
+      const replacement = projects.find((p) => openProjectIds.includes(p.id))?.id ?? projects[0]?.id ?? null;
+      set({ projects, openProjectIds, tabOrder, selectedProjectId: replacement, activeProjectId: replacement });
+      if (replacement) {
+        // The replacement is not always a project this window has a tab for, since the removed
+        // project may have been its only tab, and a board showing a project the tab bar has no
+        // tab for is the two disagreeing until the next project load heals it. So it is opened
+        // the way every other path opens a project, which gives it a tab and persists the tab
+        // state - for a window opened for a project, its own remembered choice.
+        get().openProjectTab(replacement);
+      } else {
+        // Nothing is left to show, and that choice is recorded rather than forgotten so the
+        // fallback cannot bring the removed project back
+        writeWindowProject(null);
       }
-      return {
-        projects: state.projects.filter((p) => p.id !== projectId),
-        selectedProjectId: isSelectedProject ? null : state.selectedProjectId
-      };
-    }),
+      return;
+    }
+
+    const isSelectedProject = state.selectedProjectId === projectId;
+    // Forget the removed project if it was the selected one. Only the shared key is cleared:
+    // a window opened for a project keeps its own choice in session storage, and that choice
+    // is not the removed project here, so dropping it would send the window back to the
+    // project it was opened for over a removal that never touched what it shows.
+    if (isSelectedProject && !assignedProjectId()) {
+      localStorage.removeItem(LAST_SELECTED_PROJECT_KEY);
+    }
+
+    // A window that was not opened for a project - the ordinary one - never reaches the branch
+    // above, so removing the project it is showing has to be repaired here too: the board would
+    // otherwise go on pointing at a project that is gone, with no tab and nothing to heal it until
+    // the next project load.
+    const wasActive = state.activeProjectId === projectId;
+    const replacement = wasActive
+      ? projects.find((p) => openProjectIds.includes(p.id))?.id ?? projects[0]?.id ?? null
+      : state.activeProjectId;
+    set({
+      projects,
+      openProjectIds,
+      tabOrder,
+      // The selection is the board's and Settings' own, and clearing it is what the removal of the
+      // selected project has always meant; only the active tab needed repairing here
+      selectedProjectId: isSelectedProject ? null : state.selectedProjectId,
+      activeProjectId: replacement
+    });
+    // Opened the way every other path opens a project, so it gets a tab and the tab state is
+    // persisted rather than left for a reload to discover
+    if (wasActive && replacement) get().openProjectTab(replacement);
+  },
 
   updateProject: (projectId, updates) =>
     set((state) => ({
@@ -137,7 +222,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   // Tab management actions
   openProjectTab: (projectId) => {
     const state = get();
-    console.log('[ProjectStore] openProjectTab called:', {
+    debugLog('[ProjectStore] openProjectTab called:', {
       projectId,
       currentOpenProjectIds: state.openProjectIds,
       currentTabOrder: state.tabOrder
@@ -148,7 +233,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
         ? state.tabOrder
         : [...state.tabOrder, projectId];
 
-      console.log('[ProjectStore] Adding new tab:', {
+      debugLog('[ProjectStore] Adding new tab:', {
         newOpenProjectIds,
         newTabOrder
       });
@@ -162,7 +247,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
       // Save to main process (debounced)
       saveTabStateToMain();
     } else {
-      console.log('[ProjectStore] Project already open, just activating');
+      debugLog('[ProjectStore] Project already open, just activating');
       // Project already open, just make it active
       get().setActiveProject(projectId);
     }
@@ -211,7 +296,7 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   restoreTabState: () => {
     // This is now handled by loadTabStateFromMain() called during loadProjects()
-    console.log('[ProjectStore] restoreTabState called - now handled by IPC');
+    debugLog('[ProjectStore] restoreTabState called - now handled by IPC');
   },
 
 
@@ -250,6 +335,10 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
  * Save tab state to main process (debounced to avoid excessive IPC calls)
  */
 function saveTabStateToMain(): void {
+  // Every tab change passes through here, so this is where a later project-list reload learns
+  // that the state it would restore is already out of date
+  tabsSetInThisWindow = true;
+
   // A window opened for a project keeps its project to itself (so a reload brings back what
   // it was showing, not what it was opened with) and leaves the shared tab state alone
   if (assignedProjectId()) {
@@ -270,7 +359,7 @@ function saveTabStateToMain(): void {
       activeProjectId: store.activeProjectId,
       tabOrder: store.tabOrder
     };
-    console.log('[ProjectStore] Saving tab state to main process:', tabState);
+    debugLog('[ProjectStore] Saving tab state to main process:', tabState);
     try {
       await window.electronAPI.saveTabState(tabState);
     } catch (err) {
@@ -290,9 +379,11 @@ export async function loadProjects(): Promise<void> {
   try {
     // First, load tab state from main process (reliable persistence)
     const tabStateResult = await window.electronAPI.getTabState();
-    console.log('[ProjectStore] Loaded tab state from main process:', tabStateResult.data);
+    debugLog('[ProjectStore] Loaded tab state from main process:', tabStateResult.data);
 
-    if (tabStateResult.success && tabStateResult.data) {
+    // Only while this window has no tabs of its own: once it has, they are the newer of the two
+    // (a project just added and opened is what made this reload run), so they stand
+    if (tabStateResult.success && tabStateResult.data && !tabsSetInThisWindow) {
       useProjectStore.setState({
         openProjectIds: tabStateResult.data.openProjectIds || [],
         activeProjectId: tabStateResult.data.activeProjectId || null,
@@ -309,7 +400,7 @@ export async function loadProjects(): Promise<void> {
 
     // Then load projects
     const result = await window.electronAPI.getProjects();
-    console.log('[ProjectStore] getProjects result:', {
+    debugLog('[ProjectStore] getProjects result:', {
       success: result.success,
       projectCount: result.data?.length,
       projectIds: result.data?.map(p => p.id)
@@ -333,7 +424,7 @@ export async function loadProjects(): Promise<void> {
         ? currentState.activeProjectId
         : null;
 
-      console.log('[ProjectStore] Tab state cleanup:', {
+      debugLog('[ProjectStore] Tab state cleanup:', {
         originalOpenProjectIds: currentState.openProjectIds,
         validOpenProjectIds,
         originalTabOrder: currentState.tabOrder,
@@ -346,7 +437,7 @@ export async function loadProjects(): Promise<void> {
       if (validOpenProjectIds.length !== currentState.openProjectIds.length ||
           validTabOrder.length !== currentState.tabOrder.length ||
           validActiveProjectId !== currentState.activeProjectId) {
-        console.log('[ProjectStore] Updating cleaned tab state');
+        debugLog('[ProjectStore] Updating cleaned tab state');
         useProjectStore.setState({
           openProjectIds: validOpenProjectIds,
           tabOrder: validTabOrder,
@@ -355,7 +446,7 @@ export async function loadProjects(): Promise<void> {
         // Save cleaned state back to main process
         saveTabStateToMain();
       } else {
-        console.log('[ProjectStore] Tab state is valid, no cleanup needed');
+        debugLog('[ProjectStore] Tab state is valid, no cleanup needed');
       }
 
       // Restore last selected project from localStorage for backward compatibility,
@@ -384,7 +475,12 @@ export async function loadProjects(): Promise<void> {
 }
 
 /**
- * Add a new project
+ * Add a new project.
+ *
+ * The project is only added to the list: which window ends up showing it is the caller's
+ * decision, because a window that already shows a project first asks whether to use it or open
+ * a new one. Switching here would answer that question before it is asked, and "New window"
+ * would then leave the project this window was showing without a window at all.
  */
 export async function addProject(projectPath: string): Promise<Project | null> {
   const store = useProjectStore.getState();
@@ -393,9 +489,6 @@ export async function addProject(projectPath: string): Promise<Project | null> {
     const result = await window.electronAPI.addProject(projectPath);
     if (result.success && result.data) {
       store.addProject(result.data);
-      store.selectProject(result.data.id);
-      // Also open a tab for the new project
-      store.openProjectTab(result.data.id);
       return result.data;
     } else {
       store.setError(result.error || 'Failed to add project');
@@ -486,22 +579,22 @@ export async function initializeProject(
   const store = useProjectStore.getState();
 
   try {
-    console.log('[ProjectStore] initializeProject called for:', projectId);
+    debugLog('[ProjectStore] initializeProject called for:', projectId);
     const result = await window.electronAPI.initializeProject(projectId);
-    console.log('[ProjectStore] IPC result:', result);
+    debugLog('[ProjectStore] IPC result:', result);
 
     if (result.success && result.data) {
-      console.log('[ProjectStore] IPC succeeded, result.data:', result.data);
+      debugLog('[ProjectStore] IPC succeeded, result.data:', result.data);
       // Update the project's autoBuildPath in local state
       if (result.data.success) {
-        console.log('[ProjectStore] Updating project autoBuildPath to .workbench');
+        debugLog('[ProjectStore] Updating project autoBuildPath to .workbench');
         store.updateProject(projectId, { autoBuildPath: '.workbench' });
       } else {
-        console.log('[ProjectStore] result.data.success is false, not updating project');
+        debugLog('[ProjectStore] result.data.success is false, not updating project');
       }
       return result.data;
     }
-    console.log('[ProjectStore] IPC failed or no data, setting error');
+    debugLog('[ProjectStore] IPC failed or no data, setting error');
     store.setError(result.error || 'Failed to initialize project');
     return null;
   } catch (error) {

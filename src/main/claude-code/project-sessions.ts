@@ -8,9 +8,9 @@
  * so the project's sessions can be found by the directory they ran in, whichever account wrote
  * them, and read like any other session (`session-spending.ts`).
  *
- * The folder name says which directory a session ran in, but not without ambiguity (a separator
- * and a dot both become a dash), so it is only used to skip the folders that cannot belong to this
- * project; what a session really ran in is read from the transcript itself.
+ * The folder name says which directory a session ran in, but not without ambiguity (every character
+ * that is not a letter or a digit becomes a dash), so it is only used to skip the folders that
+ * cannot belong to this project; what a session really ran in is read from the transcript itself.
  *
  * Two kinds of session are deliberately left out, because their cost is already counted:
  * - a session a task run owns, named in the task's `claude_run.json`
@@ -18,6 +18,8 @@
  */
 import path from 'path';
 import { promises as fsp } from 'fs';
+import { isWindows } from '../platform';
+import { claudeProjectSlug, isClaudeHomeInWsl } from '../platform/claude-home';
 import { belongsToProject, readTranscriptCwd } from '../self-improve/transcripts';
 import type { TranscriptFile } from './session-spending';
 
@@ -38,14 +40,17 @@ export interface FindProjectSessionsOptions {
 }
 
 /**
- * How Claude Code could have named the folder of a directory: every separator and dot becomes a
- * dash. The real name is read back from the transcript, so this only has to be no narrower.
+ * A folder name as a key two spellings of the same directory share. Claude Code names the folder
+ * after the directory as it was typed, so a session started in `c:\Users\me\app` is kept under
+ * `c--Users-me-app` while the project is stored as `C:\Users\me\app`; on Windows both are the same
+ * folder, and dropping such a session would silently cost it its spending in Metrics and its turns
+ * in the backfill. Case is folded exactly where the filesystem behind the name is case-insensitive,
+ * which is the rule `belongsToProject()` (self-improve/transcripts.ts) already decides by: Windows,
+ * and WSL too, where Claude Code sees the same Windows disk through `/mnt/c`. POSIX names are
+ * compared as they are, since two directories there really can differ in case alone.
  */
-function folderPrefix(directory: string): string {
-  return directory
-    .replace(/\\/g, '/')
-    .replace(/^[a-zA-Z]:/, '')
-    .replace(/[/.]/g, '-');
+function folderKey(name: string): string {
+  return isClaudeHomeInWsl() || isWindows() ? name.toLowerCase() : name;
 }
 
 /** The sessions of a project, newest transcript first */
@@ -54,7 +59,10 @@ export async function findProjectSessions(
   configDirs: string[],
   options: FindProjectSessionsOptions = {}
 ): Promise<ProjectSession[]> {
-  const prefix = folderPrefix(projectPath);
+  // The folder of the project itself, and the prefix of the folder of anything inside it. It has
+  // only to be no narrower than Claude Code's real name, but a guess narrower than the real rule
+  // (dropping the drive letter, say) matches nothing at all, so the shared encoding is used.
+  const prefix = folderKey(claudeProjectSlug(projectPath));
   const found = new Map<string, ProjectSession>();
 
   for (const configDir of configDirs) {
@@ -69,7 +77,8 @@ export async function findProjectSessions(
 
     for (const folder of folders) {
       // Another project, or a directory outside this one
-      if (folder !== prefix && !folder.startsWith(`${prefix}-`)) continue;
+      const name = folderKey(folder);
+      if (name !== prefix && !name.startsWith(`${prefix}-`)) continue;
       let entries: string[];
       try {
         entries = await fsp.readdir(path.join(root, folder));

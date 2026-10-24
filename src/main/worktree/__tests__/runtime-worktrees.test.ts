@@ -10,12 +10,17 @@ import path from 'path';
 
 const mocks = vi.hoisted(() => ({
   windows: true,
+  macos: false,
+  /** Whether `/usr/bin/git` is there (decided here, so the test is the same on every host) */
+  systemGitExists: false,
   wsl: null as null | { distro: string; mountRoot: string; tools: { git: { path: string | null; version: string | null } } },
-  nativeGit: { found: true, version: '2.53.0' } as { found: boolean; version?: string },
+  nativeGit: { found: true, version: '2.53.0' } as { found: boolean; version?: string; path?: string },
   git: vi.fn(),
+  runTool: vi.fn(),
 }));
 
-vi.mock('../../platform', () => ({ isWindows: () => mocks.windows }));
+vi.mock('../../platform', () => ({ isWindows: () => mocks.windows, isMacOS: () => mocks.macos }));
+vi.mock('../../platform/runtime-exec', () => ({ runTool: mocks.runTool }));
 vi.mock('../../platform/shell-runtime', () => ({
   isWslRuntime: () => mocks.wsl !== null,
   getWslInfo: () => mocks.wsl,
@@ -27,7 +32,11 @@ vi.mock('../../utils/git-exec', () => ({ git: mocks.git }));
 const existing = vi.hoisted(() => new Set<string>());
 vi.mock('fs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('fs')>();
-  return { ...actual, existsSync: (p: string) => existing.has(p) || actual.existsSync(p) };
+  return {
+    ...actual,
+    existsSync: (p: string) =>
+      p === '/usr/bin/git' ? mocks.systemGitExists : existing.has(p) || actual.existsSync(p),
+  };
 });
 
 import {
@@ -39,6 +48,7 @@ import {
   setKnownGitVersions,
   useRelativeWorktreePaths,
   worktreeGitArgs,
+  worktreePathKey,
 } from '../runtime-worktrees';
 
 const UBUNTU = (version: string | null) => ({ distro: 'Ubuntu', mountRoot: '/mnt/', tools: { git: { path: version ? '/usr/bin/git' : null, version } } });
@@ -47,9 +57,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   resetRuntimeWorktreesForTests();
   mocks.windows = true;
+  mocks.macos = false;
+  mocks.systemGitExists = false;
   mocks.wsl = null;
   mocks.nativeGit = { found: true, version: '2.53.0' };
   mocks.git.mockResolvedValue({ stdout: '', stderr: '' });
+  mocks.runTool.mockResolvedValue({ stdout: '', stderr: '' });
 });
 
 describe('gitSupportsRelativeWorktrees', () => {
@@ -104,6 +117,81 @@ describe('relative worktree links by git version', () => {
   });
 });
 
+describe('relative worktree links on macOS', () => {
+  beforeEach(() => {
+    mocks.windows = false;
+    mocks.macos = true;
+    mocks.systemGitExists = true;
+    // Homebrew git first on PATH
+    mocks.nativeGit = { found: true, version: '2.53.0', path: '/opt/homebrew/bin/git' };
+  });
+
+  it('uses absolute links while Apple git is also on the machine', async () => {
+    mocks.runTool.mockResolvedValue({ stdout: 'git version 2.39.5 (Apple Git-154)\n', stderr: '' });
+    expect(await useRelativeWorktreePaths()).toBe(false);
+    expect(mocks.runTool).toHaveBeenCalledWith(
+      'git',
+      ['--version'],
+      expect.objectContaining({ command: '/usr/bin/git' })
+    );
+    // Probed once, however many worktrees are created
+    await useRelativeWorktreePaths();
+    expect(mocks.runTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses relative links when the system git is 2.48+ too', async () => {
+    mocks.runTool.mockResolvedValue({ stdout: 'git version 2.49.0\n', stderr: '' });
+    expect(await useRelativeWorktreePaths()).toBe(true);
+  });
+
+  it('uses absolute links when the system git does not answer', async () => {
+    mocks.runTool.mockRejectedValue(new Error('xcode-select: no developer tools'));
+    expect(await useRelativeWorktreePaths()).toBe(false);
+  });
+
+  it('asks no second git when there is no /usr/bin/git, or it is the one in use', async () => {
+    mocks.systemGitExists = false;
+    expect(await useRelativeWorktreePaths()).toBe(true);
+
+    mocks.systemGitExists = true;
+    mocks.nativeGit = { found: true, version: '2.53.0', path: '/usr/bin/git' };
+    expect(await useRelativeWorktreePaths()).toBe(true);
+    expect(mocks.runTool).not.toHaveBeenCalled();
+  });
+
+  it('does not ask on Linux', async () => {
+    mocks.macos = false;
+    expect(await useRelativeWorktreePaths()).toBe(true);
+    expect(mocks.runTool).not.toHaveBeenCalled();
+  });
+});
+
+describe('worktreePathKey', () => {
+  it('reads the two WSL UNC prefixes as the same folder (the worktree stays)', () => {
+    const wslDollar = '\\\\wsl$\\Ubuntu\\home\\me\\proj\\.workbench\\worktrees\\tasks\\001';
+    const localhost = '\\\\wsl.localhost\\Ubuntu\\home\\me\\proj\\.workbench\\worktrees\\tasks\\001';
+    expect(worktreePathKey(wslDollar)).toBe(worktreePathKey(localhost));
+    // Windows git writes UNC paths with forward slashes
+    expect(worktreePathKey('//wsl.localhost/Ubuntu/home/me/proj/.workbench/worktrees/tasks/001')).toBe(
+      worktreePathKey(wslDollar)
+    );
+    // The distribution name and the drive letter are compared without case
+    expect(worktreePathKey('\\\\WSL.LOCALHOST\\ubuntu\\home\\me\\proj')).toBe(
+      worktreePathKey('\\\\wsl$\\Ubuntu\\home\\me\\proj')
+    );
+    expect(worktreePathKey('c:/repo/wt')).toBe(worktreePathKey('C:\\repo\\wt'));
+    // Different worktrees stay different
+    expect(worktreePathKey('\\\\wsl$\\Ubuntu\\home\\me\\a')).not.toBe(worktreePathKey('\\\\wsl$\\Ubuntu\\home\\me\\b'));
+    expect(worktreePathKey('\\\\wsl$\\Debian\\home\\me\\a')).not.toBe(worktreePathKey('\\\\wsl$\\Ubuntu\\home\\me\\a'));
+  });
+
+  it('off Windows, only resolves (paths are case-sensitive there)', () => {
+    mocks.windows = false;
+    expect(worktreePathKey('/home/me/proj/wt/')).toBe(path.resolve('/home/me/proj/wt'));
+    expect(worktreePathKey('/home/me/proj/WT')).not.toBe(worktreePathKey('/home/me/proj/wt'));
+  });
+});
+
 describe('parseRecordedGitdir', () => {
   it('reads every format as a host path', () => {
     expect(parseRecordedGitdir('C:/repo/.workbench/worktrees/tasks/t1/.git\n', 'C:\\repo\\.git\\worktrees\\t1')).toEqual({
@@ -120,6 +208,16 @@ describe('parseRecordedGitdir', () => {
     });
     // A path inside an unknown distribution can't be reached
     expect(parseRecordedGitdir('/home/me/repo/wt/.git', 'x', {}).path).toBeNull();
+    // Windows git writing a UNC path uses forward slashes: still a Windows link, not a path
+    // inside the distribution
+    expect(parseRecordedGitdir('//wsl.localhost/Ubuntu/home/me/repo/wt/.git', 'x', { distro: 'Ubuntu' })).toEqual({
+      path: '\\\\wsl.localhost\\Ubuntu\\home\\me\\repo\\wt',
+      format: 'windows',
+    });
+    expect(parseRecordedGitdir('//wsl$/Ubuntu/home/me/repo/wt/.git', 'x', { distro: 'Ubuntu' })).toEqual({
+      path: '\\\\wsl$\\Ubuntu\\home\\me\\repo\\wt',
+      format: 'windows',
+    });
     const relative = parseRecordedGitdir('../../../wt/.git', path.join('C:\\repo', '.git', 'worktrees', 'wt'));
     expect(relative.format).toBe('relative');
     expect(relative.path).toBe(path.resolve(path.join('C:\\repo', '.git', 'worktrees', 'wt'), '../../../wt'));
@@ -164,6 +262,16 @@ describe('repair', () => {
     const result = await repairProjectWorktrees(repo);
     expect(result).toEqual({ repaired: ['C:\\repo\\a'] });
     expect(mocks.git).toHaveBeenCalledWith(['worktree', 'repair', 'C:\\repo\\a'], expect.anything());
+  });
+
+  it('in WSL, repairs a worktree Windows git linked in the distribution home with forward slashes', async () => {
+    mocks.wsl = UBUNTU('2.43.0');
+    record('a', '//wsl.localhost/Ubuntu/home/me/proj/wt/.git', '\\\\wsl.localhost\\Ubuntu\\home\\me\\proj\\wt');
+
+    // Without this the link reads as a path inside the distribution, the worktree is left
+    // unrepaired, and the prune that follows deletes it
+    const result = await repairProjectWorktrees(repo);
+    expect(result).toEqual({ repaired: ['\\\\wsl.localhost\\Ubuntu\\home\\me\\proj\\wt'] });
   });
 
   it('makes no git call when every link fits this runtime', async () => {

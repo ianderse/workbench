@@ -270,7 +270,7 @@ export const IPC_CHANNELS = {
   PROJECT_INDEX_GET: 'projectIndex:get',
   PROJECT_INDEX_BUILD: 'projectIndex:build',
   PROJECT_INDEX_IS_BUILDING: 'projectIndex:isBuilding',
-  PROJECT_INDEX_DELETE: 'projectIndex:delete',
+  PROJECT_INDEX_STASH: 'projectIndex:stash',
 
   SELF_IMPROVE_GET_INDEX: 'selfImprove:getIndex',
   SELF_IMPROVE_BUILD_INDEX: 'selfImprove:buildIndex',

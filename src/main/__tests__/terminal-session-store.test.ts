@@ -30,6 +30,22 @@ function initTestPaths(): void {
   BACKUP_PATH = path.join(SESSIONS_DIR, 'terminals.json.backup');
 }
 
+// How long this machine has been up, as the store sees it. The store works out when the machine
+// came up from the wall clock and the uptime, so holding the uptime still is what lets a test say
+// "this window was last written before this boot" and mean it.
+const fakeOs = vi.hoisted(() => ({ uptimeSeconds: 3600 }));
+
+vi.mock('os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('os')>();
+  const uptime = (): number => fakeOs.uptimeSeconds;
+  return { ...actual, uptime, default: { ...actual, uptime } };
+});
+
+/** When the store will take this machine to have come up */
+function thisBootMs(): number {
+  return Math.round(Date.now() - fakeOs.uptimeSeconds * 1000);
+}
+
 // Mock Electron before importing the store
 // Note: The mock uses a getter to access the dynamic paths at runtime
 vi.mock('electron', () => ({
@@ -92,6 +108,7 @@ describe('TerminalSessionStore', () => {
     cleanupTestDirs();
     // Setup creates new unique temp directory for this test
     setupTestDirs();
+    fakeOs.uptimeSeconds = 3600;
     vi.resetModules();
     vi.useFakeTimers();
   });
@@ -399,6 +416,112 @@ describe('TerminalSessionStore', () => {
       const store = new TerminalSessionStore(TEST_PROJECT_PATH);
 
       expect(store.getSessions().map(s => s.id)).toEqual(['left-behind']);
+    });
+
+    it('takes over the windows of a run from before this boot, whatever holds its pid now', async () => {
+      // A live pid, as a saved pid becomes after a reboot: the number was handed out again. The run
+      // that held the window stopped writing to it when the machine went down.
+      const lastBoot = thisBootMs() - 10 * 24 * 60 * 60 * 1000;
+      writeFileSync(STORE_PATH, createValidStoreData([
+        {
+          ...createTestSession({ id: 'before-the-reboot', lastActiveAt: new Date(lastBoot + 60_000).toISOString() }),
+          owner: { instanceId: 'last-boot', pid: process.ppid, bootTimeMs: lastBoot },
+        }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      expect(store.getSessions().map(s => s.id)).toEqual(['before-the-reboot']);
+    });
+
+    it('takes over the windows of a run that wrote them moments before the machine came up again', async () => {
+      // A machine restarted and the app started again inside one saving period: the window was
+      // written seconds ago by the clock, yet before this boot, so no live process can be that run
+      fakeOs.uptimeSeconds = 20;
+      const lastBoot = thisBootMs() - 2 * 60 * 60 * 1000;
+      writeFileSync(STORE_PATH, createValidStoreData([
+        {
+          ...createTestSession({
+            id: 'written-just-before-the-reboot',
+            lastActiveAt: new Date(thisBootMs() - 5000).toISOString(),
+          }),
+          owner: { instanceId: 'last-boot', pid: process.ppid, bootTimeMs: lastBoot },
+        }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      expect(store.getSessions().map(s => s.id)).toEqual(['written-just-before-the-reboot']);
+    });
+
+    it('leaves a running copy its windows when the clock stepped and the boot times no longer agree', async () => {
+      // The other copy saved the window before an NTP correction moved the clock, so the boot time
+      // it recorded and the one this run works out are hours apart on the same boot. It is still
+      // writing to the window every saving period, which is what says it is there.
+      const steppedBoot = thisBootMs() - 2 * 60 * 60 * 1000;
+      writeFileSync(STORE_PATH, createValidStoreData([
+        {
+          ...createTestSession({ id: 'theirs', lastActiveAt: new Date(Date.now() - 5000).toISOString() }),
+          owner: { instanceId: 'another-run', pid: process.ppid, bootTimeMs: steppedBoot },
+        }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      // Not this run's to show...
+      expect(store.getSessions()).toHaveLength(0);
+
+      store.saveSession(createTestSession({ id: 'ours' }));
+
+      // ...and not this run's to write away, so the two never both claim it
+      const written = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+      expect(written.windows.map((w: { id: string }) => w.id).sort()).toEqual(['ours', 'theirs']);
+      expect(written.windows.find((w: { id: string }) => w.id === 'theirs').owner.instanceId).toBe('another-run');
+    });
+
+    it('leaves a running copy its windows after a long sleep, with nothing written while asleep', async () => {
+      // Hours pass with the machine asleep and no window is touched, but the uptime counts that
+      // time, so the boot time still says the run holding them belongs to this boot
+      fakeOs.uptimeSeconds = 24 * 60 * 60;
+      writeFileSync(STORE_PATH, createValidStoreData([
+        {
+          ...createTestSession({ id: 'theirs', lastActiveAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString() }),
+          owner: { instanceId: 'another-run', pid: process.ppid, bootTimeMs: thisBootMs() },
+        }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      expect(store.getSessions()).toHaveLength(0);
+    });
+
+    it('takes over a window of a run that recorded no boot time but was last active before this boot', async () => {
+      writeFileSync(STORE_PATH, createValidStoreData([
+        {
+          ...createTestSession({ id: 'old-file', lastActiveAt: new Date(Date.now() - 365 * 24 * 60 * 60 * 1000).toISOString() }),
+          owner: { instanceId: 'last-boot', pid: process.ppid },
+        }
+      ]));
+
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      expect(store.getSessions().map(s => s.id)).toEqual(['old-file']);
+    });
+
+    it('stamps the boot it saved a window on, so a later boot can tell the pid is stale', async () => {
+      const { TerminalSessionStore } = await import('../terminal-session-store');
+      const store = new TerminalSessionStore(TEST_PROJECT_PATH);
+
+      store.saveSession(createTestSession({ id: 'ours' }));
+
+      const written = JSON.parse(readFileSync(STORE_PATH, 'utf-8'));
+      expect(written.windows[0].owner.bootTimeMs).toBeTypeOf('number');
+      expect(written.windows[0].owner.bootTimeMs).toBeLessThanOrEqual(Date.now());
     });
 
     it('restores windows saved before windows recorded an owner', async () => {
