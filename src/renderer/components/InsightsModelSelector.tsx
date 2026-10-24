@@ -37,6 +37,8 @@ function shortModelLabel(model: string): string {
   return label.replace(/^Claude\s+/, '');
 }
 
+const NO_OMP_MODELS: Partial<Record<string, string>> = {};
+
 /** "omlx/Qwen3.8-27B-oQ8e-mtp" → "Qwen3.8-27B-oQ8e-mtp" */
 function shortOmpModel(model: string): string {
   return model.slice(model.indexOf('/') + 1);
@@ -49,9 +51,9 @@ export function InsightsModelSelector({
 }: InsightsModelSelectorProps) {
   const { t } = useTranslation(['common', 'settings']);
   const [showCustomModal, setShowCustomModal] = useState(false);
-  const ompModels = useSettingsStore((state) =>
-    state.settings.agentBackend?.kind === 'omp' ? state.settings.agentBackend.omp?.models ?? {} : undefined
-  );
+  // Select stable references only: a fresh `{}` from a selector re-renders forever under Zustand 5
+  const agentBackend = useSettingsStore((state) => state.settings.agentBackend);
+  const ompModels = agentBackend?.kind === 'omp' ? agentBackend.omp?.models ?? NO_OMP_MODELS : undefined;
 
   // Resolve the effective model/effort: an explicit config wins, otherwise the Balanced profile
   const balanced = DEFAULT_AGENT_PROFILES.find((p) => p.id === 'balanced');
