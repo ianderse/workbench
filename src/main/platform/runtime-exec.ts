@@ -19,7 +19,8 @@
  *   (never PATH or Windows-only ones), path values translated; PATH is the distribution's login
  *   PATH (WB_PATH). Secrets therefore travel in the environment, never in the arguments
  * - the wrapper's first stderr line is the Linux pid (`\x1eWBPID <pid>`), removed before callers
- *   see stderr and used to stop the Linux process (killing only wsl.exe can leave it running)
+ *   see stderr and used to stop the Linux process (killing only wsl.exe can leave it running):
+ *   on killRuntimeProcess, and when a timeout or the caller's abort signal ends a run
  *
  * Arguments reach Linux byte for byte through wsl.exe (multiline text, quotes, `$`, backticks,
  * `%VAR%`, unicode, JSON), so nothing needs a temp file on the way.
@@ -125,6 +126,12 @@ export const WSL_WRAPPER = `printf '\\036WBPID %s\\n' "$$" >&2; export PATH="\${
 
 /** The wrapper's pid line (with the line break) */
 const PID_LINE = /\x1eWBPID (\d+)\r?\n?/;
+
+/**
+ * The same line with its break required, for matching against a buffer that is still filling up:
+ * only the line break proves that the digits before it are the whole pid (see watchWslPid).
+ */
+const COMPLETE_PID_LINE = /\x1eWBPID (\d+)\r?\n/;
 
 /** A whole argument that is a Windows path: `C:\...`, `C:/...`, `\\wsl$\...`, `\\wsl.localhost\...` */
 const WINDOWS_PATH_ARG = /^(?:[A-Za-z]:[\\/]|\\\\wsl(?:\$|\.localhost)\\)/i;
@@ -338,6 +345,132 @@ function signalWslProcess(distro: string, pid: number, signal: 'TERM' | 'KILL'):
   });
 }
 
+/**
+ * The Linux pid of a process we only hold through execFile, read from the wrapper's pid line on
+ * stderr. The line stays in the output execFile collects (callers get it stripped), so this only
+ * listens in: replacing the stream would take the output away from execFile itself.
+ */
+function watchWslPid(child: ChildProcess | undefined, distro: string): WslProcess {
+  const entry: WslProcess = { distro, pid: null };
+  let pending: string | null = '';
+  child?.stderr?.on('data', (chunk: Buffer | string) => {
+    if (pending === null) return;
+    pending += typeof chunk === 'string' ? chunk : chunk.toString('latin1');
+    // The pid is taken from a line that has arrived whole, which is why the line break is not
+    // optional in the pattern used here: stderr is a stream, and a chunk can end between the pid's
+    // digits. Matching a pattern whose break is optional against the buffer as it stands would
+    // read `\x1eWBPID 12` followed by `345\n` as pid 12 and latch it for good, and the TERM and
+    // KILL below would then go to pid 12 and its whole process group inside the distribution.
+    // PidLineFilter keeps the same precaution by matching one complete line at a time.
+    const match = COMPLETE_PID_LINE.exec(pending);
+    if (match) {
+      entry.pid = Number(match[1]);
+      pending = null;
+    } else if (pending.length > 64 * 1024) {
+      // Give up looking: this output has no pid line in it
+      pending = null;
+    }
+  });
+  return entry;
+}
+
+/**
+ * Whether an execFile failure means *we* stopped the child rather than the tool ending by itself:
+ * its timeout or the caller's abort signal, both of which make Node kill the child and set
+ * `killed`. A tool that died of its own signal (SIGSEGV, SIGPIPE) carries a `signal` with
+ * `killed: false` and nobody asked for it to stop, so it must not start the escalation below.
+ *
+ * It matters because killing wsl.exe is all Node can do: the process inside the distribution is
+ * not its child on the Windows side, so it survives and has to be ended here.
+ */
+function wasTerminated(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const failure = error as { killed?: unknown; name?: unknown; code?: unknown };
+  return failure.killed === true
+    || failure.name === 'AbortError'
+    || failure.code === 'ABORT_ERR';
+}
+
+/**
+ * How long a read of `/proc/<pid>/stat` is waited for. It is shorter than the fifteen seconds the
+ * signal calls allow because each of these reads holds up the TERM or KILL it guards, and a signal
+ * that arrives long after the run was cancelled is worth less than one sent promptly. Reading one
+ * line of `/proc` is immediate unless the distribution is wedged, and a wedged distribution would
+ * not carry out the escalation this read guards either.
+ */
+const PROC_READ_TIMEOUT_MS = 5000;
+
+/**
+ * When the pid's process started, as the clock ticks since boot that `/proc/<pid>/stat` reports
+ * (field 22), or null when no process has that pid. Two processes can share a pid over time but
+ * never a start time, so this tells the process we signalled apart from whatever the distribution
+ * later hands the pid to.
+ *
+ * The comm field sits in parentheses and may hold spaces and ')' of its own, so everything up to
+ * its last ')' is dropped first; the remaining fields start at the state (field 3), which puts
+ * field 22 in `${20}` (plain `$20` would read as `$2` followed by a zero).
+ */
+function wslProcessStart(distro: string, pid: number): Promise<string | null> {
+  const script = `s=$(cat /proc/${pid}/stat 2>/dev/null) || exit 0; s=\${s##*)}; set -- $s; printf %s "\${20}"`;
+  return execFileAsync(getWslExePath(), ['-d', distro, '--exec', '/bin/sh', '-c', script], {
+    windowsHide: true,
+    timeout: PROC_READ_TIMEOUT_MS,
+  }).then(({ stdout }) => {
+    const start = String(stdout).trim();
+    return start === '' ? null : start;
+  }, () => null);
+}
+
+/**
+ * End a process left running inside the distribution after its wsl.exe was killed: TERM first,
+ * then KILL if TERM wasn't enough.
+ *
+ * Nothing on the Windows side can watch the Linux process any more, because its wsl.exe is gone,
+ * so there is no exit event to guard and cancel the escalation with the way stopWslProcess does
+ * with its child's. The pid's start time stands in for that handle: read before TERM goes out and
+ * read again before KILL, an unchanged value is the only proof that the pid still belongs to the
+ * process we told to stop. Without it, a tool that obeyed TERM leaves a KILL in flight that lands
+ * five seconds later on whatever process the distribution gave the pid to next, and on that
+ * process's whole group, since the escalation signals `-<pid>` as well.
+ *
+ * The first read is therefore answered before TERM is sent, not merely started before it. Only a
+ * process that has not been asked to stop yet is certainly still the one we mean: a read that is
+ * only in flight when TERM goes out is a second wsl.exe launch racing the first, and if the tool
+ * obeys TERM at once and the distribution hands the pid on before that read runs, both reads see
+ * the new process, agree with each other, and the guard waves KILL through to exactly the stranger
+ * it exists to protect.
+ *
+ * The whole chain therefore runs detached from the caller: the pair of wsl.exe round trips in
+ * front of TERM and KILL is ordering *inside* the chain and nothing a caller waits for. A run that
+ * was timed out or cancelled has already failed as far as its caller is concerned, and on the
+ * native side Node kills the process and the rejection follows at once, so holding a WSL run's
+ * rejection for up to twenty seconds of best-effort cleanup would only make the app feel stuck
+ * (the Use Graphify switch, for one, stays disabled until its build rejects).
+ */
+function endLeftoverWslProcess(tracked: WslProcess): void {
+  if (tracked.pid === null) return;
+  const { distro, pid } = tracked;
+  void wslProcessStart(distro, pid).then(async (started) => {
+    // Nothing is signalled unless the pid can be shown to still hold the process we started. null
+    // is both "no process has this pid any more" and "the read itself could not run", and in
+    // either case a TERM would go to whatever the distribution has since given the pid to, and to
+    // that process's whole group, rather than to anything of ours
+    if (started === null) return;
+    await signalWslProcess(distro, pid, 'TERM').catch(() => undefined);
+    const timer = setTimeout(() => {
+      void wslProcessStart(distro, pid).then((now) => {
+        // The same proof again before KILL: a pid no process has (null), one a different process
+        // now has (a later start time) and a read that could not run at all (also null) all leave
+        // the process group alone rather than signalling it blind
+        if (now === null || now !== started) return undefined;
+        return signalWslProcess(distro, pid, 'KILL').catch(() => undefined);
+      });
+    }, GRACEFUL_KILL_TIMEOUT_MS);
+    timer.unref();
+    // Detached work must not reject into the main process, where nobody is left to catch it
+  }).catch(() => undefined);
+}
+
 /** After KILL, how long to wait before stopping wsl.exe itself */
 const WSL_FINAL_GRACE_MS = 2000;
 
@@ -378,15 +511,18 @@ export async function runTool(tool: RuntimeTool, args: string[], options: RunToo
   if (info) {
     const { cwd, env, command, encoding = 'utf8', windowsHide: _windowsHide, ...execOptions } = options;
     const launch = buildWslLaunch(tool, args, { cwd, env, command }, info);
+    const running = execFileAsync(launch.file, launch.args, {
+      ...execOptions,
+      env: launch.env,
+      encoding,
+      windowsHide: true,
+    });
+    const tracked = watchWslPid(running.child, launch.distro);
     try {
-      const { stdout, stderr } = await execFileAsync(launch.file, launch.args, {
-        ...execOptions,
-        env: launch.env,
-        encoding,
-        windowsHide: true,
-      });
+      const { stdout, stderr } = await running;
       return { stdout, stderr: stripPidLine(stderr) };
     } catch (error) {
+      if (wasTerminated(error)) endLeftoverWslProcess(tracked);
       throw cleanWslError(error, launch.tool, args);
     }
   }
@@ -498,15 +634,18 @@ export async function runToolScript(
     const args = wslArgs(info.distro, cwd, ['/bin/sh', '-c', buildBatchScript(runtimeTool, invocations)]);
     let stdout: Buffer;
     let failure = '';
+    const running = execFileAsync(getWslExePath(), args, {
+      maxBuffer: 64 * 1024 * 1024,
+      ...execOptions,
+      env: buildWslEnv(env, info.loginPath),
+      encoding: 'buffer',
+      windowsHide: true,
+    });
+    const tracked = watchWslPid(running.child, info.distro);
     try {
-      ({ stdout } = await execFileAsync(getWslExePath(), args, {
-        maxBuffer: 64 * 1024 * 1024,
-        ...execOptions,
-        env: buildWslEnv(env, info.loginPath),
-        encoding: 'buffer',
-        windowsHide: true,
-      }));
+      ({ stdout } = await running);
     } catch (error) {
+      if (wasTerminated(error)) endLeftoverWslProcess(tracked);
       const partial = (error as { stdout?: unknown; stderr?: unknown }).stdout;
       const stderr = (error as { stderr?: unknown }).stderr;
       stdout = Buffer.isBuffer(partial) ? partial : Buffer.alloc(0);
