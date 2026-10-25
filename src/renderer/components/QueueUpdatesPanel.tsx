@@ -128,7 +128,9 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
                 <p className="text-sm font-medium text-foreground wrap-anywhere">
                   {proposal.kind === 'breakdown'
                     ? t('queueGrooming.breakdownReady', { count: proposal.breakdown.tasks.length })
-                    : t('queueGrooming.breakdownFailed', { error: proposal.error })}
+                    : proposal.kind === 'breakdownRunning'
+                      ? t('queueGrooming.breakdownRunning')
+                      : t('queueGrooming.breakdownFailed', { error: proposal.error })}
                 </p>
                 <p className="mt-0.5 line-clamp-2 text-xs text-(--nav-label-color) wrap-anywhere">{proposal.prompt}</p>
               </div>
@@ -148,6 +150,18 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
                     }
                   >
                     {t('queueGrooming.review')}
+                  </Button>
+                )}
+                {proposal.kind === 'breakdownFailed' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busyId === proposal.id}
+                    onClick={() =>
+                      useBreakdownReviewStore.getState().request({ projectId, proposalId: proposal.id, prompt: proposal.prompt })
+                    }
+                  >
+                    {t('queueGrooming.retry')}
                   </Button>
                 )}
                 <Button size="sm" variant="ghost" disabled={busyId === proposal.id} onClick={() => void run(proposal, 'dismiss')}>

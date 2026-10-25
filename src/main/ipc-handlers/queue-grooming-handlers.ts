@@ -22,6 +22,7 @@ import {
   applyQueueProposal,
   configureQueueGrooming,
   dismissQueueProposal,
+  failInterruptedBreakdowns,
   groomQueueAfterMerge,
   listQueueProposals,
   undoContextNote,
@@ -37,6 +38,13 @@ export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow
     // Archived or re-linked tickets may free queued tasks
     taskQueue.request(projectId);
   });
+
+  // A Break into tasks run that was going when the app quit is not coming back: offer a retry
+  for (const project of projectStore.getProjects()) {
+    void failInterruptedBreakdowns(project.id).catch((error) => {
+      appLog.warn('[QueueGrooming] Could not mark an interrupted breakdown:', error);
+    });
+  }
 
   // Every merge path (local merge, merged pull request, full worktree merge) emits `merged`.
   // Today structural changes only become proposals; an autonomous mode would pass true.

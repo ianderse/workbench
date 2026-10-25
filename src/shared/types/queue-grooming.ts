@@ -69,7 +69,7 @@ export interface SplitProposal extends QueueProposalBase {
 /** Changes to existing or new tickets that a merge proposes (applied with Apply, undoable) */
 export type StructuralProposal = ObsoleteProposal | DuplicateProposal | NewTaskProposal | SplitProposal;
 
-/** A Break into tasks run that finished in the background: the tickets are ready to review */
+/** A finished Break into tasks run: the tickets are ready to review (stored as soon as the run ends) */
 export interface BreakdownProposal {
   id: string;
   kind: 'breakdown';
@@ -81,7 +81,16 @@ export interface BreakdownProposal {
   breakdown: TaskBreakdown;
 }
 
-/** A Break into tasks run that failed in the background */
+/** A Break into tasks run that is under way; kept so the prompt survives a restart (then it becomes `breakdownFailed`) */
+export interface BreakdownRunningProposal {
+  id: string;
+  kind: 'breakdownRunning';
+  createdAt: string;
+  prompt: string;
+  attachmentNames: string[];
+}
+
+/** A Break into tasks run that failed */
 export interface BreakdownFailedProposal {
   id: string;
   kind: 'breakdownFailed';
@@ -90,10 +99,10 @@ export interface BreakdownFailedProposal {
   error: string;
 }
 
-export type QueueProposal = StructuralProposal | BreakdownProposal | BreakdownFailedProposal;
+export type QueueProposal = StructuralProposal | BreakdownProposal | BreakdownFailedProposal | BreakdownRunningProposal;
 
-export function isBreakdownProposal(p: QueueProposal): p is BreakdownProposal | BreakdownFailedProposal {
-  return p.kind === 'breakdown' || p.kind === 'breakdownFailed';
+export function isBreakdownProposal(p: QueueProposal): p is BreakdownProposal | BreakdownFailedProposal | BreakdownRunningProposal {
+  return p.kind === 'breakdown' || p.kind === 'breakdownFailed' || p.kind === 'breakdownRunning';
 }
 
 /** Kept on a task that split (`metadata.splitInto`), so the card and detail can show it and undo can restore it */

@@ -1,16 +1,17 @@
 /**
- * A Break into tasks proposal the user chose to review (from the Queue updates panel): the task
- * dialog opens on its review step with it, then clears it.
+ * A Break into tasks proposal the user chose to review or retry (from the Queue updates panel): the
+ * task dialog opens on its review step (or, for a retry, the form) with it, then clears it.
  */
 import { create } from 'zustand';
 import type { TaskBreakdown } from '../../shared/types/task-breakdown';
 
 export interface PendingBreakdownReview {
   projectId: string;
-  /** The stored proposal; dismissed once the tickets are created or discarded */
+  /** The stored proposal; dismissed once the tickets are created or discarded (a retry: once the new run starts) */
   proposalId: string;
   prompt: string;
-  breakdown: TaskBreakdown;
+  /** Missing for a failed or interrupted run: the dialog opens on the form with the prompt (retry) */
+  breakdown?: TaskBreakdown;
 }
 
 interface BreakdownReviewState {

@@ -111,8 +111,7 @@ export interface TaskAPI {
   getQueueHolds: () => Promise<Array<{ projectId: string; blockedBy: { id: string; name: string } }>>;
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
   cancelBreakDownTask: (requestId: string) => void;
-  keepBreakDownInBackground: (requestId: string) => void;
-  saveBreakdownProposal: (projectId: string, prompt: string, attachmentNames: string[], breakdown: TaskBreakdown) => Promise<IPCResult>;
+  saveBreakdownProposal: (projectId: string, prompt: string, attachmentNames: string[], breakdown: TaskBreakdown, proposalId?: string) => Promise<IPCResult>;
   registerSpecBatch: (projectId: string, batch: { id: string; prompt: string; sources: string[]; taskIds: string[] }) => Promise<IPCResult>;
   onBreakDownProgress: (callback: (requestId: string, progress: RunProgress) => void) => () => void;
   onTaskExecutionProgress: (
@@ -373,11 +372,8 @@ export const createTaskAPI = (): TaskAPI => ({
     };
   },
 
-  keepBreakDownInBackground: (requestId: string): void =>
-    ipcRenderer.send(IPC_CHANNELS.TASK_BREAKDOWN_BACKGROUND, requestId),
-
-  saveBreakdownProposal: (projectId: string, prompt: string, attachmentNames: string[], breakdown: TaskBreakdown): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.TASK_BREAKDOWN_SAVE, projectId, prompt, attachmentNames, breakdown),
+  saveBreakdownProposal: (projectId: string, prompt: string, attachmentNames: string[], breakdown: TaskBreakdown, proposalId?: string): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_BREAKDOWN_SAVE, projectId, prompt, attachmentNames, breakdown, proposalId),
 
   cancelBreakDownTask: (requestId: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_BREAKDOWN_CANCEL, requestId),

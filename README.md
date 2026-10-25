@@ -17,6 +17,7 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 ### 2026-10-25
 
 **Queue**
+- Break into tasks no longer loses work: the prompt is saved when a run starts and the proposed tickets are saved as soon as they are ready (Queue updates panel), so closing the dialog or restarting the app keeps them; a run interrupted by a restart shows as failed with Retry, which reopens the dialog with the prompt. Tickets are removed from the panel when you create them or discard them in the dialog (edits made in the dialog are kept only with Save for later)
 - Project priority (Settings > Project > Tasks: High, Normal, Low): with several projects open on one local model server, a lower-priority project starts queued tasks only while every higher-priority project has nothing to run (no task in progress or AI review, no queued task that could start). Running tasks are never paused and a manual Start still starts at once; queued cards show "Waiting for <project>" and start about 2 seconds after the higher project frees up
 - The parallel task limit now counts tasks in AI review as well as in progress, so a task moving to AI review no longer frees a slot for a fourth model run
 

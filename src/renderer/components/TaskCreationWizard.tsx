@@ -216,6 +216,8 @@ export function TaskCreationWizard({
     const requestId = `breakdown-${Date.now()}`;
     breakdownRequestId.current = requestId;
     breakdownStartedAt.current = Date.now();
+    // A retry (or a result left by "Back") is replaced by the new run's own stored entry
+    if (reviewProposalId.current) void window.electronAPI.dismissQueueProposal(projectId, reviewProposalId.current);
     reviewProposalId.current = null;
     setBreakdownProgress(null);
     setError(null);
@@ -231,6 +233,7 @@ export function TaskCreationWizard({
       setLeave(null);
       if (result.success && result.data) {
         createdIds.current = new Map();
+        reviewProposalId.current = result.data.proposalId ?? null;
         specBatch.current = result.data.batchId
           ? { id: result.data.batchId, sources: result.data.specSources ?? [], prompt: description.trim() }
           : null;
@@ -347,6 +350,15 @@ export function TaskCreationWizard({
   useEffect(() => {
     if (!open || !initialBreakdown || initialBreakdown.projectId !== projectId) return;
     const { breakdown } = initialBreakdown;
+    if (!breakdown) {
+      // Retry of a failed or interrupted run: the prompt comes back in the form
+      reviewProposalId.current = initialBreakdown.proposalId;
+      setDescription(initialBreakdown.prompt);
+      setError(null);
+      setStep('form');
+      onBreakdownConsumed?.();
+      return;
+    }
     // Open tickets as they are now: one that was merged since no longer needs waiting for
     const open_ = listOpenTickets(useTaskStore.getState().tasks);
     const openIds = new Set(open_.map((ticket) => ticket.id));
@@ -405,23 +417,23 @@ export function TaskCreationWizard({
 
   /** Close the dialog and let the run finish in main; its result waits in the Queue updates panel */
   const keepWorkingInBackground = () => {
-    const requestId = breakdownRequestId.current;
     breakdownRequestId.current = null;
-    if (requestId) window.electronAPI.keepBreakDownInBackground(requestId);
     setLeave(null);
     closeDialog();
   };
 
   /** Leave the review step: keep the proposal for later, or throw it away */
   const leaveReview = (keep: boolean) => {
-    if (keep && !reviewProposalId.current) {
+    if (keep) {
+      // The result is already stored; this keeps the edits made here
       void window.electronAPI.saveBreakdownProposal(
         projectId,
         specBatch.current?.prompt ?? description.trim(),
         images.map((image) => image.filename),
-        currentBreakdown()
+        currentBreakdown(),
+        reviewProposalId.current ?? undefined
       );
-    } else if (!keep && reviewProposalId.current) {
+    } else if (reviewProposalId.current) {
       void window.electronAPI.dismissQueueProposal(projectId, reviewProposalId.current);
     }
     setLeave(null);

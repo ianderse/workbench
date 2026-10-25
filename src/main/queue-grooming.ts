@@ -28,6 +28,7 @@ import type {
   SplitProposal,
   BreakdownFailedProposal,
   BreakdownProposal,
+  BreakdownRunningProposal,
   QueueProposal,
   QueueProposalsFile,
   StructuralProposal,
@@ -203,6 +204,8 @@ function defaultDeps(): GroomingDeps {
 // =============================================================================
 // Proposals file
 // =============================================================================
+
+export const INTERRUPTED_BREAKDOWN_ERROR = 'Interrupted by a restart';
 
 export function getQueueProposalsPath(project: Pick<Project, 'path' | 'autoBuildPath'>): string {
   return path.join(project.path, project.autoBuildPath || '.workbench', QUEUE_PROPOSALS_FILE);
@@ -626,19 +629,47 @@ export function applyQueueProposal(
   });
 }
 
-/** Keep a Break into tasks result (or failure) that finished while its dialog was closed */
+/**
+ * Store a Break into tasks entry: the running run, its result or its failure. An entry with the same
+ * id is replaced in place (running -> result), else it is appended.
+ */
 export function addBreakdownProposal(
   projectId: string,
-  proposal: BreakdownProposal | BreakdownFailedProposal,
+  proposal: BreakdownProposal | BreakdownFailedProposal | BreakdownRunningProposal,
   deps: GroomingDeps = defaultDeps()
 ): Promise<{ success: boolean; error?: string }> {
   return withStateLock(projectId, async () => {
     const project = deps.getProject(projectId);
     if (!project) return { success: false, error: 'Project not found' };
     const file = await readQueueProposals(project);
-    await writeQueueProposals(project, { ...file, proposals: [...file.proposals, proposal] });
+    const exists = file.proposals.some((p) => p.id === proposal.id);
+    const proposals = exists ? file.proposals.map((p) => (p.id === proposal.id ? proposal : p)) : [...file.proposals, proposal];
+    await writeQueueProposals(project, { ...file, proposals });
     deps.changed(projectId);
     return { success: true };
+  });
+}
+
+/**
+ * At startup, a Break into tasks run that was still going when the app quit is gone: it becomes a
+ * failure with its prompt, so the Queue updates panel can offer a retry.
+ */
+export function failInterruptedBreakdowns(
+  projectId: string,
+  deps: GroomingDeps = defaultDeps()
+): Promise<void> {
+  return withStateLock(projectId, async () => {
+    const project = deps.getProject(projectId);
+    if (!project) return;
+    const file = await readQueueProposals(project);
+    if (!file.proposals.some((p) => p.kind === 'breakdownRunning')) return;
+    const proposals = file.proposals.map((p): QueueProposal =>
+      p.kind === 'breakdownRunning'
+        ? { id: p.id, kind: 'breakdownFailed', createdAt: p.createdAt, prompt: p.prompt, error: INTERRUPTED_BREAKDOWN_ERROR }
+        : p
+    );
+    await writeQueueProposals(project, { ...file, proposals });
+    deps.changed(projectId);
   });
 }
 

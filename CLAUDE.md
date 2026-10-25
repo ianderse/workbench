@@ -270,6 +270,7 @@ Tickets are written before the code exists, so later ones go stale as earlier ta
   shown in the "Queue updates" panel on the board (`QueueUpdatesPanel`); with `autoApplyStructural` they apply at once and
   leave an undo entry. The project setting `groomQueueAfterMerge` (default on) turns it off. The answer is validated by
   `normalizeGroomingResult()` (`shared/utils/queue-grooming.ts`).
+  Break into tasks (`ipc-handlers/task/breakdown-handlers.ts`) uses the same file: the prompt is stored as a `breakdownRunning` proposal when a run starts (a leftover one becomes `breakdownFailed`, "Interrupted by a restart", on startup, and the panel offers Retry with the prompt prefilled), the result replaces it as a `breakdown` proposal at once (its id comes back as `proposalId`), and the dialog removes it only when the tickets are created or discarded, so closing the dialog or a restart loses nothing.
 
 ### Follow-up tickets
 

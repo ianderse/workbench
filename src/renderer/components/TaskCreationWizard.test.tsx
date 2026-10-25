@@ -20,7 +20,6 @@ vi.mock('react-i18next', () => ({
 const api = {
   breakDownTask: vi.fn(() => new Promise(() => undefined)),
   cancelBreakDownTask: vi.fn(),
-  keepBreakDownInBackground: vi.fn(),
   saveBreakdownProposal: vi.fn(async () => ({ success: true })),
   dismissQueueProposal: vi.fn(async () => ({ success: true })),
   onBreakDownProgress: vi.fn(() => () => undefined),
@@ -52,7 +51,7 @@ const pending: PendingBreakdownReview = {
   },
 };
 
-function renderWizard(extra: { initialBreakdown?: PendingBreakdownReview } = {}) {
+function renderWizard(extra: { initialBreakdown?: PendingBreakdownReview; onBreakdownConsumed?: () => void } = {}) {
   const onOpenChange = vi.fn();
   const view = render(<TaskCreationWizard projectId="p1" open onOpenChange={onOpenChange} {...extra} />);
   return { onOpenChange, ...view };
@@ -93,7 +92,6 @@ describe('closing the dialog while a breakdown works', () => {
     expect(api.cancelBreakDownTask).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: 'tasks:breakdown.background' }));
-    expect(api.keepBreakDownInBackground).toHaveBeenCalledTimes(1);
     expect(api.cancelBreakDownTask).not.toHaveBeenCalled();
     expect(onOpenChange).toHaveBeenCalledWith(false);
     vi.restoreAllMocks();
@@ -128,12 +126,23 @@ describe('reviewing a stored proposal', () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 
-  it('saves a review for later when it did not come from a stored proposal', async () => {
-    renderWizard({ initialBreakdown: { ...pending, proposalId: '' } });
-    // (an empty proposal id counts as none: the review is new)
+  it('saves the edits of a review for later over its stored proposal', async () => {
+    renderWizard({ initialBreakdown: pending });
     await screen.findByDisplayValue('Set up the model');
     fireEvent.click(screen.getByRole('button', { name: 'buttons.close' }));
     fireEvent.click(await screen.findByRole('button', { name: 'tasks:breakdown.saveForLater' }));
-    expect(api.saveBreakdownProposal).toHaveBeenCalledWith('p1', 'Build from docs/A.md', [], expect.objectContaining({ batchId: 'batch-1' }));
+    expect(api.saveBreakdownProposal).toHaveBeenCalledWith(
+      'p1', 'Build from docs/A.md', [], expect.objectContaining({ batchId: 'batch-1' }), 'prop-1'
+    );
+  });
+
+  it('retries a failed run: the prompt is back in the form and the failed entry goes away on the new run', async () => {
+    const consumed = vi.fn();
+    renderWizard({ initialBreakdown: { projectId: 'p1', proposalId: 'failed-1', prompt: 'Build from docs/A.md' }, onBreakdownConsumed: consumed });
+    expect(await screen.findByDisplayValue('Build from docs/A.md')).toBeInTheDocument();
+    expect(consumed).toHaveBeenCalledTimes(1);
+    expect(api.dismissQueueProposal).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'tasks:wizard.breakIntoTasks' }));
+    expect(api.dismissQueueProposal).toHaveBeenCalledWith('p1', 'failed-1');
   });
 });

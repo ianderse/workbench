@@ -29,4 +29,6 @@ export interface TaskBreakdown {
   batchId?: string;
   /** Spec files the prompt referenced; empty when the prompt itself is the spec */
   specSources?: string[];
+  /** The stored proposal of this result (Queue updates panel); removed once the tickets are created or discarded */
+  proposalId?: string;
 }
