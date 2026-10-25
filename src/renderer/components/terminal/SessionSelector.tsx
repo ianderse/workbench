@@ -68,6 +68,8 @@ export function SessionSelector({ terminalId, labelClassName }: SessionSelectorP
     setIsOpen(false);
     // The open session again: nothing to do
     if (sessionId && sessions.find((session) => session.sessionId === sessionId)?.current) return;
+    // The trigger names the session the window now opens (none yet for a new one)
+    setSessions((list) => list.map((session) => ({ ...session, current: session.sessionId === sessionId })));
     useTerminalStore.getState().setCLIMode(terminalId, true);
     // A spinner over the window until the session is up (the old one exits, the new one starts)
     useTerminalStore.getState().setTerminalLoading(terminalId, 'claude');
