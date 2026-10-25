@@ -70,6 +70,29 @@ export function isAsyncLaunch(toolUseResult: unknown): boolean {
   return toolUseResult.status === 'async_launched' || toolUseResult.isAsync === true
 }
 
+/** The answer the Agent tool gives a background launch. A sub-agent's own transcript records the
+ *  result with nothing else (the session's transcript also has its toolUseResult, see
+ *  isAsyncLaunch), so the answer is how a launch made from inside a sub-agent is told apart */
+const ASYNC_LAUNCH_ANSWER = 'Async agent launched successfully'
+
+/** The text a tool result carries */
+function toolResultText(block: unknown): string {
+  const content = isRecord(block) ? block.content : undefined
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+  return content.map((part) => (isRecord(part) && typeof part.text === 'string' ? part.text : '')).join('')
+}
+
+/**
+ * Whether an Agent/Task call's result says the agent goes on in the background: then it has only
+ * started, and what ends it is its <task-notification>. Taken for its end instead, a background
+ * agent a sub-agent launches (the reviewers /code-review's fork sends out) was drawn finished the
+ * moment it was launched, and went on working unseen.
+ */
+function launchedInBackground(toolUseResult: unknown, block: unknown): boolean {
+  return isAsyncLaunch(toolUseResult) || toolResultText(block).trimStart().startsWith(ASYNC_LAUNCH_ANSWER)
+}
+
 const TASK_NOTIFICATION_PREFIX = '<task-notification'
 
 /** Text of a user entry's content, whether a plain string or text blocks. */
@@ -434,7 +457,7 @@ export class TranscriptParser {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const launch = session.launches.get(block.tool_use_id)
-      if (isAsyncLaunch(toolUseResult)) {
+      if (launchedInBackground(toolUseResult, block)) {
         // Background launch: the subagent keeps running. It finishes when its
         // <task-notification> arrives (see handleTaskNotification).
         if (launch) launch.background = true
@@ -633,7 +656,7 @@ export class TranscriptParser {
               const resultBlock = block as ToolResultBlock
               const launch = session.launches.get(resultBlock.tool_use_id)
               if (launch) {
-                if (isAsyncLaunch(entry.toolUseResult)) launch.background = true
+                if (launchedInBackground(entry.toolUseResult, resultBlock)) launch.background = true
                 else launch.finished = true
               }
               session.pendingToolCalls.delete(resultBlock.tool_use_id)

@@ -79,7 +79,11 @@ export function handleAgentSpawn(
   }
 
   const agent: Agent = {
-    id: name, state: 'idle',
+    // A sub-agent is launched with work to do, so it is working from the start: drawn idle until
+    // its first message, it sat there looking idle for as long as it took to start, which for a
+    // fork (it takes the whole conversation along) is a good while. The main agent starts out
+    // waiting for a prompt
+    id: name, state: isMain ? 'idle' : 'thinking',
     parentId: parentId || null,
     x, y,
     isMain,

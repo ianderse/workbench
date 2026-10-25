@@ -374,6 +374,53 @@ describe('relay', () => {
     );
   });
 
+  it('keeps a background agent a sub-agent launches running until its report', async () => {
+    // /code-review's fork sends its reviewers out in the background. Its transcript records each
+    // launch's result without a toolUseResult, only the Agent tool's answer
+    const agentId = 'a32c2c04160aaa861';
+    relay.subscribe('window-a', workspace, flowDir);
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    const forkFile = path.join(subagentsDir(), `agent-${agentId}.jsonl`);
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.forked-skill.json`), JSON.stringify({ skillName: 'code-review' }));
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.meta.json`), JSON.stringify({ agentType: 'general-purpose', name: 'code-review' }));
+    appendTo(transcript, [
+      toolUse('toolu_review', 'Skill'),
+      toolResult('toolu_review', { success: true, status: 'forked', background: true, agentId }),
+    ]);
+    appendTo(forkFile, [
+      toolUse('toolu_reviewer', 'Agent'),
+      {
+        type: 'user', uuid: 'r-reviewer', isSidechain: true,
+        message: { role: 'user', content: [{
+          type: 'tool_result', tool_use_id: 'toolu_reviewer',
+          content: [{ type: 'text', text: 'Async agent launched successfully.\nagentId: a8777609eb4aa278e\nThe agent is working in the background.' }],
+        }] },
+      },
+    ]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_spawn', payload: expect.objectContaining({ name: 'toolu_reviewer', parent: agentId }) }),
+      ])),
+      { timeout: 5000 }
+    );
+    // Launched is not done: it goes on working in the background
+    expect(events().some((event) => event.type === 'agent_complete' && event.payload.name === 'toolu_reviewer')).toBe(false);
+
+    // Its report, which the fork is handed, is what ends it
+    appendTo(forkFile, [{
+      type: 'queue-operation', operation: 'enqueue',
+      content: '<task-notification>\n<task-id>a8777609eb4aa278e</task-id>\n<tool-use-id>toolu_reviewer</tool-use-id>\n<status>completed</status>\n</task-notification>',
+    }]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_complete', payload: { name: 'toolu_reviewer' } }),
+      ])),
+      { timeout: 5000 }
+    );
+  });
+
   it('draws a forked skill\'s background agent (/code-review) and completes it on its report', async () => {
     const agentId = 'aedfe971f6aff305a';
     relay.subscribe('window-a', workspace, flowDir);
