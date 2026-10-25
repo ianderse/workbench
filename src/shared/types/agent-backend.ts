@@ -30,8 +30,9 @@ export interface OmpBackendSettings {
   /** Path or command for the `omp` executable (default: `omp` on PATH) */
   command?: string;
   /**
-   * OMP model for each Workbench model tier, passed as `omp --model` (e.g. `ollama/qwen3-coder:30b`,
-   * `lmstudio/qwen2.5-coder-32b`). Empty means OMP's own default model role.
+   * Optional OMP model for each Workbench model tier, passed as `omp --model` (e.g. `ollama/qwen3-coder:30b`,
+   * `lmstudio/qwen2.5-coder-32b`). A tier left empty uses the OMP role for the job: `plan` for planning,
+   * `default` for implementing and utility calls, `judge` for the fresh-eyes review.
    * Triage picks a tier (haiku = small/fast ... fable = biggest); this maps the tier to a local model.
    */
   models: Partial<Record<ClaudeModelAlias, string>>;
@@ -46,10 +47,13 @@ export interface OmpBackendSettings {
   /** OMP model for the advisor role (`modelRoles.advisor`); empty = the advisor model OMP is configured with */
   advisorModel?: string;
   /**
-   * Let OMP switch to the fallback models of its config (`retry.fallbackChains`) when the model
-   * fails. Off by default so local runs stay local and do not use cloud quota.
+   * After the retries on the local model fail, try a task phase once more letting OMP switch to the
+   * fallback models of its config (`retry.fallbackChains`). Off by default so local runs stay local and
+   * do not use cloud quota.
    */
   allowFallbackModels?: boolean;
+  /** Retries of a task phase on the local model before giving up or trying the fallback models; 0-10, default 5 */
+  retries?: number;
 }
 
 export interface AgentBackendSettings {
@@ -66,6 +70,7 @@ export const DEFAULT_OMP_BACKEND_SETTINGS: OmpBackendSettings = {
   advisor: 'inherit',
   advisorModel: '',
   allowFallbackModels: false,
+  retries: 5,
 };
 
 export const DEFAULT_AGENT_BACKEND_SETTINGS: AgentBackendSettings = {

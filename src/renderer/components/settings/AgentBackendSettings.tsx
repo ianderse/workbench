@@ -82,7 +82,7 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
   else status = t('agentBackend.statusNotFound');
 
   /** Model picker: the detected OMP models with an "OMP default" entry, or free text when none were found */
-  const modelPicker = (id: string, value: string, save: (v: string) => void) => {
+  const modelPicker = (id: string, value: string, save: (v: string) => void, defaultLabel = t('agentBackend.ompDefault')) => {
     if (models.length === 0) {
       return (
         <Input
@@ -100,7 +100,7 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={DEFAULT_VALUE}>{t('agentBackend.ompDefault')}</SelectItem>
+          <SelectItem value={DEFAULT_VALUE}>{defaultLabel}</SelectItem>
           {value && !models.some((m) => m.selector === value) && <SelectItem value={value}>{value}</SelectItem>}
           {models.map((m) => (
             <SelectItem key={m.selector} value={m.selector}>
@@ -118,7 +118,7 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
       if (v) next[tier] = v;
       else delete next[tier];
       updateOmp({ models: next });
-    });
+    }, t('agentBackend.useOmpRoles'));
 
   return (
     <>
@@ -178,6 +178,7 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
       {kind === 'omp' && (
         <>
           <SettingsSection title={t('agentBackend.modelsTitle')} description={t('agentBackend.modelsDescription')}>
+            <p className="mb-3 text-[0.8125rem] text-muted-foreground">{t('agentBackend.modelsDescription')}</p>
             <SettingsRows>
               {CLAUDE_MODEL_ALIASES.map((tier) => (
                 <SettingsRow key={tier} label={t(`agentBackend.tiers.${tier}`)} htmlFor={`omp-model-${tier}`}>
@@ -222,6 +223,25 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
                   id="omp-allow-fallback"
                   checked={omp.allowFallbackModels === true}
                   onCheckedChange={(checked) => updateOmp({ allowFallbackModels: checked })}
+                />
+              </SettingsRow>
+              <SettingsRow
+                label={t('agentBackend.retries')}
+                description={t('agentBackend.retriesDescription')}
+                htmlFor="omp-retries"
+              >
+                <Input
+                  id="omp-retries"
+                  type="number"
+                  min={0}
+                  max={10}
+                  className="w-20"
+                  value={omp.retries ?? 5}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (e.target.value === '' || !Number.isFinite(value)) return;
+                    updateOmp({ retries: Math.min(10, Math.max(0, Math.round(value))) });
+                  }}
                 />
               </SettingsRow>
             </SettingsRows>

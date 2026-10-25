@@ -55,14 +55,81 @@ export function modelAliasOf(model: string | undefined): ClaudeModelAlias | unde
   return CLAUDE_MODEL_ALIASES.find((alias) => lower.includes(alias));
 }
 
-/** `--model` value: the OMP model configured for the tier, or undefined for OMP's default */
-export function ompModelFor(model: string | undefined, settings: OmpBackendSettings): string | undefined {
+/** OMP model roles Workbench picks by job (`omp --model @<role>`) */
+export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny';
+
+/** Role name -> model selector, from the user's OMP config (`modelRoles`) */
+export type OmpRoleMap = Readonly<Record<string, string>>;
+
+/** The kinds of work a run can be for; each has an OMP role */
+export type OmpJob = 'plan' | 'implement' | 'validate' | 'revise' | 'review' | 'utility';
+
+/** OMP role for a job: plan -> plan, review -> judge, everything else -> default */
+export function ompRoleForJob(job: OmpJob): OmpRole {
+  if (job === 'plan') return 'plan';
+  if (job === 'review') return 'judge';
+  return 'default';
+}
+
+/**
+ * `--model @<role>` for a role the user's OMP config defines. omp 18.11.0 fails with "Model not found"
+ * for an undefined role, so a missing role falls back to `@default`, and to nothing (OMP's own
+ * default) when no roles are known yet or `default` is not defined either.
+ */
+export function ompRoleSelector(role: string, roles: OmpRoleMap | undefined): string | undefined {
+  if (!roles) return undefined;
+  if (roles[role]?.trim()) return `@${role}`;
+  if (roles.default?.trim()) return '@default';
+  return undefined;
+}
+
+export interface OmpModelSelection {
+  /** Value for `--model`, undefined = leave it to OMP */
+  selector?: string;
+  /** Where the choice came from */
+  source: 'pin' | 'size' | 'role' | 'none';
+  /** Role used when `source` is `role` */
+  role?: string;
+  /** The model that will run, when known */
+  concrete?: string;
+}
+
+/**
+ * Which OMP model a run uses. Order: an exact `provider/model` pin, the Workbench size mapping
+ * (`omp.models`), then the OMP role for the job (only roles the OMP config defines), then nothing.
+ */
+export function resolveOmpSelection(
+  model: string | undefined,
+  settings: OmpBackendSettings,
+  role?: string,
+  roles?: OmpRoleMap,
+): OmpModelSelection {
   // An exact OMP selector (`provider/model`) the user pinned goes straight to `--model`;
   // Claude ids (`claude-opus-4-1`) have no slash and still map through their tier
-  if (model && model.includes('/')) return model.trim();
+  if (model && model.includes('/')) return { selector: model.trim(), source: 'pin', concrete: model.trim() };
   const alias = modelAliasOf(model);
   const mapped = alias ? settings.models[alias]?.trim() : undefined;
-  return mapped || undefined;
+  if (mapped) return { selector: mapped, source: 'size', concrete: mapped };
+  if (role) {
+    const selector = ompRoleSelector(role, roles);
+    if (selector) {
+      const used = selector.slice(1);
+      return { selector, source: 'role', role: used, concrete: roles?.[used]?.trim() || undefined };
+    }
+  }
+  return { source: 'none' };
+}
+
+/** `--model` value: the OMP model configured for the tier, else the job's role, or undefined for OMP's default */
+export function ompModelFor(model: string | undefined, settings: OmpBackendSettings, role?: string, roles?: OmpRoleMap): string | undefined {
+  return resolveOmpSelection(model, settings, role, roles).selector;
+}
+
+/** Retries on the local model before giving up (or trying the fallback models): 0-10, default 5 */
+export function ompMaxRetries(settings: Pick<OmpBackendSettings, 'retries'>): number {
+  const n = settings.retries;
+  if (typeof n !== 'number' || !Number.isFinite(n)) return 5;
+  return Math.min(10, Math.max(0, Math.round(n)));
 }
 
 /**
@@ -83,7 +150,7 @@ export function resolveOmpAdvisor(settings: OmpBackendSettings, oneShot?: boolea
  */
 export function buildOmpAdvisorOverlay(
   advisor: { mode: OmpAdvisorMode; model?: string },
-  allowFallbackModels = true,
+  allowFallback = false,
 ): string | undefined {
   let advisorPart = '';
   if (advisor.mode === 'off') {
@@ -94,7 +161,8 @@ export function buildOmpAdvisorOverlay(
   }
   // `retry.modelFallback: false` stops OMP switching to the models of `retry.fallbackChains`
   // (verified against omp 18.11.0: a failing local model then surfaces its own error)
-  const fallbackPart = allowFallbackModels ? '' : 'retry:\n  modelFallback: false\n';
+  // Only the one final attempt of a task phase passes `allowFallback`; every other run stays on its model
+  const fallbackPart = allowFallback ? '' : 'retry:\n  modelFallback: false\n';
   return `${advisorPart}${fallbackPart}` || undefined;
 }
 
@@ -102,6 +170,10 @@ export interface OmpArgsOptions {
   settings: OmpBackendSettings;
   /** Workbench model tier or Claude model id */
   model?: string;
+  /** OMP role used when `model` has no explicit OMP model (size mapping or pin) */
+  role?: string;
+  /** Roles the user's OMP config defines (undefined = not known yet) */
+  roles?: OmpRoleMap;
   effort?: ClaudeEffort;
   /** OMP tool names, or 'all' for OMP's default set */
   tools: 'all' | readonly string[];
@@ -133,7 +205,7 @@ export function buildOmpArgs(options: OmpArgsOptions): string[] {
   } else {
     args.push('--no-session');
   }
-  const model = ompModelFor(options.model, settings);
+  const model = ompModelFor(options.model, settings, options.role, options.roles);
   if (model) args.push('--model', model);
   const thinking = options.effort ? settings.thinking[options.effort] : undefined;
   if (thinking) args.push('--thinking', thinking);

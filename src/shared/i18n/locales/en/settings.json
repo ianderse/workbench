@@ -670,8 +670,8 @@
     "modelsCount": "{{count}} models available",
     "noModels": "No models found. Type a model id instead",
     "refresh": "Refresh",
-    "modelsTitle": "Models",
-    "modelsDescription": "Triage picks a size for each task. Choose the OMP model that handles each size",
+    "modelsTitle": "Sizes (optional)",
+    "modelsDescription": "Leave empty to use your OMP roles: plan for planning, default for implementing, judge for reviews. Set a model to override the role for tasks of that size",
     "tiers": {
       "haiku": "Small",
       "sonnet": "Standard",
@@ -679,6 +679,8 @@
       "fable": "Largest"
     },
     "ompDefault": "OMP default",
+    "useOmpRoles": "Use OMP roles",
+    "ompDefaultRole": "OMP default role",
     "modelPlaceholder": "provider/model",
     "advisorTitle": "Advisor",
     "advisorDescription": "A stronger model reviews each turn and adds notes for the model that does the work. Applies to tasks, Insights and agent terminals. Utility calls such as titles and commit messages skip it. It uses the advisor model's quota and billing",
@@ -693,7 +695,9 @@
     "advisorModelDescription": "OMP default uses the advisor model set in the OMP config",
     "fallbackTitle": "Fallback models",
     "allowFallbackModels": "Allow fallback models",
-    "allowFallbackModelsDescription": "When the local model fails, let OMP switch to the fallback models in its config. This may use cloud quota",
+    "allowFallbackModelsDescription": "When retries on the local model fail, try once more letting OMP switch to the fallback models in its config. May use cloud quota",
+    "retries": "Retries on the local model",
+    "retriesDescription": "Times a task phase is resumed after a temporary error such as a busy model server, with longer pauses each time. 0 to 10",
     "thinkingTitle": "Thinking",
     "thinkingDescription": "OMP thinking level for each effort level",
     "thinkingLevels": {

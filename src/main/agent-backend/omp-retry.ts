@@ -7,14 +7,13 @@
  * (pure functions): whether a failure is worth retrying and how long to wait.
  */
 
-/** Pauses before retry 1, 2 and 3 of a phase */
-export const OMP_RETRY_DELAYS_MS: readonly number[] = [30_000, 2 * 60_000, 5 * 60_000];
+/** Pauses before retry 1, 2, 3...; the last one repeats for further retries */
+export const OMP_RETRY_DELAYS_MS: readonly number[] = [30_000, 60_000, 2 * 60_000, 5 * 60_000, 10 * 60_000];
 
-export const OMP_MAX_RETRIES = OMP_RETRY_DELAYS_MS.length;
-
-/** Pause before the given retry (1-based), or undefined when the retries are used up */
+/** Pause before the given retry (1-based); the last pause repeats. Undefined for retry numbers below 1 */
 export function ompRetryDelayMs(retry: number): number | undefined {
-  return retry >= 1 ? OMP_RETRY_DELAYS_MS[retry - 1] : undefined;
+  if (retry < 1) return undefined;
+  return OMP_RETRY_DELAYS_MS[Math.min(retry, OMP_RETRY_DELAYS_MS.length) - 1];
 }
 
 /** Errors that will not go away by trying again: configuration, credentials, quota, bad requests */

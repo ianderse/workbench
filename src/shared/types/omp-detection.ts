@@ -15,6 +15,8 @@ export interface OmpDetection {
   path?: string;
   version?: string;
   models: OmpModelInfo[];
+  /** Model roles of the user's OMP config (`modelRoles`): role name -> model selector */
+  roles?: Record<string, string>;
   /** Why the model list is empty or the CLI was not usable */
   error?: string;
 }

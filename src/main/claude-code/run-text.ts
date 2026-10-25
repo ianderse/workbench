@@ -15,6 +15,7 @@ import type { ClaudeUserContentBlock } from './stream-types';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import { ompToolsFromClaude } from '../agent-backend/omp-args';
+import type { OmpRole } from '../agent-backend/omp-args';
 import { startOmpProcess } from '../agent-backend/omp-process';
 
 /** Built-in tools for read-only exploration of a project */
@@ -28,6 +29,8 @@ export interface RunClaudeTextOptions {
   systemPrompt?: string;
   model?: ClaudeModelAlias | string;
   effort?: ClaudeEffort;
+  /** OMP only: the role used when the model has no explicit OMP model (default `default`; the review uses `judge`) */
+  ompRole?: OmpRole;
   /** JSON Schema: the run returns validated `structured` output */
   jsonSchema?: Record<string, unknown>;
   /** Working directory (defaults to the process cwd) */
@@ -144,6 +147,7 @@ async function runOmpText(options: RunClaudeTextOptions, settings: OmpBackendSet
     cwd: options.cwd ?? process.cwd(),
     prompt: options.prompt,
     model: options.model ?? 'haiku',
+    role: options.ompRole,
     effort: options.effort,
     tools: ompToolsFromClaude(options.tools, options.allowedTools),
     systemPrompt: options.systemPrompt,

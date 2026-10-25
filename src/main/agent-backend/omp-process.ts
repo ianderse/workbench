@@ -13,22 +13,24 @@
  */
 
 import type { ChildProcess } from 'child_process';
-import { constants as fsConstants } from 'fs';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { appLog } from '../app-logger';
-import { getExecutableExtension, getPathDelimiter } from '../platform';
 import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
 import type { ClaudeProcessHandle } from '../claude-code/process';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from '../claude-code/stream-types';
 import type { ClaudeEffort } from '../../shared/types/claude-code';
 import type { OmpBackendSettings } from '../../shared/types/agent-backend';
-import { buildOmpAdvisorOverlay, buildOmpArgs, ompModelFor, resolveOmpAdvisor } from './omp-args';
+import { buildOmpAdvisorOverlay, buildOmpArgs, resolveOmpAdvisor, resolveOmpSelection, type OmpRole } from './omp-args';
+import { resolveOmpCommand } from './omp-command';
+import { getOmpRoles } from './omp-roles';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
 
 type OmpProcessOutcome = Awaited<ClaudeProcessHandle['done']>;
+
+export { resolveOmpCommand };
 
 export interface OmpRunOptions {
   settings: OmpBackendSettings;
@@ -38,6 +40,10 @@ export interface OmpRunOptions {
   prompt: string | ClaudeUserContentBlock[];
   /** Workbench model tier or Claude model id (mapped through the settings) */
   model?: string;
+  /** OMP role used when the model has no explicit OMP model; default `default` */
+  role?: OmpRole;
+  /** Let OMP switch to its fallback models if the model fails (only the final attempt of a task phase) */
+  allowFallback?: boolean;
   effort?: ClaudeEffort;
   /** OMP tool names, or 'all' */
   tools: 'all' | readonly string[];
@@ -61,37 +67,6 @@ export interface OmpRunOptions {
   onStderr?: (chunk: string) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
-}
-
-/** Directories searched for `omp` when the app (started from Finder/Explorer) has a minimal PATH */
-function extraSearchDirs(): string[] {
-  const home = os.homedir();
-  return ['/opt/homebrew/bin', '/usr/local/bin', path.join(home, '.bun', 'bin'), path.join(home, '.local', 'bin'), path.join(home, '.npm-global', 'bin')];
-}
-
-async function isExecutable(file: string): Promise<boolean> {
-  try {
-    await access(file, fsConstants.X_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** Absolute path of the OMP executable (settings command, PATH, then common install folders) */
-export async function resolveOmpCommand(configured: string | undefined, envPath: string | undefined = process.env.PATH): Promise<string> {
-  const command = configured?.trim() || 'omp';
-  if (path.isAbsolute(command) || command.includes('/') || command.includes('\\')) return command;
-  const ext = getExecutableExtension();
-  const names = ext ? [`${command}${ext}`, `${command}.cmd`, command] : [command];
-  const dirs = [...(envPath ?? '').split(getPathDelimiter()).filter(Boolean), ...extraSearchDirs()];
-  for (const dir of dirs) {
-    for (const name of names) {
-      const candidate = path.join(dir, name);
-      if (await isExecutable(candidate)) return candidate;
-    }
-  }
-  return command; // let the spawn fail with a readable "not found"
 }
 
 function extensionFor(mediaType: string): string {
@@ -134,6 +109,10 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
   };
   // One-shot utility calls never use the advisor; the setting applies to the other runs
   const advisor = resolveOmpAdvisor(options.settings, options.oneShot);
+  // Roles are read in the background; until they are known `--model` is left out
+  const roles = getOmpRoles();
+  const role = options.role ?? 'default';
+  const selection = resolveOmpSelection(options.model, options.settings, role, roles);
   try {
     if (options.session) await mkdir(options.session.dir, { recursive: true });
     const { text, files } = splitPrompt(options.prompt);
@@ -154,7 +133,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       await writeFile(appendSystemPromptFile, options.appendSystemPrompt, 'utf-8');
     }
     let advisorOverlayFile: string | undefined;
-    const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.settings.allowFallbackModels === true);
+    const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.allowFallback === true);
     if (advisorOverlay) {
       advisorOverlayFile = path.join(tempDir, 'advisor-overlay.yml');
       await writeFile(advisorOverlayFile, advisorOverlay, 'utf-8');
@@ -193,7 +172,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     current = child;
     if (resumeNote) appLog.info(`[OMP] ${resumeNote}`);
     return new Promise<{ outcome: Omit<OmpProcessOutcome, 'result'>; result?: ClaudeResultMessage; text: string; sessionId?: string }>((resolve) => {
-      const translator = createOmpTranslator({ model: ompModelFor(options.model, options.settings), emitDeltas: options.emitDeltas, emitProgress: options.emitProgress });
+      const translator = createOmpTranslator({ model: selection.concrete ?? selection.selector, emitDeltas: options.emitDeltas, emitProgress: options.emitProgress });
       let buffer = '';
       let stderr = '';
       let held: ClaudeResultMessage | undefined;
@@ -267,6 +246,8 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
   const baseArgs = buildOmpArgs({
     settings: options.settings,
     model: options.model,
+    role,
+    roles,
     effort: options.effort,
     tools: options.tools,
     autoApprove: options.autoApprove,
@@ -315,6 +296,8 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
           const repairArgs = buildOmpArgs({
             settings: options.settings,
             model: options.model,
+            role,
+            roles,
             effort: options.effort,
             tools: [],
             session: resumeSession,

@@ -69,12 +69,13 @@ import { appLog } from '../app-logger';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import type { AgentOverride } from '../../shared/types/task';
-import { OMP_READ_ONLY_TOOLS, ompModelFor, modelAliasOf } from '../agent-backend/omp-args';
+import { OMP_READ_ONLY_TOOLS, ompMaxRetries, ompRoleForJob, resolveOmpSelection, modelAliasOf, type OmpRole } from '../agent-backend/omp-args';
+import { getOmpRoles } from '../agent-backend/omp-roles';
 import { buildOmpMemoryPrompt } from '../self-improve/nudge';
 import { startOmpProcess } from '../agent-backend/omp-process';
 import { isOmpNotice, isOmpProgress, isOmpTodos } from '../agent-backend/omp-translate';
 import { StreamProgress } from '../agent-backend/stream-progress';
-import { classifyOmpFailure, ompRetryDelayMs, OMP_MAX_RETRIES } from '../agent-backend/omp-retry';
+import { classifyOmpFailure, ompRetryDelayMs } from '../agent-backend/omp-retry';
 import { runClaudeText, READ_ONLY_TOOLS } from './run-text';
 import {
   collectReviewDiff,
@@ -475,12 +476,18 @@ export class ClaudeTaskRun {
    * Model and effort for a step's log line. Under OMP the tier alias and effort mean nothing on
    * their own ("opus" is the Large size, effort becomes a thinking level), so name what runs.
    */
-  private modelLabel(model: string, effort: ClaudeEffort): string {
+  private modelLabel(model: string, effort: ClaudeEffort, role: OmpRole = 'default'): string {
     if (this.config.backend !== 'omp') return `${model}, ${effort}`;
     const { omp } = getAgentBackendSettings();
+    const selection = resolveOmpSelection(model, omp, role, getOmpRoles());
+    const thinking = `thinking ${omp.thinking[effort]}`;
+    if (selection.source === 'role') {
+      return `OMP ${selection.role} role${selection.concrete ? `: ${selection.concrete}` : ''}, ${thinking}`;
+    }
+    if (selection.source === 'none') return `OMP default model, ${thinking}`;
     const alias = modelAliasOf(model);
-    const size = alias ? `${OMP_SIZE_NAMES[alias]} size: ` : '';
-    return `${size}${ompModelFor(model, omp) ?? 'OMP default model'}, thinking ${omp.thinking[effort]}`;
+    const size = selection.source === 'size' && alias ? `${OMP_SIZE_NAMES[alias]} size: ` : '';
+    return `${size}${selection.selector}, ${thinking}`;
   }
 
   /** Name of the task's backend, for log lines */
@@ -550,6 +557,7 @@ export class ClaudeTaskRun {
     const model = name === 'plan' && !triage.pinned?.model ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
     const effort: ClaudeEffort = name === 'plan' && !triage.pinned?.effort && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
     const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' ? 'validation' : 'coding';
+    const role = ompRoleForJob(name);
 
     // A session lives in the runtime it ran in (native or WSL); after a switch, start a new one
     await whenShellRuntimeReady();
@@ -584,15 +592,15 @@ export class ClaudeTaskRun {
 
     if (name === 'plan') {
       this.emitProgress('planning', 0.15, label);
-      this.log.startPhase('planning', `${label} (${this.modelLabel(model, effort)})`);
+      this.log.startPhase('planning', `${label} (${this.modelLabel(model, effort, role)})`);
     } else if (name === 'implement' || name === 'revise') {
       this.callbacks.onTaskEvent?.('CODING_STARTED', { subtaskId: '', subtaskDescription: label });
       this.emitProgress('coding', 0.2, label);
-      this.log.startPhase('coding', `${label} (${this.modelLabel(model, effort)})`);
+      this.log.startPhase('coding', `${label} (${this.modelLabel(model, effort, role)})`);
     } else {
       this.callbacks.onTaskEvent?.('QA_STARTED', { iteration: 1, maxIterations: 1 });
       this.emitProgress('qa_review', 0.85, label);
-      this.log.startPhase('validation', `${label} (${this.modelLabel(model, effort)})`);
+      this.log.startPhase('validation', `${label} (${this.modelLabel(model, effort, role)})`);
     }
 
     // OMP: Workbench runs the fresh-context review itself, before the session validates
@@ -976,6 +984,9 @@ no notes came with the request, so review the change against the task with fresh
     let resume: string | undefined = params.resume ? params.sessionId : undefined;
     let input = params.input;
     let retries = 0;
+    const maxRetries = ompMaxRetries(omp);
+    // The one final attempt (after the retries on the local model) that lets OMP use its fallback models
+    let fallbackAttempt = false;
 
     for (;;) {
       const progress = new StreamProgress();
@@ -985,6 +996,8 @@ no notes came with the request, so review the change against the task with fresh
         env: this.config.extraEnv,
         prompt: input,
         model: params.model,
+        role: ompRoleForJob(params.name),
+        allowFallback: fallbackAttempt,
         effort: params.effort,
         // Planning is read-only (OMP has no plan permission mode): fewer tools and a note in the prompt
         tools: planning ? OMP_READ_ONLY_TOOLS : 'all',
@@ -1032,23 +1045,31 @@ no notes came with the request, so review the change against the task with fresh
         signal: outcome.signal,
         timedOut: outcome.timedOut,
       });
-      const delay = kind === 'transient' ? ompRetryDelayMs(retries + 1) : undefined;
-      if (delay === undefined) {
-        if (kind === 'transient') this.noteLog(params.logPhase, `Giving up after ${OMP_MAX_RETRIES} retries of this step`);
+      const exhausted = kind === 'transient' && retries >= maxRetries;
+      const useFallback = exhausted && omp.allowFallbackModels === true && !fallbackAttempt;
+      const delay = kind === 'transient' && !exhausted ? ompRetryDelayMs(retries + 1) : undefined;
+      if (delay === undefined && !useFallback) {
+        if (kind === 'transient') this.noteLog(params.logPhase, `Giving up after ${retries} ${retries === 1 ? 'retry' : 'retries'} of this step`);
         if (result) return { result: withCarried(result), stopped: false };
         return { stopped: false, error: stderrTail || `OMP exited with code ${outcome.exitCode}` };
       }
 
-      // Transient provider or network error: continue the same step in the same session after a pause
-      retries++;
+      // Transient provider or network error: continue the same step in the same session after a pause.
+      // Retries and the fallback attempt continue one phase, so their cost and turns are added up
       if (result) {
         carried.cost += result.total_cost_usd ?? 0;
         carried.turns += result.num_turns ?? 0;
         carried.durationMs += result.duration_ms ?? 0;
       }
       const reason = (result?.omp_errors?.find((e) => !e.fallback)?.text || result?.errors?.join('; ') || stderrTail || 'unknown error').slice(0, 300);
-      this.noteLog(params.logPhase, `Temporary error (${reason}). Retry ${retries}/${OMP_MAX_RETRIES} in ${formatDelay(delay)}`);
-      if (!(await this.sleep(delay))) return { stopped: true };
+      if (useFallback) {
+        fallbackAttempt = true;
+        this.noteLog(params.logPhase, `Temporary error (${reason}). Retries on the local model failed; trying once more with OMP fallback models allowed`);
+      } else {
+        retries++;
+        this.noteLog(params.logPhase, `Temporary error (${reason}). Retry ${retries}/${maxRetries} in ${formatDelay(delay!)}`);
+        if (!(await this.sleep(delay!))) return { stopped: true };
+      }
       const sessionId = this.info.sessionId;
       if (sessionId) {
         resume = sessionId;
@@ -1106,9 +1127,7 @@ no notes came with the request, so review the change against the task with fresh
     const reviewTriage = this.info.triage;
     const reviewModel = reviewTriage?.pinned?.model ? reviewTriage.model : 'opus';
     const reviewEffort: ClaudeEffort = reviewTriage?.pinned?.effort ? reviewTriage.effort : 'high';
-    this.noteLog('validation', reviewTriage?.pinned?.model
-      ? `Reviewing the change with a fresh context (${reviewModel})`
-      : 'Reviewing the change with a fresh context (Large model)');
+    this.noteLog('validation', `Reviewing the change with a fresh context (${this.modelLabel(reviewModel, reviewEffort, ompRoleForJob('review'))})`);
     const phase = this.beginPhase('review', { model: reviewModel, effort: reviewEffort });
     const started = Date.now();
     try {
@@ -1116,6 +1135,7 @@ no notes came with the request, so review the change against the task with fresh
         prompt: `${taskBlock(this.config)}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>`,
         appendSystemPrompt: REVIEW_SYSTEM_PROMPT,
         model: reviewModel,
+        ompRole: ompRoleForJob('review'),
         effort: reviewEffort,
         backend: this.config.backend,
         jsonSchema: REVIEW_SCHEMA,

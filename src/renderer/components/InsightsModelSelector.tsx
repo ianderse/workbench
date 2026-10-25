@@ -77,7 +77,7 @@ export function InsightsModelSelector({
   if (ompModels) {
     const ompLabel = (alias: string) => {
       const mapped = ompModels[alias as keyof typeof ompModels]?.trim();
-      return mapped ? shortOmpModel(mapped) : t('settings:agentBackend.ompDefault');
+      return mapped ? shortOmpModel(mapped) : t('settings:agentBackend.ompDefaultRole');
     };
     const activeAlias = (CLAUDE_MODEL_ALIASES as readonly string[]).includes(activeModel) ? activeModel : 'sonnet';
     return (

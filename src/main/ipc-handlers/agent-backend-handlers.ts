@@ -12,6 +12,7 @@ import { appLog } from '../app-logger';
 import { existsAsync, findExecutableAsync } from '../env-utils';
 import { runTool } from '../platform/runtime-exec';
 import { getAgentBackendSettings } from '../agent-backend/settings';
+import { refreshOmpRoles } from '../agent-backend/omp-roles';
 import { parseOmpModels, parseOmpVersion } from '../agent-backend/omp-detect-parse';
 
 const VERSION_TIMEOUT_MS = 10_000;
@@ -52,13 +53,17 @@ export async function detectOmp(): Promise<OmpDetection> {
     } catch {
       ({ stdout } = await runTool('claude', ['models'], { command: ompPath, timeout: MODELS_TIMEOUT_MS, maxBuffer: 32 * 1024 * 1024 }));
     }
-    return { installed: true, path: ompPath, version, models: parseOmpModels(stdout) };
+    // The role cache is read again with every detection (a refresh in Settings > Agents)
+    const roles = await refreshOmpRoles();
+    return { installed: true, path: ompPath, version, models: parseOmpModels(stdout), ...(roles ? { roles } : {}) };
   } catch (error) {
     return { installed: true, path: ompPath, version, models: [], error: errorMessage(error) };
   }
 }
 
 export function registerAgentBackendHandlers(): void {
+  // Read the OMP model roles in the background so the first run already knows them
+  if (getAgentBackendSettings().kind === 'omp') void refreshOmpRoles();
   ipcMain.handle(IPC_CHANNELS.AGENT_BACKEND_DETECT_OMP, async (): Promise<IPCResult<OmpDetection>> => {
     try {
       return { success: true, data: await detectOmp() };

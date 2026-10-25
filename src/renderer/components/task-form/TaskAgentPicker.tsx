@@ -63,7 +63,7 @@ export function TaskAgentPicker({ value, onChange, disabled = false, compact = f
   const set = (patch: AgentOverride) => onChange(normalizeAgentOverride({ effort: value?.effort, ...patch }));
   const ompTierLabel = (alias: ClaudeModelAlias) => {
     const mapped = ompModels[alias]?.trim();
-    return mapped ? shortOmpModel(mapped) : t('settings:agentBackend.ompDefault');
+    return mapped ? shortOmpModel(mapped) : t('settings:agentBackend.ompDefaultRole');
   };
 
   const triggerLabel = pinnedModelLabel(value, appBackend, agentBackend?.omp?.models) ?? t('tasks:agentPicker.auto');

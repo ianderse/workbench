@@ -3,8 +3,7 @@ import { classifyOmpErrorText, classifyOmpFailure, ompRetryDelayMs } from '../om
 
 describe('ompRetryDelayMs', () => {
   it('backs off 30s, 2m, 5m and then stops', () => {
-    expect([1, 2, 3].map(ompRetryDelayMs)).toEqual([30_000, 120_000, 300_000]);
-    expect(ompRetryDelayMs(4)).toBeUndefined();
+    expect([1, 2, 3, 4, 5, 6, 10].map(ompRetryDelayMs)).toEqual([30_000, 60_000, 120_000, 300_000, 600_000, 600_000, 600_000]);
     expect(ompRetryDelayMs(0)).toBeUndefined();
   });
 });

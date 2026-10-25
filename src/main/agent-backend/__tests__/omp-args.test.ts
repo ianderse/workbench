@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_OMP_BACKEND_SETTINGS } from '../../../shared/types/agent-backend';
-import { buildOmpAdvisorOverlay, buildOmpArgs, modelAliasOf, ompModelFor, ompToolsFromClaude, resolveOmpAdvisor } from '../omp-args';
+import { buildOmpAdvisorOverlay, buildOmpArgs, modelAliasOf, ompMaxRetries, ompModelFor, ompRoleForJob, ompToolsFromClaude, resolveOmpAdvisor } from '../omp-args';
 
 const settings = { ...DEFAULT_OMP_BACKEND_SETTINGS, models: { haiku: 'ollama/small', opus: 'lmstudio/big' }, extraArgs: ['--no-lsp'] };
 
@@ -61,14 +61,58 @@ describe('omp advisor', () => {
   });
 
   it('writes an overlay only when flags alone cannot do it', () => {
-    expect(buildOmpAdvisorOverlay({ mode: 'inherit' })).toBeUndefined();
-    expect(buildOmpAdvisorOverlay({ mode: 'on' })).toBeUndefined();
-    expect(buildOmpAdvisorOverlay({ mode: 'off' })).toBe('advisor:\n  enabled: false\n');
-    expect(buildOmpAdvisorOverlay({ mode: 'off', model: 'omlx/big' })).toBe('advisor:\n  enabled: false\n');
-    expect(buildOmpAdvisorOverlay({ mode: 'inherit', model: 'omlx/big' })).toBe('modelRoles:\n  advisor: "omlx/big"\n');
-    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, false)).toBe('retry:\n  modelFallback: false\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true)).toBeUndefined();
+    expect(buildOmpAdvisorOverlay({ mode: 'on' }, true)).toBeUndefined();
+    expect(buildOmpAdvisorOverlay({ mode: 'off' }, true)).toBe('advisor:\n  enabled: false\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'off', model: 'omlx/big' }, true)).toBe('advisor:\n  enabled: false\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit', model: 'omlx/big' }, true)).toBe('modelRoles:\n  advisor: "omlx/big"\n');
+    // Fallback models are off unless the final attempt of a task phase allows them
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' })).toBe('retry:\n  modelFallback: false\n');
     expect(buildOmpAdvisorOverlay({ mode: 'off' }, false)).toBe('advisor:\n  enabled: false\n' + 'retry:\n  modelFallback: false\n');
     expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true)).toBeUndefined();
-    expect(buildOmpAdvisorOverlay({ mode: 'on', model: 'omlx/big' })).toBe('modelRoles:\n  advisor: "omlx/big"\nadvisor:\n  enabled: true\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'off' }, true)).toBe('advisor:\n  enabled: false\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'on', model: 'omlx/big' }, true)).toBe('modelRoles:\n  advisor: "omlx/big"\nadvisor:\n  enabled: true\n');
+  });
+});
+
+describe('omp roles per job', () => {
+  const roles = { default: 'omlx/flash', plan: 'anthropic/opus', judge: 'anthropic/sonnet' };
+
+  it('maps jobs to roles', () => {
+    expect(ompRoleForJob('plan')).toBe('plan');
+    expect(ompRoleForJob('review')).toBe('judge');
+    for (const job of ['implement', 'validate', 'revise', 'utility'] as const) expect(ompRoleForJob(job)).toBe('default');
+  });
+
+  it('uses the job role when the size has no mapping', () => {
+    expect(ompModelFor('sonnet', settings, 'plan', roles)).toBe('@plan');
+    expect(ompModelFor('sonnet', settings, 'default', roles)).toBe('@default');
+    expect(ompModelFor('sonnet', settings, 'judge', roles)).toBe('@judge');
+  });
+
+  it('lets a size mapping or an exact pin win over the role', () => {
+    expect(ompModelFor('opus', settings, 'plan', roles)).toBe('lmstudio/big');
+    expect(ompModelFor('omlx/pinned', settings, 'judge', roles)).toBe('omlx/pinned');
+  });
+
+  it('only uses roles the OMP config defines', () => {
+    expect(ompModelFor('sonnet', settings, 'judge', { default: 'omlx/flash' })).toBe('@default');
+    expect(ompModelFor('sonnet', settings, 'plan', { judge: 'x/y' })).toBeUndefined();
+    expect(ompModelFor('sonnet', settings, 'plan', undefined)).toBeUndefined();
+    expect(ompModelFor('sonnet', settings, undefined, roles)).toBeUndefined();
+  });
+
+  it('puts the role in the command line', () => {
+    const args = buildOmpArgs({ settings, model: 'sonnet', role: 'plan', roles, tools: [] });
+    expect(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2)).toEqual(['--model', '@plan']);
+    expect(buildOmpArgs({ settings, model: 'sonnet', role: 'plan', tools: [] })).not.toContain('--model');
+  });
+
+  it('clamps the retry count', () => {
+    expect(ompMaxRetries({})).toBe(5);
+    expect(ompMaxRetries({ retries: 0 })).toBe(0);
+    expect(ompMaxRetries({ retries: 99 })).toBe(10);
+    expect(ompMaxRetries({ retries: -2 })).toBe(0);
+    expect(ompMaxRetries({ retries: 3 })).toBe(3);
   });
 });
