@@ -51,7 +51,8 @@ vi.mock('../triage', async (importOriginal) => {
   return { ...actual, triageTask: (...args: unknown[]) => triageMock(...args) };
 });
 
-import { ClaudeTaskRun, loadClaudeRunInfo } from '../task-runner';
+import { ClaudeTaskRun, loadClaudeRunInfo, ompSubagentGuidance } from '../task-runner';
+import { ompSubagentsPerTask } from '../../../shared/types/agent-backend';
 import { SELF_IMPROVE_NUDGE } from '../../self-improve/nudge';
 
 function result(sessionId: string, fields: Record<string, unknown> = {}): ClaudeStreamMessage {
@@ -812,5 +813,22 @@ describe('ClaudeTaskRun', () => {
       await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
       expect(argValue(spawned[1].args, '--resume')).toBe('s24');
     });
+  });
+});
+
+describe('ompSubagentGuidance', () => {
+  it('lets one OMP task fan out to parallel subagents up to its cap, or work alone', () => {
+    const parallel = ompSubagentGuidance(3);
+    expect(parallel).toContain('task tool in one batch call');
+    expect(parallel).toContain('at most 3 at a time');
+    expect(parallel).toContain('no two subagents edit the same file');
+    expect(ompSubagentGuidance(1)).toBe('- Do the work yourself in this conversation.\n');
+    expect(ompSubagentGuidance(0)).toBe('- Do the work yourself in this conversation.\n');
+  });
+
+  it('clamps the setting to 0-8 with a default of 3', () => {
+    expect(ompSubagentsPerTask({})).toBe(3);
+    expect(ompSubagentsPerTask({ subagentsPerTask: 20 })).toBe(8);
+    expect(ompSubagentsPerTask({ subagentsPerTask: -2 })).toBe(0);
   });
 });

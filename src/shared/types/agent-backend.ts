@@ -54,6 +54,17 @@ export interface OmpBackendSettings {
   allowFallbackModels?: boolean;
   /** Retries of a task phase on the local model before giving up or trying the fallback models; 0-10, default 5 */
   retries?: number;
+  /**
+   * Subagents one task may run at once through OMP's `task` tool (`task.maxConcurrency`), so a
+   * single ticket can use several model-server slots. 0 = the agent works alone; 0-8, default 3
+   */
+  subagentsPerTask?: number;
+}
+
+/** Subagent concurrency for one task: the setting clamped to 0-8, default 3 */
+export function ompSubagentsPerTask(settings: Pick<OmpBackendSettings, 'subagentsPerTask'>): number {
+  const value = Math.round(Number(settings.subagentsPerTask ?? 3));
+  return Number.isFinite(value) ? Math.min(8, Math.max(0, value)) : 3;
 }
 
 export interface AgentBackendSettings {
@@ -71,6 +82,7 @@ export const DEFAULT_OMP_BACKEND_SETTINGS: OmpBackendSettings = {
   advisorModel: '',
   allowFallbackModels: false,
   retries: 5,
+  subagentsPerTask: 3,
 };
 
 export const DEFAULT_AGENT_BACKEND_SETTINGS: AgentBackendSettings = {

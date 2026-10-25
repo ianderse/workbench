@@ -244,6 +244,25 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
                   }}
                 />
               </SettingsRow>
+              <SettingsRow
+                label={t('agentBackend.subagentsPerTask')}
+                description={t('agentBackend.subagentsPerTaskDescription')}
+                htmlFor="omp-subagents"
+              >
+                <Input
+                  id="omp-subagents"
+                  type="number"
+                  min={0}
+                  max={8}
+                  className="w-20"
+                  value={omp.subagentsPerTask ?? 3}
+                  onChange={(e) => {
+                    const value = Number(e.target.value);
+                    if (e.target.value === '' || !Number.isFinite(value)) return;
+                    updateOmp({ subagentsPerTask: Math.min(8, Math.max(0, Math.round(value))) });
+                  }}
+                />
+              </SettingsRow>
             </SettingsRows>
           </SettingsSection>
 

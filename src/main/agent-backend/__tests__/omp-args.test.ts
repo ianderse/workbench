@@ -60,6 +60,13 @@ describe('omp advisor', () => {
     expect(resolveOmpAdvisor({ ...settings, advisor: 'on', advisorModel: 'omlx/big' }, true)).toEqual({ mode: 'off' });
   });
 
+  it('caps subagents per run so one task cannot swamp the model server', () => {
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, false, 3)).toBe('retry:\n  modelFallback: false\ntask:\n  maxConcurrency: 3\n');
+    // 0 means the agent works alone, but a stray task call still gets a cap of 1
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true, 0)).toBe('task:\n  maxConcurrency: 1\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true)).toBeUndefined();
+  });
+
   it('writes an overlay only when flags alone cannot do it', () => {
     expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true)).toBeUndefined();
     expect(buildOmpAdvisorOverlay({ mode: 'on' }, true)).toBeUndefined();

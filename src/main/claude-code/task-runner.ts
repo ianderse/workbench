@@ -90,6 +90,7 @@ import type { SplitSubmission } from '../queue-grooming';
 import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
 import { appLog } from '../app-logger';
 import { getAgentBackendSettings } from '../agent-backend/settings';
+import { ompSubagentsPerTask } from '../../shared/types/agent-backend';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import type { AgentOverride } from '../../shared/types/task';
 import { OMP_READ_ONLY_TOOLS, ompMaxRetries, ompRoleForJob, resolveOmpSelection, modelAliasOf, type OmpRole } from '../agent-backend/omp-args';
@@ -269,6 +270,19 @@ const VALIDATION_SCHEMA = {
   required: ['status', 'summary', 'checks', 'findings'],
 };
 
+/**
+ * How an OMP task uses subagents. With a cap of 2 or more, independent parts of a ticket run as
+ * parallel subagents (each a separate request to the model server), so one ticket can use several
+ * server slots; the main agent keeps the shared groundwork, integration, checks and the commit.
+ */
+export function ompSubagentGuidance(subagents: number): string {
+  if (subagents < 2) return '- Do the work yourself in this conversation.\n';
+  return `- When the work splits into independent parts (separate modules, files or test suites that don't need each other's unfinished code), hand them to subagents with the task tool in one batch call so they run in parallel, at most ${subagents} at a time. Do the shared groundwork they depend on (types, interfaces, fixtures) yourself first.
+- Give each subagent a precise brief: the files it owns (no two subagents edit the same file), the interfaces to follow, and how to verify its part. Subagents don't commit; you integrate their work, run the project's checks on the whole change and commit it.
+- Also use subagents for broad searches whose raw output you don't need. Don't delegate small or tightly coupled changes: do those yourself.
+`;
+}
+
 function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string, omp = false): string {
   const sections = [
     `You are running autonomously inside Workbench, a desktop app that hands coding tasks to ${omp ? 'a coding agent' : 'Claude Code'}. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
@@ -285,8 +299,7 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, paral
 - Follow the project's CLAUDE.md, conventions and existing patterns. Keep the change focused on the task.
 ${omp
   ? `- Track work with the todo tool only when it has several distinct steps worth tracking; skip it for small changes.
-- Do the work yourself in this conversation.
-`
+${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
   : `- Track work with the task list (TaskCreate / TaskUpdate) only when it has several distinct steps worth tracking; skip it for small changes.
 - Use subagents only when they help: broad searches whose raw output you don't need, or independent investigations that can run in parallel. Do the implementation itself in this conversation.
 - Use skills and MCP tools when they fit the task.

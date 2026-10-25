@@ -21,7 +21,7 @@ import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
 import type { ClaudeProcessHandle } from '../claude-code/process';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from '../claude-code/stream-types';
 import type { ClaudeEffort } from '../../shared/types/claude-code';
-import type { OmpBackendSettings } from '../../shared/types/agent-backend';
+import { ompSubagentsPerTask, type OmpBackendSettings } from '../../shared/types/agent-backend';
 import { buildOmpAdvisorOverlay, buildOmpArgs, resolveOmpAdvisor, resolveOmpSelection, type OmpRole } from './omp-args';
 import { resolveOmpCommand } from './omp-command';
 import { getOmpRoles } from './omp-roles';
@@ -136,7 +136,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       await writeFile(appendSystemPromptFile, options.appendSystemPrompt, 'utf-8');
     }
     let advisorOverlayFile: string | undefined;
-    const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.allowFallback === true);
+    const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.allowFallback === true, ompSubagentsPerTask(options.settings));
     if (advisorOverlay) {
       advisorOverlayFile = path.join(tempDir, 'advisor-overlay.yml');
       await writeFile(advisorOverlayFile, advisorOverlay, 'utf-8');

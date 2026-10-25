@@ -151,6 +151,8 @@ export function resolveOmpAdvisor(settings: OmpBackendSettings, oneShot?: boolea
 export function buildOmpAdvisorOverlay(
   advisor: { mode: OmpAdvisorMode; model?: string },
   allowFallback = false,
+  /** Subagents a run may have at once (`task.maxConcurrency`); undefined leaves OMP's default (32) */
+  subagents?: number,
 ): string | undefined {
   let advisorPart = '';
   if (advisor.mode === 'off') {
@@ -163,7 +165,10 @@ export function buildOmpAdvisorOverlay(
   // (verified against omp 18.11.0: a failing local model then surfaces its own error)
   // Only the one final attempt of a task phase passes `allowFallback`; every other run stays on its model
   const fallbackPart = allowFallback ? '' : 'retry:\n  modelFallback: false\n';
-  return `${advisorPart}${fallbackPart}` || undefined;
+  // OMP runs up to 32 subagents at once by default, far more than a local model server can serve;
+  // 0 (the agent works alone) still needs a cap of 1 so a stray task call can't fan out
+  const taskPart = subagents === undefined ? '' : `task:\n  maxConcurrency: ${Math.max(1, subagents)}\n`;
+  return `${advisorPart}${fallbackPart}${taskPart}` || undefined;
 }
 
 export interface OmpArgsOptions {

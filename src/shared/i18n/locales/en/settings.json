@@ -718,6 +718,8 @@
     "allowFallbackModelsDescription": "When retries on the local model fail, try once more letting OMP switch to the fallback models in its config. May use cloud quota",
     "retries": "Retries on the local model",
     "retriesDescription": "Times a task phase is resumed after a temporary error such as a busy model server, with longer pauses each time. 0 to 10",
+    "subagentsPerTask": "Subagents per task",
+    "subagentsPerTaskDescription": "How many parts of one task can run in parallel as subagents, each using a slot on your model server. Keep tasks times subagents within what the server can serve. 0 to 8, 0 means the agent works alone",
     "thinkingTitle": "Thinking",
     "thinkingDescription": "OMP thinking level for each effort level",
     "thinkingLevels": {

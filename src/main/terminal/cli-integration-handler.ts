@@ -50,6 +50,7 @@ import { appLog } from '../app-logger';
 import { claudeThemeFlag } from '../claude-cli-theme';
 import { isOmpBackend, getAgentBackendSettings } from '../agent-backend/settings';
 import { buildOmpAdvisorOverlay, resolveOmpAdvisor } from '../agent-backend/omp-args';
+import { ompSubagentsPerTask } from '../../shared/types/agent-backend';
 import { app } from 'electron';
 import { getAugmentedEnv, getAugmentedEnvAsync } from '../env-utils';
 
@@ -1592,7 +1593,7 @@ async function executeProfileCommandAsync(options: ExecuteProfileCommandOptions)
 function ompAdvisorFlags(terminal: Pick<TerminalProcess, 'shellKind'>, omp: ReturnType<typeof getAgentBackendSettings>['omp']): string {
   const advisor = resolveOmpAdvisor(omp);
   let flags = advisor.mode === 'on' ? ' --advisor' : '';
-  const overlay = buildOmpAdvisorOverlay(advisor, false);
+  const overlay = buildOmpAdvisorOverlay(advisor, false, ompSubagentsPerTask(omp));
   if (overlay) {
     try {
       const file = path.join(app.getPath('userData'), 'omp-advisor-overlay.yml');
