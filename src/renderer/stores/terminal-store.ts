@@ -429,6 +429,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
       terminals: [...state.terminals, restoredTerminal],
       activeTerminalId: state.activeTerminalId || restoredTerminal.id,
     }));
+    // A restored window starts over too (a new shell, and Claude Code again when its session is
+    // resumed): it shows a spinner instead of the buffer it replays and the start-up that follows
+    get().setTerminalLoading(restoredTerminal.id, restoredTerminal.pendingCLIResume ? 'claude' : 'shell');
 
     debugLog(`[TerminalStore] Successfully added restored terminal ${session.id} to store, isRestored: true, pendingCLIResume: ${session.isCLIMode === true}`);
     return restoredTerminal;
@@ -691,6 +694,9 @@ export const useTerminalStore = create<TerminalState>((set, get) => ({
           if (!get().terminals.find((t) => t.id === terminalId)?.pendingCLIResume) continue;
           debugLog(`[TerminalStore] Resuming Claude Code in terminal: ${terminalId}`);
           get().setPendingClaudeResume(terminalId, false);
+          // The spinner waits for this window's Claude Code, counting from the moment it starts:
+          // the windows resume one after another, so the later ones start well after the restore
+          get().setTerminalLoading(terminalId, 'claude');
           window.electronAPI.activateDeferredClaudeResume(terminalId);
           // The terminal now runs `claude --continue` in the project: show it in Claude mode
           get().setCLIMode(terminalId, true);
