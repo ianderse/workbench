@@ -14,6 +14,12 @@
 
 Entries are dated so changes can be tracked; commit hashes point at the change. Upstream Workbench's own description follows the changelog.
 
+### 2026-10-25
+
+**Upstream sync decisions**
+- One merge helper: autonomous auto-merge, PR merges, local merges and resync without a session all bring the target branch into the task branch through `mergeTargetIntoBranch`, with conflicts resolved by the merge agent on the task's own backend (a task pinned to Claude Code or OMP uses that, not the app-wide one)
+- Autonomous mode now resyncs the other open tasks when it auto-merges a task into its target branch (integration branch or main), not only when a task reaches Done; an auto-merged task moving to Done later does not trigger it again
+
 ### 2026-10-24
 
 **Local models with OMP**
