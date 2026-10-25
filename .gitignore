@@ -115,3 +115,6 @@ playwright/.cache/
 # is not, because it holds absolute machine paths
 .claude/settings.local.json
 /shared_docs
+
+# Agent scratch worktrees
+.claude/worktrees/
