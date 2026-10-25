@@ -21,7 +21,7 @@ import { git as runGit } from '../utils/git-exec';
 import { findBaseBranchRef } from '../utils/base-branch';
 import { toHostPath } from '../platform/shell-runtime';
 import { runMergeAgent, type MergeAgentFn } from '../ai/runners/merge-agent';
-import { findMissingTargetLines, CONFLICT_MARKER } from '../ai/runners/github/pr-merger';
+import { findMissingTargetLines, CONFLICT_MARKER } from '../ai/runners/merge-target-into-branch';
 
 const MAX_BUFFER = 20 * 1024 * 1024;
 

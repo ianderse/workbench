@@ -6,7 +6,8 @@
  * server over HTTP (MCP Streamable HTTP, plain JSON responses), on 127.0.0.1 only.
  *
  * Each chat turn gets its own bearer token, which names the project the tools act on and stops
- * working when the turn ends.
+ * working when the turn ends. Task runs get tokens too (`openMcpToolsSession`): they see their
+ * own tool list (task messaging), never the chat's task management tools.
  */
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -32,7 +33,37 @@ export interface TaskToolsSession {
   close: () => void;
 }
 
-const sessions = new Map<string, TaskToolContext>();
+/** A tool as `tools/list` describes it */
+export interface McpToolDescriptor {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+}
+
+/** What one token gives access to: its tools and how to run them */
+export interface McpToolsProvider {
+  instructions: string;
+  tools: McpToolDescriptor[];
+  /** Run a tool; a string result is sent as is, anything else as JSON. Throws for a tool error */
+  call: (name: string, args: Record<string, unknown>) => Promise<unknown>;
+}
+
+const sessions = new Map<string, McpToolsProvider>();
+
+/** The chat's task tools for a project */
+function insightsProvider(context: TaskToolContext): McpToolsProvider {
+  return {
+    instructions: "Manage this project's Workbench tasks.",
+    tools: TASK_TOOLS.map(({ name, description, inputSchema, mutates }) => ({
+      name,
+      description,
+      inputSchema,
+      annotations: { readOnlyHint: !mutates, destructiveHint: name === 'delete_task' || name === 'retry_task' },
+    })),
+    call: (name, args) => runTaskTool(context, name, args),
+  };
+}
 let server: Server | null = null;
 let listening: Promise<number> | null = null;
 
@@ -45,7 +76,7 @@ function rpcError(id: JsonRpcRequest['id'], code: number, message: string) {
 }
 
 /** Answer one JSON-RPC message; notifications get no answer */
-async function handleMessage(context: TaskToolContext, message: JsonRpcRequest): Promise<unknown | undefined> {
+async function handleMessage(provider: McpToolsProvider, message: JsonRpcRequest): Promise<unknown | undefined> {
   const isNotification = message.id === undefined;
   switch (message.method) {
     case 'initialize': {
@@ -54,26 +85,20 @@ async function handleMessage(context: TaskToolContext, message: JsonRpcRequest):
         protocolVersion: PROTOCOL_VERSIONS.includes(requested) ? requested : PROTOCOL_VERSIONS[0],
         capabilities: { tools: { listChanged: false } },
         serverInfo: { name: TASK_TOOLS_SERVER_NAME, version: '1.0.0' },
-        instructions: "Manage this project's Workbench tasks.",
+        instructions: provider.instructions,
       });
     }
     case 'ping':
       return rpcResult(message.id, {});
     case 'tools/list':
-      return rpcResult(message.id, {
-        tools: TASK_TOOLS.map(({ name, description, inputSchema, mutates }) => ({
-          name,
-          description,
-          inputSchema,
-          annotations: { readOnlyHint: !mutates, destructiveHint: name === 'delete_task' || name === 'retry_task' },
-        })),
-      });
+      return rpcResult(message.id, { tools: provider.tools });
     case 'tools/call': {
       const name = String(message.params?.name ?? '');
       const args = (message.params?.arguments ?? {}) as Record<string, unknown>;
       try {
-        const result = await runTaskTool(context, name, args);
-        return rpcResult(message.id, { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
+        const result = await provider.call(name, args);
+        const text = typeof result === 'string' ? result : JSON.stringify(result, null, 2);
+        return rpcResult(message.id, { content: [{ type: 'text', text }] });
       } catch (error) {
         const text = error instanceof Error ? error.message : String(error);
         return rpcResult(message.id, { content: [{ type: 'text', text }], isError: true });
@@ -112,8 +137,8 @@ function send(response: ServerResponse, status: number, body?: unknown): void {
 
 async function handleRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
   const token = /^Bearer (.+)$/.exec(request.headers.authorization ?? '')?.[1];
-  const context = token ? sessions.get(token) : undefined;
-  if (!context) return send(response, 401, rpcError(null, -32001, 'Unauthorized'));
+  const provider = token ? sessions.get(token) : undefined;
+  if (!provider) return send(response, 401, rpcError(null, -32001, 'Unauthorized'));
   // Only JSON-RPC over POST: no server-initiated stream
   if (request.method !== 'POST') return send(response, 405);
 
@@ -124,7 +149,7 @@ async function handleRequest(request: IncomingMessage, response: ServerResponse)
     return send(response, 400, rpcError(null, -32700, 'Parse error'));
   }
   const messages = Array.isArray(payload) ? payload : [payload];
-  const answers = (await Promise.all(messages.map((message) => handleMessage(context, message)))).filter((answer) => answer !== undefined);
+  const answers = (await Promise.all(messages.map((message) => handleMessage(provider, message)))).filter((answer) => answer !== undefined);
   if (answers.length === 0) return send(response, 202);
   send(response, 200, Array.isArray(payload) ? answers : answers[0]);
 }
@@ -148,10 +173,15 @@ function ensureServer(): Promise<number> {
 }
 
 /** Open the task tools for one chat turn of a project */
-export async function openTaskToolsSession(context: TaskToolContext): Promise<TaskToolsSession> {
+export function openTaskToolsSession(context: TaskToolContext): Promise<TaskToolsSession> {
+  return openMcpToolsSession(insightsProvider(context));
+}
+
+/** Open a token for any set of tools (task runs' messaging tools) */
+export async function openMcpToolsSession(provider: McpToolsProvider): Promise<TaskToolsSession> {
   const port = await ensureServer();
   const token = randomBytes(24).toString('hex');
-  sessions.set(token, context);
+  sessions.set(token, provider);
   return {
     mcpServer: { type: 'http', url: `http://127.0.0.1:${port}/mcp`, headers: { Authorization: `Bearer ${token}` } },
     close: () => {
