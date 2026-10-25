@@ -47,6 +47,19 @@
  *    `response abort`, `prompt_result {status:"aborted"}`, `session_settled`. Workbench stops runs with the
  *    existing kill path (killRuntimeProcess) instead, as in print mode; the translator reports "aborted".
  *
+ * Slow start (verified 2026-10-25, omp 18.12.6)
+ *  - The `response` to a `prompt` is written at once (about 10 ms after the command, `success: true`) and
+ *    `agent_start` follows within about 20 ms when the context fits (`ready`, `model_changed`,
+ *    `available_commands_update`, `response`, `agent_start`, `turn_start`, user `message_start/end`, ...).
+ *  - When the resumed session does not fit the model's window, omp logs "Pre-prompt context maintenance triggered
+ *    by pending prompt size" and compacts BEFORE `agent_start`; with a local model that took over 55 s (production
+ *    log, 162k tokens into a 128k window). The `response` is already out by then, so a successful response means the
+ *    prompt is accepted and a slow start is not a failed start. The omp binary has `auto_compaction_start` and
+ *    `auto_compaction_end` events (not captured live here: forcing a compaction needs an over-full session), so
+ *    compaction/maintenance/queue events also count as working (`isWorkingEvent`). Only a stdout that stays
+ *    silent for a long time before `agent_start` is given up (hang guard, no -p fallback: print mode would compact
+ *    again and lose the live messages).
+ *
  * Not verified: protocol v2 framing (we stay on v1), `images` on prompt (attachments use print mode).
  */
 
@@ -123,6 +136,15 @@ export function readSteerId(event: Record<string, unknown>): string | undefined 
 /** True for the event after which the process can be closed: the session has nothing left to do */
 export function isSessionSettled(event: Record<string, unknown>): boolean {
   return event.type === 'session_settled';
+}
+
+/**
+ * True for an event that shows the session is working on an accepted prompt even though `agent_start` has not
+ * come yet: omp compacts or trims the context first when the resumed session does not fit the model's window
+ */
+export function isWorkingEvent(event: Record<string, unknown>): boolean {
+  const type = typeof event.type === 'string' ? event.type : '';
+  return type === 'agent_start' || type === 'queue_update' || /compaction|maintenance|^auto_retry/.test(type);
 }
 
 /** The session id in a `get_state` response, if any */

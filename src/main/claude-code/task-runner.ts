@@ -1944,6 +1944,7 @@ no notes came with the request, so review the change against the task with fresh
         settings: omp,
         cwd: this.config.worktreePath,
         env: this.config.extraEnv,
+        label: `${this.config.specId} ${params.name}`,
         prompt: input,
         model: params.model,
         role: params.role ?? ompRoleForJob(params.name),

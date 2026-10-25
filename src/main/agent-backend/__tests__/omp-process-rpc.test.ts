@@ -88,13 +88,24 @@ if (!rpc) {
       buf = buf.slice(i + 1);
       if (cmd.type === 'get_state') out({ id: cmd.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'rpc-session' } });
       if (cmd.type === 'prompt') {
+        if (mode === 'rpc-refuse') {
+          out({ id: cmd.id, type: 'response', command: 'prompt', success: false, error: 'busy' });
+          continue;
+        }
         out({ id: cmd.id, type: 'response', command: 'prompt', success: true });
-        out({ type: 'agent_start' });
-        out({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text: cmd.message }] } });
-        // Without a steer the run ends by itself
+        if (mode === 'rpc-hang') continue;
+        // omp compacts a too-large resumed session before agent_start
+        const delay = mode === 'rpc-slow-start' ? 1200 : mode === 'rpc-compact' ? 1200 : 0;
+        if (mode === 'rpc-compact') out({ type: 'auto_compaction_start', reason: 'threshold' });
         setTimeout(() => {
-          if (!steered || mode === 'rpc-ignore') endRun('final answer');
-        }, mode === 'rpc-ignore' ? 700 : 1500);
+          if (mode === 'rpc-compact') out({ type: 'auto_compaction_end' });
+          out({ type: 'agent_start' });
+          out({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text: cmd.message }] } });
+          // Without a steer the run ends by itself
+          setTimeout(() => {
+            if (!steered || mode === 'rpc-ignore') endRun('final answer');
+          }, mode === 'rpc-ignore' ? 700 : 1500);
+        }, delay);
       }
       if (cmd.type === 'steer') {
         steered = true;
@@ -194,6 +205,43 @@ describe('startOmpProcess with live messages', () => {
     // A message taken while the RPC process was starting goes back to the inbox with the unread ones
     if (early) expect(outcome.unread).toEqual([{ id: 'wbm-test3', text: 'early message' }]);
     expect(handle.send('after the fallback')).toBe(false);
+  });
+
+  it.each(['rpc-slow-start', 'rpc-compact'])('does not fall back when agent_start is slow after the prompt was accepted (%s)', async (mode) => {
+    const { messages, promise } = run(mode);
+    const handle = await promise;
+    const outcome = await handle.done;
+    // The 400 ms start wait passed long before agent_start (1200 ms): the RPC run was kept
+    expect(text(messages)).toBe('final answer');
+    expect(outcome.exitCode).toBe(0);
+    expect(messages.find((m) => m.type === 'system')).toMatchObject({ session_id: 'rpc-session' });
+  });
+
+  it('keeps messages sent during the compaction and delivers them after agent_start', async () => {
+    const { read, messages, promise } = run('rpc-compact');
+    const handle = await promise;
+    // Prompt accepted, compaction running (agent_start comes at about 1200 ms)
+    await new Promise((r) => setTimeout(r, 700));
+    expect(handle.send('during compaction', 'wbm-test4')).toBe('wbm-test4');
+    const outcome = await handle.done;
+    expect(read).toEqual([{ id: 'wbm-test4', text: 'during compaction' }]);
+    expect(outcome.unread).toEqual([]);
+    expect(text(messages)).toBe('saw the steer');
+  });
+
+  it('falls back to omp -p when the prompt is refused', async () => {
+    const { messages, promise } = run('rpc-refuse');
+    const outcome = await (await promise).done;
+    expect(text(messages)).toBe('print answer: do the thing');
+    expect(outcome.result?.is_error).toBe(false);
+  });
+
+  it('gives up on a silent process after the prompt was accepted, without repeating the step in print mode', async () => {
+    const { messages, promise } = run('rpc-hang', { rpcWaitsMs: { ready: 400, start: 400, settle: 400, state: 400, hang: 600 } });
+    const outcome = await (await promise).done;
+    expect(text(messages)).not.toMatch(/^print answer/);
+    expect(outcome.result?.is_error).toBe(true);
+    expect(outcome.stderr).toContain('no output from omp');
   });
 
   it('uses omp -p when the setting is off, for utility calls, without live options and with attachments', async () => {

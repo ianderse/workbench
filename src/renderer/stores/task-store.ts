@@ -401,7 +401,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
           // Helps trace whether real-time plan updates reach the store correctly.
           const completedCount = subtasks.filter(s => s.status === 'completed').length;
           if (completedCount > 0) {
-            console.warn(`[updateTaskFromPlan] Task ${taskId}: ${completedCount}/${subtasks.length} subtasks completed`);
+            console.debug(`[updateTaskFromPlan] Task ${taskId}: ${completedCount}/${subtasks.length} subtasks completed`);
           }
 
           // NOTE: We do NOT update status from plan anymore.

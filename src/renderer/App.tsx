@@ -149,7 +149,7 @@ export function App() {
 
   // Restore tab state and open tabs for loaded projects
   useEffect(() => {
-    console.warn('[App] Tab restore useEffect triggered:', {
+    console.debug('[App] Tab restore useEffect triggered:', {
       projectsCount: projects.length,
       openProjectIds,
       activeProjectId,
@@ -164,7 +164,7 @@ export function App() {
       if (openProjectIds.length === 0) {
         // No tabs persisted at all, open the first available project
         const projectToOpen = activeProjectId || selectedProjectId || projects[0].id;
-        console.warn('[App] No tabs persisted, opening project:', projectToOpen);
+        console.debug('[App] No tabs persisted, opening project:', projectToOpen);
         // Verify the project exists before opening
         if (projects.some(p => p.id === projectToOpen)) {
           openProjectTab(projectToOpen);
@@ -177,21 +177,21 @@ export function App() {
         }
         return;
       }
-      console.warn('[App] Tabs already persisted, checking active project');
+      console.debug('[App] Tabs already persisted, checking active project');
       // If there's an active project but no tabs open for it, open a tab
       // Note: Use openProjectIds instead of projectTabs to avoid re-render loop
       // (projectTabs creates a new array on every render)
       if (activeProjectId && !openProjectIds.includes(activeProjectId)) {
-        console.warn('[App] Active project has no tab, opening:', activeProjectId);
+        console.debug('[App] Active project has no tab, opening:', activeProjectId);
         openProjectTab(activeProjectId);
       }
       // If there's a selected project but no active project, make it active
       else if (selectedProjectId && !activeProjectId) {
-        console.warn('[App] No active project, using selected:', selectedProjectId);
+        console.debug('[App] No active project, using selected:', selectedProjectId);
         setActiveProject(selectedProjectId);
         openProjectTab(selectedProjectId);
       } else {
-        console.warn('[App] Tab state is valid, no action needed');
+        console.debug('[App] Tab state is valid, no action needed');
       }
     }
   }, [projects, activeProjectId, selectedProjectId, openProjectIds, openProjectTab, setActiveProject, projectTabs.length, projectTabs.map]);
@@ -269,7 +269,7 @@ export function App() {
     // dialog; the others show the update notification like any other window would.
     const cleanupDownloaded = window.electronAPI.onAppUpdateDownloaded(() => {
       if (!document.hasFocus()) return;
-      console.warn('[App] Update downloaded, opening settings to updates section');
+      console.debug('[App] Update downloaded, opening settings to updates section');
       setSettingsInitialSection('updates');
       setIsSettingsDialogOpen(true);
     });

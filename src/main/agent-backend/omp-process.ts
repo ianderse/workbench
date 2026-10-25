@@ -32,7 +32,7 @@ import { resolveOmpCommand } from './omp-command';
 import { getOmpRoles } from './omp-roles';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
-import { isSessionSettled, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
+import { isSessionSettled, isWorkingEvent, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
 import { recordOmpUsage, type UsageContext } from '../usage/usage-record';
 
 type OmpProcessOutcome = Awaited<ClaudeProcessHandle['done']>;
@@ -85,7 +85,9 @@ export interface OmpRunOptions {
    */
   live?: { onInputRead?: (id: string, text: string) => void };
   /** Tests: override the RPC start-up waits (ms) */
-  rpcWaitsMs?: { ready?: number; start?: number; settle?: number; state?: number };
+  rpcWaitsMs?: { ready?: number; start?: number; settle?: number; state?: number; hang?: number };
+  /** Names the run in log lines (spec id and phase); default: the working directory's name */
+  label?: string;
 }
 
 function extensionFor(mediaType: string): string {
@@ -210,7 +212,8 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     live.unread.set(messageId, text);
     return messageId;
   };
-  const waits = { ready: 20_000, start: 30_000, settle: 8_000, state: 5_000, ...(options.rpcWaitsMs ?? {}) };
+  const label = options.label ?? path.basename(options.cwd);
+  const waits = { ready: 20_000, start: 30_000, settle: 8_000, state: 5_000, hang: 10 * 60_000, ...(options.rpcWaitsMs ?? {}) };
 
   interface RunOnceResult {
     outcome: Omit<OmpProcessOutcome, 'result'>;
@@ -239,6 +242,10 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       let held: ClaudeResultMessage | undefined;
       // RPC state
       let started = false; // agent_start seen: the prompt is running, no fallback any more
+      // The prompt was accepted (successful response) or omp showed it is working on it (compaction, queue, agent
+      // events). OMP may compact the session before agent_start, which takes minutes on a local model: from here a
+      // slow start is not a failed start, only a silent process (`waits.hang`) is given up
+      let accepted = false;
       let promptSent = false;
       let ended = false; // agent_end seen
       let fallback: string | undefined;
@@ -257,7 +264,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         timers.clear();
       };
       const giveUp = (reason: string) => {
-        if (fallback || started) return;
+        if (fallback || started || accepted) return;
         fallback = reason;
         stop();
       };
@@ -295,11 +302,31 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         if (promptSent || stdinClosed) return;
         promptSent = true;
         child.stdin?.write(rpcPrompt(input));
-        after(waits.start, () => giveUp('no agent_start after the prompt'));
+        after(waits.start, () => giveUp('no response to the prompt'));
+      };
+      // Hang guard before agent_start: restarted by every stdout line, so a compaction that talks never trips it
+      let hangTimer: NodeJS.Timeout | undefined;
+      const armHangGuard = () => {
+        if (hangTimer) clearTimeout(hangTimer);
+        hangTimer = setTimeout(() => {
+          stderr = (stderr + `\nWorkbench: no output from omp for ${Math.round(waits.hang / 1000)} s before the run started`).slice(-8000);
+          appLog.warn(`[OMP] ${label}: no output from omp for ${Math.round(waits.hang / 1000)} s after the prompt was accepted, stopping it`);
+          stop();
+        }, waits.hang);
+      };
+      const disarmHangGuard = () => {
+        if (hangTimer) clearTimeout(hangTimer);
+        hangTimer = undefined;
+      };
+      const markAccepted = () => {
+        if (accepted) return;
+        accepted = true;
+        clearTimers();
       };
       const handleRpcLine = (line: string) => {
         const parsed = parseRpcLine(line);
         if (!parsed) return;
+        if (accepted && !started) armHangGuard();
         if (parsed.kind === 'invalid') {
           if (!started) giveUp('unparseable output before the run started');
           return;
@@ -318,12 +345,20 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
             sendPrompt();
           } else if (parsed.id === RPC_PROMPT_ID && !parsed.success) {
             giveUp(`prompt refused: ${parsed.error ?? 'unknown error'}`);
+          } else if (parsed.id === RPC_PROMPT_ID) {
+            markAccepted();
+            armHangGuard();
           }
           return;
         }
         const event = parsed.event;
+        if (promptSent && !started && isWorkingEvent(event)) {
+          markAccepted();
+          armHangGuard();
+        }
         if (event.type === 'agent_start') {
           started = true;
+          disarmHangGuard();
           clearTimers();
           live.started = true;
           for (const message of live.pending.splice(0)) {
@@ -387,6 +422,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
 
       const finish = (exitCode: number | null, signal: NodeJS.Signals | null) => {
         clearTimers();
+        disarmHangGuard();
         live.open = false;
         live.started = false;
         live.pending = [];
@@ -394,7 +430,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         buffer = '';
         // An RPC process that never started a run: the caller repeats the step in print mode
         // (messages taken meanwhile stay in `unread` and go back to the inbox with the print run's outcome)
-        if (rpc && !started && !aborted && !timedOut) {
+        if (rpc && !started && !accepted && !aborted && !timedOut) {
           const last = stderr.trim().split('\n').slice(-1)[0]?.slice(0, 200);
           resolve({
             outcome: { exitCode, signal, stderr, aborted, timedOut, results: [], resultOrigins: [], unread: [] },
@@ -490,7 +526,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     const rpcRun = await runOnce(rpcArgs, setup.text, !!options.jsonSchema, undefined, true);
     if (!rpcRun.fallback) return rpcRun;
     // Never lose a step to the new transport: run it again in print mode (the RPC process did not start the run)
-    appLog.warn(`[OMP] RPC mode did not start (${rpcRun.fallback}); running this step with omp -p, messages wait for the next step`);
+    appLog.warn(`[OMP] ${label}: RPC mode did not start (${rpcRun.fallback}); running this step with omp -p, messages wait for the next step`);
     if (aborted || timedOut) return rpcRun;
     return runOnce(baseArgs, setup.text, !!options.jsonSchema, 'Falling back to omp -p for this step');
   };
