@@ -33,6 +33,26 @@ describe('normalizeFollowUpResult', () => {
     expect(result.covered).toEqual([{ item: 'c', coveredBy: '002-map', why: 'w' }]);
   });
 
+  it('keeps a clipped suggestion on planning tickets only and removes dashes', () => {
+    const long = 'Add X now; '.repeat(100);
+    const result = normalizeFollowUpResult(
+      {
+        items: [
+          ticket('a', 'planning', { suggestion: '  Add X now \u2014 defer Y  ' }),
+          ticket('b', 'queue', { suggestion: 'ignored' }),
+          ticket('c', 'planning', { suggestion: long }),
+          ticket('d', 'planning'),
+        ],
+      },
+      ctx()
+    );
+    const by = Object.fromEntries(result.tickets.map((t) => [t.item, t.suggestion]));
+    expect(by.a).toBe('Add X now, defer Y');
+    expect(by.b).toBe('');
+    expect((by.c ?? '').length).toBeLessThanOrEqual(500);
+    expect(by.d).toBe('');
+  });
+
   it('requires a title and a description for queue and planning', () => {
     const result = normalizeFollowUpResult(
       { items: [ticket('a', 'queue', { title: '' }), ticket('b', 'planning', { description: '  ' }), ticket('c')] },

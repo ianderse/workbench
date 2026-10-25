@@ -295,7 +295,7 @@ no `needsDecision`, the decision ticket's own `dependsOnTaskIds`, queued ones at
 applies to review-derived follow-ups, so the explicit queue choice stands), then the decision ticket gets a "## Decision" block,
 `metadata.decision = { text, at, outcome: 'tickets' | 'deferred' | 'rejected', ticketIds }` and moves to Done (backlog accepts
 `MARK_DONE`; it never ran, so there is no worktree or merge dialog). *Not now* saves the note (outcome `deferred`, stays in Planning and
-can be decided again); *Reject* archives. Any model failure, or an answer with no tickets, changes nothing.
+can be decided again); *Reject* archives. Any model failure, or an answer with no tickets, changes nothing. A `planning` follow-up also carries `followUpFrom.suggestion` (the model's recommended decision, written as the person would type it); older tickets get one through the panel's "Suggest a decision" button (`suggestDecision()`, IPC `QUEUE_SUGGEST_DECISION`, never on open), the panel prefills the textarea with it, and an empty answer on *Make tickets* uses it (`resolveDecisionText()`; the person's own text and a deferred ticket's saved text always win).
 
 ### Task splitting (per project)
 

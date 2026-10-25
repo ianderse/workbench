@@ -7,6 +7,9 @@ import {
   getDecisionQuestion,
   isAwaitingDecision,
   normalizeDecisionResult,
+  normalizeSuggestion,
+  resolveDecisionText,
+  initialDecisionText,
 } from '../decision-tickets';
 
 describe('normalizeDecisionResult', () => {
@@ -85,5 +88,26 @@ describe('decision texts and state', () => {
     expect(getDecisionQuestion({ followUpFrom: { taskId: '1', item: 'x', why: 'Pick one' } }, '')).toBe('Pick one');
     expect(getDecisionQuestion(undefined, 'a\n\n**Why this needs a decision:** Scope is unclear\nmore')).toBe('Scope is unclear');
     expect(getDecisionQuestion(undefined, 'nothing')).toBe('');
+  });
+});
+
+describe('suggestions', () => {
+  it('uses the suggestion only when the text is empty', () => {
+    expect(resolveDecisionText('', 'Add X now')).toBe('Add X now');
+    expect(resolveDecisionText('   ', 'Add X now')).toBe('Add X now');
+    expect(resolveDecisionText('My own words', 'Add X now')).toBe('My own words');
+    expect(resolveDecisionText('', undefined)).toBe('');
+  });
+
+  it('prefills saved text over the suggestion', () => {
+    const followUpFrom = { taskId: 't', item: 'i', needsDecision: true, suggestion: 'Add X now' };
+    expect(initialDecisionText({ followUpFrom })).toBe('Add X now');
+    expect(initialDecisionText({ followUpFrom, decision: { text: 'Later', at: 'x', outcome: 'deferred' } })).toBe('Later');
+  });
+
+  it('normalizes the suggestion', () => {
+    expect(normalizeSuggestion({ suggestion: ' Add X \u2014 now ' })).toBe('Add X, now');
+    expect(normalizeSuggestion({ suggestion: 'a'.repeat(900) })).toHaveLength(500);
+    expect(normalizeSuggestion(null)).toBe('');
   });
 });

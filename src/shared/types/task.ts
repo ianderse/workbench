@@ -183,6 +183,8 @@ export interface TaskFollowUpRef {
   needsDecision?: boolean;
   /** needsDecision: what the person has to decide (the model's one-sentence reason) */
   why?: string;
+  /** needsDecision: the model's recommended decision, written the way the person would type it */
+  suggestion?: string;
 }
 
 /** What the person decided on a needs-decision ticket (Your decision panel) */

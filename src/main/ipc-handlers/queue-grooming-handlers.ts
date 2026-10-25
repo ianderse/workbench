@@ -13,7 +13,7 @@ import { taskHooks } from '../task-hooks';
 import { taskQueue } from '../services/task-queue';
 import { appLog } from '../app-logger';
 import { createFollowUpTickets } from '../follow-up-tickets';
-import { decideTicket } from '../decision-tickets';
+import { decideTicket, suggestDecision } from '../decision-tickets';
 import type { DecisionAction } from '../../shared/utils/decision-tickets';
 import {
   applyQueueProposal,
@@ -89,6 +89,8 @@ export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow
     if (result.success && splitTaskId) void resumeAfterSplitDecision(projectId, splitTaskId);
     return result.success ? { success: true } : { success: false, error: result.error };
   });
+
+  handleIpc(IPC_CHANNELS.QUEUE_SUGGEST_DECISION, async (_, projectId: string, taskId: string) => suggestDecision(projectId, taskId));
 
   handleIpc(
     IPC_CHANNELS.QUEUE_DECIDE_TICKET,

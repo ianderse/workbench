@@ -7,7 +7,7 @@ import type { Project, Task, TaskMetadata } from '../../shared/types';
 vi.mock('../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 vi.mock('../project-store', () => ({ projectStore: {} }));
 
-import { decideTicket, type DecisionDeps } from '../decision-tickets';
+import { decideTicket, suggestDecision, type DecisionDeps } from '../decision-tickets';
 
 let project: Project;
 let tasks: Task[];
@@ -213,5 +213,39 @@ describe('decideTicket: not now and reject', () => {
     expect(ticket.description).toContain('Rejected.');
     expect(archived).toEqual([['017-decide']]);
     expect(modelPrompts).toHaveLength(0);
+  });
+});
+
+describe('suggestDecision', () => {
+  it('stores the suggestion on followUpFrom and keeps the other fields', async () => {
+    modelAnswer = { suggestion: 'Add forgetting now; defer threats until slice 2' };
+    const result = await suggestDecision('p1', '017-decide', makeDeps());
+    expect(result).toEqual({ success: true, data: { suggestion: 'Add forgetting now; defer threats until slice 2' } });
+    const from = tasks.find((t) => t.id === '017-decide')!.metadata!.followUpFrom!;
+    expect(from.suggestion).toBe('Add forgetting now; defer threats until slice 2');
+    expect(from.why).toBe('Scope');
+    expect(from.needsDecision).toBe(true);
+    expect(modelPrompts[0]).toContain('Decide whether to add forgetting');
+  });
+
+  it('leaves the ticket unchanged when the model fails or gives nothing', async () => {
+    const before = snapshot();
+    modelError = new Error('boom');
+    expect((await suggestDecision('p1', '017-decide', makeDeps())).success).toBe(false);
+    modelError = null;
+    modelAnswer = { suggestion: '   ' };
+    expect((await suggestDecision('p1', '017-decide', makeDeps())).success).toBe(false);
+    expect(snapshot()).toBe(before);
+  });
+
+  it('refuses a ticket that is not waiting for a decision', async () => {
+    expect((await suggestDecision('p1', '015-map', makeDeps())).success).toBe(false);
+  });
+
+  it('make tickets with empty text uses the stored suggestion', async () => {
+    tasks.find((t) => t.id === '017-decide')!.metadata!.followUpFrom!.suggestion = 'Add both now';
+    const result = await decideTicket('p1', '017-decide', { action: 'tickets', text: '' }, makeDeps());
+    expect(result.success).toBe(true);
+    expect(modelPrompts[0]).toContain('Add both now');
   });
 });

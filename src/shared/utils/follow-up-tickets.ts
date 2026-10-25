@@ -22,6 +22,7 @@ const MAX_ITEM_CHARS = 300;
 const MAX_TITLE_CHARS = 120;
 const MAX_DESCRIPTION_CHARS = 3000;
 const MAX_WHY_CHARS = 400;
+export const MAX_SUGGESTION_CHARS = 500;
 const MAX_TICKET_DESCRIPTION_CHARS = 1200;
 
 export type FollowUpAction = 'none' | 'covered' | 'queue' | 'planning';
@@ -47,6 +48,10 @@ export const FOLLOW_UP_SCHEMA: Record<string, unknown> = {
           title: { type: 'string', description: 'actions queue and planning: short ticket title in sentence case, no trailing period' },
           description: { type: 'string', description: 'actions queue and planning: standalone description with acceptance criteria' },
           why: { type: 'string', description: 'One sentence: why this action' },
+          suggestion: {
+            type: 'string',
+            description: 'action planning: your recommended decision, written the way the person would type it, e.g. "Add X now; defer Y until slice 2; reject Z because ..."',
+          },
         },
         required: ['item', 'action', 'why'],
       },
@@ -63,7 +68,7 @@ For each item choose exactly one action:
 - "queue": clear, bounded, in-scope follow-up work an engineer would simply do without asking anyone, for example a missing test, a small cleanup the reviewer flagged, or a fix for a bug that was found. It starts on its own once the reviewed ticket is merged.
 - "planning": the work needs a human to decide whether it should be done at all: a product or design decision, a change of scope, something risky or large, or something that contradicts the ticket's spec. It waits in Planning until the person decides.
 
-For "queue" and "planning" give a short "title" (sentence case, no trailing period) and a standalone "description" that someone who has not seen the reviewed ticket can act on, with acceptance criteria. "why" is one plain sentence; for "planning" it tells the person what they have to decide.
+For "queue" and "planning" give a short "title" (sentence case, no trailing period) and a standalone "description" that someone who has not seen the reviewed ticket can act on, with acceptance criteria. "why" is one plain sentence; for "planning" it tells the person what they have to decide. For "planning" also give a "suggestion": the decision you recommend, written in the first person as the person would type it in one or two short sentences (for example "Add X now; defer Y until slice 2; reject Z because ..."), tied to the ticket's spec and naming the concrete pieces of work.
 
 Rules:
 - When unsure between "queue" and "planning", choose "planning". When unsure between work and information, choose "none".
@@ -128,6 +133,8 @@ export interface FollowUpTicketPlan {
   title: string;
   description: string;
   why: string;
+  /** planning only: the recommended decision (empty when the model gave none) */
+  suggestion?: string;
 }
 
 export interface FollowUpCoveredPlan {
@@ -198,7 +205,8 @@ export function normalizeFollowUpResult(raw: unknown, context: FollowUpContext):
     if (!title || !description) continue;
     const action = e.action === 'queue' && context.sourceIsFollowUp ? 'planning' : e.action;
     seenItems.add(key);
-    result.tickets.push({ item, action, title, description, why });
+    const suggestion = action === 'planning' ? noDashes(text(e.suggestion, MAX_SUGGESTION_CHARS)) : '';
+    result.tickets.push({ item, action, title, description, why, suggestion });
   }
   return result;
 }

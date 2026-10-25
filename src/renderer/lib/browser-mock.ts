@@ -138,6 +138,7 @@ const browserMockAPI: ElectronAPI = {
   listQueueProposals: async () => ({ success: true, data: [] }),
   applyQueueProposal: async () => ({ success: false, error: 'Not available in browser mode' }),
   dismissQueueProposal: async () => ({ success: true }),
+  suggestDecision: async () => ({ success: false, error: 'Not available in browser mode' }),
   decideTicket: async () => ({ success: false, error: 'Not available in browser mode' }),
   undoContextNote: async () => ({ success: false, error: 'Not available in browser mode' }),
   onQueueProposalsChanged: () => () => {},

@@ -10,6 +10,7 @@
  */
 import type { TaskMetadata } from '../types/task';
 import { taskNumber } from './queue-grooming';
+import { MAX_SUGGESTION_CHARS } from './follow-up-tickets';
 
 /** New tickets one decision can create */
 export const MAX_DECISION_TICKETS = 4;
@@ -196,4 +197,73 @@ export function getDecisionQuestion(metadata: TaskMetadata | undefined, descript
   if (stored) return stored;
   const match = /\*\*Why this needs a decision:\*\*\s*([^\n]+)/.exec(description ?? '');
   return match?.[1]?.trim() ?? '';
+}
+
+/** The stored suggestion of a needs-decision ticket ('' when there is none) */
+export function getDecisionSuggestion(metadata: TaskMetadata | undefined): string {
+  return metadata?.followUpFrom?.suggestion?.trim() ?? '';
+}
+
+/**
+ * The words that get turned into tickets: what the person wrote, else the suggestion. Their own
+ * text always wins, even when it differs from the suggestion.
+ */
+export function resolveDecisionText(text: string, suggestion: string | undefined): string {
+  return text.trim() || (suggestion ?? '').trim();
+}
+
+/** What the textarea starts with: the saved text of a deferred ticket wins over the suggestion */
+export function initialDecisionText(metadata: TaskMetadata | undefined): string {
+  return metadata?.decision?.text?.trim() ? metadata.decision.text : getDecisionSuggestion(metadata);
+}
+
+export const SUGGEST_SCHEMA: Record<string, unknown> = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    suggestion: {
+      type: 'string',
+      description: 'The recommended decision, written the way the person would type it: what to add now, what to defer and what to reject, each with a short reason',
+    },
+  },
+  required: ['suggestion'],
+};
+
+export const SUGGEST_SYSTEM_PROMPT = `You recommend a decision. A ticket in Planning asks a person to decide something. You do NOT write code and you do NOT change files. You may read the project, but you usually do not need to. Answer with the structured output only.
+
+Write "suggestion" as the person would type their own answer: one or two short sentences, for example "Add X now; defer Y until slice 2; reject Z because ...". Name the concrete pieces of work the ticket lists, stay tied to the spec and the reviewed task, and give a brief reason for each defer or reject. Do not hedge, do not ask questions and do not use em dashes or en dashes. Maximum ${MAX_SUGGESTION_CHARS} characters.`;
+
+export interface SuggestPromptInput {
+  ticket: { id: string; title: string; description?: string; question?: string };
+  source?: { id: string; title: string; description?: string; headline?: string; whatChanged?: string[]; summary?: string };
+}
+
+/** The user message: the decision ticket and the task it came from */
+export function buildSuggestPrompt(input: SuggestPromptInput): string {
+  const parts = [
+    `<decision_ticket id="${input.ticket.id}" title="${input.ticket.title.replace(/"/g, "'")}">\n${clip(input.ticket.description, MAX_DESCRIPTION_CHARS)}\n</decision_ticket>`,
+  ];
+  if (input.ticket.question) parts.push(`What needs deciding: ${clip(input.ticket.question, 400)}`);
+  if (input.source) {
+    const { source } = input;
+    parts.push(
+      [
+        `<source_task id="${source.id}" title="${source.title.replace(/"/g, "'")}">`,
+        source.description ? `Spec:\n${clip(source.description, 1500)}` : '',
+        source.headline ? `Review summary: ${clip(source.headline, 300)}` : '',
+        source.whatChanged?.length ? `What changed:\n${source.whatChanged.map((b) => `- ${clip(b, 220)}`).join('\n')}` : '',
+        source.summary ? `Agent final notes:\n${clip(source.summary, 2000)}` : '',
+        '</source_task>',
+      ]
+        .filter(Boolean)
+        .join('\n')
+    );
+  }
+  return parts.join('\n\n');
+}
+
+/** The model's suggestion, clipped; '' when it gave none */
+export function normalizeSuggestion(raw: unknown): string {
+  const value = raw && typeof raw === 'object' ? (raw as { suggestion?: unknown }).suggestion : undefined;
+  return noDashes(text(value, MAX_SUGGESTION_CHARS));
 }

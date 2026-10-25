@@ -18,6 +18,8 @@ export interface QueueGroomingAPI {
   undoContextNote: (projectId: string, taskId: string, noteId: string) => Promise<IPCResult>;
   /** Answer a needs-decision ticket (one model call when making tickets) */
   decideTicket: (projectId: string, taskId: string, action: DecisionAction, text: string) => Promise<IPCResult<DecisionData>>;
+  /** Write a recommended decision for a needs-decision ticket (one model call; stored on the ticket) */
+  suggestDecision: (projectId: string, taskId: string) => Promise<IPCResult<{ suggestion: string }>>;
   /** Proposals were added, applied or dismissed */
   onQueueProposalsChanged: (callback: (projectId: string) => void) => () => void;
 }
@@ -30,6 +32,7 @@ export const createQueueGroomingAPI = (): QueueGroomingAPI => ({
     invokeIpc(IPC_CHANNELS.QUEUE_NOTE_UNDO, projectId, taskId, noteId),
   decideTicket: (projectId: string, taskId: string, action: DecisionAction, text: string) =>
     invokeIpc(IPC_CHANNELS.QUEUE_DECIDE_TICKET, projectId, taskId, action, text),
+  suggestDecision: (projectId: string, taskId: string) => invokeIpc(IPC_CHANNELS.QUEUE_SUGGEST_DECISION, projectId, taskId),
   onQueueProposalsChanged: (callback: (projectId: string) => void) =>
     createIpcListener(IPC_CHANNELS.QUEUE_PROPOSALS_CHANGED, callback),
 });

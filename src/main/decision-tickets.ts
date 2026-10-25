@@ -20,8 +20,15 @@ import {
   buildDecisionBlock,
   buildDecisionPrompt,
   buildDecisionTicketDescription,
+  SUGGEST_SCHEMA,
+  SUGGEST_SYSTEM_PROMPT,
+  buildSuggestPrompt,
+  getDecisionQuestion,
+  getDecisionSuggestion,
   isAwaitingDecision,
   normalizeDecisionResult,
+  normalizeSuggestion,
+  resolveDecisionText,
   type DecisionAction,
   type DecisionData,
   type DecisionOutcome,
@@ -103,7 +110,7 @@ async function run(projectId: string, taskId: string, request: DecisionRequest, 
   if (!project) return { success: false, error: 'Project not found' };
   const ticket = findDecisionTicket(deps, projectId, taskId);
   if (!ticket) return { success: false, error: 'This ticket is not waiting for a decision' };
-  const decisionText = request.text.trim();
+  const decisionText = request.action === 'tickets' ? resolveDecisionText(request.text, getDecisionSuggestion(ticket.metadata)) : request.text.trim();
   const at = new Date().toISOString();
 
   if (request.action === 'defer' || request.action === 'reject') {
@@ -196,4 +203,61 @@ async function run(projectId: string, taskId: string, request: DecisionRequest, 
   deps.changed(projectId);
   appLog.info(`[Decision] ${fresh.id}: ${created.length} ticket(s) created`);
   return { success: true, data: { outcome: 'tickets', created, decisionRecord: result.decisionRecord } };
+}
+
+export interface SuggestResponse {
+  success: boolean;
+  error?: string;
+  data?: { suggestion: string };
+}
+
+/**
+ * Ask the model for a recommended decision on a needs-decision ticket and store it as
+ * `followUpFrom.suggestion` (read-only call, OMP role `plan`). Never throws; on any failure the
+ * ticket is unchanged.
+ */
+export async function suggestDecision(projectId: string, taskId: string, deps: DecisionDeps = defaultDeps()): Promise<SuggestResponse> {
+  const key = `suggest:${projectId}:${taskId}`;
+  if (inFlight.has(key)) return { success: false, error: 'A suggestion is already being written' };
+  inFlight.add(key);
+  try {
+    const project = deps.getProject(projectId);
+    if (!project) return { success: false, error: 'Project not found' };
+    const ticket = findDecisionTicket(deps, projectId, taskId);
+    if (!ticket?.metadata?.followUpFrom) return { success: false, error: 'This ticket is not waiting for a decision' };
+    const from = ticket.metadata.followUpFrom;
+    const source = deps.getTasks(projectId).find((t) => t.id === from.taskId);
+    const raw = await deps.runModel({
+      prompt: buildSuggestPrompt({
+        ticket: { id: ticket.id, title: ticket.title, description: ticket.description, question: getDecisionQuestion(ticket.metadata, ticket.description) },
+        source: source
+          ? {
+              id: source.id,
+              title: source.title,
+              description: source.description,
+              headline: source.claudeRun?.reviewSummary?.headline,
+              whatChanged: source.claudeRun?.reviewSummary?.whatChanged,
+              summary: source.claudeRun?.summary,
+            }
+          : undefined,
+      }),
+      systemPrompt: SUGGEST_SYSTEM_PROMPT,
+      jsonSchema: SUGGEST_SCHEMA,
+      cwd: project.path,
+      profileId: project.settings?.claudeProfileId,
+    });
+    const suggestion = normalizeSuggestion(raw);
+    if (!suggestion) return { success: false, error: 'The model gave no usable answer' };
+    // The model took a while: the ticket may have been decided, moved or deleted
+    const fresh = findDecisionTicket(deps, projectId, taskId);
+    if (!fresh?.metadata?.followUpFrom) return { success: false, error: 'This ticket changed while the model was working' };
+    await deps.updateTask(projectId, fresh.id, { metadata: { followUpFrom: { ...fresh.metadata.followUpFrom, suggestion } } });
+    deps.changed(projectId);
+    return { success: true, data: { suggestion } };
+  } catch (error) {
+    appLog.warn(`[Decision] Could not suggest a decision for ${taskId}:`, error);
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    inFlight.delete(key);
+  }
 }

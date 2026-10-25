@@ -207,7 +207,7 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
         sourceType: 'manual',
         // The queue waits for the merge of the reviewed task (autonomous mode counts an auto-merge as done)
         dependsOnTaskIds: [source.id],
-        followUpFrom: { taskId: source.id, item: plan.item, ...(plan.action === 'planning' ? { needsDecision: true, ...(plan.why ? { why: plan.why } : {}) } : {}) },
+        followUpFrom: { taskId: source.id, item: plan.item, ...(plan.action === 'planning' ? { needsDecision: true, ...(plan.why ? { why: plan.why } : {}), ...(plan.suggestion ? { suggestion: plan.suggestion } : {}) } : {}) },
       };
       const id = await deps.createTask(projectId, plan.title, buildFollowUpDescription(plan, source.id), metadata);
       if (!id) continue;
