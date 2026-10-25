@@ -235,7 +235,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         }
         // Every process books its own tokens (a JSON repair run is a second one), also when it failed
         recordOmpUsage(options.usage, translator.usage, { sessionId: translator.sessionId });
-        resolve({ outcome: { exitCode, signal, stderr, aborted, timedOut }, result, text: translator.lastText, sessionId: translator.sessionId });
+        resolve({ outcome: { exitCode, signal, stderr, aborted, timedOut, results: [], resultOrigins: [], unread: [] }, result, text: translator.lastText, sessionId: translator.sessionId });
       };
       child.on('error', (error) => {
         stderr = (stderr + `\n${error.message}`).slice(-8000);
@@ -346,5 +346,6 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     }
   })();
 
-  return { child: firstChild, done, stop };
+  // OMP gets no live messages (task messaging is Claude Code only)
+  return { child: firstChild, done, stop, send: () => false };
 }

@@ -93,6 +93,13 @@ vi.mock('../utils/base-branch', () => ({
 const mockGit = vi.hoisted(() => vi.fn(async (_args: string[], _options?: unknown) => ({ stdout: '', stderr: '' })));
 vi.mock('../utils/git-exec', () => ({ git: mockGit }));
 
+// A pending resync request of the task (task-resync/request.ts); none unless a test sets one
+const pendingResync = vi.hoisted(() => ({ value: undefined as unknown }));
+vi.mock('../task-resync/request', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../task-resync/request')>()),
+  readResyncRequest: vi.fn(() => pendingResync.value),
+}));
+
 import { AgentManager } from './agent-manager';
 
 const project = {
@@ -211,6 +218,20 @@ describe('AgentManager', () => {
     expect(registry.registerOperation).toHaveBeenCalledWith(
       'task:project-1:001-add-login', 'task-execution', 'profile-a', 'Account A', expect.any(Function), expect.anything()
     );
+  });
+
+  it('applies a pending local merge on start only to a task without a pull request', async () => {
+    pendingResync.value = { ref: 'develop', into: 'develop', via: 'local', merged: [], at: '2026-10-01T00:00:00Z' };
+    try {
+      await manager.startTask('001-add-login', { project, task: makeTask({ status: 'human_review' }), mode: 'start' });
+      expect((await nextRun(1)).config.resync).toEqual(expect.objectContaining({ ref: 'develop' }));
+      const withPr = makeTask({ id: '002-pr', specId: '002-pr', status: 'human_review' });
+      withPr.metadata = { ...withPr.metadata, prUrl: 'https://github.com/o/r/pull/2', prState: 'open' } as Task['metadata'];
+      await manager.startTask('002-pr', { project, task: withPr, mode: 'start' });
+      expect((await nextRun(2)).config.resync).toBeUndefined();
+    } finally {
+      pendingResync.value = undefined;
+    }
   });
 
   it('runs in the project directory when worktrees are off', async () => {

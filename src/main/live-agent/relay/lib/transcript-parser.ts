@@ -82,24 +82,24 @@ function xmlTag(text: string, tag: string): string | undefined {
 }
 
 /**
- * Parse a `<task-notification>` block (sent when a background task stops). Its launch is named
- * by `tool-use-id`, except for a background agent the session started itself (/subtask), which
- * has no launching tool call and is known by its `task-id`.
+ * The launches a `<task-notification>` block (sent when a background task stops) may name: its
+ * `tool-use-id` (an Agent/Task launch), then its `task-id` (a background agent the session
+ * started itself: /subtask, which has no launching tool call, or a forked skill, whose
+ * `tool-use-id` is its Skill call while its node is named by the agent id).
  */
-function parseTaskNotification(text: string): { toolUseId: string } | null {
-  if (!text.startsWith(TASK_NOTIFICATION_PREFIX)) return null
-  const toolUseId = xmlTag(text, 'tool-use-id') ?? xmlTag(text, 'task-id')
-  return toolUseId ? { toolUseId } : null
+function parseTaskNotification(text: string): string[] {
+  if (!text.startsWith(TASK_NOTIFICATION_PREFIX)) return []
+  return [xmlTag(text, 'tool-use-id'), xmlTag(text, 'task-id')].filter((id): id is string => !!id)
 }
 
 /**
- * The launch ID of the background task a transcript entry reports as stopped.
- * Claude Code records the notification in one of three ways: as a user message
- * when it starts a turn; or, when it arrives mid-turn, as a `queue-operation`
- * enqueue (written the moment the task stops) followed by a `queued_command`
- * attachment (when the model is handed it). Seeing it more than once is fine.
+ * The ids of the background task a transcript entry reports as stopped (see
+ * parseTaskNotification). Claude Code records the notification in one of three ways: as a user
+ * message when it starts a turn; or, when it arrives mid-turn, as a `queue-operation` enqueue
+ * (written the moment the task stops) followed by a `queued_command` attachment (when the model
+ * is handed it). Seeing it more than once is fine.
  */
-export function taskNotificationLaunchId(entry: Record<string, unknown>): string | undefined {
+function taskNotificationIds(entry: Record<string, unknown>): string[] {
   let text = ''
   if (entry.type === 'user' && isRecord(entry.message)) {
     text = userContentText(entry.message.content as TranscriptEntry['message']['content'])
@@ -109,7 +109,31 @@ export function taskNotificationLaunchId(entry: Record<string, unknown>): string
     && typeof entry.attachment.prompt === 'string') {
     text = entry.attachment.prompt.trim()
   }
-  return text ? parseTaskNotification(text)?.toolUseId : undefined
+  return text ? parseTaskNotification(text) : []
+}
+
+/** The tracked launch a transcript entry reports as stopped (a `<task-notification>`), if any */
+export function taskNotificationLaunchId(entry: Record<string, unknown>, launches: ReadonlyMap<string, unknown>): string | undefined {
+  return taskNotificationIds(entry).find(id => launches.has(id))
+}
+
+/**
+ * The background agent a forked skill runs in (a skill with `context: fork`, e.g. /code-review),
+ * from its Skill call's result: Claude Code writes its work to subagents/agent-<id>.jsonl, like a
+ * /subtask fork's, and reports back with a <task-notification>. Undefined for any other result,
+ * and for a forked skill run in the foreground (its result is its answer: it's already done).
+ */
+export function forkedSkillAgentId(toolUseResult: unknown): string | undefined {
+  if (!isRecord(toolUseResult) || toolUseResult.status !== 'forked' || toolUseResult.background === false) return undefined
+  return typeof toolUseResult.agentId === 'string' && toolUseResult.agentId ? toolUseResult.agentId : undefined
+}
+
+/** Whether a transcript entry is a message of the conversation. Other entries can carry message
+ *  content too: Claude Code 2.1.300+ records each API request's messages as `api-request-blob`
+ *  entries, written after the calls they hold were answered, so their tool_use blocks are
+ *  history, never calls starting. */
+export function isConversationEntry(entry: Record<string, unknown>): boolean {
+  return entry.type === 'user' || entry.type === 'assistant'
 }
 
 /** User entries Claude Code writes for local slash commands (`/model`, …) and
@@ -224,7 +248,7 @@ export class TranscriptParser {
 
     // A background task finished. Only Agent/Task launches we're tracking are
     // acted on; background Bash and other tasks send the same block.
-    const finishedLaunchId = taskNotificationLaunchId(parsed)
+    const finishedLaunchId = taskNotificationLaunchId(parsed, session.launches)
     if (finishedLaunchId) this.handleTaskNotification(finishedLaunchId, session)
 
     const turn = sessionTurnEffect(parsed, session)
@@ -342,8 +366,15 @@ export class TranscriptParser {
     toolUseResult?: unknown,
   ): void {
     const sessionId = session.sessionId
+    // A forked skill's agent gets its node, even when the PostToolUse hook already ended its call
+    const forkedAgentId = forkedSkillAgentId(toolUseResult)
+    if (forkedAgentId && !session.launches.has(forkedAgentId)) {
+      session.launches.set(forkedAgentId, { parent: agentName, seenLive: true, background: true, fork: true, finished: false })
+      spawnSubagentNode(this.delegate, session, forkedAgentId)
+    }
     const pending = ctxPending.get(block.tool_use_id)
-    // Skip results for calls we aren't tracking (e.g. abandoned when the turn ended)
+    // Skip results for calls we aren't tracking (e.g. abandoned when the turn ended, or ended by
+    // the PostToolUse hook)
     if (!pending) { return }
     const toolName = pending.name
 
@@ -411,12 +442,46 @@ export class TranscriptParser {
   endTurn(session: WatchedSession): void {
     if (!session.turnOpen) return
     session.turnOpen = false
+    // Sub-agents it launched in the foreground and never heard back from were stopped with it
+    // (interrupted, or the turn failed); background ones keep running
+    for (const [id, launch] of session.launches) {
+      if (launch.parent === ORCHESTRATOR_NAME && !launch.background && !launch.fork && session.pendingToolCalls.has(id)) {
+        this.finishWithForegroundDescendants(id, session)
+      }
+    }
     dropAbandonedCalls(session)
     this.delegate.emit({
       time: this.delegate.elapsed(session.sessionId),
       type: 'agent_complete',
       payload: { name: ORCHESTRATOR_NAME },
     }, session.sessionId)
+  }
+
+  /** Finish a sub-agent stopped with its caller, and the sub-agents it was waiting on (launched
+   *  in the foreground), deepest first */
+  private finishWithForegroundDescendants(launchId: string, session: WatchedSession): void {
+    for (const [id, launch] of session.launches) {
+      if (launch.parent === launchId && !launch.background && !launch.fork && !launch.finished) {
+        this.finishWithForegroundDescendants(id, session)
+      }
+    }
+    this.finishSubagent(launchId, session)
+  }
+
+  /**
+   * A tool call the PostToolUse / PostToolUseFailure hook reports as done: ended like its
+   * transcript result would end it (which is then skipped), so a call whose result is written
+   * late, or never (an agent stopped mid-call), doesn't stay running. Sub-agent launches are left
+   * to the transcript, which tells a background launch from a finished one.
+   */
+  endToolFromHook(session: WatchedSession, agentName: string, toolUseId: string, isError: boolean): void {
+    const pendingCalls = agentName === ORCHESTRATOR_NAME
+      ? session.pendingToolCalls
+      : session.subagentDedup.get(agentName)?.pendingToolCalls
+    const call = pendingCalls?.get(toolUseId)
+    if (!pendingCalls || !call || call.name === 'Agent' || call.name === 'Task') return
+    this.handleToolResult({ type: 'tool_result', tool_use_id: toolUseId, ...(isError ? { is_error: true } : {}) },
+      agentName, pendingCalls, session)
   }
 
   /** Mark a sub-agent launch finished and emit its completion */
@@ -486,11 +551,17 @@ export class TranscriptParser {
           session.launches.set(launchedId, { parent: ORCHESTRATOR_NAME, seenLive: false, background: true, fork: true, finished: false })
         }
         // A background sub-agent that already sent its <task-notification> is finished
-        const finishedLaunchId = taskNotificationLaunchId(raw)
+        const finishedLaunchId = taskNotificationLaunchId(raw, session.launches)
         const finishedLaunch = finishedLaunchId && session.launches.get(finishedLaunchId)
         if (finishedLaunch && finishedLaunch.background) finishedLaunch.finished = true
+        // A forked skill's agent started before we attached
+        const forkedAgentId = isConversationEntry(raw) ? forkedSkillAgentId(entry.toolUseResult) : undefined
+        if (forkedAgentId && !session.launches.has(forkedAgentId)) {
+          session.launches.set(forkedAgentId, { parent: ORCHESTRATOR_NAME, seenLive: false, background: true, fork: true, finished: false })
+        }
         const isUser = entry.message?.role === 'user' || entry.message?.role === 'human'
-        if (entry.message && Array.isArray(entry.message.content)) {
+        // Only the conversation's own entries: request records repeat calls long answered
+        if (isConversationEntry(raw) && entry.message && Array.isArray(entry.message.content)) {
           for (const block of entry.message.content) {
             if (block.type === 'tool_use' && (block as ToolUseBlock).id) {
               const toolBlock = block as ToolUseBlock

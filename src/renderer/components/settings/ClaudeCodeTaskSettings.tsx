@@ -221,6 +221,20 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             </Select>
           </SettingsRow>
 
+          {/* Task messaging goes through Workbench's MCP server, which only Claude Code reaches; OMP tasks get none */}
+          {!isOmp && (
+            <SettingsRow
+              label={t('claudeCode.execution.taskMessaging')}
+              description={t('claudeCode.execution.taskMessagingDescription')}
+            >
+              <Switch
+                checked={current.taskMessaging}
+                onCheckedChange={(taskMessaging) => update({ taskMessaging })}
+                aria-label={t('claudeCode.execution.taskMessaging')}
+              />
+            </SettingsRow>
+          )}
+
           {/* --fallback-model is a Claude Code flag; OMP has no equivalent */}
           {!isOmp && (
             <SettingsRow

@@ -58,6 +58,7 @@ export const IPC_CHANNELS = {
   TASK_WORKTREE_MERGE_LOCAL: 'task:worktreeMergeLocal',  // Merge the task branch into its base branch with git, locally (no push)
   TASK_WORKTREE_PR_STATE: 'task:worktreePRState',  // Read a task's PR state from GitHub and store it in the task metadata
   TASK_MERGE_PR_PROGRESS: 'task:mergePRProgress',  // Event: merging a task's PR moved to another step (main -> renderer)
+  TASK_MERGE_LOCAL_PROGRESS: 'task:mergeLocalProgress',  // Event: merging a task's branch locally moved to another step (main -> renderer)
   TASK_LIST_WORKTREES: 'task:listWorktrees',
   TASK_ARCHIVE: 'task:archive',
   TASK_UNARCHIVE: 'task:unarchive',

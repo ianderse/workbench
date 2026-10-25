@@ -225,6 +225,14 @@ At every phase, `buildParallelTasksPrompt()` (`src/main/task-changelog.ts`) adds
 task's system prompt: the other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
 them and avoid merge conflicts.
 
+### Task messaging and resync (upstream)
+
+Parallel tasks message each other through Workbench (`src/main/task-messaging/`: broker, inbox, notices, tools served over
+local MCP; Settings > Agents > Task messaging) and, when a task is merged, every other task on that base branch that lacks
+the merge goes back to In Progress to take it in (`src/main/task-resync/`, `ClaudeTaskRun` phase `resync`, request in
+`resync_request.json`). Messaging works on **Claude Code only** (`TaskRunConfig.messaging` is unset for OMP tasks);
+resync runs on either backend. See `docs/upstream-sync/2026-10-25.md` for how it was merged with this fork's features.
+
 ### Stale tickets (briefing and queue grooming)
 
 Tickets are written before the code exists, so later ones go stale as earlier tasks merge. Two things counter that:

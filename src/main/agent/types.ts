@@ -12,6 +12,8 @@ export interface ExecutionProgressData {
   currentSubtask?: string;
   message?: string;
   completedPhases?: CompletablePhase[];
+  /** The base branch the run is merging in (resync), null when it is not syncing */
+  syncingWith?: string | null;
 }
 
 /** Kind of run that exited (kept as a type for listeners that log it) */

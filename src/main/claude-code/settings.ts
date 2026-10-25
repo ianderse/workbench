@@ -19,5 +19,6 @@ export function resolveClaudeCodeTaskSettings(stored: Partial<ClaudeCodeTaskSett
   merged.aiReviewRounds = Number.isFinite(rounds)
     ? Math.min(MAX_AI_REVIEW_ROUNDS, Math.max(MIN_AI_REVIEW_ROUNDS, Math.round(rounds)))
     : DEFAULT_CLAUDE_CODE_TASK_SETTINGS.aiReviewRounds;
+  if (typeof merged.taskMessaging !== 'boolean') merged.taskMessaging = DEFAULT_CLAUDE_CODE_TASK_SETTINGS.taskMessaging;
   return merged;
 }

@@ -133,5 +133,6 @@ export const taskMock = {
   onTaskLogsStream: () => () => {},
   onMergeProgress: () => () => {},
   onMergePRProgress: () => () => {},
+  onLocalMergeProgress: () => () => {},
   onTaskListChanged: () => () => {}
 };

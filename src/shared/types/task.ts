@@ -39,6 +39,8 @@ export interface ExecutionProgress {
   // When a phase completes, it's added to this array before transitioning to the next phase
   // This ensures that planning is marked complete before coding starts, etc.
   completedPhases?: CompletablePhase[];  // Phases that have successfully completed
+  /** The base branch the run is merging in after another task was merged into it (null: not syncing) */
+  syncingWith?: string | null;
 }
 
 export interface Subtask {
@@ -535,6 +537,23 @@ export interface WorktreeMergePRResult {
   error?: string;
 }
 
+/** Steps of merging a task's branch locally (progress events) */
+export type LocalMergeStep = 'checking' | 'pulling' | 'checkingConflicts' | 'resolving' | 'verifying' | 'merging';
+
+export interface LocalMergeProgress {
+  step: LocalMergeStep;
+  params?: Record<string, string | number>;
+}
+
+/** Why the base branch could not be brought up to date before a local merge (it merged as it was) */
+export interface LocalMergePullNote {
+  /** fetchFailed: the remote could not be reached; notFastForward: the local branch diverged from it */
+  reason: 'fetchFailed' | 'notFastForward';
+  /** The base branch's upstream (e.g. `origin/main`) */
+  upstream: string;
+  detail?: string;
+}
+
 /** Result of merging a task's branch into its base branch with git, locally */
 export interface WorktreeLocalMergeResult {
   success: boolean;
@@ -544,8 +563,14 @@ export interface WorktreeLocalMergeResult {
   sourceBranch?: string;
   /** The base branch already had the task's commits, so nothing was merged */
   alreadyMerged?: boolean;
-  /** Files git could not merge on its own (the merge was undone) */
+  /** Files whose conflicts Claude Code resolved in the task's worktree before the merge */
+  resolvedConflicts?: string[];
+  /** Files with conflicts that could not be resolved (the merge was undone) */
   conflictedFiles?: string[];
+  /** Claude Code's account of the conflict resolution */
+  summary?: string;
+  /** Set when the base branch could not be pulled first */
+  pullNote?: LocalMergePullNote;
   error?: string;
 }
 

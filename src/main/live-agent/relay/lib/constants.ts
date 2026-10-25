@@ -14,6 +14,12 @@ export const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
  *  test run or background agent can go quiet for longer than that (ms) */
 export const BUSY_INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000 // 30 minutes
 
+/** A sub-agent whose transcript (and every sub-agent under it) has been quiet this
+ *  long is taken as stopped (ms): the last resort for one that ended without
+ *  any signal reaching us (e.g. killed with Claude Code), so it doesn't stay
+ *  drawn as running while the rest of the session goes on */
+export const SUBAGENT_STALE_MS = BUSY_INACTIVITY_TIMEOUT_MS
+
 /** Interval between active-session directory scans (ms) */
 export const SCAN_INTERVAL_MS = 1000
 

@@ -11,7 +11,7 @@ import {
 } from '../../ui/dialog';
 import { Button } from '../../ui/button';
 import { SettingsRow, SettingsRows } from '../../settings/SettingsRow';
-import type { Task, WorktreeLocalMergeResult, WorktreeStatus } from '../../../../shared/types';
+import type { LocalMergeProgress, Task, WorktreeLocalMergeResult, WorktreeStatus } from '../../../../shared/types';
 
 interface LocalMergeDialogProps {
   open: boolean;
@@ -22,23 +22,35 @@ interface LocalMergeDialogProps {
 }
 
 /**
- * Dialog for merging a task's branch into the base branch chosen for it with plain git, in the
- * project. Nothing is pushed and no pull request is involved.
+ * Dialog for merging a task's branch into the base branch chosen for it with git, in the project.
+ * The base branch is pulled first; when the branches conflict, Claude Code resolves the conflicts
+ * in the task's worktree before the merge. Nothing is pushed and no pull request is involved.
  */
 export function LocalMergeDialog({ open, task, worktreeStatus, onOpenChange, onMerge }: LocalMergeDialogProps) {
   const { t } = useTranslation(['taskReview', 'tasks', 'common']);
   const [isMerging, setIsMerging] = useState(false);
+  const [progress, setProgress] = useState<LocalMergeProgress | null>(null);
   const [result, setResult] = useState<WorktreeLocalMergeResult | null>(null);
 
   useEffect(() => {
     if (open) {
       setIsMerging(false);
+      setProgress(null);
       setResult(null);
     }
   }, [open]);
 
+  // Steps of the merge as the main process reports them
+  useEffect(() => {
+    if (!open) return;
+    return window.electronAPI.onLocalMergeProgress((taskId, next) => {
+      if (taskId === task.id) setProgress(next);
+    });
+  }, [open, task.id]);
+
   const handleMerge = async () => {
     setIsMerging(true);
+    setProgress(null);
     setResult(null);
     try {
       setResult(await onMerge());
@@ -51,6 +63,13 @@ export function LocalMergeDialog({ open, task, worktreeStatus, onOpenChange, onM
 
   const sourceBranch = worktreeStatus?.branch;
   const targetBranch = worktreeStatus?.baseBranch;
+  const resolvedCount = result?.resolvedConflicts?.length ?? 0;
+  const pullNote = result?.pullNote
+    ? t(`taskReview:localMerge.pullNote.${result.pullNote.reason}`, {
+        upstream: result.pullNote.upstream,
+        target: result.targetBranch ?? targetBranch ?? '',
+      })
+    : null;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !isMerging && onOpenChange(next)}>
@@ -63,7 +82,7 @@ export function LocalMergeDialog({ open, task, worktreeStatus, onOpenChange, onM
         {/* Merged */}
         {result?.success && (
           <>
-            <div className="mt-4 text-sm">
+            <div className="mt-4 space-y-2 text-sm">
               <p className="text-foreground">
                 {result.alreadyMerged
                   ? t('taskReview:localMerge.success.alreadyMerged', { source: result.sourceBranch, target: result.targetBranch })
@@ -71,6 +90,13 @@ export function LocalMergeDialog({ open, task, worktreeStatus, onOpenChange, onM
                     ? t('taskReview:localMerge.success.merged', { source: result.sourceBranch, target: result.targetBranch })
                     : t('taskReview:localMerge.success.mergedNoBranch')}
               </p>
+              {resolvedCount > 0 && (
+                <p className="text-(--nav-label-color)">{t('taskReview:localMerge.success.conflictsResolved', { count: resolvedCount })}</p>
+              )}
+              {pullNote && <p className="text-(--nav-label-color)">{pullNote}</p>}
+              {result.summary && (
+                <p className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-(--nav-label-color)">{result.summary}</p>
+              )}
             </div>
             <DialogFooter>
               <Button size="sm" onClick={() => onOpenChange(false)}>
@@ -89,6 +115,10 @@ export function LocalMergeDialog({ open, task, worktreeStatus, onOpenChange, onM
                 <p className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-(--nav-label-color)">
                   {t('taskReview:localMerge.errors.conflictedFiles', { files: result.conflictedFiles.join(', ') })}
                 </p>
+              )}
+              {pullNote && <p className="text-xs text-(--nav-label-color)">{pullNote}</p>}
+              {result.summary && (
+                <p className="max-h-48 overflow-y-auto whitespace-pre-wrap text-xs text-(--nav-label-color)">{result.summary}</p>
               )}
             </div>
             <DialogFooter>
@@ -131,9 +161,19 @@ export function LocalMergeDialog({ open, task, worktreeStatus, onOpenChange, onM
                     </span>
                   </SettingsRow>
                 )}
-                <p className="pt-1 text-xs text-(--nav-label-color)">{t('taskReview:localMerge.hints.merge')}</p>
               </SettingsRows>
+              <p className="mt-3 text-sm text-(--nav-label-color)">{t('taskReview:localMerge.hints.merge')}</p>
+              <p className="mt-2 text-sm text-(--nav-label-color)">{t('taskReview:localMerge.hints.conflicts')}</p>
             </div>
+
+            {isMerging && (
+              <p className="flex items-center gap-2 text-sm text-(--nav-label-color)">
+                <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
+                {progress
+                  ? t(`taskReview:localMerge.steps.${progress.step}`, progress.params ?? {})
+                  : t('taskReview:localMerge.steps.checking')}
+              </p>
+            )}
 
             <DialogFooter>
               <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={isMerging}>

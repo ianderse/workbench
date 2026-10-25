@@ -2,10 +2,11 @@
  * Merge Agent
  * ===========
  *
- * A Claude Code run, in a task's worktree, that finishes a merge of the PR's target branch into
- * the task branch: it resolves the conflicted files so the task's changes and every change
- * already merged into the target (other tasks that ran in parallel) survive, checks the result
- * and commits the merge. The caller verifies the result (see `pr-merger.ts`).
+ * A Claude Code run, in a task's worktree, that finishes a merge of the task's target branch (the
+ * PR's base, or the base branch of a local merge) into the task branch: it resolves the conflicted
+ * files so the task's changes and every change already merged into the target (other tasks that
+ * ran in parallel) survive, checks the result and commits the merge. The caller verifies the
+ * result (see `merge-target-into-branch.ts`).
  */
 
 import { runClaudeText } from '../../claude-code/run-text';
@@ -26,6 +27,8 @@ export interface MergeAgentInput {
   conflictedFiles: string[];
   taskTitle?: string;
   taskDescription?: string;
+  /** The project's checks for this task (from its triage), to run on the result */
+  verificationCommands?: string[];
   /** Second pass: target lines the first resolution dropped */
   missingLines?: MissingTargetLines[];
   model?: string;
@@ -70,15 +73,19 @@ const MERGE_AGENT_SCHEMA = {
 } as const;
 
 function systemPrompt(input: MergeAgentInput): string {
+  const commands = (input.verificationCommands ?? []).filter((command) => command.trim());
+  const checks = commands.length
+    ? `- Check the result with the project's checks for this task (${commands.map((command) => `\`${command}\``).join(', ')}) and any other checks that apply to the files involved, when they can run here, and fix breakage the merge caused.`
+    : "- Check the result with the project's own checks that apply to the files involved (type checker, tests, build) when they can run here, and fix breakage the merge caused.";
   return `You are the merge agent of Workbench, a desktop app that runs coding tasks in parallel, each in its own git worktree. Nobody watches this session and nobody can answer questions.
 
-Your working directory is the worktree of a task on branch \`${input.branch}\`. Its pull request is about to be merged into \`${input.targetRef}\`, so \`${input.targetRef}\` was merged into \`${input.branch}\` first, and that merge stopped with conflicts. Other tasks that ran in parallel have already merged their changes into \`${input.targetRef}\`: none of those changes may be lost, and none of this task's changes either.
+Your working directory is the worktree of a task on branch \`${input.branch}\`. This branch is about to be merged into \`${input.targetRef}\`, so \`${input.targetRef}\` was merged into \`${input.branch}\` first, and that merge stopped with conflicts. Other tasks that ran in parallel have already merged their changes into \`${input.targetRef}\`: none of those changes may be lost, and none of this task's changes either.
 
 How to resolve:
 - For each conflicted file, understand both sides before editing: \`git diff\`, \`git log -p --merge -- <file>\`, and the three versions \`git show :1:<file>\` (common ancestor), \`:2:<file>\` (this task) and \`:3:<file>\` (${input.targetRef}).
 - Keep both sides' changes. When both sides changed the same lines, combine their intent so the code does what both changes meant; never drop one side just to end the conflict.
 - Change nothing beyond what the merge needs. Make sure no conflict markers remain.
-- Check the result with the project's own checks that apply to the files involved (type checker, tests, build) when they can run here, and fix breakage the merge caused.
+${checks}
 - Then stage the files and conclude the merge with \`git commit --no-edit\`.
 - Never push, abort the merge, reset, rebase, stash, or touch other branches.
 

@@ -1556,6 +1556,33 @@ describe('usage-monitor', () => {
     });
   });
 
+  describe('Stored usage after an account switch', () => {
+    it('caches the active account\'s stored snapshot as of when it was fetched, not as fresh', async () => {
+      const { getClaudeProfileManager } = await import('../claude-profile-manager');
+      const profile = { id: 'work', name: 'Work', isAuthenticated: true };
+      const base = vi.mocked(getClaudeProfileManager).getMockImplementation()!();
+      vi.mocked(getClaudeProfileManager).mockReturnValue({
+        ...base,
+        getSettings: vi.fn(() => ({ profiles: [profile], activeProfileId: 'work' })),
+        getProfile: vi.fn(() => profile),
+        getActiveProfile: vi.fn(() => profile),
+      } as never);
+      const monitor = getUsageMonitor() as unknown as Record<string, any>;
+      const fetchedAt = new Date(Date.now() - 60 * 60 * 1000);
+      monitor.currentUsage = { profileId: 'work', profileName: 'Work', sessionPercent: 10, weeklyPercent: 20, fetchedAt };
+      monitor.currentUsageProfileId = 'work';
+      monitor.allProfilesUsageCache.clear();
+
+      await monitor._doGetAllProfilesUsage(false);
+      expect(monitor.allProfilesUsageCache.get('work').fetchedAt).toBe(fetchedAt.getTime());
+      monitor.currentUsage = null;
+      monitor.currentUsageProfileId = null;
+      monitor.allProfilesUsageCache.clear();
+      vi.mocked(getClaudeProfileManager).mockReset();
+      vi.mocked(getClaudeProfileManager).mockImplementation(() => base);
+    });
+  });
+
   describe('Race condition prevention via activeProfile parameter', () => {
     it('should use passed activeProfile instead of re-detecting', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

@@ -22,6 +22,7 @@ import { isProfileRateLimited } from './rate-limit-manager';
 import { getOperationRegistry } from './operation-registry';
 import { usesClaudeSubscription } from './profile-utils';
 import { isOmpBackend } from '../agent-backend/settings';
+import { appLog } from '../app-logger';
 
 // Re-export for backward compatibility
 export type { ApiProvider };
@@ -207,6 +208,12 @@ export class UsageMonitor extends EventEmitter {
   private currentUsage: ClaudeUsageSnapshot | null = null;
   private currentUsageProfileId: string | null = null; // Track which profile's usage is in currentUsage
   private isChecking = false;
+  // A usage refresh asked for while a check was running (an account switch); runs when it ends
+  private recheckPending = false;
+  // Bumped on every account switch, so a check that started before it doesn't store the old
+  // account's usage as the new one's
+  private activeProfileGeneration = 0;
+  private unsubscribeActiveProfile: (() => void) | null = null;
 
   // Per-profile API failure tracking with cooldown-based retry
   // Map<profileId, lastFailureTimestamp> - stores when API last failed for this profile
@@ -296,6 +303,11 @@ export class UsageMonitor extends EventEmitter {
 
     this.debugLog('[UsageMonitor] Starting with interval: ' + interval + ' ms (60-second updates for active profile usage stats)');
 
+    // Every way of switching accounts (Settings, swaps, terminals) goes through the profile manager
+    this.unsubscribeActiveProfile = profileManager.onActiveProfileChanged?.((profileId) => {
+      this.handleActiveProfileChanged(profileId);
+    }) ?? null;
+
     // Check immediately
     this.checkUsageAndSwap();
 
@@ -314,6 +326,102 @@ export class UsageMonitor extends EventEmitter {
       this.intervalId = null;
       this.debugLog('[UsageMonitor] Stopped');
     }
+    this.unsubscribeActiveProfile?.();
+    this.unsubscribeActiveProfile = null;
+  }
+
+  /**
+   * The account in use changed: show the new account's stored usage right away (or nothing, so
+   * the badge waits for it, when it was never fetched) instead of the previous account's, then
+   * fetch its usage in the background. The swap check is skipped for that refresh, so two
+   * accounts over their limits don't swap back and forth; the regular interval does that.
+   */
+  handleActiveProfileChanged(profileId: string): void {
+    this.activeProfileGeneration++;
+    if (this.currentUsageProfileId !== profileId) {
+      const stored = this.getStoredUsageSnapshot(profileId);
+      this.currentUsage = stored;
+      this.currentUsageProfileId = stored ? profileId : null;
+      this.emit('usage-updated', stored);
+    }
+
+    // The accounts list as cached, with the account in use marked
+    const cached = this.buildCachedAllProfilesUsage();
+    if (cached) this.emit('all-profiles-usage-updated', cached);
+
+    this.refreshUsage();
+  }
+
+  /** Fetch the active account's usage now without the swap check (queued behind a running check) */
+  private refreshUsage(): void {
+    if (this.isChecking) {
+      this.recheckPending = true;
+      return;
+    }
+    this.checkUsageAndSwap({ allowSwap: false }).catch(error => {
+      appLog.error('[UsageMonitor] Usage refresh failed:', error);
+    });
+  }
+
+  /** The last usage known for a profile: its cached summary, else the usage saved with it */
+  private getStoredUsageSnapshot(profileId: string): ClaudeUsageSnapshot | null {
+    const profile = getClaudeProfileManager().getProfile(profileId);
+    if (!profile || !usesClaudeSubscription(profile)) return null;
+    const cached = this.allProfilesUsageCache.get(profileId)?.usage;
+    if (cached?.lastFetchedAt) {
+      return {
+        profileId,
+        profileName: profile.name,
+        profileEmail: profile.email ?? cached.profileEmail,
+        sessionPercent: cached.sessionPercent,
+        weeklyPercent: cached.weeklyPercent,
+        sessionResetTimestamp: cached.sessionResetTimestamp,
+        weeklyResetTimestamp: cached.weeklyResetTimestamp,
+        fetchedAt: new Date(cached.lastFetchedAt),
+        needsReauthentication: this.needsReauthProfiles.has(profileId)
+      };
+    }
+    if (profile.usage?.lastUpdated) {
+      return {
+        profileId,
+        profileName: profile.name,
+        profileEmail: profile.email,
+        sessionPercent: profile.usage.sessionUsagePercent ?? 0,
+        weeklyPercent: profile.usage.weeklyUsagePercent ?? 0,
+        fetchedAt: profile.usage.lastUpdated,
+        needsReauthentication: this.needsReauthProfiles.has(profileId)
+      };
+    }
+    return null;
+  }
+
+  /** The cached accounts list with `isActive` following the account in use (null before any fetch) */
+  private buildCachedAllProfilesUsage(): AllProfilesUsage | null {
+    if (this.allProfilesUsageCache.size === 0) return null;
+    const settings = getClaudeProfileManager().getSettings();
+    const allProfiles = settings.profiles
+      .map((profile) => this.allProfilesUsageCache.get(profile.id)?.usage)
+      .filter((summary): summary is ProfileUsageSummary => !!summary)
+      .map((summary) => ({ ...summary, isActive: summary.profileId === settings.activeProfileId }))
+      .sort((a, b) => b.availabilityScore - a.availabilityScore);
+    return {
+      activeProfile: this.currentUsage ?? this.emptySnapshot(settings.activeProfileId),
+      allProfiles,
+      fetchedAt: new Date()
+    };
+  }
+
+  /** A placeholder snapshot for an account whose usage isn't known yet */
+  private emptySnapshot(profileId: string | undefined): ClaudeUsageSnapshot {
+    const settings = getClaudeProfileManager().getSettings();
+    return {
+      profileId: profileId || '',
+      profileName: settings.profiles.find(p => p.id === profileId)?.name || '',
+      sessionPercent: 0,
+      weeklyPercent: 0,
+      fetchedAt: new Date(),
+      needsReauthentication: this.needsReauthProfiles.has(profileId || '')
+    };
   }
 
   /**
@@ -396,7 +504,7 @@ export class UsageMonitor extends EventEmitter {
     // CRITICAL: On startup, currentUsage may be null, but we still need to check for
     // missing credentials to show the re-auth indicator. Proactively check all profiles
     // for missing credentials and populate needsReauthProfiles.
-    if (!this.currentUsage) {
+    if (!this.currentUsage && this.allProfilesUsageCache.size === 0) {
       // Fast path: no coalescing needed since this is synchronous-ish and returns quickly
       // Check all OAuth profiles for missing credentials
       for (const profile of settings.profiles) {
@@ -411,30 +519,25 @@ export class UsageMonitor extends EventEmitter {
         }
       }
 
-      // Build a minimal response with needsReauthentication flags even without usage data
+      // Build a minimal response with needsReauthentication flags even without usage data: the
+      // usage saved with each profile, or none (no lastFetchedAt, so it reads as not fetched)
       const allProfiles: ProfileUsageSummary[] = settings.profiles.map(profile => ({
         profileId: profile.id,
         profileName: profile.name,
         profileEmail: profile.email,
-        sessionPercent: 0,
-        weeklyPercent: 0,
+        sessionPercent: profile.usage?.sessionUsagePercent ?? 0,
+        weeklyPercent: profile.usage?.weeklyUsagePercent ?? 0,
         isAuthenticated: profile.isAuthenticated ?? false,
         isRateLimited: false,
         availabilityScore: profile.isAuthenticated ? 100 : 0,
         isActive: profile.id === activeProfileId,
+        lastFetchedAt: profile.usage?.lastUpdated?.toISOString(),
         needsReauthentication: this.needsReauthProfiles.has(profile.id)
       }));
 
       // Return minimal data with auth status - don't return null!
       return {
-        activeProfile: {
-          profileId: activeProfileId || '',
-          profileName: settings.profiles.find(p => p.id === activeProfileId)?.name || '',
-          sessionPercent: 0,
-          weeklyPercent: 0,
-          fetchedAt: new Date(),
-          needsReauthentication: this.needsReauthProfiles.has(activeProfileId || '')
-        },
+        activeProfile: this.emptySnapshot(activeProfileId),
         allProfiles,
         fetchedAt: new Date()
       };
@@ -481,6 +584,18 @@ export class UsageMonitor extends EventEmitter {
       const profile = settings.profiles[i];
       // No subscription usage for a detected cloud provider, API key or gateway setup
       if (!usesClaudeSubscription(profile)) continue;
+      // For the active profile, use the current detailed usage (fresh from the last poll), but
+      // only when it is this profile's: right after an account switch it still belongs to the
+      // previous account until the new one's usage is fetched
+      // (cached as of when it was fetched: right after a switch it is the stored, older snapshot)
+      if (profile.id === activeProfileId && this.currentUsage && this.currentUsageProfileId === profile.id) {
+        const summary = this.buildProfileUsageSummary(profile, this.currentUsage);
+        profileResults[i] = summary;
+        const fetchedAt = new Date(this.currentUsage.fetchedAt).getTime();
+        this.allProfilesUsageCache.set(profile.id, { usage: summary, fetchedAt: Number.isFinite(fetchedAt) ? Math.min(fetchedAt, now) : now });
+        continue;
+      }
+
       const cached = this.allProfilesUsageCache.get(profile.id);
 
       // Use cached data if fresh (within TTL) and not force refreshing
@@ -489,14 +604,6 @@ export class UsageMonitor extends EventEmitter {
           ...cached.usage,
           isActive: profile.id === activeProfileId
         };
-        continue;
-      }
-
-      // For active profile, use the current detailed usage (always fresh from last poll)
-      if (profile.id === activeProfileId && this.currentUsage) {
-        const summary = this.buildProfileUsageSummary(profile, this.currentUsage);
-        profileResults[i] = summary;
-        this.allProfilesUsageCache.set(profile.id, { usage: summary, fetchedAt: now });
         continue;
       }
 
@@ -712,7 +819,9 @@ export class UsageMonitor extends EventEmitter {
     allProfiles.sort((a, b) => b.availabilityScore - a.availabilityScore);
 
     return {
-      activeProfile: this.currentUsage!, // Non-null: _doGetAllProfilesUsage is only called when currentUsage is set
+      activeProfile: this.currentUsage && this.currentUsageProfileId === activeProfileId
+        ? this.currentUsage
+        : this.emptySnapshot(activeProfileId),
       allProfiles,
       fetchedAt: new Date()
     };
@@ -866,7 +975,7 @@ export class UsageMonitor extends EventEmitter {
     return {
       profileId: profile.id,
       profileName: profile.name,
-      profileEmail: usage.profileEmail || profile.email,
+      profileEmail: profile.email || usage.profileEmail,
       sessionPercent: usage.sessionPercent,
       weeklyPercent: usage.weeklyPercent,
       sessionResetTimestamp: usage.sessionResetTimestamp,
@@ -881,7 +990,7 @@ export class UsageMonitor extends EventEmitter {
         rateLimitStatus.type,
         profile.isAuthenticated ?? true
       ),
-      isActive: usage.profileId === profileManager.getActiveProfile()?.id,
+      isActive: profile.id === profileManager.getActiveProfile()?.id,
       lastFetchedAt: usage.fetchedAt?.toISOString(),
       needsReauthentication: this.needsReauthProfiles.has(profile.id)
     };
@@ -935,7 +1044,7 @@ export class UsageMonitor extends EventEmitter {
    * - checkThresholdsExceeded(): Evaluates usage against thresholds
    * - handleAuthFailure(): Manages auth failure recovery
    */
-  private async checkUsageAndSwap(): Promise<void> {
+  private async checkUsageAndSwap({ allowSwap = true }: { allowSwap?: boolean } = {}): Promise<void> {
     if (this.isChecking) {
       return; // Prevent concurrent checks
     }
@@ -946,6 +1055,7 @@ export class UsageMonitor extends EventEmitter {
     this.isChecking = true;
     let profileId: string | undefined;
     let isAPIProfile = false;
+    const generation = this.activeProfileGeneration;
 
     try {
       // Step 1: Determine active profile (API vs OAuth)
@@ -961,6 +1071,12 @@ export class UsageMonitor extends EventEmitter {
       const usage = await this.fetchUsage(profileId, activeProfile.credential, activeProfile);
       if (!usage) {
         this.traceLog('[UsageMonitor] Failed to fetch usage (API may be rate-limited or credential unavailable)');
+        return;
+      }
+
+      // The account was switched while this fetched: this usage is the previous account's
+      if (generation !== this.activeProfileGeneration) {
+        this.recheckPending = true;
         return;
       }
 
@@ -992,6 +1108,7 @@ export class UsageMonitor extends EventEmitter {
       }
 
       // Step 4: Check thresholds and perform proactive swap (OAuth profiles only)
+      if (!allowSwap) return;
       if (!isAPIProfile) {
         const profileManager = getClaudeProfileManager();
         const settings = profileManager.getAutoSwitchSettings();
@@ -1044,6 +1161,10 @@ export class UsageMonitor extends EventEmitter {
       console.error('[UsageMonitor] Check failed:', error);
     } finally {
       this.isChecking = false;
+      if (this.recheckPending) {
+        this.recheckPending = false;
+        this.refreshUsage();
+      }
     }
   }
 

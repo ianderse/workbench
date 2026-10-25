@@ -62,7 +62,7 @@ export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny';
 export type OmpRoleMap = Readonly<Record<string, string>>;
 
 /** The kinds of work a run can be for; each has an OMP role */
-export type OmpJob = 'plan' | 'implement' | 'validate' | 'revise' | 'review' | 'spec_review' | 'utility';
+export type OmpJob = 'plan' | 'implement' | 'validate' | 'revise' | 'resync' | 'review' | 'spec_review' | 'utility';
 
 /** OMP role for a job: plan and spec_review -> plan, review -> judge, everything else -> default */
 export function ompRoleForJob(job: OmpJob): OmpRole {

@@ -47,6 +47,12 @@ export interface ClaudeCodeTaskSettings {
   allowFable: boolean;
   /** Fallback model chain when the chosen model is overloaded (`--fallback-model`) */
   fallbackModel?: string;
+  /**
+   * Parallel tasks message each other (Workbench's `message_task` and `list_parallel_tasks`
+   * tools) and get Workbench's notices about each other (started, overlapping files, finished,
+   * merged)
+   */
+  taskMessaging: boolean;
 }
 
 export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
@@ -58,6 +64,7 @@ export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
   validation: true,
   aiReviewRounds: 3,
   allowFable: false,
+  taskMessaging: true,
 };
 
 /** Size of a task as judged by triage */
@@ -82,8 +89,11 @@ export interface TaskTriage {
   pinned?: { model?: boolean; effort?: boolean };
 }
 
-/** Steps of a task run */
-export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise' | 'review' | 'spec_review';
+/**
+ * Steps of a task run. `resync`: the task's base branch moved on (another task was merged into it)
+ * and the task's session merges it in, then resumes its work (`task-resync/`)
+ */
+export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise' | 'review' | 'spec_review' | 'resync';
 
 export interface ClaudeRunPhase {
   name: ClaudeRunPhaseName;
@@ -98,6 +108,8 @@ export interface ClaudeRunPhase {
   numTurns?: number;
   isError?: boolean;
   error?: string;
+  /** resync: what was merged in, and whether the step also carried on with unfinished work */
+  resync?: { ref: string; into: string; continued: boolean };
 }
 
 /** What Claude Code loaded for the session (from the stream's `system/init` event) */

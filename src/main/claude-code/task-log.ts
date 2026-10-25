@@ -59,6 +59,12 @@ export function summarizeToolInput(toolName: string, input: Record<string, unkno
       return pick('subject');
     case 'TaskUpdate':
       return [pick('taskId'), pick('status')].filter(Boolean).join(' ');
+    case 'SendMessage':
+      // Native message to another session
+      return [pick('to', 'recipient'), pick('summary', 'message')].filter(Boolean).join(': ');
+    case 'mcp__workbench__message_task':
+      // Workbench's message to another task
+      return [pick('task'), pick('message')].filter(Boolean).join(': ');
     default:
       return pick('description', 'file_path', 'path', 'command', 'query', 'url', 'name');
   }
