@@ -12,12 +12,17 @@
  *    second pass with the lost lines)
  *
  * A failed merge leaves the worktree as it was. Used by the PR merge (`github/pr-merger.ts`) and
- * the local merge (`worktree/local-merge.ts`). All git calls are async.
+ * the local merge (`worktree/local-merge.ts`), the autonomous auto-merge (`autonomous/autonomous-git.ts`)
+ * and a task's resync without a session (`claude-code/task-runner.ts`): the one implementation of
+ * "bring the target into the task branch and resolve conflicts". The conflict help goes through the
+ * agent backend layer (`runMergeAgent` -> `runClaudeText`) with the task's own backend. All git
+ * calls are async.
  */
 
 import { readFile, rm, writeFile } from 'fs/promises';
 import path from 'path';
 import { git as runGit } from '../../utils/git-exec';
+import type { AgentBackendKind } from '../../../shared/types/agent-backend';
 import { runMergeAgent, type MergeAgentFn, type MergeAgentInput, type MissingTargetLines } from './merge-agent';
 
 export interface MergeTargetIntoBranchConfig {
@@ -35,6 +40,8 @@ export interface MergeTargetIntoBranchConfig {
   verificationCommands?: string[];
   /** Claude profile for the merge agent */
   profileId?: string;
+  /** The task's effective backend (Claude Code or OMP); default: the app-wide backend */
+  backend?: AgentBackendKind;
   onProgress?: (step: 'resolving' | 'verifying', params?: Record<string, string | number>) => void;
   /** Resolves conflicts (tests replace it) */
   mergeAgent?: MergeAgentFn;
@@ -276,6 +283,7 @@ export async function mergeTargetIntoBranch(config: MergeTargetIntoBranchConfig)
     taskDescription: config.taskDescription,
     verificationCommands: config.verificationCommands,
     profileId: config.profileId,
+    backend: config.backend,
     abortSignal: config.abortSignal,
   };
   try {

@@ -224,6 +224,20 @@ describe('autoMergeIntoTarget', () => {
       expect(git(project, 'show', 'workbench/auto:a.txt')).toContain('TWO from one');
       expect(git(project, 'show', 'workbench/auto:a.txt')).toContain('TWO from two');
     });
+
+    it('hands the task backend to the merge agent (a task pinned to OMP or Claude Code)', async () => {
+      const two = await setup();
+      const mergeAgent = vi.fn(async (input: { worktreePath: string }) => {
+        writeFileSync(path.join(input.worktreePath, 'a.txt'), 'one\nTWO from one\nTWO from two\nthree\n');
+        git(input.worktreePath, 'add', 'a.txt');
+        return { status: 'resolved' as const, summary: 'kept both', intentionallyDropped: [] };
+      });
+
+      const result = await autoMergeIntoTarget({ ...mergeInput(two, '002-b'), mergeAgent, backend: 'omp' });
+
+      expect(result.success).toBe(true);
+      expect(mergeAgent).toHaveBeenCalledWith(expect.objectContaining({ backend: 'omp' }));
+    });
   });
 });
 

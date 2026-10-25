@@ -21,7 +21,8 @@ import { git as runGit } from '../utils/git-exec';
 import { findBaseBranchRef } from '../utils/base-branch';
 import { toHostPath } from '../platform/shell-runtime';
 import { runMergeAgent, type MergeAgentFn } from '../ai/runners/merge-agent';
-import { findMissingTargetLines, CONFLICT_MARKER } from '../ai/runners/merge-target-into-branch';
+import { mergeTargetIntoBranch } from '../ai/runners/merge-target-into-branch';
+import type { AgentBackendKind } from '../../shared/types/agent-backend';
 
 const MAX_BUFFER = 20 * 1024 * 1024;
 
@@ -212,6 +213,10 @@ export interface AutoMergeInput {
   /** Workbench's data folder, ignored when checking for uncommitted changes */
   dataDir?: string;
   profileId?: string;
+  /** The task's effective backend (`resolveEffectiveAgent`), so a pinned task resolves conflicts with its own */
+  backend?: AgentBackendKind;
+  /** The project's checks for this task, for the merge agent to run */
+  verificationCommands?: string[];
   /** Resolves conflicts (tests replace it) */
   mergeAgent?: MergeAgentFn;
   log?: (message: string) => void;
@@ -225,8 +230,8 @@ export type AutoMergeResult =
 
 /**
  * Merge a task into the target branch with one `--no-ff` merge commit. The target branch is
- * pulled into the task branch first (in the task's worktree), where the merge agent resolves
- * conflicts, so the final merge cannot conflict. Nothing is changed on failure.
+ * pulled into the task branch first (in the task's worktree) by the shared `mergeTargetIntoBranch`,
+ * where the merge agent resolves conflicts, so the final merge cannot conflict. Nothing is changed on failure.
  */
 export async function autoMergeIntoTarget(input: AutoMergeInput): Promise<AutoMergeResult> {
   const { projectDir, worktreePath, targetBranch, specId } = input;
@@ -262,70 +267,31 @@ export async function autoMergeIntoTarget(input: AutoMergeInput): Promise<AutoMe
     return { success: true, sha: targetSha, alreadyMerged: true };
   }
 
-  // 1. Pull the target into the task branch; the merge agent resolves conflicts
+  // 1. Pull the target into the task branch: the shared helper (also used by PR and local merges
+  //    and by resync) merges it in the task's worktree, the merge agent resolves conflicts, and the
+  //    result is checked (no markers, target included, no lost lines). A failure leaves the worktree as it was
   if (!(await isAncestor(projectDir, targetSha, `refs/heads/${taskBranch}`))) {
-    const before = (await wt(['rev-parse', 'HEAD'])).trim();
-    const mergeBase = (await wt(['merge-base', 'HEAD', targetSha]).catch(() => '')).trim();
-    const rollback = async () => {
-      if (await isMerging()) await wt(['merge', '--abort']).catch(() => undefined);
-      const head = (await wt(['rev-parse', 'HEAD']).catch(() => before)).trim();
-      if (head !== before) await wt(['reset', '--hard', before]).catch(() => undefined);
-    };
     log(`Merging ${targetBranch} into ${taskBranch}`);
-    let conflicted: string[] = [];
-    try {
-      await wt(['merge', '--no-ff', '--no-edit', targetSha]);
-    } catch (error) {
-      conflicted = await conflictedFilesIn(wt);
-      if (conflicted.length === 0) {
-        await rollback();
-        return fail('error', `Could not merge ${targetBranch} into the task branch: ${errorText(error)}`);
-      }
-    }
-    if (conflicted.length) {
-      log(`Merge conflicts in ${conflicted.length} file(s), asking the merge agent`);
-      const agentInput = {
-        worktreePath,
-        branch: taskBranch,
-        targetRef: targetSha,
-        conflictedFiles: conflicted,
-        taskTitle: input.taskTitle,
-        taskDescription: input.taskDescription,
-        profileId: input.profileId,
-      };
-      try {
-        const first = await mergeAgent(agentInput);
-        if (first.status !== 'resolved') throw new Error(`the merge agent could not resolve the conflicts: ${first.summary}`);
-        const unmerged = (await wt(['diff', '--name-only', '--diff-filter=U'])).trim();
-        if (unmerged) throw new Error(`conflicts remain in ${unmerged.split('\n').join(', ')}`);
-        for (const file of conflicted) {
-          const content = await wt(['show', `:${file}`]).catch(() => wt(['show', `HEAD:${file}`]).catch(() => ''));
-          if (CONFLICT_MARKER.test(content)) throw new Error(`conflict markers remain in ${file}`);
-        }
-        if (await isMerging()) await wt(['commit', '--no-edit']);
-        if (!(await isAncestor(worktreePath, targetSha, 'HEAD'))) throw new Error(`the merge did not include ${targetBranch}`);
-
-        // Every line the target added to the conflicted files must survive
-        if (mergeBase) {
-          let missing = await findMissingTargetLines(wt, conflicted, mergeBase, targetSha);
-          if (missing.length) {
-            const second = await mergeAgent({ ...agentInput, missingLines: missing });
-            if (second.status !== 'resolved') throw new Error(`the merge agent could not restore the changes from ${targetBranch}: ${second.summary}`);
-            if ((await wt(['status', '--porcelain', '--untracked-files=no'])).trim()) {
-              await wt(['add', '-u']);
-              await wt(['commit', '-m', `Restore changes from ${targetBranch} lost in the merge`]);
-            }
-            const dropped = new Set(second.intentionallyDropped.map(({ file, line }) => `${file}\0${line.trim()}`));
-            missing = (await findMissingTargetLines(wt, conflicted, mergeBase, targetSha))
-              .map(({ file, lines }) => ({ file, lines: lines.filter((line) => !dropped.has(`${file}\0${line}`)) }))
-              .filter(({ lines }) => lines.length);
-            if (missing.length) throw new Error(`the merge would lose changes from ${targetBranch} in ${missing.map((m) => m.file).join(', ')}`);
-          }
-        }
-      } catch (error) {
-        await rollback();
-        return fail('conflicts', `Conflicts with ${targetBranch} could not be resolved: ${errorText(error)}`, conflicted);
-      }
+    const pulled = await mergeTargetIntoBranch({
+      worktreePath,
+      branch: taskBranch,
+      targetRef: targetSha,
+      targetName: targetBranch,
+      taskTitle: input.taskTitle,
+      taskDescription: input.taskDescription,
+      verificationCommands: input.verificationCommands,
+      profileId: input.profileId,
+      backend: input.backend,
+      mergeAgent,
+      onProgress: (step, params) => {
+        if (step === 'resolving') log(`Merge conflicts in ${params?.count ?? ''} file(s), asking the merge agent`);
+      },
+    });
+    if (!pulled.success) {
+      const error = pulled.error ?? `Could not merge ${targetBranch} into the task branch`;
+      return pulled.conflictedFiles.length
+        ? fail('conflicts', `Conflicts with ${targetBranch} could not be resolved: ${error}`, pulled.conflictedFiles)
+        : fail('error', error);
     }
   }
 

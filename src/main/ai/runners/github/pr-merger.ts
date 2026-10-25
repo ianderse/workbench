@@ -16,6 +16,7 @@ import { git as runGit } from '../../../utils/git-exec';
 import { runTool } from '../../../platform/runtime-exec';
 import type { MergeAgentFn } from '../merge-agent';
 import { abortOwnWorktreeMerge, inspectWorktreeMerge, mergeTargetIntoBranch } from '../merge-target-into-branch';
+import type { AgentBackendKind } from '../../../../shared/types/agent-backend';
 import type { MergePRStep, WorktreeMergePRResult } from '../../../../shared/types/task';
 
 export interface MergePRConfig {
@@ -30,6 +31,8 @@ export interface MergePRConfig {
   taskDescription?: string;
   /** Claude profile for the merge agent */
   profileId?: string;
+  /** The task's effective backend for the merge agent; default: the app-wide backend */
+  backend?: AgentBackendKind;
   /** Workbench's data folder, ignored when checking for uncommitted changes */
   dataDir?: string;
   onProgress?: (step: MergePRStep, params?: Record<string, string | number>) => void;
@@ -112,6 +115,7 @@ export async function mergePR(config: MergePRConfig): Promise<MergePRResult> {
     taskTitle: config.taskTitle,
     taskDescription: config.taskDescription,
     profileId: config.profileId,
+    backend: config.backend,
     onProgress,
     mergeAgent: config.mergeAgent,
   });

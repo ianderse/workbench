@@ -940,6 +940,8 @@ export class ClaudeTaskRun {
             taskDescription: this.config.description,
             verificationCommands: this.info.triage?.verification,
             profileId: this.config.profileId,
+            // The task's own backend (Claude Code or OMP), not the app-wide one
+            backend: this.config.backend,
             abortSignal: this.abortController.signal,
           });
           if (this.stopped) {

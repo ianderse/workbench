@@ -23,6 +23,7 @@
 import { git as runGit } from '../utils/git-exec';
 import { PARSED_DIFF_FLAGS, abortOwnWorktreeMerge, inspectWorktreeMerge, mergeTargetIntoBranch } from '../ai/runners/merge-target-into-branch';
 import type { MergeAgentFn } from '../ai/runners/merge-agent';
+import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import type { LocalMergePullNote, LocalMergeStep, WorktreeLocalMergeResult } from '../../shared/types/task';
 
 export interface LocalMergeConfig {
@@ -40,6 +41,8 @@ export interface LocalMergeConfig {
   verificationCommands?: string[];
   /** Claude profile for the merge agent */
   profileId?: string;
+  /** The task's effective backend for the merge agent; default: the app-wide backend */
+  backend?: AgentBackendKind;
   onProgress?: (step: LocalMergeStep, params?: Record<string, string | number>) => void;
   /** Resolves conflicts (tests replace it) */
   mergeAgent?: MergeAgentFn;
@@ -196,6 +199,7 @@ export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLoca
     taskDescription: config.taskDescription,
     verificationCommands: config.verificationCommands,
     profileId: config.profileId,
+    backend: config.backend,
     onProgress,
     mergeAgent: config.mergeAgent,
   });

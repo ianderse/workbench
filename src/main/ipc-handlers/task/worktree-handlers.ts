@@ -5,6 +5,8 @@ import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../
 import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, WorktreeLocalMergeResult, PullRequestState, Project, Task } from '../../../shared/types';
 import type { TaskChangeSummary, TaskChangeFile } from '../../../shared/types/task';
 import { parseNumstat } from '../../../shared/utils/task-work-summary';
+import { resolveEffectiveAgent } from '../../../shared/utils/agent-override';
+import { getAgentBackendSettings } from '../../agent-backend/settings';
 import { appLog } from '../../app-logger';
 import path from 'path';
 import { matchesExtensionGlob } from '../../utils/glob-markers';
@@ -1552,6 +1554,7 @@ export function registerWorktreeHandlers(
           taskTitle: task.title,
           taskDescription: task.metadata?.userDescription || task.description,
           profileId: project.settings?.claudeProfileId,
+          backend: resolveEffectiveAgent(task.metadata?.agentOverride, getAgentBackendSettings().kind).backend,
           dataDir: project.autoBuildPath,
           onProgress: (step, params) =>
             safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_PR_PROGRESS, taskId, { step, params }),
@@ -1632,6 +1635,7 @@ export function registerWorktreeHandlers(
           taskDescription: task.metadata?.userDescription || task.description,
           verificationCommands: runInfo?.triage?.verification,
           profileId: project.settings?.claudeProfileId,
+          backend: resolveEffectiveAgent(task.metadata?.agentOverride, getAgentBackendSettings().kind).backend,
           onProgress: (step, params) =>
             safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_MERGE_LOCAL_PROGRESS, taskId, { step, params }),
         });

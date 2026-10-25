@@ -11,6 +11,7 @@
 
 import { runClaudeText } from '../../claude-code/run-text';
 import type { ClaudeEffort } from '../../../shared/types/claude-code';
+import type { AgentBackendKind } from '../../../shared/types/agent-backend';
 
 /** Lines of the target branch missing from a file after a first resolution */
 export interface MissingTargetLines {
@@ -34,6 +35,8 @@ export interface MergeAgentInput {
   model?: string;
   effort?: ClaudeEffort;
   profileId?: string;
+  /** The task's own backend (`resolveEffectiveAgent`); default: the app-wide backend */
+  backend?: AgentBackendKind;
   abortSignal?: AbortSignal;
 }
 
@@ -126,6 +129,7 @@ export const runMergeAgent: MergeAgentFn = async (input) => {
     timeoutMs: MERGE_AGENT_TIMEOUT_MS,
     abortSignal: input.abortSignal,
     profileId: input.profileId,
+    backend: input.backend,
   });
   const structured = result.structured as Partial<MergeAgentResult> | undefined;
   return {
