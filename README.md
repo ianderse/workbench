@@ -17,7 +17,7 @@ This fork ([ianderse/workbench](https://github.com/ianderse/workbench), branch `
 - The UI names the backend in use instead of always saying Claude, Claude-only settings are hidden under OMP, and the Chat page lists your OMP models (`59b186b`, `3b81e81`, `fdbcf7b`, `cce5ada`)
 - Self-improve memories reach OMP runs (`229bc66`)
 - OMP picks a model role per job: planning uses your `plan` role, implementing and validating use `default`, the fresh-eyes review uses `judge`. Workbench size mappings and per-task pins still win (`7c689d8`)
-- Log lines name the model that actually runs (`a3afc13`)
+- Log lines name the model that actually runs, and the triage summary names the size instead of a Claude model (`a3afc13`, `12da35b`)
 - Claude usage polling pauses while OMP is selected (`0a3f233`)
 
 **Reliability on slow or busy local servers**
