@@ -32,7 +32,10 @@ const major = current.split('.')[0];
 // guess one (a shallow clone, or a major raised before its release was tagged)
 const anchor = `v${major}.0.0`;
 try {
-  git('rev-parse', '--verify', `refs/tags/${anchor}`);
+  execFileSync('git', ['rev-parse', '--verify', `refs/tags/${anchor}`], {
+    cwd: root,
+    stdio: 'ignore',
+  });
 } catch {
   console.log(`[sync-version] no ${anchor} tag to count from, keeping ${current}`);
   process.exit(0);
