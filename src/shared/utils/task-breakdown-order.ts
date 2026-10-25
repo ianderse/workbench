@@ -17,3 +17,24 @@ export function sortByDependencies<T extends { key: string; dependsOn: string[] 
   for (const task of tasks) visit(task, new Set());
   return out;
 }
+
+/**
+ * Drop the dependency edges that close a cycle: edges are added one by one in task order and an
+ * edge from a task that already (transitively) waits for the dependent is skipped.
+ */
+export function breakDependencyCycles<T extends { key: string; dependsOn: string[] }>(tasks: T[]): void {
+  const accepted = new Map<string, string[]>(tasks.map((t) => [t.key, []]));
+  const reaches = (from: string, target: string, visited = new Set<string>()): boolean => {
+    if (from === target) return true;
+    if (visited.has(from)) return false;
+    visited.add(from);
+    return (accepted.get(from) ?? []).some((next) => reaches(next, target, visited));
+  };
+  for (const task of tasks) {
+    for (const dep of task.dependsOn) {
+      if (reaches(dep, task.key)) continue;
+      accepted.get(task.key)!.push(dep);
+    }
+    task.dependsOn = accepted.get(task.key)!;
+  }
+}

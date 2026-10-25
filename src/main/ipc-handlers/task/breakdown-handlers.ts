@@ -11,6 +11,7 @@ import type { TaskBreakdown } from '../../../shared/types/task-breakdown';
 import { projectStore } from '../../project-store';
 import { appLog } from '../../app-logger';
 import { breakDownTask } from '../../task-breakdown';
+import { listOpenTickets } from '../../../shared/utils/open-tickets';
 
 const running = new Map<string, AbortController>();
 
@@ -29,6 +30,7 @@ export function registerTaskBreakdownHandlers(): void {
           projectPath: project.path,
           description,
           attachmentNames: Array.isArray(attachmentNames) ? attachmentNames.filter((n) => typeof n === 'string') : undefined,
+          openTickets: listOpenTickets(projectStore.getTasks(projectId)),
           abortSignal: controller.signal,
         });
         return { success: true, data };

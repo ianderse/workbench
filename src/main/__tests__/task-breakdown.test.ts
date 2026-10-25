@@ -50,3 +50,43 @@ describe('normalizeBreakdown', () => {
     expect(sortByDependencies([t('a', ['b']), t('b', ['a'])])).toHaveLength(2);
   });
 });
+
+describe('normalizeBreakdown with existing open tickets', () => {
+  const open = [
+    { id: '005-engine', title: 'Engine', status: 'queue' },
+    { id: '006-save', title: 'Save', status: 'in_progress' },
+  ];
+
+  it('keeps open ticket ids next to new keys', () => {
+    const result = normalizeBreakdown({ tasks: [t('t1', ['005-engine']), t('t2', ['t1', '006-save', '005-engine'])] }, open);
+    const byKey = Object.fromEntries(result.tasks.map((x) => [x.key, x]));
+    expect(byKey.t1.dependsOn).toEqual([]);
+    expect(byKey.t1.dependsOnExisting).toEqual(['005-engine']);
+    expect(byKey.t2.dependsOn).toEqual(['t1']);
+    expect(byKey.t2.dependsOnExisting).toEqual(['006-save', '005-engine']);
+  });
+
+  it('drops ids of done, archived or unknown tickets (they are not in the open list)', () => {
+    const result = normalizeBreakdown({ tasks: [t('t1', ['001-done', 'nope', '005-engine'])] }, open);
+    expect(result.tasks[0].dependsOnExisting).toEqual(['005-engine']);
+    expect(result.tasks[0].dependsOn).toEqual([]);
+  });
+
+  it('accepts a ticket number such as #005 when it names one open ticket', () => {
+    const result = normalizeBreakdown({ tasks: [t('t1', ['#005', '6', '#009'])] }, open);
+    expect(result.tasks[0].dependsOnExisting).toEqual(['005-engine', '006-save']);
+  });
+
+  it('still breaks cycles among new tasks', () => {
+    const result = normalizeBreakdown({ tasks: [t('a', ['b', '005-engine']), t('b', ['a'])] }, open);
+    const deps = Object.fromEntries(result.tasks.map((x) => [x.key, x.dependsOn]));
+    expect(deps.a).toEqual(['b']);
+    expect(deps.b).toEqual([]);
+    expect(result.tasks.find((x) => x.key === 'a')!.dependsOnExisting).toEqual(['005-engine']);
+  });
+
+  it('has no existing dependencies without an open list', () => {
+    const result = normalizeBreakdown({ tasks: [t('t1', ['005-engine'])] });
+    expect(result.tasks[0].dependsOnExisting).toEqual([]);
+  });
+});

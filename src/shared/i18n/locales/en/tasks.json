@@ -369,7 +369,12 @@
     "back": "Back",
     "createFailed": "Created {{done}} of {{total}} tasks: {{error}}",
     "noneSelected": "Select at least one task",
-    "waitsFor": "Waits for: {{titles}}"
+    "waitsFor": "Waits for: {{titles}}",
+    "existingDependencies": "Wait for existing tickets",
+    "existingDependenciesHint": "Pick open tickets this task needs merged first",
+    "waitForTicketsNone": "Wait for tickets",
+    "waitForTickets_one": "Waits for {{count}} ticket",
+    "waitForTickets_other": "Waits for {{count}} tickets"
   },
   "feedback": {
     "maxImagesError": "Maximum of {{count}} images allowed",

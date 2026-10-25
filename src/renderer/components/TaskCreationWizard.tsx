@@ -20,7 +20,8 @@ import { createTask, queueTasksInOrder, saveDraft, loadDraft, clearDraft, isDraf
 import type { TaskMetadata, ImageAttachment, AgentOverride } from '../../shared/types';
 import { normalizeAgentOverride } from '../../shared/utils/agent-override';
 import { useSettingsStore } from '../stores/settings-store';
-import { TaskBreakdownReview, effectiveDependencies, type BreakdownItem } from './task-form/TaskBreakdownReview';
+import { TaskBreakdownReview, effectiveDependencies, effectiveExistingDependencies, type BreakdownItem } from './task-form/TaskBreakdownReview';
+import type { OpenTicketRef } from '../../shared/types/task-breakdown';
 import { sortByDependencies } from '../../shared/utils/task-breakdown-order';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 
@@ -71,6 +72,7 @@ export function TaskCreationWizard({
   // "Break into tasks": 'form' -> 'working' (model call) -> 'review' -> creating
   const [step, setStep] = useState<'form' | 'working' | 'review'>('form');
   const [breakdownItems, setBreakdownItems] = useState<BreakdownItem[]>([]);
+  const [openTickets, setOpenTickets] = useState<OpenTicketRef[]>([]);
   const [queueAfterCreate, setQueueAfterCreate] = useState(true);
   const breakdownRequestId = useRef<string | null>(null);
   // Breakdown keys already created (key -> task id), so a retry after a failure continues
@@ -187,6 +189,7 @@ export function TaskCreationWizard({
       if (result.success && result.data) {
         createdIds.current = new Map();
         setBreakdownItems(result.data.tasks.map((task) => ({ ...task, included: true })));
+        setOpenTickets(result.data.openTickets ?? []);
         setStep('review');
       } else {
         setError(t('tasks:breakdown.failed', { error: result.error || t('common:errors.unknownError') }));
@@ -210,6 +213,7 @@ export function TaskCreationWizard({
 
   const handleCreateBreakdown = async () => {
     const dependencies = effectiveDependencies(breakdownItems);
+    const existingDependencies = effectiveExistingDependencies(breakdownItems);
     const selected = sortByDependencies(
       breakdownItems.filter((item) => item.included).map((item) => ({ ...item, dependsOn: dependencies[item.key] ?? [] }))
     );
@@ -227,9 +231,10 @@ export function TaskCreationWizard({
           continue;
         }
         const metadata = buildMetadata(item.agentOverride);
-        const dependsOnTaskIds = (dependencies[item.key] ?? [])
-          .map((key) => createdIds.current.get(key))
-          .filter((id): id is string => !!id);
+        const dependsOnTaskIds = [
+          ...(existingDependencies[item.key] ?? []),
+          ...(dependencies[item.key] ?? []).map((key) => createdIds.current.get(key)).filter((id): id is string => !!id),
+        ];
         if (dependsOnTaskIds.length > 0) metadata.dependsOnTaskIds = dependsOnTaskIds;
         const task = await createTask(projectId, item.title.trim(), item.description.trim() || item.title.trim(), metadata);
         if (!task) throw new Error(t('tasks:wizard.errors.createFailed'));
@@ -256,6 +261,7 @@ export function TaskCreationWizard({
   const resetForm = () => {
     setStep('form');
     setBreakdownItems([]);
+    setOpenTickets([]);
     createdIds.current = new Map();
     setDescription('');
     setImages([]);
@@ -387,6 +393,7 @@ export function TaskCreationWizard({
       {step === 'review' && (
         <TaskBreakdownReview
           items={breakdownItems}
+          openTickets={openTickets}
           onItemsChange={setBreakdownItems}
           queue={queueAfterCreate}
           onQueueChange={setQueueAfterCreate}
