@@ -21,6 +21,7 @@ import {
 import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask, useTaskStore, unmetDependencyTitles } from '../stores/task-store';
 import type { Task, TaskStatus } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
+import { taskNumber } from '../../shared/utils/queue-grooming';
 import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
 
 // Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
@@ -64,6 +65,7 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
+    prevTask.metadata?.contextNotes?.length === nextTask.metadata?.contextNotes?.length &&
     prevTask.metadata?.agentOverride === nextTask.metadata?.agentOverride
   );
 
@@ -99,6 +101,8 @@ export const TaskCard = memo(function TaskCard({
   const waitsFor = useTaskStore((s) =>
     task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task) : ''
   );
+  // A string (or undefined), so the memoized card compares it cheaply
+  const lastNoteFrom = task.metadata?.contextNotes?.at(-1)?.fromTaskId;
   const isRunning = task.status === 'in_progress';
   // Validation (AI Review) also runs Claude Code, so it can be left stuck too (e.g. by an app quit)
   const isActive = isRunning || task.status === 'ai_review';
@@ -286,6 +290,11 @@ export const TaskCard = memo(function TaskCard({
         {failedReviewRounds > 0 && (
           <p className="mt-1.5 text-xs font-medium text-destructive">
             {t('aiReviewFailed.cardLabel', { count: failedReviewRounds })}
+          </p>
+        )}
+        {lastNoteFrom && (
+          <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1">
+            {t('queueGrooming.cardLabel', { number: taskNumber(lastNoteFrom) })}
           </p>
         )}
         {waitsFor && (

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
+import { Switch } from '../ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
@@ -49,50 +50,63 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
     if (Number.isFinite(parsed) && parsed > 0) setSettings({ ...settings, maxBudgetUsd: parsed });
   };
 
-  // Both rows are Claude Code's (its account, --max-budget-usd); OMP has neither
-  if (isOmp) return null;
-
   return (
     <SettingsSection title={t('projectPages.tasks.title')}>
       <SettingsRows>
-        <SettingsRow
-          label={t('projectPages.tasks.account')}
-          description={t('projectPages.tasks.accountDescription')}
-          htmlFor="project-claude-account"
-        >
-          <Select
-            value={accountValue}
-            onValueChange={(value) => setSettings({ ...settings, claudeProfileId: value })}
-            disabled={profiles.length === 0}
+        {/* Account and budget are Claude Code's (its account, --max-budget-usd); OMP has neither */}
+        {!isOmp && (
+          <SettingsRow
+            label={t('projectPages.tasks.account')}
+            description={t('projectPages.tasks.accountDescription')}
+            htmlFor="project-claude-account"
           >
-            <SelectTrigger id="project-claude-account" className="h-8">
-              <SelectValue placeholder={t('projectPages.tasks.noAccounts')} />
-            </SelectTrigger>
-            <SelectContent>
-              {profiles.map((profile) => (
-                <SelectItem key={profile.id} value={profile.id}>
-                  {profile.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </SettingsRow>
+            <Select
+              value={accountValue}
+              onValueChange={(value) => setSettings({ ...settings, claudeProfileId: value })}
+              disabled={profiles.length === 0}
+            >
+              <SelectTrigger id="project-claude-account" className="h-8">
+                <SelectValue placeholder={t('projectPages.tasks.noAccounts')} />
+              </SelectTrigger>
+              <SelectContent>
+                {profiles.map((profile) => (
+                  <SelectItem key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+        )}
+
+        {!isOmp && (
+          <SettingsRow
+            label={t('projectPages.tasks.budget')}
+            description={t('projectPages.tasks.budgetDescription')}
+            htmlFor="project-task-budget"
+          >
+            <Input
+              id="project-task-budget"
+              type="number"
+              inputMode="decimal"
+              min={0}
+              step={0.5}
+              className="w-24"
+              placeholder={t('projectPages.tasks.budgetPlaceholder')}
+              value={budgetDraft}
+              onChange={(e) => handleBudgetChange(e.target.value)}
+            />
+          </SettingsRow>
+        )}
 
         <SettingsRow
-          label={t('projectPages.tasks.budget')}
-          description={t('projectPages.tasks.budgetDescription')}
-          htmlFor="project-task-budget"
+          label={t('projectPages.tasks.groomQueue')}
+          description={t('projectPages.tasks.groomQueueDescription')}
         >
-          <Input
-            id="project-task-budget"
-            type="number"
-            inputMode="decimal"
-            min={0}
-            step={0.5}
-            className="w-24"
-            placeholder={t('projectPages.tasks.budgetPlaceholder')}
-            value={budgetDraft}
-            onChange={(e) => handleBudgetChange(e.target.value)}
+          <Switch
+            checked={settings.groomQueueAfterMerge !== false}
+            onCheckedChange={(checked) => setSettings({ ...settings, groomQueueAfterMerge: checked })}
+            aria-label={t('projectPages.tasks.groomQueue')}
           />
         </SettingsRow>
       </SettingsRows>

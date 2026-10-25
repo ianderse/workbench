@@ -505,7 +505,9 @@
       "noAccounts": "No Claude accounts",
       "budget": "Budget per task",
       "budgetDescription": "Stop a task when its estimated cost reaches this amount in US dollars. Leave empty for no limit",
-      "budgetPlaceholder": "No limit"
+      "budgetPlaceholder": "No limit",
+      "groomQueue": "Update queued tasks after a merge",
+      "groomQueueDescription": "After a task merges, add context notes to tickets in Planning and the Queue and propose archiving or adding tasks"
     },
     "context": {
       "projectIndex": "Project index",

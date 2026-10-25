@@ -46,6 +46,7 @@ import { TASK_STATUS_LABELS, getTaskColumn, type TaskStatusColumn } from '../../
 import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
+import { TaskContextNotes } from './TaskContextNotes';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
 import { useTaskGitOptions } from '../task-form/TaskGitOptions';
 import { TaskWarnings } from './TaskWarnings';
@@ -368,6 +369,9 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                     <div className="px-6 pb-6 pt-2 space-y-5 overflow-x-hidden max-w-full">
                       {/* Human Review after the last AI review round still failed: why, and how the rounds went */}
                       {task.status === 'human_review' && <AIReviewFailedPanel claudeRun={task.claudeRun} />}
+
+                      {/* Notes added to this ticket after other tasks merged, with Undo */}
+                      <TaskContextNotes task={task} />
 
                       {/* Metadata */}
                       <TaskMetadata

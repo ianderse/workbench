@@ -34,6 +34,7 @@ import { appLog } from '../app-logger';
 import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branch';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
+import { buildTaskBriefing } from '../task-briefing';
 
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
@@ -513,6 +514,16 @@ export class AgentManager extends EventEmitter {
       backend: effectiveAgent.backend,
       ...(task.metadata?.agentOverride ? { agentOverride: task.metadata.agentOverride } : {}),
     };
+
+    // What merged since the ticket was written; recomputed at every start, so a retried task sees new merges
+    if (mode === 'start') {
+      try {
+        const { projectStore } = await import('../project-store');
+        config.briefingPrompt = await buildTaskBriefing(task, projectStore.getTasks(project.id), config.changelogPath);
+      } catch (error) {
+        appLog.warn(`[AgentManager] Could not brief ${taskId} on merged tasks:`, error);
+      }
+    }
 
     if (isSelfImproveEnabled(project.settings)) {
       config.selfImprovePrompt = SELF_IMPROVE_NUDGE;

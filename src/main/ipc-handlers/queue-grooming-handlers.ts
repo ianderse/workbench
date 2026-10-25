@@ -1,0 +1,61 @@
+/**
+ * Queue grooming IPC handlers: the proposals a merged task left for the tickets in Planning and
+ * the Queue (see queue-grooming.ts), and the hook that starts a grooming after every merge.
+ */
+import type { BrowserWindow } from 'electron';
+import { IPC_CHANNELS } from '../../shared/constants';
+import type { IPCResult } from '../../shared/types';
+import type { QueueProposal } from '../../shared/types/queue-grooming';
+import { handleIpc } from './ipc-registry';
+import { safeSendToRenderer } from './utils';
+import { taskHooks } from '../task-hooks';
+import { taskQueue } from '../services/task-queue';
+import { appLog } from '../app-logger';
+import {
+  applyQueueProposal,
+  configureQueueGrooming,
+  dismissQueueProposal,
+  groomQueueAfterMerge,
+  listQueueProposals,
+  undoContextNote,
+} from '../queue-grooming';
+
+export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow | null): void {
+  configureQueueGrooming((projectId) => {
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.QUEUE_PROPOSALS_CHANGED, projectId);
+    safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LIST_CHANGED, projectId);
+    // Archived or re-linked tickets may free queued tasks
+    taskQueue.request(projectId);
+  });
+
+  // Every merge path (local merge, merged pull request, full worktree merge) emits `merged`.
+  // Today structural changes only become proposals; an autonomous mode would pass true.
+  taskHooks.on('merged', ({ project, task }) => {
+    void groomQueueAfterMerge(project.id, task.id, { autoApplyStructural: false }).catch((error) => {
+      appLog.warn('[QueueGrooming] Grooming failed:', error);
+    });
+  });
+
+  handleIpc(IPC_CHANNELS.QUEUE_PROPOSALS_LIST, async (_, projectId: string): Promise<IPCResult<QueueProposal[]>> => {
+    try {
+      return { success: true, data: await listQueueProposals(projectId) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  });
+
+  handleIpc(IPC_CHANNELS.QUEUE_PROPOSAL_APPLY, async (_, projectId: string, proposalId: string): Promise<IPCResult> => {
+    const result = await applyQueueProposal(projectId, proposalId);
+    return result.success ? { success: true } : { success: false, error: result.error };
+  });
+
+  handleIpc(IPC_CHANNELS.QUEUE_PROPOSAL_DISMISS, async (_, projectId: string, proposalId: string): Promise<IPCResult> => {
+    const result = await dismissQueueProposal(projectId, proposalId);
+    return result.success ? { success: true } : { success: false, error: result.error };
+  });
+
+  handleIpc(IPC_CHANNELS.QUEUE_NOTE_UNDO, async (_, projectId: string, taskId: string, noteId: string): Promise<IPCResult> => {
+    const result = await undoContextNote(projectId, taskId, noteId);
+    return result.success ? { success: true } : { success: false, error: result.error };
+  });
+}

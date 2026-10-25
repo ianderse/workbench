@@ -52,6 +52,8 @@ export interface ProjectSettings {
    * `.workbench/compeng` so every session in the project shares it); off unless set
    */
   selfImprove?: boolean;
+  /** After a task is merged, add context notes to queued tickets and propose queue changes (default: true) */
+  groomQueueAfterMerge?: boolean;
 }
 
 export interface NotificationSettings {

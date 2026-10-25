@@ -213,6 +213,25 @@
       "startFailed": "Failed to start task"
     }
   },
+  "queueGrooming": {
+    "panelTitle": "Queue updates ({{count}})",
+    "panelToggle": "Show or hide queue updates",
+    "intro": "Proposed after #{{number}} merged",
+    "obsolete": "Archive {{title}}",
+    "duplicate": "Archive {{title}}, a duplicate of {{kept}}",
+    "newTask": "Add task {{title}}",
+    "waitsFor": "Waits for: {{titles}}",
+    "apply": "Apply",
+    "dismiss": "Dismiss",
+    "applyFailed": "Could not apply the update: {{error}}",
+    "cardLabel": "Updated after #{{number}}",
+    "notesTitle": "Updates after merges",
+    "notesDescription": "Added to this ticket automatically after other tasks merged",
+    "noteFrom": "After #{{number}} merged",
+    "undo": "Undo",
+    "undoFailed": "Could not undo the update: {{error}}",
+    "unknownTask": "a removed task"
+  },
   "breakdown": {
     "title": "Break into tasks",
     "description": "Review the proposed tasks before they are created",

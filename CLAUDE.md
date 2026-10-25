@@ -216,6 +216,24 @@ At every phase, `buildParallelTasksPrompt()` (`src/main/task-changelog.ts`) adds
 task's system prompt: the other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
 them and avoid merge conflicts.
 
+### Stale tickets (briefing and queue grooming)
+
+Tickets are written before the code exists, so later ones go stale as earlier tasks merge. Two things counter that:
+
+- **Briefing** — when a task starts (`mode: 'start'`, also a retry), `buildTaskBriefing()` (`src/main/task-briefing.ts`)
+  adds a "Since this ticket was written" section to its system prompt (`TaskRunConfig.briefingPrompt`): the tasks merged
+  after the ticket was created, each with title, run summary, files touched (changelog) and open follow-ups, the ticket's
+  own dependencies first, capped at about 6k characters. No model call.
+- **Queue grooming** — every merge path (`markTaskDone` for local merges and merged PRs, the full worktree merge in
+  `worktree-handlers.ts`) emits the `merged` task hook, and `ipc-handlers/queue-grooming-handlers.ts` calls
+  `groomQueueAfterMerge(projectId, taskId, { autoApplyStructural: false })` (`src/main/queue-grooming.ts`). One background,
+  read-only `runClaudeText` call (OMP role `plan`) compares the merged task with the tickets in Planning and the Queue.
+  Notes are applied at once (appended to the description and kept in `metadata.contextNotes`, shown on the card and undoable
+  in the task dialog). Obsolete, duplicate and new-task answers become proposals in `.workbench/queue-proposals.json`,
+  shown in the "Queue updates" panel on the board (`QueueUpdatesPanel`); with `autoApplyStructural` they apply at once and
+  leave an undo entry. The project setting `groomQueueAfterMerge` (default on) turns it off. The answer is validated by
+  `normalizeGroomingResult()` (`shared/utils/queue-grooming.ts`).
+
 ### MCP Connectors
 
 Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and

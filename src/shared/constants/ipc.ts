@@ -66,6 +66,11 @@ export const IPC_CHANNELS = {
   TASK_ERROR: 'task:error',
   TASK_LOG: 'task:log',
   TASK_STATUS_CHANGE: 'task:statusChange',
+  QUEUE_PROPOSALS_LIST: 'queueGrooming:list',  // Pending queue proposals of a project
+  QUEUE_PROPOSAL_APPLY: 'queueGrooming:apply',
+  QUEUE_PROPOSAL_DISMISS: 'queueGrooming:dismiss',
+  QUEUE_NOTE_UNDO: 'queueGrooming:undoNote',  // Take a context note off a ticket
+  QUEUE_PROPOSALS_CHANGED: 'queueGrooming:changed',  // Event: proposals or notes changed (main -> renderer): (projectId)
   TASK_LIST_CHANGED: 'task:listChanged',  // Event: tasks were created, edited or moved outside the board, e.g. by the Claude chat (main -> renderer): (projectId)
   TASK_RATE_LIMIT_HOLD_CHANGE: 'task:rateLimitHoldChange',  // Rate-limit hold set/cleared (main -> renderer)
   TASK_EXECUTION_PROGRESS: 'task:executionProgress',

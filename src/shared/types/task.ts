@@ -6,6 +6,7 @@ import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
 import type { ClaudeRunInfo, ClaudeRunPhase, ClaudeEffort } from './claude-code';
 import type { AgentBackendKind } from './agent-backend';
+import type { TaskContextNote } from './queue-grooming';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -219,6 +220,9 @@ export interface TaskMetadata {
   useWorktree?: boolean;  // If false, use direct mode (no worktree isolation) - default is true for safety
   useLocalBranch?: boolean;  // If true, use the local branch directly instead of preferring origin/branch (preserves gitignored files)
   pushNewBranches?: boolean;  // If false, keep the task branch local-only instead of auto-pushing to origin
+
+  /** Notes added after other tasks merged (queue grooming); each can be undone */
+  contextNotes?: TaskContextNote[];
 
   // Archive status
   archivedAt?: string;  // ISO date when task was archived

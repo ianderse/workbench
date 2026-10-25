@@ -9,6 +9,7 @@ import { ClaudeCodeAPI, createClaudeCodeAPI } from './modules/claude-code-api';
 import { GraphifyAPI, createGraphifyAPI } from './modules/graphify-api';
 import { AgentBackendAPI, createAgentBackendAPI } from './modules/agent-backend-api';
 import { SelfImproveAPI, createSelfImproveAPI } from './modules/self-improve-api';
+import { QueueGroomingAPI, createQueueGroomingAPI } from './modules/queue-grooming-api';
 import { ProjectIndexAPI, createProjectIndexAPI } from './modules/project-index-api';
 import { LiveAgentAPI, createLiveAgentAPI } from './modules/live-agent-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
@@ -29,6 +30,7 @@ export interface ElectronAPI extends
   GraphifyAPI,
   AgentBackendAPI,
   SelfImproveAPI,
+  QueueGroomingAPI,
   ProjectIndexAPI,
   LiveAgentAPI,
   McpAPI,
@@ -50,6 +52,7 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createGraphifyAPI(),
   ...createAgentBackendAPI(),
   ...createSelfImproveAPI(),
+  ...createQueueGroomingAPI(),
   ...createProjectIndexAPI(),
   ...createLiveAgentAPI(),
   ...createMcpAPI(),

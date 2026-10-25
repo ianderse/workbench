@@ -36,6 +36,7 @@ import { resolveMaxParallelTasks, getTaskColumn as getVisualColumn, canMoveTask 
 import { useProjectStore } from '../stores/project-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { WorktreeCleanupDialog } from './WorktreeCleanupDialog';
+import { QueueUpdatesPanel } from './QueueUpdatesPanel';
 import type { Task, TaskStatus, TaskOrderState } from '../../shared/types';
 
 // Type guard for valid drop column targets - preserves literal type from TASK_STATUS_COLUMNS
@@ -788,6 +789,8 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
             )}
           </div>
         </div>
+      {/* Changes a merged task proposes for the tickets in Planning and the Queue */}
+      {projectId && <QueueUpdatesPanel projectId={projectId} tasks={tasks} />}
       {/* Kanban columns */}
       <DndContext
         sensors={sensors}

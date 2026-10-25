@@ -21,6 +21,7 @@ import { registerClaudeCodeHandlers } from './claude-code-handlers';
 import { registerGraphifyHandlers } from './graphify-handlers';
 import { registerAgentBackendHandlers } from './agent-backend-handlers';
 import { registerSelfImproveHandlers } from './self-improve-handlers';
+import { registerQueueGroomingHandlers } from './queue-grooming-handlers';
 import { registerProjectIndexHandlers } from './project-index-handlers';
 import { registerLiveAgentHandlers } from './live-agent-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
@@ -87,6 +88,8 @@ export function setupIpcHandlers(
   // Agent backend handlers (OMP detection)
   registerAgentBackendHandlers();
   registerSelfImproveHandlers();
+  // Updates to queued tickets after a merge (notes, proposals)
+  registerQueueGroomingHandlers(getMainWindow);
   registerProjectIndexHandlers();
 
   // Live agent handlers (relay status, agent windows' graph subscriptions)

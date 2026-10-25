@@ -149,6 +149,8 @@ export interface TaskRunConfig {
   selfImprovePrompt?: string;
   /** The project's memory directory (self-improve); OMP is told where it is, since it has no auto memory */
   selfImproveDir?: string;
+  /** "Since this ticket was written" section: tasks merged after the ticket was created (see task-briefing.ts) */
+  briefingPrompt?: string;
   /** The project's task changelog; each phase's prompt lists what the other tasks are changing */
   changelogPath?: string;
   /** Extra environment (e.g. GRAPHIFY_OUT, PATH with the graphify CLI) */
@@ -282,6 +284,7 @@ ${omp
   ];
   if (config.graphifyPrompt) sections.push(config.graphifyPrompt);
   if (config.selfImprovePrompt) sections.push(config.selfImprovePrompt);
+  if (config.briefingPrompt) sections.push(config.briefingPrompt);
   if (parallelTasksPrompt) sections.push(parallelTasksPrompt);
   return sections.join('\n\n');
 }

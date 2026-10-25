@@ -18,7 +18,7 @@ import { appLog } from './app-logger';
  * Project settings kept in the project's own `.workbench/settings.json` (next to its tasks)
  * instead of the app's project list
  */
-const PROJECT_FILE_SETTING_KEYS = ['useClaudeMd', 'maxBudgetUsd', 'claudeProfileId', 'selfImprove'] as const;
+const PROJECT_FILE_SETTING_KEYS = ['useClaudeMd', 'maxBudgetUsd', 'claudeProfileId', 'selfImprove', 'groomQueueAfterMerge'] as const;
 const PROJECT_SETTINGS_FILE = 'settings.json';
 
 /** The project's settings file, or null while the project isn't initialized (no `.workbench`) */

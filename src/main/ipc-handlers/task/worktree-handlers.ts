@@ -861,6 +861,8 @@ export function registerWorktreeHandlers(
 
               // Route status change through TaskStateManager (XState) to avoid dual emission
               taskStateManager.handleManualStatusChange(taskId, newStatus as any, task, project);
+              // A full merge (not staged for review) finished: the task is done
+              if (newStatus === 'done') taskHooks.emit('merged', { project, task });
 
               return {
                 success: true,
@@ -1589,4 +1591,6 @@ async function markTaskDone(task: Task, project: Project, worktreePath: string):
   projectStore.invalidateTasksCache(project.id);
   // A merged task may unblock queued tasks that depend on it
   taskQueue.request(project.id);
+  // Local merge and merged pull request both end here
+  taskHooks.emit('merged', { project, task });
 }

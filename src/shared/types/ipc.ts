@@ -506,6 +506,15 @@ export interface ElectronAPI {
   buildMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo>>;
   /** Whether a memory index build is running for the project */
   isMemoryIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
+
+  // Queue grooming (what a merged task means for the tickets in Planning and the Queue)
+  /** Proposals waiting for the user (obsolete / duplicate tickets, new tasks) */
+  listQueueProposals: (projectId: string) => Promise<IPCResult<import('./queue-grooming').QueueProposal[]>>;
+  applyQueueProposal: (projectId: string, proposalId: string) => Promise<IPCResult>;
+  dismissQueueProposal: (projectId: string, proposalId: string) => Promise<IPCResult>;
+  /** Take a context note off a ticket (its text leaves the description) */
+  undoContextNote: (projectId: string, taskId: string, noteId: string) => Promise<IPCResult>;
+  onQueueProposalsChanged: (callback: (projectId: string) => void) => () => void;
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   isGraphifyEnabled: (projectId: string) => Promise<IPCResult<boolean>>;
   setGraphifyEnabled: (projectId: string, enabled: boolean) => Promise<IPCResult>;

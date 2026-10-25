@@ -11,6 +11,8 @@ export interface TaskHookEvents {
   state: { project: Project; task: Task; status: TaskStatus; state?: string };
   /** The task's Claude Code session edited files (paths relative to its worktree, forward slashes) */
   'files-edited': { project: Project; task: Task; files: string[] };
+  /** The task's branch was merged into its base branch (local merge, merged pull request or full worktree merge) and the task is done */
+  merged: { project: Project; task: Task };
 }
 
 type TaskHookName = keyof TaskHookEvents;
@@ -19,6 +21,7 @@ type TaskHookHandler<K extends TaskHookName> = (event: TaskHookEvents[K]) => voi
 const handlers: { [K in TaskHookName]: Set<TaskHookHandler<K>> } = {
   state: new Set(),
   'files-edited': new Set(),
+  merged: new Set(),
 };
 
 function reportFailure(name: TaskHookName, error: unknown): void {
