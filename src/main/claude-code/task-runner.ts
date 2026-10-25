@@ -577,6 +577,17 @@ export class ClaudeTaskRun {
     return `${OMP_SIZE_NAMES[alias]} size (${where}), ${effort}`;
   }
 
+  /**
+   * The model a step records in run info. Under OMP the triage model is only a size ("opus" is the
+   * Large size), so record the model OMP will actually use: the pin, the size mapping or the role's
+   * model; screens that read run info then name the real model.
+   */
+  private phaseModel(model: string, role: OmpRole = 'default'): string {
+    if (this.config.backend !== 'omp') return model;
+    const selection = resolveOmpSelection(model, getAgentBackendSettings().omp, role, getOmpRoles());
+    return selection.concrete ?? selection.selector ?? 'OMP default model';
+  }
+
   /** Name of the task's backend, for log lines */
   private backendName(): string {
     return this.config.backend === 'omp' ? 'OMP' : 'Claude Code';
@@ -587,7 +598,7 @@ export class ClaudeTaskRun {
     const label = revision ? 'Assessing the requested changes' : 'Assessing the task';
     this.emitProgress('planning', 0.05, label);
     this.log.startPhase('planning', label);
-    const phase = this.beginPhase('triage', { model: settings.triageModel, effort: 'low' });
+    const phase = this.beginPhase('triage', { model: this.phaseModel(settings.triageModel), effort: 'low' });
 
     let triage: TaskTriage;
     let triageCost: number | undefined;
@@ -708,7 +719,7 @@ export class ClaudeTaskRun {
 
     const sessionId = resumeSessionId ?? randomUUID();
     const phase = this.beginPhase(name, {
-      model,
+      model: this.phaseModel(model, ompRoleForJob(name === 'plan' ? 'plan' : 'implement')),
       effort,
       permissionMode: name === 'plan' ? 'plan' : this.config.isolated === false ? 'auto' : 'bypassPermissions',
       // OMP picks the session id itself: it is stored when the run reports it
@@ -1412,7 +1423,7 @@ no notes came with the request, so review the change against the task with fresh
     const reviewModel = reviewTriage?.pinned?.model ? reviewTriage.model : 'opus';
     const reviewEffort: ClaudeEffort = reviewTriage?.pinned?.effort ? reviewTriage.effort : 'high';
     this.noteLog('validation', `Reviewing the change with a fresh context${this.loop && this.loop.max > 1 ? ` (round ${this.loop.round}/${this.loop.max})` : ''} (${this.modelLabel(reviewModel, reviewEffort, ompRoleForJob('review'))})`);
-    const phase = this.beginPhase('review', { model: reviewModel, effort: reviewEffort });
+    const phase = this.beginPhase('review', { model: this.phaseModel(reviewModel, ompRoleForJob('review')), effort: reviewEffort });
     const started = Date.now();
     try {
       const result = await runClaudeText({
