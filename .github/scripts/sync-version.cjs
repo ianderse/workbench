@@ -6,7 +6,8 @@
  * the branch (a commit, an amend, a cherry-pick, a pull):
  * - major: the first number in package.json, never touched here. Raising it is the user's call,
  *   and the `v<major>.0.0` tag of that release is where the counting below starts
- * - minor: the merge commits on this branch since that tag (one per merged pull request)
+ * - minor: the merge commits on this branch since that tag (one per merged pull request; a merge
+ *   that only brings this branch up to date with main is not one of them)
  * - patch: the plain commits since the newest of those merges, so a merge resets it to 0
  *
  * The `post-commit` hook runs this and folds the change into the commit that caused it; a merge is
@@ -42,9 +43,41 @@ try {
   process.exit(0);
 }
 
+const exists = (ref) => {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', ref], { cwd: root, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+const isAncestor = (sha, ref) => {
+  try {
+    execFileSync('git', ['merge-base', '--is-ancestor', sha, ref], { cwd: root, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * A merge counts when it brought a pull request in, not when it brought this branch up to date
+ * with main: `git merge main` on a branch of your own raises nothing, since nothing was merged.
+ * The two read the same in the history apart from which side main is on, so that is what decides:
+ * a merge is this branch catching up when its first parent is off main and its second is on it.
+ */
+const mainRef = ['refs/remotes/origin/main', 'refs/heads/main'].find(exists);
+const caughtUpWithMain = (sha) => {
+  if (!mainRef) return false;
+  const [, first, second] = lines(git('rev-list', '--parents', '-n', '1', sha))[0].split(' ');
+  return !!second && !isAncestor(first, mainRef) && isAncestor(second, mainRef);
+};
+
 // --first-parent: only this branch's own history, so the commits a merge brought in are not
 // counted again as patches after it
-const merges = lines(git('rev-list', '--first-parent', '--merges', `${anchor}..HEAD`));
+const merges = lines(git('rev-list', '--first-parent', '--merges', `${anchor}..HEAD`)).filter(
+  (sha) => !caughtUpWithMain(sha)
+);
 const since = merges[0] ?? anchor;
 const patch = lines(git('rev-list', '--first-parent', '--no-merges', `${since}..HEAD`)).length;
 const version = `${major}.${merges.length}.${patch}`;
