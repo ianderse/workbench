@@ -61,14 +61,14 @@ function thinkingHashKey(entryUuid: string | undefined, fallbackSource: string):
 /** Whether the parent transcript records an Agent/Task launch as a background
  *  (async) launch, via the entry-level `toolUseResult` field of the user entry
  *  carrying its tool_result. */
-export function isAsyncLaunch(toolUseResult: unknown): boolean {
+function isAsyncLaunch(toolUseResult: unknown): boolean {
   if (!isRecord(toolUseResult)) return false
   return toolUseResult.status === 'async_launched' || toolUseResult.isAsync === true
 }
 
 
-/** The answer the Agent tool gives a background launch. A sub-agent's own transcript records the
- *  result with nothing else (the session's transcript also has its toolUseResult, see
+/** The answer the Agent tool gives a background launch. A sub-agent's own transcript often records
+ *  the result with nothing else (the session's transcript also has its toolUseResult, see
  *  isAsyncLaunch), so the answer is how a launch made from inside a sub-agent is told apart */
 const ASYNC_LAUNCH_ANSWER = 'Async agent launched successfully'
 
@@ -84,10 +84,20 @@ function toolResultText(block: unknown): string {
  * Whether an Agent/Task call's result says the agent goes on in the background: then it has only
  * started, and what ends it is its <task-notification>. Taken for its end instead, a background
  * agent a sub-agent launches (the reviewers /code-review's fork sends out) was drawn finished the
- * moment it was launched, and went on working unseen.
+ * moment it was launched, and went on working unseen. The answer is only read where no
+ * toolUseResult says which it is: a foreground agent's report that happens to start with it is its
+ * end, while a result of some other shape still counts its launch answer.
  */
-function launchedInBackground(toolUseResult: unknown, block: unknown): boolean {
-  return isAsyncLaunch(toolUseResult) || toolResultText(block).trimStart().startsWith(ASYNC_LAUNCH_ANSWER)
+export function launchedInBackground(toolUseResult: unknown, block: unknown): boolean {
+  if (isAsyncLaunch(toolUseResult)) return true
+  if (saysHowItRan(toolUseResult)) return false
+  return toolResultText(block).trimStart().startsWith(ASYNC_LAUNCH_ANSWER)
+}
+
+/** A toolUseResult that states how the agent ran (its status, or whether it went to the background) */
+function saysHowItRan(toolUseResult: unknown): boolean {
+  return isRecord(toolUseResult) && !Array.isArray(toolUseResult)
+    && (typeof toolUseResult.status === 'string' || typeof toolUseResult.isAsync === 'boolean')
 }
 
 const TASK_NOTIFICATION_PREFIX = '<task-notification'
