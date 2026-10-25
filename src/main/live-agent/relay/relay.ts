@@ -227,9 +227,12 @@ function broadcastEvent(event: AgentEvent & { sessionId: string }) {
     }
     // Work done for it is that session's activity: without this it would go
     // quiet, close and be disposed (taking its background session with it)
-    // while the background session is still busy on its behalf
+    // while the background session is still busy on its behalf. Only work,
+    // though: what a background session sends as it closes (the calls and
+    // sub-agents it leaves are ended, see closeSession) is not, and must not
+    // bring back a session that has ended
     const parent = sessions.get(parentSessionId)
-    if (parent) {
+    if (parent && !sessions.get(event.sessionId)?.sessionCompleted) {
       if (parent.sessionCompleted) resumeSession(parent)
       touchSession(parent)
     }
@@ -304,6 +307,9 @@ const sessions = new Map<string, WatchedSession>()
 const pendingBackgroundSessions = new Map<string, { parentId: string; at: number }>()
 /** Background sessions found, by their full id, and the session each works for */
 const backgroundSessionParents = new Map<string, string>()
+/** Where each found background session's transcript is: the workspace's scan lists only its own
+ *  project dirs, and one Claude Code keeps under another directory's is looked at here instead */
+const backgroundSessionFiles = new Map<string, string>()
 /** How long an announced background session is looked for: its file appears a
  *  moment after the announcement, and one never written is given up on */
 const BACKGROUND_SESSION_WAIT_MS = 60 * 1000
@@ -365,6 +371,7 @@ function findBackgroundSessionFiles(
  * is left alone rather than guessed at.
  */
 function resolveBackgroundSessions() {
+  followFoundBackgroundSessions()
   if (pendingBackgroundSessions.size === 0) return
   // Each directory is listed once a pass, however many sessions are looked for
   const listings = new Map<string, string[]>()
@@ -392,6 +399,7 @@ function resolveBackgroundSessions() {
     const [{ sessionId, filePath, mtimeMs }] = found
     pendingBackgroundSessions.delete(idPrefix)
     backgroundSessionParents.set(sessionId, parentId)
+    backgroundSessionFiles.set(sessionId, filePath)
     const watched = sessions.get(sessionId)
     if (watched) {
       // Only from the window's own directory: one a window of another directory
@@ -401,6 +409,24 @@ function resolveBackgroundSessions() {
     } else if (hasActivitySinceDisposed(filePath)) {
       watchSession(sessionId, filePath, mtimeMs, parent.dirKey, parentId)
     }
+  }
+}
+
+/**
+ * A found background session that went quiet and was let go (or that resolving couldn't watch
+ * then) is picked up again when it works again, wherever its file is, as long as the session it
+ * works for is still watched: the scan alone would only find it in the workspace's own project dirs.
+ */
+function followFoundBackgroundSessions() {
+  for (const [sessionId, filePath] of backgroundSessionFiles) {
+    if (sessions.has(sessionId)) continue
+    const parentId = backgroundSessionParents.get(sessionId)
+    const parent = parentId === undefined ? undefined : sessions.get(parentId)
+    if (!parent || parentId === undefined) continue
+    let mtimeMs: number
+    try { mtimeMs = fs.statSync(filePath).mtimeMs } catch { continue }
+    if ((Date.now() - mtimeMs) / 1000 > ACTIVE_SESSION_AGE_S) continue
+    if (hasActivitySinceDisposed(filePath)) watchSession(sessionId, filePath, mtimeMs, parent.dirKey, parentId)
   }
 }
 
@@ -819,7 +845,10 @@ function disposeSession(sessionId: string) {
   // they stop being watched with it (one still running is picked up again if its
   // session is watched again and announces it again)
   for (const [id, parentId] of backgroundSessionParents) {
-    if (parentId === sessionId) backgroundSessionParents.delete(id)
+    if (parentId === sessionId) {
+      backgroundSessionParents.delete(id)
+      backgroundSessionFiles.delete(id)
+    }
   }
   for (const [idPrefix, pending] of pendingBackgroundSessions) {
     if (pending.parentId === sessionId) pendingBackgroundSessions.delete(idPrefix)
@@ -926,8 +955,6 @@ function isWorkspaceDir(cwd: string, workspace: Workspace): boolean {
 }
 
 function scanForActiveSessions(workspace: Workspace) {
-  // Announced background sessions whose files weren't there yet: looked for again
-  resolveBackgroundSessions()
 
   // Forget sessions that have stayed closed past the active window; if the
   // agent works in one again, the scan below picks it up again
@@ -1123,6 +1150,9 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
 
   const scanInterval = setInterval(() => {
     for (const workspace of workspaces.values()) scanForActiveSessions(workspace)
+    // Background sessions announced but not found yet, and found ones let go: once a tick, not
+    // once per workspace (it lists the project dirs of every config dir)
+    resolveBackgroundSessions()
   }, SCAN_INTERVAL_MS)
 
   let relayDisposed = false
@@ -1186,6 +1216,7 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       projectDirWatchers.clear()
       for (const id of [...sessions.keys()]) disposeSession(id)
       backgroundSessionParents.clear()
+      backgroundSessionFiles.clear()
       pendingBackgroundSessions.clear()
       sessionOwners.clear()
       clients.clear()
