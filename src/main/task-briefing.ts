@@ -8,6 +8,7 @@
  * list and the project's changelog (see `task-changelog.ts`).
  */
 import type { Task } from '../shared/types';
+import { activeAutoMerge } from '../shared/utils/autonomous';
 import { readTaskChangelog, type TaskChangelogEntry } from './task-changelog';
 
 /** Total size of the section's task entries */
@@ -114,7 +115,8 @@ export function mergedFromChangelog(entries: readonly TaskChangelogEntry[]): Map
   const files = new Map<string, Set<string>>();
   const merged = new Map<string, { mergedAt: string; files: string[] }>();
   for (const entry of entries) {
-    if (entry.event === 'state' && entry.status === 'done') {
+    // Done, or merged by autonomous mode into the branch new tasks start from
+    if (entry.event === 'state' && (entry.status === 'done' || entry.state === 'auto_merged')) {
       merged.set(entry.task, { mergedAt: entry.at, files: [...(entry.files?.length ? entry.files : files.get(entry.task) ?? [])].sort() });
       continue;
     }
@@ -139,9 +141,11 @@ export function collectMergedSince(
   const createdAt = Date.parse(task.createdAt);
   const result: MergedTaskBrief[] = [];
   for (const other of tasks) {
-    if (other.id === task.id || other.status !== 'done' || other.metadata?.archivedAt) continue;
+    if (other.id === task.id || other.metadata?.archivedAt) continue;
+    const autoMerge = activeAutoMerge(other);
+    if (other.status !== 'done' && !autoMerge) continue;
     const info = merged.get(other.id) ?? merged.get(other.specId);
-    const mergedAt = info?.mergedAt ?? new Date(other.updatedAt).toISOString();
+    const mergedAt = info?.mergedAt ?? autoMerge?.at ?? new Date(other.updatedAt).toISOString();
     if (Number.isFinite(createdAt) && Date.parse(mergedAt) <= createdAt) continue;
     result.push({
       id: other.id,

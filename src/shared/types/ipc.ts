@@ -515,6 +515,15 @@ export interface ElectronAPI {
   /** Take a context note off a ticket (its text leaves the description) */
   undoContextNote: (projectId: string, taskId: string, noteId: string) => Promise<IPCResult>;
   onQueueProposalsChanged: (callback: (projectId: string) => void) => () => void;
+
+  // Autonomous mode
+  getAutonomousStatus: (projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousStatus | null>>;
+  mergeIntegrationIntoBase: (projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousMergeIntoBaseResult>>;
+  previewAutoMergeRevert: (taskId: string, projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousRevertPreview>>;
+  revertAutoMerge: (taskId: string, projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousRevertResult>>;
+  listQueueUndo: (projectId: string) => Promise<IPCResult<import('./queue-grooming').QueueUndoEntry[]>>;
+  undoQueueChange: (projectId: string, undoId: string) => Promise<IPCResult>;
+  onAutonomousChanged: (callback: (projectId: string) => void) => () => void;
   hasGraphifyGraph: (projectId: string) => Promise<IPCResult<boolean>>;
   isGraphifyEnabled: (projectId: string) => Promise<IPCResult<boolean>>;
   setGraphifyEnabled: (projectId: string, enabled: boolean) => Promise<IPCResult>;

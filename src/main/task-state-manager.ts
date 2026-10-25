@@ -605,7 +605,7 @@ export class TaskStateManager {
         stateValue = 'qa_review';
         break;
       case 'human_review':
-        stateValue = 'human_review';
+        stateValue = reviewReason === 'auto_merged' ? 'auto_merged' : 'human_review';
         contextReviewReason = reviewReason;
         break;
       case 'pr_created':

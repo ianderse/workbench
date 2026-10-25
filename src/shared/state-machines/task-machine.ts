@@ -26,6 +26,10 @@ export type TaskEvent =
   | { type: 'MOVED_TO_BACKLOG' }
   | { type: 'RATE_LIMIT_HOLD'; resetAt: string; message: string; phase?: string }
   | { type: 'USER_RESUMED' }
+  // Autonomous mode merged the task into its target branch (from human_review)
+  | { type: 'AUTO_MERGED' }
+  // The automatic merge was reverted: the task is an ordinary completed task again
+  | { type: 'AUTO_MERGE_REVERTED' }
   | { type: 'MARK_DONE' }
   | { type: 'CREATE_PR' }
   | { type: 'PR_CREATED'; prUrl: string };
@@ -145,9 +149,21 @@ export const taskMachine = createMachine(
       human_review: {
         on: {
           CREATE_PR: 'creating_pr',
+          AUTO_MERGED: { target: 'auto_merged', actions: 'setReviewReasonAutoMerged' },
           MARK_DONE: 'done',
           USER_RESUMED: { target: 'coding', actions: 'clearReviewReason' },
           // Allow restarting planning from human_review (e.g., incomplete task with no subtasks)
+          PLANNING_STARTED: { target: 'planning', actions: 'clearReviewReason' },
+          MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' }
+        }
+      },
+      // Merged into the target branch by autonomous mode: shown in Human Review until a person moves it
+      // to Done. Done does not merge again (the work is already in the target branch)
+      auto_merged: {
+        on: {
+          AUTO_MERGE_REVERTED: { target: 'human_review', actions: 'setReviewReasonCompleted' },
+          MARK_DONE: 'done',
+          USER_RESUMED: { target: 'coding', actions: 'clearReviewReason' },
           PLANNING_STARTED: { target: 'planning', actions: 'clearReviewReason' },
           MOVED_TO_BACKLOG: { target: 'backlog', actions: 'clearReviewReason' }
         }
@@ -187,6 +203,7 @@ export const taskMachine = createMachine(
     },
     actions: {
       setReviewReasonCompleted: assign({ reviewReason: () => 'completed' }),
+      setReviewReasonAutoMerged: assign({ reviewReason: () => 'auto_merged' }),
       setReviewReasonStopped: assign({ reviewReason: () => 'stopped' }),
       setReviewReasonQaRejected: assign({ reviewReason: () => 'qa_rejected' }),
       setReviewReasonErrors: assign({ reviewReason: () => 'errors' }),

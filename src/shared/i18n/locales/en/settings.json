@@ -507,7 +507,18 @@
       "budgetDescription": "Stop a task when its estimated cost reaches this amount in US dollars. Leave empty for no limit",
       "budgetPlaceholder": "No limit",
       "groomQueue": "Update queued tasks after a merge",
-      "groomQueueDescription": "After a task merges, add context notes to tickets in Planning and the Queue and propose archiving or adding tasks"
+      "groomQueueDescription": "After a task merges, add context notes to tickets in Planning and the Queue and propose archiving or adding tasks",
+      "autonomous": "Autonomous mode",
+      "autonomousDescription": "Tasks that pass AI review merge on their own, and the tasks waiting on them start. You still review merged tasks and move them to Done",
+      "autonomousTarget": "Merge into",
+      "autonomousTargetIntegration": "Integration branch",
+      "autonomousTargetMain": "Base branch",
+      "autonomousTargetIntegrationDescription": "A separate branch collects the merged tasks, and you merge it into the base branch when you are ready",
+      "autonomousTargetMainDescription": "Merged tasks go straight into the project's base branch",
+      "autonomousBranch": "Integration branch",
+      "autonomousBranchDescription": "Created from the base branch when first needed. New tasks start from it",
+      "autonomousPush": "Push after each merge",
+      "autonomousPushDescription": "Push the branch the task was merged into. A failed push is shown and never blocks the merge"
     },
     "context": {
       "projectIndex": "Project index",

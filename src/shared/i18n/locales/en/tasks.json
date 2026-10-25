@@ -213,6 +213,52 @@
       "startFailed": "Failed to start task"
     }
   },
+  "autonomous": {
+    "cardLabel": "Merged automatically",
+    "cardLabelTitle": "Merged into {{branch}} on its own. Move it to Done to sign it off",
+    "blocked": {
+      "conflicts": "Auto-merge blocked: conflicts",
+      "dirty_target": "Auto-merge blocked: target branch can't be updated",
+      "error": "Auto-merge blocked: see the task log"
+    },
+    "panel": {
+      "title": "Merged automatically",
+      "description": "This task passed AI review and was merged into {{branch}} as {{sha}}. Moving it to Done signs it off, nothing is merged again",
+      "pushFailed": "The push failed: {{error}}",
+      "pushed": "{{branch}} was pushed",
+      "requestChangesNote": "Requesting changes creates a Fix task at the top of the Queue that starts from {{branch}}",
+      "followUp": "Follow-up task: {{id}}",
+      "revert": "Revert this task",
+      "reverting": "Reverting",
+      "revertTitle": "Revert {{title}}?",
+      "revertDescription": "This adds a commit to {{branch}} that undoes the task's merge, in a temporary worktree. Your checkout is not touched",
+      "revertDependents": "These tasks were merged later and depend on it. They stay merged, so they may break without it:",
+      "revertConfirm": "Revert",
+      "revertCancel": "Cancel",
+      "revertFailed": "Could not revert: {{error}}",
+      "reverted": "Reverted on {{branch}}",
+      "revertedNote": "The merge was reverted on {{branch}}"
+    },
+    "banner": {
+      "ahead_one": "{{branch}} is {{count}} task ahead of {{base}}",
+      "ahead_other": "{{branch}} is {{count}} tasks ahead of {{base}}",
+      "upToDate": "{{branch}} is level with {{base}}",
+      "mergeInto": "Merge into {{base}}",
+      "merging": "Merging",
+      "merged": "Merged into {{base}}",
+      "pushFailed": "Merged, but the push failed: {{error}}",
+      "failed": "Could not merge: {{error}}"
+    },
+    "recentChanges": {
+      "title": "Recent automatic changes ({{count}})",
+      "toggle": "Show or hide recent automatic changes",
+      "obsolete": "Archived {{title}}",
+      "duplicate": "Archived {{title}}, a duplicate of {{kept}}",
+      "newTask": "Added task {{title}}",
+      "undo": "Undo",
+      "undoFailed": "Could not undo the change: {{error}}"
+    }
+  },
   "queueGrooming": {
     "panelTitle": "Queue updates ({{count}})",
     "panelToggle": "Show or hide queue updates",

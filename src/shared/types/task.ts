@@ -17,7 +17,8 @@ export type TaskOrderState = Record<TaskStatus, string[]>;
 // - 'completed': All subtasks done and QA passed, ready for final approval/merge
 // - 'errors': Subtasks failed during execution
 // - 'qa_rejected': QA found issues that need fixing
-export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'stopped';
+// - 'auto_merged': autonomous mode merged the task into its target branch; awaiting the human's sign-off
+export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'stopped' | 'auto_merged';
 
 export type SubtaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
@@ -224,6 +225,13 @@ export interface TaskMetadata {
   /** Notes added after other tasks merged (queue grooming); each can be undone */
   contextNotes?: TaskContextNote[];
 
+  /** Autonomous mode: the task's merge into the target branch (one --no-ff merge commit) */
+  autoMerge?: AutoMergeRecord;
+  /** Autonomous mode: why the last automatic merge did not happen (cleared when it succeeds) */
+  autoMergeBlocked?: { reason: 'conflicts' | 'dirty_target' | 'error'; message: string; at: string };
+  /** Id of the "Fix: ..." task that "Request changes" created for an automatically merged task */
+  autoMergeFollowUpTaskId?: string;
+
   // Archive status
   archivedAt?: string;  // ISO date when task was archived
   archivedInVersion?: string;  // Version in which task was archived (from changelog)
@@ -244,6 +252,22 @@ export interface RateLimitHold {
   pausedAt: string;
   /** Build phase that was interrupted (planning, coding, qa_review, qa_fixing) */
   phase?: string;
+}
+
+/** A task merged by autonomous mode (`metadata.autoMerge`) */
+export interface AutoMergeRecord {
+  /** The merge commit on the target branch */
+  sha: string;
+  /** The branch it was merged into */
+  branch: string;
+  /** ISO time */
+  at: string;
+  /** Whether the target branch was pushed afterwards */
+  pushed?: boolean;
+  pushError?: string;
+  /** Set when the merge was reverted from the task detail */
+  revertedAt?: string;
+  revertSha?: string;
 }
 
 export interface Task {

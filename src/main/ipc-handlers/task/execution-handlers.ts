@@ -39,6 +39,8 @@ import { taskQueue } from '../../services/task-queue';
 import { taskQueueOrder } from '../../services/task-queue-order';
 import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
+import { activeAutoMerge } from '../../../shared/utils/autonomous';
+import { createFollowUpTask, getAutonomousTargetSync } from '../../autonomous/autonomous-service';
 
 
 /**
@@ -205,6 +207,7 @@ function configureTaskQueue(
     ),
     getQueueOrder: (projectId) => taskQueueOrder.get(projectId),
     isTaskRunning: (taskId, projectId) => agentManager.isRunning(taskId, projectId),
+    getAutonomousTarget: (projectId, task) => getAutonomousTargetSync(projectStore.getProject(projectId), task),
     startTask: async (taskId, projectId) => {
       // The queue promotes one project's tasks at a time and says which, so the start never has
       // to guess the project from the task id
@@ -589,6 +592,13 @@ export function registerTaskExecutionHandlers(
         return { success: true };
       }
 
+      // Merged by autonomous mode: its worktree is behind the target branch, so the change request
+      // becomes a new "Fix: ..." task at the top of the Queue that starts from the target branch
+      if (activeAutoMerge(task)) {
+        const followUp = await createFollowUpTask(project, task, feedback, images as Array<Record<string, unknown>> | undefined);
+        return followUp.success ? { success: true } : { success: false, error: followUp.error };
+      }
+
       // Asked of the project whose task the revision will run in - the one resolved above, which
       // is the request's `projectId` whenever it sent one. Asking with that optional id instead
       // would guard a different project from the one `launchRun` below starts, and with no id sent
@@ -669,7 +679,8 @@ export function registerTaskExecutionHandlers(
         if (worktreePath) {
           if (options?.keepWorktree) {
             console.warn(`[TASK_UPDATE_STATUS] Marking task ${taskId} as done while keeping worktree at ${worktreePath}`);
-          } else if (options?.forceCleanup) {
+          } else if (options?.forceCleanup || activeAutoMerge(task)) {
+            // (a task merged by autonomous mode is in its target branch already: Done only cleans up)
             console.warn(`[TASK_UPDATE_STATUS] Cleaning up worktree for task ${taskId} (user confirmed)`);
             try {
               // Validate the detected branch matches the expected pattern, so a corrupted

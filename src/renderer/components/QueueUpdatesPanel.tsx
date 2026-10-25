@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import type { Task } from '../../shared/types';
-import type { QueueProposal } from '../../shared/types/queue-grooming';
+import type { QueueProposal, QueueUndoEntry } from '../../shared/types/queue-grooming';
 
 interface QueueUpdatesPanelProps {
   projectId: string;
@@ -16,11 +16,14 @@ interface QueueUpdatesPanelProps {
  * Compact panel above the board: the changes a merged task proposes for the tickets in Planning and
  * the Queue (archive an obsolete or duplicate ticket, add a task). Each one is applied or dismissed
  * here; notes on single tickets are applied on their own and shown on the card. Hidden when nothing
- * is proposed.
+ * is proposed. Below it, "Recent automatic changes" lists what autonomous mode applied on its own, each
+ * with Undo.
  */
 export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) {
   const { t } = useTranslation('tasks');
   const [proposals, setProposals] = useState<QueueProposal[]>([]);
+  const [undoEntries, setUndoEntries] = useState<QueueUndoEntry[]>([]);
+  const [undoExpanded, setUndoExpanded] = useState(false);
   const [expanded, setExpanded] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -28,6 +31,8 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
   const load = useCallback(async () => {
     const result = await window.electronAPI.listQueueProposals(projectId);
     if (result.success) setProposals(result.data ?? []);
+    const undo = await window.electronAPI.listQueueUndo(projectId);
+    if (undo.success) setUndoEntries(undo.data ?? []);
   }, [projectId]);
 
   // Read once when the board opens, then whenever the main process says proposals changed
@@ -57,7 +62,30 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
     }
   };
 
-  if (proposals.length === 0) return null;
+  const undoChange = async (entry: QueueUndoEntry) => {
+    setBusyId(entry.id);
+    setError(null);
+    try {
+      const result = await window.electronAPI.undoQueueChange(projectId, entry.id);
+      if (!result.success) setError(t('autonomous.recentChanges.undoFailed', { error: result.error ?? '' }));
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  if (proposals.length === 0 && undoEntries.length === 0) return null;
+
+  const describeApplied = (proposal: QueueProposal): string => {
+    switch (proposal.kind) {
+      case 'obsolete':
+        return t('autonomous.recentChanges.obsolete', { title: titleOf(proposal.taskId) });
+      case 'duplicate':
+        return t('autonomous.recentChanges.duplicate', { title: titleOf(proposal.taskId), kept: titleOf(proposal.duplicateOf) });
+      case 'newTask':
+        return t('autonomous.recentChanges.newTask', { title: proposal.title });
+    }
+  };
 
   const describe = (proposal: QueueProposal): string => {
     switch (proposal.kind) {
@@ -71,6 +99,8 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
   };
 
   return (
+    <>
+    {proposals.length > 0 && (
     <section
       aria-label={t('queueGrooming.panelTitle', { count: proposals.length })}
       className="mx-6 mt-2 rounded-lg border border-border bg-card/60"
@@ -119,5 +149,47 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
         </p>
       )}
     </section>
+    )}
+    {undoEntries.length > 0 && (
+      <section
+        aria-label={t('autonomous.recentChanges.title', { count: undoEntries.length })}
+        className="mx-6 mt-2 rounded-lg border border-border bg-card/60"
+      >
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm font-medium text-foreground"
+          onClick={() => setUndoExpanded((value) => !value)}
+          aria-expanded={undoExpanded}
+          aria-label={t('autonomous.recentChanges.toggle')}
+        >
+          {undoExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+          {t('autonomous.recentChanges.title', { count: undoEntries.length })}
+        </button>
+        {undoExpanded && (
+          <ul className="divide-y divide-border border-t border-border">
+            {[...undoEntries].reverse().map((entry) => (
+              <li key={entry.id} className="flex items-start gap-3 px-3 py-2">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-foreground wrap-anywhere">{describeApplied(entry.proposal)}</p>
+                  <p className="mt-0.5 text-xs text-(--nav-label-color) wrap-anywhere">
+                    {t('queueGrooming.intro', { number: taskNumber(entry.proposal.fromTaskId) })}
+                    {entry.proposal.reason ? `: ${entry.proposal.reason}` : ''}
+                  </p>
+                </div>
+                <Button size="sm" variant="ghost" className="shrink-0" disabled={busyId === entry.id} onClick={() => void undoChange(entry)}>
+                  {t('autonomous.recentChanges.undo')}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {error && proposals.length === 0 && (
+          <p role="alert" className="border-t border-border px-3 py-2 text-xs text-destructive">
+            {error}
+          </p>
+        )}
+      </section>
+    )}
+    </>
   );
 }

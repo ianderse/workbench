@@ -32,6 +32,8 @@ import { getTaskWorktreeBranch } from '../../shared/utils/claude-run';
 import type { AppSettings } from '../../shared/types/settings';
 import { appLog } from '../app-logger';
 import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branch';
+import { resolveAutonomousConfig } from '../../shared/utils/autonomous';
+import { prepareAutonomousBase } from '../autonomous/autonomous-service';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 import { buildTaskBriefing } from '../task-briefing';
@@ -405,7 +407,15 @@ export class AgentManager extends EventEmitter {
     // nothing chosen there is no choice to honour, so the repository is asked what its default
     // branch is rather than assuming `main`, which would fail on every project whose default is
     // `master`
-    const chosenBaseBranch = task.metadata?.baseBranch || project.settings?.mainBranch;
+    //
+    // Autonomous mode with an integration branch: new tasks branch from that branch (created from the
+    // base branch when first needed) so they see what earlier tasks merged into it
+    const autonomous = resolveAutonomousConfig(project.settings);
+    const integrationBranch =
+      autonomous.enabled && autonomous.target === 'integration' && task.metadata?.useWorktree !== false
+        ? autonomous.integrationBranch
+        : undefined;
+    const chosenBaseBranch = integrationBranch || task.metadata?.baseBranch || project.settings?.mainBranch;
 
     // That strictness is about the one moment the base branch decides what the work is built on:
     // the task's branch being cut from it. It happens once per task - `createOrGetWorktree` only
@@ -433,6 +443,10 @@ export class AgentManager extends EventEmitter {
     // a git repository at all, or in one freshly `git init`ed with no commit, and there the
     // detection has nothing to answer with. Failing to start over a value that is only going to be
     // printed would make those runs impossible, so the name stands in as a label instead.
+    if (integrationBranch && branchingFromBase) {
+      // A failure (no base branch to cut it from) fails the start with its message
+      await prepareAutonomousBase(project, task);
+    }
     const baseBranch = chosenBaseBranch
       ? (branchingFromBase ? await resolveBaseBranch(project.path, chosenBaseBranch) : chosenBaseBranch)
       : await this.detectBaseBranch(project.path, branchingFromBase);
@@ -447,7 +461,8 @@ export class AgentManager extends EventEmitter {
         project.path,
         task.specId,
         baseBranch,
-        task.metadata?.useLocalBranch ?? false,
+        // Autonomous mode merges into local branches (a push may have failed), so tasks start from them
+        task.metadata?.useLocalBranch ?? autonomous.enabled,
         task.metadata?.pushNewBranches ?? project.settings?.pushNewBranches !== false,
         project.autoBuildPath,
       );

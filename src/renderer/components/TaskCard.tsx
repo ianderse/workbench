@@ -21,6 +21,8 @@ import {
 import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask, useTaskStore, unmetDependencyTitles } from '../stores/task-store';
 import type { Task, TaskStatus } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
+import { useProjectStore } from '../stores/project-store';
+import { activeAutoMerge } from '../../shared/utils/autonomous';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
 import { canResumeTask } from '../../shared/utils/task-resume';
@@ -62,6 +64,9 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.description === nextTask.description &&
     prevTask.updatedAt === nextTask.updatedAt &&
     prevTask.reviewReason === nextTask.reviewReason &&
+    prevTask.metadata?.autoMerge?.sha === nextTask.metadata?.autoMerge?.sha &&
+    prevTask.metadata?.autoMerge?.revertedAt === nextTask.metadata?.autoMerge?.revertedAt &&
+    prevTask.metadata?.autoMergeBlocked?.at === nextTask.metadata?.autoMergeBlocked?.at &&
     prevTask.claudeRun?.reviewVerdict?.status === nextTask.claudeRun?.reviewVerdict?.status &&
     prevTask.claudeRun?.reviewVerdict?.rounds === nextTask.claudeRun?.reviewVerdict?.rounds &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
@@ -105,8 +110,9 @@ export const TaskCard = memo(function TaskCard({
   const stuckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // A string, so the selector returns a stable value
+  const autonomous = useProjectStore((s) => s.projects.find((p) => p.id === task.projectId)?.settings?.autonomous === true);
   const waitsFor = useTaskStore((s) =>
-    task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task) : ''
+    task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task, autonomous) : ''
   );
   // A string (or undefined), so the memoized card compares it cheaply
   const lastNoteFrom = task.metadata?.contextNotes?.at(-1)?.fromTaskId;
@@ -252,6 +258,9 @@ export const TaskCard = memo(function TaskCard({
   };
 
   const isArchived = !!task.metadata?.archivedAt;
+  // Autonomous mode: merged into its target branch on its own (a string, so the memoized card compares it cheaply)
+  const autoMergedInto = task.status === 'human_review' ? activeAutoMerge(task)?.branch : undefined;
+  const autoMergeBlocked = task.status === 'human_review' ? task.metadata?.autoMergeBlocked : undefined;
   // Human Review after every AI review round failed (a number, so the memoized card compares it cheaply)
   const failedReviewRounds = task.status === 'human_review' && task.claudeRun?.reviewVerdict?.status === 'failed'
     ? task.claudeRun.reviewVerdict.rounds
@@ -301,6 +310,16 @@ export const TaskCard = memo(function TaskCard({
         {failedReviewRounds > 0 && (
           <p className="mt-1.5 text-xs font-medium text-destructive">
             {t('aiReviewFailed.cardLabel', { count: failedReviewRounds })}
+          </p>
+        )}
+        {autoMergedInto && (
+          <p className="mt-1.5 text-xs font-medium text-(--nav-label-color) wrap-anywhere" title={t('autonomous.cardLabelTitle', { branch: autoMergedInto })}>
+            {t('autonomous.cardLabel')}
+          </p>
+        )}
+        {autoMergeBlocked && !autoMergedInto && (
+          <p className="mt-1.5 text-xs font-medium text-warning line-clamp-2 wrap-anywhere" title={autoMergeBlocked.message}>
+            {t(`autonomous.blocked.${autoMergeBlocked.reason}`)}
           </p>
         )}
         {lastNoteFrom && (

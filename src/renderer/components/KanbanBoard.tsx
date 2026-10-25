@@ -37,6 +37,7 @@ import { useProjectStore } from '../stores/project-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { WorktreeCleanupDialog } from './WorktreeCleanupDialog';
 import { QueueUpdatesPanel } from './QueueUpdatesPanel';
+import { AutonomousBanner } from './AutonomousBanner';
 import type { Task, TaskStatus, TaskOrderState } from '../../shared/types';
 
 // Type guard for valid drop column targets - preserves literal type from TASK_STATUS_COLUMNS
@@ -437,6 +438,12 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
   });
 
   // Calculate archived count for Done column button
+  // Changes when a task is auto-merged, reverted or done, so the integration branch banner counts again
+  const autonomousSignature = useMemo(
+    () => tasks.map((t) => `${t.status === 'done' ? 'd' : ''}${t.metadata?.autoMerge?.sha ?? ''}${t.metadata?.autoMerge?.revertedAt ? 'r' : ''}`).join(','),
+    [tasks]
+  );
+
   const archivedCount = useMemo(() =>
     tasks.filter(t => t.metadata?.archivedAt).length,
     [tasks]
@@ -789,6 +796,8 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
             )}
           </div>
         </div>
+      {/* Autonomous mode with an integration branch: how far it is ahead of the base branch, and merge it */}
+      {projectId && <AutonomousBanner projectId={projectId} tasksSignature={autonomousSignature} />}
       {/* Changes a merged task proposes for the tickets in Planning and the Queue */}
       {projectId && <QueueUpdatesPanel projectId={projectId} tasks={tasks} />}
       {/* Kanban columns */}

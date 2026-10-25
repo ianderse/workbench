@@ -54,6 +54,14 @@ export interface ProjectSettings {
   selfImprove?: boolean;
   /** After a task is merged, add context notes to queued tickets and propose queue changes (default: true) */
   groomQueueAfterMerge?: boolean;
+  /** Autonomous mode: tasks that pass AI review merge on their own and the tasks waiting on them start (default: false) */
+  autonomous?: boolean;
+  /** Where autonomous mode merges: a separate integration branch (default) or the base branch */
+  autonomousTarget?: 'integration' | 'main';
+  /** Name of the integration branch (default: workbench/auto) */
+  autonomousBranch?: string;
+  /** Push the target branch after each automatic merge (default: true) */
+  autonomousPush?: boolean;
 }
 
 export interface NotificationSettings {

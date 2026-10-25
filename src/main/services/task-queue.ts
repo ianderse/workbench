@@ -26,6 +26,7 @@
 import type { Task } from '../../shared/types';
 import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
 import { sortColumnTasks } from '../../shared/utils/task-column-order';
+import { isDependencySatisfied } from '../../shared/utils/autonomous';
 
 /** Delay used to coalesce bursts of requests (e.g. "Queue all") into one pass. */
 const TASK_QUEUE_DEBOUNCE_MS = 100;
@@ -54,6 +55,11 @@ export interface TaskQueueDeps {
    * a false result or a thrown error counts as a failed start.
    */
   startTask: (taskId: string, projectId: string) => Promise<boolean>;
+  /**
+   * Autonomous mode: the branch a task will branch from and be merged into, or undefined while the
+   * project's autonomous mode is off. A dependency auto-merged into it no longer blocks the task.
+   */
+  getAutonomousTarget?: (projectId: string, task: Task) => string | undefined;
   /** Debounce override for tests. */
   debounceMs?: number;
 }
@@ -62,13 +68,13 @@ export interface TaskQueueDeps {
  * Ids of the tasks this task still waits for: dependencies that exist, aren't archived and
  * aren't done yet. A dependency that no longer exists (deleted) counts as satisfied.
  */
-export function getUnmetDependencyIds(task: Task, tasks: readonly Task[]): string[] {
+export function getUnmetDependencyIds(task: Task, tasks: readonly Task[], autonomousTarget?: string): string[] {
   const ids = task.metadata?.dependsOnTaskIds;
   if (!ids || ids.length === 0) return [];
   return ids.filter((depId) => {
     if (depId === task.id) return false;
     const dep = tasks.find((t) => t.id === depId || t.specId === depId);
-    return !!dep && dep.status !== 'done' && !dep.metadata?.archivedAt;
+    return !!dep && !isDependencySatisfied(dep, autonomousTarget) && !dep.metadata?.archivedAt;
   });
 }
 
@@ -77,10 +83,15 @@ export function getUnmetDependencyIds(task: Task, tasks: readonly Task[]): strin
  * unplaced tasks newest first, then the saved order): not archived and not waiting for a
  * rate limit to reset and not waiting for a task it depends on.
  */
-export function getPromotableQueuedTasks(tasks: Task[], now: number = Date.now(), queueOrder?: readonly string[]): Task[] {
+export function getPromotableQueuedTasks(
+  tasks: Task[],
+  now: number = Date.now(),
+  queueOrder?: readonly string[],
+  getAutonomousTarget?: (task: Task) => string | undefined
+): Task[] {
   const queued = tasks.filter((t) => t.status === 'queue' && !t.metadata?.archivedAt);
   return sortColumnTasks(queued, queueOrder).filter(
-    (t) => !isTaskOnRateLimitHold(t, now) && getUnmetDependencyIds(t, tasks).length === 0
+    (t) => !isTaskOnRateLimitHold(t, now) && getUnmetDependencyIds(t, tasks, getAutonomousTarget?.(t)).length === 0
   );
 }
 
@@ -185,7 +196,7 @@ export class TaskQueue {
       if (inProgressIds.size >= maxParallel) return;
 
       const queueOrder = deps.getQueueOrder?.(projectId) ?? [];
-      const next = getPromotableQueuedTasks(tasks, Date.now(), queueOrder).find(
+      const next = getPromotableQueuedTasks(tasks, Date.now(), queueOrder, (t) => deps.getAutonomousTarget?.(projectId, t)).find(
         (t) => !started.has(t.id) && !failed.has(t.id) && !deps.isTaskRunning?.(t.id, projectId)
       );
       if (!next) return;

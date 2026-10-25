@@ -131,6 +131,8 @@ export async function buildParallelTasksPrompt(
       task.task !== specId &&
       task.status !== undefined &&
       ACTIVE_STATUSES.has(task.status) &&
+      // merged by autonomous mode into the branch new tasks start from: not a parallel change any more
+      task.state !== 'auto_merged' &&
       existsSync(path.join(specsDir, task.task))
   );
   const list = others.length

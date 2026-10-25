@@ -243,6 +243,25 @@ Tickets are written before the code exists, so later ones go stale as earlier ta
   leave an undo entry. The project setting `groomQueueAfterMerge` (default on) turns it off. The answer is validated by
   `normalizeGroomingResult()` (`shared/utils/queue-grooming.ts`).
 
+### Autonomous mode (per project)
+
+Project settings `autonomous`, `autonomousTarget` (`integration` default | `main`), `autonomousBranch` (default
+`workbench/auto`) and `autonomousPush` (default on), kept in `.workbench/settings.json`. Rules are pure in
+`shared/utils/autonomous.ts`; git work is `main/autonomous/autonomous-git.ts` (merges and reverts run in a temporary
+detached worktree, then the branch is moved by `merge --ff-only` where it is checked out, else `update-ref`); the glue is
+`main/autonomous/autonomous-service.ts` and `ipc-handlers/autonomous-handlers.ts`.
+
+- New tasks branch from the target (the integration branch is created from the base branch when first needed; local
+  branches are preferred). A task that enters Human Review as `completed` with `reviewVerdict.status === 'passed'` (no
+  verdict, a failed one or a stopped task never merge) is merged with one `--no-ff` commit after the target is pulled
+  into the task branch (merge agent resolves conflicts; otherwise `metadata.autoMergeBlocked`, task stays in Human
+  Review). The commit goes to `metadata.autoMerge = { sha, branch, at }`, the target is pushed, the machine enters
+  `auto_merged` (Human Review, reason `auto_merged`), the queue runs and grooming applies structural changes.
+- The queue gate counts a dependency auto-merged into the dependent's target as satisfied (`isDependencySatisfied`).
+- Done from `auto_merged` only cleans up the worktree. Request changes creates a `Fix: <title>` task at the top of the
+  Queue (the old worktree is behind the target). Revert (`git revert -m 1`) and "Merge into main" (board banner) also use
+  temporary worktrees. Undo of automatic queue changes is in the Queue updates panel.
+
 ### MCP Connectors
 
 Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and

@@ -4,7 +4,8 @@ import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { SettingsSection } from '../settings/SettingsSection';
-import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
+import { SettingsRow, SettingsRows, SegmentedControl } from '../settings/SettingsRow';
+import { DEFAULT_AUTONOMOUS_BRANCH, resolveAutonomousConfig } from '../../../shared/utils/autonomous';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
 import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
@@ -39,6 +40,13 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
       return parsed === settings.maxBudgetUsd ? draft : settings.maxBudgetUsd?.toString() ?? '';
     });
   }, [settings.maxBudgetUsd]);
+
+  // The integration branch name is typed as text; an invalid name falls back to the default when used
+  const autonomous = resolveAutonomousConfig(settings);
+  const [branchDraft, setBranchDraft] = useState(settings.autonomousBranch ?? '');
+  useEffect(() => {
+    setBranchDraft((draft) => ((settings.autonomousBranch ?? '') === draft.trim() ? draft : settings.autonomousBranch ?? ''));
+  }, [settings.autonomousBranch]);
 
   const handleBudgetChange = (value: string) => {
     setBudgetDraft(value);
@@ -109,6 +117,68 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
             aria-label={t('projectPages.tasks.groomQueue')}
           />
         </SettingsRow>
+
+        <SettingsRow
+          label={t('projectPages.tasks.autonomous')}
+          description={t('projectPages.tasks.autonomousDescription')}
+        >
+          <Switch
+            checked={autonomous.enabled}
+            onCheckedChange={(checked) => setSettings({ ...settings, autonomous: checked })}
+            aria-label={t('projectPages.tasks.autonomous')}
+          />
+        </SettingsRow>
+
+        {autonomous.enabled && (
+          <>
+            <SettingsRow
+              label={t('projectPages.tasks.autonomousTarget')}
+              description={t(autonomous.target === 'integration'
+                ? 'projectPages.tasks.autonomousTargetIntegrationDescription'
+                : 'projectPages.tasks.autonomousTargetMainDescription')}
+            >
+              <SegmentedControl
+                value={autonomous.target}
+                options={[
+                  { value: 'integration', label: t('projectPages.tasks.autonomousTargetIntegration') },
+                  { value: 'main', label: t('projectPages.tasks.autonomousTargetMain') },
+                ]}
+                onValueChange={(value) => setSettings({ ...settings, autonomousTarget: value })}
+                ariaLabel={t('projectPages.tasks.autonomousTarget')}
+              />
+            </SettingsRow>
+
+            {autonomous.target === 'integration' && (
+              <SettingsRow
+                label={t('projectPages.tasks.autonomousBranch')}
+                description={t('projectPages.tasks.autonomousBranchDescription')}
+                htmlFor="project-autonomous-branch"
+              >
+                <Input
+                  id="project-autonomous-branch"
+                  className="w-48"
+                  placeholder={DEFAULT_AUTONOMOUS_BRANCH}
+                  value={branchDraft}
+                  onChange={(e) => {
+                    setBranchDraft(e.target.value);
+                    setSettings({ ...settings, autonomousBranch: e.target.value.trim() || undefined });
+                  }}
+                />
+              </SettingsRow>
+            )}
+
+            <SettingsRow
+              label={t('projectPages.tasks.autonomousPush')}
+              description={t('projectPages.tasks.autonomousPushDescription')}
+            >
+              <Switch
+                checked={autonomous.push}
+                onCheckedChange={(checked) => setSettings({ ...settings, autonomousPush: checked })}
+                aria-label={t('projectPages.tasks.autonomousPush')}
+              />
+            </SettingsRow>
+          </>
+        )}
       </SettingsRows>
     </SettingsSection>
   );

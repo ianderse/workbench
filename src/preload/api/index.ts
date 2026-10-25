@@ -10,6 +10,7 @@ import { GraphifyAPI, createGraphifyAPI } from './modules/graphify-api';
 import { AgentBackendAPI, createAgentBackendAPI } from './modules/agent-backend-api';
 import { SelfImproveAPI, createSelfImproveAPI } from './modules/self-improve-api';
 import { QueueGroomingAPI, createQueueGroomingAPI } from './modules/queue-grooming-api';
+import { AutonomousAPI, createAutonomousAPI } from './modules/autonomous-api';
 import { ProjectIndexAPI, createProjectIndexAPI } from './modules/project-index-api';
 import { LiveAgentAPI, createLiveAgentAPI } from './modules/live-agent-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
@@ -31,6 +32,7 @@ export interface ElectronAPI extends
   AgentBackendAPI,
   SelfImproveAPI,
   QueueGroomingAPI,
+  AutonomousAPI,
   ProjectIndexAPI,
   LiveAgentAPI,
   McpAPI,
@@ -53,6 +55,7 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createAgentBackendAPI(),
   ...createSelfImproveAPI(),
   ...createQueueGroomingAPI(),
+  ...createAutonomousAPI(),
   ...createProjectIndexAPI(),
   ...createLiveAgentAPI(),
   ...createMcpAPI(),

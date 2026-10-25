@@ -47,7 +47,7 @@ interface PullRequestView {
   headRefName: string;
 }
 
-const CONFLICT_MARKER = /^(<{7}|>{7})( |$)/m;
+export const CONFLICT_MARKER =/^(<{7}|>{7})( |$)/m;
 /** Target lines too generic to tell whether they survived (braces, punctuation) */
 const TRIVIAL_LINE = /^[\s{}()[\];,.]*$/;
 
@@ -58,7 +58,7 @@ function errorText(error: unknown): string {
 }
 
 /** Lines the target branch added to each file (since `mergeBase`) that `HEAD` no longer has */
-async function findMissingTargetLines(
+export async function findMissingTargetLines(
   git: (args: string[]) => Promise<string>,
   files: string[],
   mergeBase: string,

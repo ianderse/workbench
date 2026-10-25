@@ -70,6 +70,13 @@ export const IPC_CHANNELS = {
   QUEUE_PROPOSAL_APPLY: 'queueGrooming:apply',
   QUEUE_PROPOSAL_DISMISS: 'queueGrooming:dismiss',
   QUEUE_NOTE_UNDO: 'queueGrooming:undoNote',  // Take a context note off a ticket
+  QUEUE_UNDO_LIST: 'queueGrooming:undoList',  // Structural changes applied without asking (autonomous mode), newest last
+  QUEUE_CHANGE_UNDO: 'queueGrooming:undoChange',  // Undo one of them: (projectId, undoId)
+  AUTONOMOUS_STATUS: 'autonomous:status',  // The integration branch next to the base branch: (projectId)
+  AUTONOMOUS_MERGE_INTO_BASE: 'autonomous:mergeIntoBase',  // Merge the integration branch into the base branch: (projectId)
+  AUTONOMOUS_REVERT_PREVIEW: 'autonomous:revertPreview',  // Later automatic merges that depend on a task: (taskId, projectId)
+  AUTONOMOUS_REVERT: 'autonomous:revert',  // Revert a task's automatic merge: (taskId, projectId)
+  AUTONOMOUS_CHANGED: 'autonomous:changed',  // Event: an automatic merge, revert or merge into the base branch happened (main -> renderer): (projectId)
   QUEUE_PROPOSALS_CHANGED: 'queueGrooming:changed',  // Event: proposals or notes changed (main -> renderer): (projectId)
   TASK_LIST_CHANGED: 'task:listChanged',  // Event: tasks were created, edited or moved outside the board, e.g. by the Claude chat (main -> renderer): (projectId)
   TASK_RATE_LIMIT_HOLD_CHANGE: 'task:rateLimitHoldChange',  // Rate-limit hold set/cleared (main -> renderer)

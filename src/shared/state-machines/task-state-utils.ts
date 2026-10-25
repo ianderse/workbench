@@ -15,7 +15,7 @@ import type { TaskStatus, ReviewReason, ExecutionPhase } from '../types';
  */
 export const TASK_STATE_NAMES = [
   'backlog', 'planning', 'coding',
-  'qa_review', 'qa_fixing', 'queued', 'human_review', 'error',
+  'qa_review', 'qa_fixing', 'queued', 'human_review', 'auto_merged', 'error',
   'creating_pr', 'pr_created', 'done'
 ] as const;
 
@@ -33,7 +33,7 @@ export type TaskStateName = typeof TASK_STATE_NAMES[number];
  * blocks — new execution-progress events flow through normally.
  */
 export const XSTATE_SETTLED_STATES: ReadonlySet<string> = new Set<TaskStateName>([
-  'queued', 'human_review', 'error', 'creating_pr', 'pr_created', 'done'
+  'queued', 'human_review', 'auto_merged', 'error', 'creating_pr', 'pr_created', 'done'
 ]);
 
 /**
@@ -53,6 +53,7 @@ export const XSTATE_TO_PHASE: Record<TaskStateName, ExecutionPhase> & Record<str
   'qa_fixing': 'qa_fixing',
   'queued': 'idle',
   'human_review': 'complete',
+  'auto_merged': 'complete',
   'error': 'failed',
   'creating_pr': 'complete',
   'pr_created': 'complete',
@@ -83,6 +84,8 @@ export function mapStateToLegacy(
       return { status: 'queue' };
     case 'human_review':
       return { status: 'human_review', reviewReason: reviewReason ?? 'completed' };
+    case 'auto_merged':
+      return { status: 'human_review', reviewReason: 'auto_merged' };
     case 'error':
       return { status: 'human_review', reviewReason: 'errors' };
     case 'creating_pr':

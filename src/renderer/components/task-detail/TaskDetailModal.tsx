@@ -58,6 +58,8 @@ import { isTaskSessionActive } from '../../../shared/utils/claude-run';
 import { TaskAttachments } from './TaskAttachments';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
 import { AIReviewFailedPanel } from './task-review/AIReviewFailedPanel';
+import { AutoMergePanel } from './task-review/AutoMergePanel';
+import { activeAutoMerge } from '../../../shared/utils/autonomous';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
 import { MergePRDialog } from './task-review/MergePRDialog';
 import { LocalMergeDialog } from './task-review/LocalMergeDialog';
@@ -380,6 +382,9 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       {/* Human Review after the last AI review round still failed: why, and how the rounds went */}
                       {task.status === 'human_review' && <AIReviewFailedPanel claudeRun={task.claudeRun} />}
 
+                      {/* Merged by autonomous mode: where it went, and Revert this task */}
+                      {task.status === 'human_review' && <AutoMergePanel task={task} />}
+
                       {/* Notes added to this ticket after other tasks merged, with Undo */}
                       <TaskContextNotes task={task} />
 
@@ -392,7 +397,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                             <TaskOpenAgentButton task={task} />
                             {/* Merge the task branch into its base branch with git, in the project.
                                 A disabled button gets no pointer events, so its reason sits on a wrapper */}
-                            {state.needsReview && state.worktreeStatus?.exists && (
+                            {state.needsReview && state.worktreeStatus?.exists && !activeAutoMerge(task) && (
                               <span title={baseBranchMissingTitle} className="inline-flex">
                                 <Button
                                   variant="ghost"
@@ -425,7 +430,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                                   </Button>
                                 )}
                               </>
-                            ) : state.needsReview && state.worktreeStatus?.exists && (
+                            ) : state.needsReview && state.worktreeStatus?.exists && !activeAutoMerge(task) && (
                               <span title={baseBranchMissingTitle} className="inline-flex">
                                 <Button
                                   size="sm"
