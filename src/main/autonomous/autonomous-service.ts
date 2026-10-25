@@ -28,6 +28,9 @@ import {
   resolveAutonomousConfig,
 } from '../../shared/utils/autonomous';
 import { appLog } from '../app-logger';
+import { taskHooks } from '../task-hooks';
+import { getAgentBackendSettings } from '../agent-backend/settings';
+import { resolveEffectiveAgent } from '../../shared/utils/agent-override';
 import { projectStore } from '../project-store';
 import { taskStateManager } from '../task-state-manager';
 import { taskQueue } from '../services/task-queue';
@@ -250,6 +253,8 @@ async function runAutoMerge(project: Project, task: Task, deps: AutoMergeDeps): 
     specId: task.specId,
     dataDir: project.autoBuildPath,
     profileId: project.settings?.claudeProfileId,
+    // The task's own backend (a pin to Claude Code or OMP), not the app-wide one
+    backend: resolveEffectiveAgent(task.metadata?.agentOverride, getAgentBackendSettings().kind).backend,
     mergeAgent: deps.mergeAgent,
     log: (message) => logTask(project, task, 'info', message),
     shouldContinue: () => {
@@ -293,6 +298,10 @@ async function runAutoMerge(project: Project, task: Task, deps: AutoMergeDeps): 
   }
   projectStore.invalidateTasksCache(project.id);
   notifyChanged(project.id);
+
+  // The other open tasks that branch from this target take the merge in, as after a merge to Done
+  // (the task is not resynced again when it moves to Done later: it is already merged)
+  taskHooks.emit('auto-merged', { project, task: freshTask(project.id, task.id) ?? merged, into: targetBranch });
 
   // The tasks waiting on this one can start, and the queue is groomed with structural changes applied
   taskQueue.request(project.id);

@@ -13,6 +13,8 @@ export interface TaskHookEvents {
   'files-edited': { project: Project; task: Task; files: string[] };
   /** The task's branch was merged into its base branch (local merge, merged pull request or full worktree merge) and the task is done */
   merged: { project: Project; task: Task };
+  /** Autonomous mode merged the task into `into` (its target branch); the task stays in Human Review */
+  'auto-merged': { project: Project; task: Task; into: string };
 }
 
 type TaskHookName = keyof TaskHookEvents;
@@ -22,6 +24,7 @@ const handlers: { [K in TaskHookName]: Set<TaskHookHandler<K>> } = {
   state: new Set(),
   'files-edited': new Set(),
   merged: new Set(),
+  'auto-merged': new Set(),
 };
 
 function reportFailure(name: TaskHookName, error: unknown): void {

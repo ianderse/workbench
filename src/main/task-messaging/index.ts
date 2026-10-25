@@ -13,6 +13,7 @@ import { configureTaskMessaging } from './broker';
 import { TaskNotices } from './notices';
 import { isBranchMergedInto } from './merge-sync';
 import { taskResync } from '../task-resync';
+import { resolveAutonomousConfig } from '../../shared/utils/autonomous';
 
 export { deliverToTask } from './broker';
 
@@ -37,6 +38,14 @@ export function registerTaskMessaging(options: { isRunning?: (taskId: string, pr
     defaultBranch: (project) => resolveDefaultBaseBranch(project.path),
     // Tasks on the merged branch that are not running go back to In Progress to take it in
     requestResync: (project, task) => taskResync.request(project.id, task.id),
+    // Autonomous mode: tasks branch from its target (integration branch or main), whatever base their metadata names
+    // (the same rule as the run config in AgentManager; with target `main` the task's own base already matches)
+    autonomousTarget: (project, task) => {
+      const config = resolveAutonomousConfig(project.settings);
+      return config.enabled && config.target === 'integration' && task.metadata?.useWorktree !== false
+        ? config.integrationBranch
+        : undefined;
+    },
     // Merged locally: the task branch has commits of its own and is in its base branch (a merged
     // PR sets prState instead). `HEAD` (a detached worktree) would name the project's own HEAD here
     isMerged: async (project, _task, branch, base) => {

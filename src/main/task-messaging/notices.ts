@@ -24,7 +24,7 @@ import { taskSessionName } from '../../shared/utils/task-messaging';
 import { taskHooks, type TaskHookEvents } from '../task-hooks';
 import { foldTaskChangelog, getTaskChangelogPath, readTaskChangelog, type TaskChangelogTask } from '../task-changelog';
 import { deliverToTask, getTaskMessagingEnv, taskSpecDir } from './broker';
-import { MergeSync, hasTaskMerge, recordTaskMerge, takeTaskMerge, type MergeSyncOptions, type TaskMergeInfo } from './merge-sync';
+import { MergeSync, announcesMergeOnDone, hasTaskMerge, recordTaskMerge, takeTaskMerge, type MergeSyncOptions, type TaskMergeInfo } from './merge-sync';
 import { isStoppedByUser } from '../task-resync/user-stop';
 
 /** Tasks that get notices: running, reviewed by AI, or waiting in the queue (their inbox) */
@@ -76,6 +76,8 @@ export interface TaskNoticesOptions {
   defaultBranch?: MergeSyncOptions['defaultBranch'];
   /** A task that is not running has to take in a merge: bring it back to In Progress (task-resync) */
   requestResync?: MergeSyncOptions['requestResync'];
+  /** The branch autonomous mode branches a task from, undefined when it is off */
+  autonomousTarget?: MergeSyncOptions['autonomousTarget'];
 }
 
 function describe(projectId: string, task: Pick<Task, 'specId' | 'title'>): string {
@@ -116,6 +118,7 @@ export class TaskNotices {
       isRunning: options.isRunning,
       defaultBranch: options.defaultBranch,
       requestResync: options.requestResync,
+      autonomousTarget: options.autonomousTarget,
     });
   }
 
@@ -124,6 +127,7 @@ export class TaskNotices {
     this.unsubscribe.push(
       taskHooks.on('state', (event) => this.onState(event)),
       taskHooks.on('files-edited', (event) => this.onFilesEdited(event)),
+      taskHooks.on('auto-merged', (event) => this.onAutoMerged(event)),
     );
     return this;
   }
@@ -186,11 +190,28 @@ export class TaskNotices {
 
     if (status === 'done') {
       const files = await this.filesOf(project, task.specId);
+      // Autonomous mode merged it earlier and resynced the others then; Done only cleans up
+      const current = getTaskMessagingEnv()?.getTasks(project.id).find((t) => t.specId === task.specId);
+      if (!announcesMergeOnDone(task, current)) {
+        takeTaskMerge(project.id, task.specId);
+        this.edited.delete(key(project.id, task.specId));
+        return;
+      }
       const merge = await this.mergeOf(project, task, files);
       this.edited.delete(key(project.id, task.specId));
       if (!merge) return;
       await this.mergeSync.onMerged({ project, merged: task, who: describe(project.id, task), info: merge, files });
     }
+  }
+
+  /**
+   * Autonomous mode merged a task into its target branch (the task stays in Human Review): the
+   * other open tasks that branch from that target take it in, as after a merge to Done
+   */
+  async onAutoMerged({ project, task, into }: TaskHookEvents['auto-merged']): Promise<void> {
+    const files = await this.filesOf(project, task.specId);
+    this.edited.delete(key(project.id, task.specId));
+    await this.mergeSync.onMerged({ project, merged: task, who: describe(project.id, task), info: { into, via: 'local' }, files });
   }
 
   onFilesEdited({ project, task, files }: TaskHookEvents['files-edited']): void {

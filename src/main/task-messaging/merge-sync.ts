@@ -28,6 +28,7 @@ import { appLog } from '../app-logger';
 import { git } from '../utils/git-exec';
 import { findTaskWorktree } from '../worktree-paths';
 import { isTaskBranchMerging } from '../worktree/merge-guard';
+import { activeAutoMerge } from '../../shared/utils/autonomous';
 import { keepsLocalMergeOut as keepsLocalResyncOut, recordResyncRequest } from '../task-resync/request';
 import { getTaskMessagingEnv, isTaskLive, taskSpecDir } from './broker';
 
@@ -171,6 +172,29 @@ export interface MergeSyncOptions {
   defaultBranch?: (project: Project) => Promise<string>;
   /** A task that is not running got a resync request: bring it back to In Progress to apply it */
   requestResync?: (project: Project, task: Task) => void;
+  /**
+   * The branch a task really branches from while autonomous mode is on (its integration branch or
+   * main), undefined when it is off or names none. A merge into it reaches the task whatever base
+   * branch the task's metadata names.
+   */
+  autonomousTarget?: (project: Project, task: Task) => string | undefined;
+}
+
+/**
+ * Whether a task takes in a merge into `into`: it is based on that branch, or autonomous mode
+ * branches it from there. Tasks autonomous mode merged already are finished work: never resynced
+ */
+export function takesInMerge(task: Task, base: string, into: string, autonomousTarget?: string): boolean {
+  if (activeAutoMerge(task)) return false;
+  return base === into || autonomousTarget === into;
+}
+
+/**
+ * Whether a task that entered Done is announced as a merge. One autonomous mode merged was announced
+ * when it was auto-merged (`TaskHookEvents['auto-merged']`); Done from there only cleans up.
+ */
+export function announcesMergeOnDone(...tasks: Array<Pick<Task, 'metadata'> | undefined>): boolean {
+  return !tasks.some((t) => t && activeAutoMerge(t));
 }
 
 function listFiles(files: string[]): string {
@@ -243,8 +267,9 @@ export class MergeSync {
     const defaultBranch = () => (fallback ??= this.defaultBranchOf(project));
     const same: Task[] = [];
     for (const task of recipients) {
+      if (activeAutoMerge(task)) continue;
       const base = await this.baseOf(project, task, defaultBranch);
-      if (base === info.into) {
+      if (takesInMerge(task, base, info.into, this.options.autonomousTarget?.(project, task))) {
         same.push(task);
       } else if (task.status !== 'queue') {
         this.options.queueNotice(project.id, task.specId,
@@ -315,6 +340,7 @@ export class MergeSync {
     const task = getTaskMessagingEnv()?.getTasks(project.id).find((t) => t.specId === specId);
     if (!task || task.metadata?.archivedAt || task.metadata?.prState === 'merged') return;
     if (!MERGE_RECIPIENT_STATUSES.has(task.status) && task.status !== 'queue') return;
+    if (activeAutoMerge(task)) return;
     // It may have got a pull request while it waited
     if (keepsLocalMergeOut(info, task)) {
       this.options.queueNotice(project.id, specId, this.notPushedText(event));
