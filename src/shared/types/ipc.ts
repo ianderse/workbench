@@ -82,8 +82,7 @@ import type {
   ClaudeProfile,
   ClaudeAutoSwitchSettings,
   ClaudeUsageSnapshot,
-  AllProfilesUsage,
-  TerminalProfileChangedEvent
+  AllProfilesUsage
 } from './agent';
 import type { AppSettings } from './settings';
 import type { AppUpdateCheckResult, AppUpdateInfo, AppUpdateProgress, AppUpdateAvailableEvent, AppUpdateDownloadedEvent, AppUpdateErrorEvent } from './app-update';
@@ -267,8 +266,6 @@ export interface ElectronAPI {
   onTerminalClaudeExit: (callback: (id: string) => void) => () => void;
   /** Listen for pending Claude resume notifications (resumed once the window is shown) */
   onTerminalPendingResume: (callback: (id: string) => void) => () => void;
-  /** Listen for profile change events - terminals need to be recreated with new profile env vars */
-  onTerminalProfileChanged: (callback: (event: TerminalProfileChangedEvent) => void) => () => void;
   /** Listen for OAuth code input requests (manual OAuth flow) */
   onTerminalOAuthCodeNeeded: (callback: (info: {
     terminalId: string;

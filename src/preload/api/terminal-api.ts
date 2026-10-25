@@ -16,7 +16,6 @@ import type {
   TerminalWorktreeConfig,
   TerminalWorktreeResult,
   OtherWorktreeInfo,
-  TerminalProfileChangedEvent,
 } from '../../shared/types';
 
 /** Type for proactive swap notification events */
@@ -79,7 +78,6 @@ export interface TerminalAPI {
   onTerminalClaudeBusy: (callback: (id: string, isBusy: boolean) => void) => () => void;
   onTerminalClaudeExit: (callback: (id: string) => void) => () => void;
   onTerminalPendingResume: (callback: (id: string) => void) => () => void;
-  onTerminalProfileChanged: (callback: (event: TerminalProfileChangedEvent) => void) => () => void;
 
   // Claude Profile Management
   getClaudeProfiles: () => Promise<IPCResult<ClaudeProfileSettings>>;
@@ -339,21 +337,6 @@ export const createTerminalAPI = (): TerminalAPI => ({
     ipcRenderer.on(IPC_CHANNELS.TERMINAL_PENDING_RESUME, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_PENDING_RESUME, handler);
-    };
-  },
-
-  onTerminalProfileChanged: (
-    callback: (event: TerminalProfileChangedEvent) => void
-  ): (() => void) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      data: TerminalProfileChangedEvent
-    ): void => {
-      callback(data);
-    };
-    ipcRenderer.on(IPC_CHANNELS.TERMINAL_PROFILE_CHANGED, handler);
-    return () => {
-      ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_PROFILE_CHANGED, handler);
     };
   },
 
