@@ -69,8 +69,13 @@ export function SessionSelector({ terminalId, labelClassName }: SessionSelectorP
     // The open session again: nothing to do
     if (sessionId && sessions.find((session) => session.sessionId === sessionId)?.current) return;
     useTerminalStore.getState().setCLIMode(terminalId, true);
+    // A spinner over the window until the session is up (the old one exits, the new one starts)
+    useTerminalStore.getState().setTerminalLoading(terminalId, 'claude');
     void window.electronAPI.openClaudeSession(terminalId, sessionId).then((result) => {
-      if (!result.success) console.warn('[SessionSelector] Could not open the session:', result.error);
+      if (!result.success) {
+        useTerminalStore.getState().setTerminalLoading(terminalId, undefined);
+        console.warn('[SessionSelector] Could not open the session:', result.error);
+      }
     });
   }, [sessions, terminalId]);
 
