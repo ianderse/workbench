@@ -14,14 +14,12 @@ import type { Task } from '../types';
 /** Statuses a dependent can still be changed in: Planning (backlog) and the Queue */
 const WAITING_STATUSES = new Set(['backlog', 'queue']);
 
-/** Whether a ticket has not started: waiting in Planning or the Queue, never ran, not archived */
-export function isUnstartedDependent(task: Pick<Task, 'status' | 'claudeRun' | 'executionProgress' | 'metadata'>): boolean {
-  return (
-    WAITING_STATUSES.has(task.status) &&
-    !task.metadata?.archivedAt &&
-    !task.claudeRun &&
-    !task.executionProgress?.startedAt
-  );
+/**
+ * Whether a ticket is waiting to start: in Planning or the Queue and not archived. A ticket that ran
+ * before and was put back (stopped and re-queued) waits too: it is not running, so it can still wait
+ */
+export function isUnstartedDependent(task: Pick<Task, 'status' | 'metadata'>): boolean {
+  return WAITING_STATUSES.has(task.status) && !task.metadata?.archivedAt;
 }
 
 /** Whether a ticket still waits for a person's decision (such tickets never block anything) */

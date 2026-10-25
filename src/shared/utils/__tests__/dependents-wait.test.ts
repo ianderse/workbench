@@ -19,10 +19,14 @@ describe('addDependencyToDependents', () => {
     expect(addDependencyToDependents(tasks, ['s'], ['n'])).toEqual({ q: ['s-spec', 'n'] });
   });
 
-  it('skips started, in-progress, done and archived dependents', () => {
+  it('includes a queued ticket that ran before (stopped and re-queued)', () => {
+    const tasks = [task('s', 'done'), task('ran', 'queue', dep('s'), { claudeRun: {} as Task['claudeRun'] })];
+    expect(addDependencyToDependents(tasks, ['s'], ['n'])).toEqual({ ran: ['s', 'n'] });
+  });
+
+  it('skips in-progress, review, done and archived dependents', () => {
     const tasks = [
       task('s', 'done'),
-      task('ran', 'queue', dep('s'), { claudeRun: {} as Task['claudeRun'] }),
       task('prog', 'in_progress', dep('s')),
       task('rev', 'human_review', dep('s')),
       task('fin', 'done', dep('s')),
