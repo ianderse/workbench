@@ -12,7 +12,7 @@
  */
 
 import path from 'path';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync } from 'fs';
 import type { ArchivedTaskRun, TaskLogs } from '../shared/types';
 import type { ClaudeRunInfo } from '../shared/types/claude-code';
 import { safeParseJson } from './utils/json-repair';
@@ -21,6 +21,9 @@ export const PREVIOUS_RUNS_DIR = 'previous_runs';
 
 /** Files of a run worth keeping when the task starts over */
 const ARCHIVED_FILES = ['task_logs.json', 'claude_run.json'] as const;
+
+/** OMP's session transcripts of the run: copied (not moved), so a failed copy loses nothing */
+const OMP_SESSIONS_DIR = 'omp-sessions';
 
 /** `1` -> `001`, so the folders sort in run order */
 function folderName(index: number): string {
@@ -51,14 +54,22 @@ function readJson<T>(file: string): T | null {
 /**
  * Put the current run aside before the task starts over.
  *
- * @returns the number the run was filed under, or null when it had nothing worth keeping
+ * @returns the number the run was filed under, or null when it had nothing worth keeping.
+ * Throws when OMP's session transcripts cannot be copied.
  */
 export function archiveCurrentRun(specDir: string): number | null {
   const present = ARCHIVED_FILES.filter((file) => existsSync(path.join(specDir, file)));
-  if (present.length === 0) return null;
+  const hasSessions = existsSync(path.join(specDir, OMP_SESSIONS_DIR));
+  if (present.length === 0 && !hasSessions) return null;
 
   const index = runFolders(specDir).length + 1;
   const target = path.join(specDir, PREVIOUS_RUNS_DIR, folderName(index));
+  if (hasSessions) {
+    // Unlike the logs this is not swallowed: the caller deletes the sessions right after, and a
+    // run's transcripts are never thrown away without a copy
+    mkdirSync(target, { recursive: true });
+    cpSync(path.join(specDir, OMP_SESSIONS_DIR), path.join(target, OMP_SESSIONS_DIR), { recursive: true });
+  }
   try {
     mkdirSync(target, { recursive: true });
     for (const file of present) {

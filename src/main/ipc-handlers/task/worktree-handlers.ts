@@ -26,7 +26,7 @@ import {
 } from '../../worktree-paths';
 import { persistPlanStatus, updateTaskMetadataFields } from './plan-file-utils';
 import { refreshGitIndex } from '../../utils/git-isolation';
-import { cleanupWorktree } from '../../utils/worktree-cleanup';
+import { cleanupWorktree, discardTaskWorktree } from '../../utils/worktree-cleanup';
 import { taskStateManager } from '../../task-state-manager';
 import { taskQueue } from '../../services/task-queue';
 import { safeSendToRenderer } from '../utils';
@@ -1056,13 +1056,8 @@ export function registerWorktreeHandlers(
         }
 
         // Use the shared cleanup utility for robust, cross-platform worktree deletion
-        const cleanupResult = await cleanupWorktree({
-          worktreePath,
-          projectPath: project.path,
-          specId: task.specId,
-          logPrefix: '[TASK_WORKTREE_DISCARD]',
-          deleteBranch: true
-        });
+        // Work in the worktree is saved on a backup branch first; no backup, no discard
+        const cleanupResult = await discardTaskWorktree(project.path, task.specId, '[TASK_WORKTREE_DISCARD]');
 
         if (!cleanupResult.success) {
           console.error('[TASK_WORKTREE_DISCARD] Cleanup failed:', cleanupResult.warnings);
@@ -1091,7 +1086,9 @@ export function registerWorktreeHandlers(
           success: true,
           data: {
             success: true,
-            message: 'Worktree discarded successfully'
+            message: cleanupResult.backupBranch
+              ? `Worktree discarded successfully. Your work was saved to branch ${cleanupResult.backupBranch}`
+              : 'Worktree discarded successfully'
           }
         };
       } catch (error) {

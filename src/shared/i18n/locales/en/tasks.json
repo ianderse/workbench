@@ -23,7 +23,7 @@
     "selectTask": "Select task: {{title}}",
     "unarchive": "Unarchive",
     "unarchiveFailed": "Failed to unarchive the task: {{error}}",
-    "retry": "Retry",
+    "startOver": "Start over",
     "edit": "Edit"
   },
   "labels": {
@@ -303,6 +303,15 @@
     "noTasksToSelect": "No tasks available to select",
     "confirmBulkAction": "Confirm bulk action for {{count}} tasks",
     "processingTasks": "Processing selected tasks..."
+  },
+  "startOverDialog": {
+    "title": "Start this task over?",
+    "description": "This discards the task's worktree and branch, including all commits and uncommitted changes, and starts again from a clean slate. To continue where the task stopped, use Resume instead.",
+    "backupNote": "Your work is saved to a backup branch (workbench/backup/...) first, so you can get it back. If the backup fails, nothing is discarded.",
+    "cancel": "Cancel",
+    "confirm": "Start over",
+    "starting": "Starting over...",
+    "savedWork": "Saved your work to branch {{branch}}"
   },
   "deleteDialog": {
     "title": "Delete task",

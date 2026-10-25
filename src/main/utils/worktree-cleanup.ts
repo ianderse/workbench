@@ -19,6 +19,7 @@ import { rm } from 'fs/promises';
 import { existsSync } from 'fs';
 import { git } from './git-exec';
 import { repairForeignWorktrees } from '../worktree/runtime-worktrees';
+import { backupTaskWork } from './task-work-backup';
 import { getTaskWorktreeDir, getTerminalWorktreeDir, isPathWithinBase, findTaskWorktree } from '../worktree-paths';
 
 // Async child processes: cleanup runs from IPC handlers and must not block the main process
@@ -58,6 +59,8 @@ export interface WorktreeCleanupResult {
   branch?: string;
   /** Warnings that occurred during cleanup (non-fatal issues) */
   warnings: string[];
+  /** Branch the task's work was saved on before the worktree was discarded (see task-work-backup.ts) */
+  backupBranch?: string;
 }
 
 /**
@@ -287,17 +290,29 @@ export async function cleanupWorktree(options: WorktreeCleanupOptions): Promise<
  * Throw away a task's worktree and its branch (`workbench/<specId>`): all commits and
  * uncommitted changes. The next start creates a fresh worktree from the base branch.
  * Only local: a branch pushed to the remote stays there.
+ *
+ * Work in the worktree is first saved on a `workbench/backup/<specId>-<time>` branch
+ * (`backupBranch` in the result). When that fails nothing is discarded and the result is a failure.
  */
 export async function discardTaskWorktree(
   projectPath: string,
   specId: string,
   logPrefix = '[WORKTREE_CLEANUP]'
 ): Promise<WorktreeCleanupResult> {
+  const backup = await backupTaskWork(projectPath, specId);
+  if (backup.status === 'failed') {
+    return {
+      success: false,
+      warnings: [`Could not save the task's work to a backup branch, so nothing was discarded: ${backup.error}`]
+    };
+  }
+  if (backup.branch) console.warn(`${logPrefix} Saved the task's work on branch ${backup.branch}`);
+
   let result: WorktreeCleanupResult = { success: true, warnings: [] };
   const worktreePath = findTaskWorktree(projectPath, specId);
   if (worktreePath) {
     result = await cleanupWorktree({ worktreePath, projectPath, specId, logPrefix, deleteBranch: true });
-    if (!result.success) return result;
+    if (!result.success) return { ...result, backupBranch: backup.branch };
   }
 
   // The task branch can outlive its worktree (e.g. the folder was deleted by hand), and
@@ -313,5 +328,5 @@ export async function discardTaskWorktree(
   } catch {
     // Already deleted with the worktree, or never created
   }
-  return result;
+  return { ...result, backupBranch: backup.branch };
 }

@@ -219,7 +219,7 @@
       "start_task": "Starting a task",
       "stop_task": "Stopping a task",
       "move_task": "Moving a task",
-      "retry_task": "Retrying a task",
+      "retry_task": "Starting a task over",
       "request_changes": "Requesting changes",
       "create_pull_request": "Creating a pull request",
       "merge_pull_request": "Merging a pull request",

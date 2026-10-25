@@ -171,7 +171,7 @@ export interface ElectronAPI {
   updateTask: (taskId: string, updates: { title?: string; description?: string }, projectId?: string) => Promise<IPCResult<Task>>;
   startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
   stopTask: (taskId: string, projectId?: string) => void;
-  retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
+  retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
   submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[], options?: TaskReviewOptions, projectId?: string) => Promise<IPCResult>;
   updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean; keepWorktree?: boolean }, projectId?: string) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
   recoverStuckTask: (taskId: string, options?: TaskRecoveryOptions, projectId?: string) => Promise<IPCResult<TaskRecoveryResult>>;

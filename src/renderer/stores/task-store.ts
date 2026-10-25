@@ -904,6 +904,8 @@ export interface StartTaskOrQueueResult {
   action: 'started' | 'queued';
   success: boolean;
   error?: string;
+  /** Start over only: the branch the discarded work was saved on */
+  backupBranch?: string;
 }
 
 /**
@@ -962,7 +964,7 @@ export async function retryTask(taskId: string, projectId?: string): Promise<Sta
       executionProgress: { phase: action === 'started' ? 'planning' : 'idle', phaseProgress: 0, overallProgress: 0 }
     });
     store.updateTaskStatus(taskId, action === 'started' ? 'in_progress' : 'queue');
-    return { action, success: true };
+    return { action, success: true, backupBranch: result.data.backupBranch };
   } catch (error) {
     console.error('Error retrying task:', error);
     return { action: 'started', success: false, error: error instanceof Error ? error.message : String(error) };

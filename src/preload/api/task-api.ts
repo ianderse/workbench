@@ -49,7 +49,7 @@ export interface TaskAPI {
   ) => Promise<IPCResult<Task>>;
   startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
   stopTask: (taskId: string, projectId?: string) => void;
-  retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued' }>>;
+  retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
   submitReview: (
     taskId: string,
     approved: boolean,
@@ -149,7 +149,7 @@ export const createTaskAPI = (): TaskAPI => ({
   stopTask: (taskId: string, projectId?: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_STOP, taskId, projectId),
 
-  retryTask: (taskId: string, projectId?: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> =>
+  retryTask: (taskId: string, projectId?: string): Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_RETRY, taskId, projectId),
 
   submitReview: (

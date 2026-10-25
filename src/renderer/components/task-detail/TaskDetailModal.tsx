@@ -30,6 +30,8 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
+import { canResumeTask } from '../../../shared/utils/task-resume';
+import { StartOverDialog } from '../StartOverDialog';
 import { pinnedModelLabel } from '../../../shared/utils/agent-override-labels';
 import {
   DIALOG_ANIMATION_CLASS,
@@ -102,6 +104,11 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   const [isRetrying, setIsRetrying] = useState(false);
   // Why the last footer action failed, shown in the footer (cleared by the next action)
   const [actionError, setActionError] = useState<string | null>(null);
+  // Start over asks first: it discards the worktree (a backup branch keeps the work)
+  const [confirmStartOver, setConfirmStartOver] = useState(false);
+  // Where a start over saved the discarded work
+  const [notice, setNotice] = useState<string | null>(null);
+  const validationOn = useSettingsStore((s) => s.settings.claudeCodeTasks?.validation) !== false;
 
   // Archived tasks can be brought back to the board from here
   const handleUnarchive = async () => {
@@ -133,13 +140,16 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     }
   };
 
-  // Retry starts the task over: worktree changes and the previous run are discarded
-  const handleRetry = async () => {
+  // Start over discards the worktree and the previous run; the work is saved to a backup branch first
+  const handleStartOver = async () => {
     setIsRetrying(true);
     setActionError(null);
+    setNotice(null);
     const result = await retryTask(task.id, task.projectId);
     setIsRetrying(false);
+    setConfirmStartOver(false);
     if (result.success) {
+      if (result.backupBranch) setNotice(t('tasks:startOverDialog.savedWork', { branch: result.backupBranch }));
       state.setIsStuck(false);
       state.setHasCheckedRunning(false);
       void state.reloadPreviousRuns();
@@ -520,6 +530,11 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                   {actionError}
                 </p>
               )}
+              {notice && !actionError && (
+                <p role="status" className="mr-auto min-w-0 truncate text-sm text-muted-foreground" title={notice}>
+                  {notice}
+                </p>
+              )}
               {task.metadata?.archivedAt && (
                 <Button variant="ghost" size="sm" className="gap-1.5" onClick={handleUnarchive} disabled={isUnarchiving}>
                   {isUnarchiving ? (
@@ -530,16 +545,23 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                   {t('tasks:actions.unarchive')}
                 </Button>
               )}
+              {/* Stopped or failed with an unfinished step: continue in the same worktree and session */}
+              {canResumeTask(task, validationOn) && !state.isRunning && !state.isStuck && (
+                <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => void handleStartStop()}>
+                  <Play className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                  {t('tasks:actions.resume')}
+                </Button>
+              )}
               {/* Failed, stopped or stuck (marked running without a run): start over from a clean
-                  worktree, discarding the previous run */}
+                  worktree, discarding the previous run (after a confirmation; the work is backed up) */}
               {(state.isStuck || ((taskHasErrors(task) || taskWasStopped(task)) && !state.isRunning)) && (
-                <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRetrying} onClick={() => void handleRetry()}>
+                <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRetrying} onClick={() => setConfirmStartOver(true)}>
                   {isRetrying ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
                     <RotateCcw className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
                   )}
-                  {t('tasks:actions.retry')}
+                  {t('tasks:actions.startOver')}
                 </Button>
               )}
               <Button
@@ -580,6 +602,13 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
         task={task}
         open={state.isEditDialogOpen}
         onOpenChange={state.setIsEditDialogOpen}
+      />
+
+      <StartOverDialog
+        open={confirmStartOver}
+        onOpenChange={setConfirmStartOver}
+        onConfirm={() => void handleStartOver()}
+        busy={isRetrying}
       />
 
       {/* Delete Confirmation Dialog */}

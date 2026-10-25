@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   projects: [] as Project[],
   tasksByProject: new Map<string, Task[]>(),
   cleanupWorktree: vi.fn(async () => ({ success: true, warnings: [] as string[] })),
+  discardTaskWorktree: vi.fn(async (..._args: unknown[]) => ({ success: true, warnings: [] as string[] })),
   resetTaskRunState: vi.fn(),
   handleManualStatusChange: vi.fn(() => true),
 }));
@@ -39,7 +40,7 @@ vi.mock('../../../worktree-paths', () => ({
 
 vi.mock('../../../utils/worktree-cleanup', () => ({
   cleanupWorktree: mocks.cleanupWorktree,
-  discardTaskWorktree: vi.fn(async () => ({ success: true, warnings: [] })),
+  discardTaskWorktree: mocks.discardTaskWorktree,
 }));
 
 vi.mock('../plan-file-utils', () => ({
@@ -100,6 +101,7 @@ beforeAll(() => {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.cleanupWorktree.mockResolvedValue({ success: true, warnings: [] });
+  mocks.discardTaskWorktree.mockResolvedValue({ success: true, warnings: [] });
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
 });
@@ -116,13 +118,9 @@ describe('TASK_WORKTREE_DISCARD', () => {
     );
 
     expect(result.success).toBe(true);
-    expect(mocks.cleanupWorktree).toHaveBeenCalledTimes(1);
-    expect(mocks.cleanupWorktree).toHaveBeenCalledWith(expect.objectContaining({
-      projectPath: '/projects/project-b',
-      worktreePath: `/projects/project-b/.workbench/worktrees/tasks/${TASK_ID}`,
-      specId: TASK_ID,
-      deleteBranch: true,
-    }));
+    // The shared discard saves the work to a backup branch before it removes the worktree
+    expect(mocks.discardTaskWorktree).toHaveBeenCalledTimes(1);
+    expect(mocks.discardTaskWorktree).toHaveBeenCalledWith('/projects/project-b', TASK_ID, expect.any(String));
     // The run state that is reset, and the card that moves back to Planning, belong to the same
     // project: nothing of project-a's task is touched
     expect(mocks.resetTaskRunState).toHaveBeenCalledWith(
@@ -144,9 +142,7 @@ describe('TASK_WORKTREE_DISCARD', () => {
 
     await invokeIpcHandler(IPC_CHANNELS.TASK_WORKTREE_DISCARD, TASK_ID);
 
-    expect(mocks.cleanupWorktree).toHaveBeenCalledWith(expect.objectContaining({
-      projectPath: '/projects/project-a',
-    }));
+    expect(mocks.discardTaskWorktree).toHaveBeenCalledWith('/projects/project-a', TASK_ID, expect.any(String));
   });
 
   it('reports the task as missing when the project it names does not hold it', async () => {
@@ -163,6 +159,6 @@ describe('TASK_WORKTREE_DISCARD', () => {
     );
 
     expect(result).toEqual({ success: false, error: 'Task not found' });
-    expect(mocks.cleanupWorktree).not.toHaveBeenCalled();
+    expect(mocks.discardTaskWorktree).not.toHaveBeenCalled();
   });
 });

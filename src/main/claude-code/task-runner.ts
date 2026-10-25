@@ -480,6 +480,23 @@ export class ClaudeTaskRun {
     }
 
     // 4. Validate
+    // A fix round of the AI review loop that was stopped or failed midway: the report it was fixing
+    // is still there (and no verdict), so finish the fixes first; without this the saved report
+    // would pass for the result and the task would end up in Human Review with the fixes undone
+    const lastPhase = this.info.phases.at(-1);
+    if (
+      settings.validation && lastPhase?.name === 'revise' && (!lastPhase.endedAt || lastPhase.isError)
+      && this.info.validation && !this.info.reviewVerdict
+    ) {
+      const report = this.info.validation;
+      this.loop = { round: (this.info.reviewRounds?.length ?? 1) + 1, max: this.reviewRoundsAllowed(), feedback: buildFixFeedback(evaluateReviewGate(report), report) };
+      try {
+        const fixed = await this.runSessionPhase('revise');
+        if (fixed) return fixed;
+      } finally {
+        this.loop = undefined;
+      }
+    }
     // (a fix round stopped midway leaves no report, so the review starts again)
     if (settings.validation && (!this.hasCompleted('validate') || !this.info.validation)) {
       const validated = await this.runReviewLoop();

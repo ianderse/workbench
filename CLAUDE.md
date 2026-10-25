@@ -201,6 +201,15 @@ the settings UI is `settings/AgentBackendSettings.tsx`.
 
 A task can pin its own backend, model and effort (`TaskMetadata.agentOverride`, the Model control in the task dialogs, `task-form/TaskAgentPicker.tsx`). `resolveEffectiveAgent()` (`shared/utils/agent-override.ts`) turns it and the app backend into the task's backend; the runner (`TaskRunConfig.backend`), the auth check and one-shot calls (`runClaudeText({ backend })`) use that instead of the global backend, and triage's model/effort are replaced by the pin (`applyAgentOverrideToTriage`).
 
+### Resume and Start over
+
+A stopped (Human Review, reason `stopped`) or failed (Error) task whose run has an unfinished step shows **Resume**
+(`canResumeTask()`, `shared/utils/task-resume.ts`): it is `TASK_START`, which keeps the worktree and continues the saved
+session at the first unfinished step. **Start over** (`TASK_RETRY`, confirmation dialog) discards the worktree and branch,
+but first saves the work (commits, uncommitted and untracked files, minus generated folders) on a
+`workbench/backup/<spec-id>-<yyyyMMdd-HHmmss>` branch (`utils/task-work-backup.ts`, used by `discardTaskWorktree()`); when
+that fails nothing is discarded. OMP session transcripts are copied into `previous_runs/<n>/`.
+
 ### Task Directory
 
 Each task's `.workbench/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and

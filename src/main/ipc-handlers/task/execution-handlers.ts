@@ -19,6 +19,7 @@ import {
   resetTaskToInitialState
 } from './plan-file-utils';
 import { discardTaskWorktree } from '../../utils/worktree-cleanup';
+import { appLog } from '../../app-logger';
 import { taskLogService } from '../../task-log-service';
 import { archiveCurrentRun } from '../../task-run-archive';
 import { writeFileAtomicSync } from '../../utils/atomic-file';
@@ -366,8 +367,13 @@ export function registerTaskExecutionHandlers(
    * attachments/, a fresh implementation_plan.json), forget its state machine, then start
    * it like TASK_START does, or queue it when the parallel task limit is reached.
    *
-   * Used by Retry and by "Request changes" with "Start over" ticked; in the latter case the
+   * Used by Start over and by "Request changes" with "Start over" ticked; in the latter case the
    * reviewer's feedback and images are kept for the fresh run.
+   *
+   * Nothing is thrown away without a copy: the worktree's work (commits, uncommitted and untracked
+   * files) is first saved on a `workbench/backup/<spec-id>-<time>` branch, reported back as
+   * `backupBranch`, and the OMP session transcripts are copied into `previous_runs/`. When the
+   * backup fails the task is left as it was.
    *
    * `projectId` is the project the user acted on, sent by the renderer with the request.
    */
@@ -375,7 +381,7 @@ export function registerTaskExecutionHandlers(
     taskId: string,
     projectId?: string,
     options?: { feedback?: string; images?: ImageAttachment[] }
-  ): Promise<IPCResult<{ action: 'started' | 'queued' }>> => {
+  ): Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>> => {
     const { task, project: foundProject } = findTaskAndProject(taskId, projectId);
     if (!task || !foundProject) {
       return { success: false, error: 'Task not found' };
@@ -418,11 +424,15 @@ export function registerTaskExecutionHandlers(
 
       // 1. Revert the code: remove the worktree and its branch. Tasks that run in the
       //    project folder itself (useWorktree: false) keep their changes there.
+      let backupBranch: string | undefined;
       if (task.metadata?.useWorktree !== false) {
         const removed = await discardTaskWorktree(project.path, task.specId, '[TASK_RESTART]');
         if (!removed.success) {
+          appLog.error(`[TASK_RESTART] ${taskId} not restarted: ${removed.warnings.join('; ')}`);
           return { success: false, error: `Failed to remove the task's worktree: ${removed.warnings.join('; ')}` };
         }
+        backupBranch = removed.backupBranch;
+        if (backupBranch) appLog.info(`[TASK_RESTART] ${taskId}: saved the discarded work to branch ${backupBranch}`);
       }
 
       // 2. Keep the run that is being thrown away, so the task dialog can still show what
@@ -451,12 +461,12 @@ export function registerTaskExecutionHandlers(
         console.warn(`[TASK_RESTART] Parallel task limit reached; ${taskId} reset and queued`);
         safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', project.id);
         taskHooks.emit('state', { project, task, status: 'queue' });
-        return { success: true, data: { action: 'queued' } };
+        return { success: true, data: { action: 'queued', backupBranch } };
       }
       console.warn(`[TASK_RESTART] ${taskId} reset; starting it again`);
       // The project whose task was just reset, so the fresh run is the one this reset prepared
       await startTask(taskId, project.id);
-      return { success: true, data: { action: 'started' } };
+      return { success: true, data: { action: 'started', backupBranch } };
     } catch (error) {
       console.error('[TASK_RESTART] Failed to retry task:', error);
       return { success: false, error: error instanceof Error ? error.message : 'Failed to retry task' };
@@ -465,7 +475,7 @@ export function registerTaskExecutionHandlers(
 
   handleIpc(
     IPC_CHANNELS.TASK_RETRY,
-    (_, taskId: string, projectId?: string): Promise<IPCResult<{ action: 'started' | 'queued' }>> =>
+    (_, taskId: string, projectId?: string): Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>> =>
       restartTaskFromScratch(taskId, projectId)
   );
 

@@ -526,4 +526,23 @@ describe('taskMachine', () => {
       }
     });
   });
+  describe('resume (Resume on a stopped or failed task)', () => {
+    it('moves a stopped task from human_review to coding and clears the reason', () => {
+      const stopped = runEvents([{ type: 'USER_STOPPED', hasPlan: true }], 'coding');
+      expect(stopped.value).toBe('human_review');
+      expect(stopped.context.reviewReason).toBe('stopped');
+      const actor = createActor(taskMachine, { snapshot: taskMachine.resolveState({ value: 'human_review', context: stopped.context }) });
+      actor.start();
+      actor.send({ type: 'USER_RESUMED' });
+      expect(actor.getSnapshot().value).toBe('coding');
+      expect(actor.getSnapshot().context.reviewReason).toBeUndefined();
+      actor.stop();
+    });
+
+    it('moves a failed task from error to coding, or to planning when nothing was implemented', () => {
+      expect(runEvents([{ type: 'USER_RESUMED' }], 'error').value).toBe('coding');
+      expect(runEvents([{ type: 'PLANNING_STARTED' }], 'error').value).toBe('planning');
+      expect(runEvents([{ type: 'PLANNING_STARTED' }], 'human_review').value).toBe('planning');
+    });
+  });
 });

@@ -23,6 +23,8 @@ import type { Task, TaskStatus } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
+import { canResumeTask } from '../../shared/utils/task-resume';
+import { StartOverDialog } from './StartOverDialog';
 
 // Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
 // catches a task left In Progress or AI Review without a run (e.g. the app quit mid-run),
@@ -63,6 +65,7 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.claudeRun?.reviewVerdict?.status === nextTask.claudeRun?.reviewVerdict?.status &&
     prevTask.claudeRun?.reviewVerdict?.rounds === nextTask.claudeRun?.reviewVerdict?.rounds &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
+    canResumeTask(prevTask) === canResumeTask(nextTask) &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
     prevTask.metadata?.contextNotes?.length === nextTask.metadata?.contextNotes?.length &&
@@ -95,6 +98,10 @@ export const TaskCard = memo(function TaskCard({
   const [isRetrying, setIsRetrying] = useState(false);
   // Why starting or retrying from the card failed, shown under the description
   const [actionError, setActionError] = useState<string | null>(null);
+  // Start over asks first: it discards the worktree (a backup branch keeps the work)
+  const [confirmStartOver, setConfirmStartOver] = useState(false);
+  // Where a start over saved the discarded work, shown under the description
+  const [notice, setNotice] = useState<string | null>(null);
   const stuckIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // A string, so the selector returns a stable value
@@ -109,6 +116,9 @@ export const TaskCard = memo(function TaskCard({
 
   // Check if task is in human_review but has no completed subtasks (crashed/incomplete)
   const isIncomplete = isIncompleteHumanReview(task);
+  // Stopped or failed with an unfinished step: Resume continues the same worktree and session
+  const validationOn = useSettingsStore((state) => state.settings.claudeCodeTasks?.validation) !== false;
+  const canResume = !isStuck && !isIncomplete && canResumeTask(task, validationOn);
 
   // Memoize expensive computations to avoid running on every render
   // Truncate description for card display - full description shown in modal
@@ -210,16 +220,17 @@ export const TaskCard = memo(function TaskCard({
     }
   };
 
-  // A stuck task (marked running without a run) starts over like Retry on a failed task:
-  // continuing its broken session could pick up where it went wrong
-  const handleRetry = async (e: React.MouseEvent) => {
-    e.stopPropagation();
+  // A stuck task (marked running without a run) starts over (after the confirmation): continuing
+  // its broken session could pick up where it went wrong. The work is saved to a backup branch first
+  const handleStartOver = async () => {
     setIsRetrying(true);
     const result = await retryTask(task.id, task.projectId);
     setIsRetrying(false);
+    setConfirmStartOver(false);
     if (result.success) {
       setIsStuck(false);
       setActionError(null);
+      setNotice(result.backupBranch ? t('startOverDialog.savedWork', { branch: result.backupBranch }) : null);
     } else {
       setActionError(result.error || t('wizard.errors.startFailed'));
     }
@@ -302,6 +313,11 @@ export const TaskCard = memo(function TaskCard({
             {t('breakdown.waitsFor', { titles: waitsFor })}
           </p>
         )}
+        {notice && !actionError && (
+          <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-2 wrap-anywhere">
+            {notice}
+          </p>
+        )}
         {actionError && (
           <p role="alert" className="mt-1.5 text-xs text-destructive line-clamp-2 wrap-anywhere">
             {actionError}
@@ -326,15 +342,41 @@ export const TaskCard = memo(function TaskCard({
                 variant="ghost"
                 size="sm"
                 className={ICON_BUTTON_CLASS}
-                onClick={handleRetry}
+                onClick={(e) => { e.stopPropagation(); setConfirmStartOver(true); }}
                 disabled={isRetrying}
-                title={t('actions.retry')}
-                aria-label={t('actions.retry')}
+                title={t('actions.startOver')}
+                aria-label={t('actions.startOver')}
               >
                 {isRetrying
                   ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
                   : <RotateCcw className="h-4 w-4" strokeWidth={1.75} />}
               </Button>
+            ) : canResume ? (
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={ICON_BUTTON_CLASS}
+                  onClick={handleStartStop}
+                  title={t('actions.resume')}
+                  aria-label={t('actions.resume')}
+                >
+                  <Play className="h-4 w-4" strokeWidth={1.75} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={ICON_BUTTON_CLASS}
+                  onClick={(e) => { e.stopPropagation(); setConfirmStartOver(true); }}
+                  disabled={isRetrying}
+                  title={t('actions.startOver')}
+                  aria-label={t('actions.startOver')}
+                >
+                  {isRetrying
+                    ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+                    : <RotateCcw className="h-4 w-4" strokeWidth={1.75} />}
+                </Button>
+              </div>
             ) : isIncomplete ? (
               <Button
                 variant="ghost"
@@ -415,6 +457,12 @@ export const TaskCard = memo(function TaskCard({
         {/* Close flex container for selectable mode */}
         </div>
       </CardContent>
+      <StartOverDialog
+        open={confirmStartOver}
+        onOpenChange={setConfirmStartOver}
+        onConfirm={() => void handleStartOver()}
+        busy={isRetrying}
+      />
     </Card>
   );
 }, taskCardPropsAreEqual);
