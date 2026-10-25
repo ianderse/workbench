@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createOmpTranslator, isOmpNotice, isOmpTodos, normalizeToolInput } from '../omp-translate';
+import { classifyOmpFailure } from '../omp-retry';
 import type { ClaudeResultMessage, ClaudeStreamMessage } from '../../claude-code/stream-types';
 
 const usage = (total: number) => ({ input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } });
@@ -135,6 +136,23 @@ describe('omp translator', () => {
     expect(translator.errors.map((e) => [e.text, e.fallback])).toEqual([['stream stalled', false], ['usage_limit_reached', true]]);
     const result = out.find((m) => m.type === 'result') as { omp_errors?: unknown[] };
     expect(result.omp_errors).toHaveLength(2);
+  });
+
+  it('keeps the worker error as the worker\'s when OMP logs the switch before the failed reply (live order)', () => {
+    const reply = (provider: string, model: string, extra: Record<string, unknown> = {}) => ({
+      type: 'message_end',
+      message: { role: 'assistant', provider, model, content: [{ type: 'text', text: 'ok' }], stopReason: 'toolUse', ...extra },
+    });
+    const busy = "409 Model 'Qwen3.8-Flash-Next-oQ6e-mtp' is busy; cannot start work while unload is pending";
+    const { translator } = run([
+      reply('omlx', 'Qwen3.8-Flash-Next-oQ6e-mtp'),
+      { type: 'model_change', model: 'openai-codex/gpt-5.6-luna', role: 'fallback' },
+      reply('omlx', 'Qwen3.8-Flash-Next-oQ6e-mtp', { content: [], stopReason: 'error', errorMessage: busy }),
+      reply('openai-codex', 'gpt-5.6-luna', { content: [], stopReason: 'error', errorMessage: 'Codex error event: The usage limit has been reached (code=usage_limit_reached)' }),
+      { type: 'agent_end', messages: [] },
+    ]);
+    expect(translator.errors.map((e) => e.fallback)).toEqual([false, true]);
+    expect(classifyOmpFailure({ errors: translator.errors })).toBe('transient');
   });
 
   it('emits progress sizes for text, thinking and tool-call deltas when asked', () => {

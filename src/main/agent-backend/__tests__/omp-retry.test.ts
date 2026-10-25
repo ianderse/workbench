@@ -23,6 +23,8 @@ describe('classifyOmpErrorText', () => {
     'terminated',
     'other side closed',
     'Server disconnected without sending a response',
+    "409 Model 'Qwen3.8-Flash-Next-oQ6e-mtp' is busy; cannot start work while unload is pending until active requests finish or are aborted",
+    'Model is loading, please wait',
   ])('treats "%s" as transient', (text) => {
     expect(classifyOmpErrorText(text)).toBe('transient');
   });
@@ -48,6 +50,15 @@ describe('classifyOmpFailure', () => {
     expect(classifyOmpFailure({
       errors: [
         { text: 'OpenAI completions stream stalled while waiting for the next event' },
+        { text: 'Codex error event: The usage limit has been reached (code=usage_limit_reached)', fallback: true },
+      ],
+    })).toBe('transient');
+  });
+
+  it('retries when the local server was swapping models and the fallback was out of quota (observed live)', () => {
+    expect(classifyOmpFailure({
+      errors: [
+        { text: "409 Model 'Qwen3.8-Flash-Next-oQ6e-mtp' is busy; cannot start work while unload is pending until active requests finish or are aborted" },
         { text: 'Codex error event: The usage limit has been reached (code=usage_limit_reached)', fallback: true },
       ],
     })).toBe('transient');

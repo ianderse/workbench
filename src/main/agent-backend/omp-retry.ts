@@ -36,6 +36,8 @@ const TRANSIENT_PATTERNS: RegExp[] = [
   /stream stalled|stalled|timed out waiting|timeout waiting|terminated|premature close|unexpected end of|aborted by (?:the )?server/i,
   /\b(?:502|503|504|529)\b|bad gateway|service unavailable|gateway time-?out|overloaded|internal server error|\b500\b/i,
   /\b429\b|rate[- ]?limit|too many requests|try again later/i,
+  // Local servers swapping models: omlx answers "409 Model 'x' is busy; cannot start work while unload is pending"
+  /\b409\b|\bis busy\b|unload(?:ing)? is pending|model is (?:loading|unloading|being loaded)|loading model/i,
 ];
 
 export interface OmpErrorEntry {

@@ -276,7 +276,11 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
   let turns = 0;
   let resultEmitted = false;
   let lastText = '';
-  let onFallback = false;
+  // The model Workbench's run started on: errors from any other model came from an OMP fallback.
+  // Decided by the reply's own model, not event order: OMP logs `model_change` before the worker's
+  // failed reply lands (seen live with omlx's 409 "model is busy" and a Codex fallback)
+  let workerModel: string | undefined;
+  let fallbackTarget: string | undefined;
   const errors: OmpModelError[] = [];
 
   const buildResult = (extra?: { error?: string }): ClaudeResultMessage => {
@@ -308,7 +312,9 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
     const cost = asRecord(usage?.cost);
     if (typeof cost?.total === 'number' && Number.isFinite(cost.total)) totalCost += cost.total;
     const messageModel = asString(message.model);
-    if (messageModel) model = asString(message.provider) ? `${message.provider}/${messageModel}` : messageModel;
+    const replyModel = messageModel ? (asString(message.provider) ? `${message.provider}/${messageModel}` : messageModel) : undefined;
+    if (replyModel) model = replyModel;
+    if (replyModel && !workerModel && replyModel !== fallbackTarget) workerModel = replyModel;
 
     const blocks: Array<Json> = [];
     const texts: string[] = [];
@@ -333,7 +339,10 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
     }
     lastText = texts.join('\n').trim();
     const error = message.stopReason === 'error' ? asString(message.errorMessage) || 'OMP request failed' : undefined;
-    if (error) errors.push({ text: error, ...(model ? { model } : {}), fallback: onFallback });
+    if (error) {
+      const fallback = !!replyModel && (replyModel === fallbackTarget || (!!workerModel && replyModel !== workerModel));
+      errors.push({ text: error, ...(model ? { model } : {}), fallback });
+    }
     if (blocks.length === 0 && !error) return [];
     const out: ClaudeStreamMessage = {
       type: 'assistant',
@@ -419,8 +428,8 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
         case 'model_change': {
           // OMP switched models on its own after a provider error (`role: 'fallback'`)
           if (e.role !== 'fallback') return [];
-          onFallback = true;
-          const target = asString(e.model) ?? 'another model';
+          fallbackTarget = asString(e.model);
+          const target = fallbackTarget ?? 'another model';
           const cause = errors.at(-1)?.text;
           return [noticeMessage({
             level: 'warning',
