@@ -545,6 +545,25 @@ export class ClaudeTaskRun {
     return `${size}${selection.selector}, ${thinking}`;
   }
 
+  /**
+   * Triage's model and effort for the log. Under OMP the model is a size ("sonnet" = Standard),
+   * not Claude Sonnet: name the size and where the real models come from (a size mapping, or the
+   * OMP roles per step), and the thinking level the effort becomes.
+   */
+  private triageLabel(triage: TaskTriage): string {
+    if (this.config.backend !== 'omp') {
+      return `${triage.pinned ? 'Model pinned: ' : 'Model '}${triage.model}, effort ${triage.effort}`;
+    }
+    const { omp } = getAgentBackendSettings();
+    const effort = `effort ${triage.effort} (thinking ${omp.thinking[triage.effort]})`;
+    if (triage.pinned?.model) return `Model pinned: ${triage.model}, ${effort}`;
+    const alias = modelAliasOf(triage.model);
+    if (!alias) return `Model ${triage.model}, ${effort}`;
+    const mapped = omp.models[alias]?.trim();
+    const where = mapped ? mapped : 'models from your OMP roles';
+    return `${OMP_SIZE_NAMES[alias]} size (${where}), ${effort}`;
+  }
+
   /** Name of the task's backend, for log lines */
   private backendName(): string {
     return this.config.backend === 'omp' ? 'OMP' : 'Claude Code';
@@ -599,9 +618,9 @@ export class ClaudeTaskRun {
     this.endPhase(phase, triageCost !== undefined ? { costUsd: triageCost } : {});
     this.updateTotalCost();
     this.log.add('planning', 'info',
-      `${triage.pinned ? 'Model pinned: ' : 'Model '}${triage.model}, effort ${triage.effort}, ${triage.needsPlan ? 'plan first' : 'no plan'} (${triage.scope})`,
+      `${this.triageLabel(triage)}, ${triage.needsPlan ? 'plan first' : 'no plan'} (${triage.scope})`,
       { detail: triage.reasoning || undefined });
-    this.emitLog(`${triage.pinned ? 'Triage (model pinned)' : 'Triage'}: ${triage.model} / ${triage.effort} / ${triage.needsPlan ? 'plan first' : 'no plan'}. ${triage.reasoning}`);
+    this.emitLog(`${triage.pinned ? 'Triage (model pinned)' : 'Triage'}: ${this.triageLabel(triage)} / ${triage.needsPlan ? 'plan first' : 'no plan'}. ${triage.reasoning}`);
     this.saveInfo();
     return null;
   }
