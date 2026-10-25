@@ -4,6 +4,7 @@ import { useGraphState } from './hooks/use-graph-state'
 import { useRelay } from './hooks/use-relay'
 import { useLiveAgentStatus } from './hooks/use-live-agent-status'
 import { AgentCanvas } from "./agent-visualizer/canvas"
+import { useTerminalStore } from '../../stores/terminal-store'
 import { TIMING } from './lib/agent-types'
 
 /** Graph snapshots kept for sessions that aren't shown */
@@ -26,6 +27,9 @@ interface LiveAgentGraphProps {
 export default function LiveAgentGraph({ cwd, projectPath, terminalId }: LiveAgentGraphProps) {
   const { t } = useTranslation('terminal')
   const status = useLiveAgentStatus()
+  // The window's spinner covers the graph as well as the terminal, so the main
+  // agent waits behind it rather than resting through a start nobody can see
+  const starting = useTerminalStore((state) => !!state.terminals.find((t) => t.id === terminalId)?.loading)
   const relay = useRelay(cwd, projectPath, terminalId)
   // Set while events queued at a session swap or rebuild wait to be applied
   // (the canvas holds its effects back until then)
@@ -142,7 +146,13 @@ export default function LiveAgentGraph({ cwd, projectPath, terminalId }: LiveAge
       )}
 
       {/* Canvas fills everything */}
-      <AgentCanvas graphRef={graphRef} viewKey={`${shownSessionId}:${viewVersion}`} historyQueuedRef={historyQueuedRef} />
+      <AgentCanvas
+        graphRef={graphRef}
+        viewKey={`${shownSessionId}:${viewVersion}`}
+        sessionKey={shownSessionId ?? ''}
+        historyQueuedRef={historyQueuedRef}
+        suspended={starting}
+      />
     </div>
   )
 }
