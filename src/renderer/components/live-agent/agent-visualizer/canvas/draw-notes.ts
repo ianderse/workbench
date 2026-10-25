@@ -169,7 +169,8 @@ export function drawNotes(ctx: CanvasRenderingContext2D, notes: readonly Whistle
     ctx.fillStyle = note.color
     ctx.strokeStyle = note.color
     ctx.shadowColor = note.color
-    ctx.shadowBlur = WHISTLE.glowBlur / note.size
+    // Pixels, whatever the glyph's size: a shadow's blur ignores the transform
+    ctx.shadowBlur = WHISTLE.glowBlur
     if (note.glyph === 'z') zGlyph(ctx)
     else noteGlyph(ctx, note.kind)
     ctx.restore()

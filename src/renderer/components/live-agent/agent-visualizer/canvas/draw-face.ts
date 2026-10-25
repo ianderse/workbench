@@ -1,5 +1,6 @@
 import type { Agent, AgentState, ToolCallNode } from '../../lib/agent-types'
 import { FACE, WHISTLE, ZZZ } from '../../lib/canvas-constants'
+import { getStateColor } from '../../lib/colors'
 import { advanceNotes, spawnNote, spawnZ, type WhistleNote } from './draw-notes'
 
 /**
@@ -161,7 +162,7 @@ function newFace(time: number): FaceState {
     colorEaseUntil: 0,
     zStep: 0,
     nextZ: 0,
-    expression: 'bored',
+    expression: 'waiting',
     since: time,
     lastTime: time,
     happyUntil: 0,
@@ -466,9 +467,8 @@ function advanceRest(face: FaceState, time: number) {
     if (time - face.closeFrom < FACE.sleepyClose) return
     if (face.savesLeft <= 0) {
       // Nothing left to fight it off with: this close is the one it sleeps
-      // through, and the Zs start as soon as the lids are down
+      // through (drawFace starts the Zs once the lids are down)
       face.rest = 'asleep'
-      face.nextZ = time + ZZZ.gap
       return
     }
     // Caught itself: the eyes come back wide open for a moment
@@ -508,11 +508,12 @@ function expressionFor(agent: Agent, displayed: AgentState, waitingOnSubagents: 
     face.idleSince = 0
     return time < face.startleUntil ? 'startled' : working
   }
-  if (suspended) {
+  if (suspended && face.idleSince === 0) {
     // The window is still starting and the graph is behind its spinner: the
     // resting cycle waits for it rather than playing to nobody, so whoever is
-    // watching sees it whistle from the first blow
-    face.idleSince = 0
+    // watching sees it whistle from the first blow. One already under way goes
+    // on (a session being opened, its spinner over the one still shown):
+    // nothing wakes it but work
     return 'waiting'
   }
   if (face.idleSince === 0) {
@@ -615,7 +616,8 @@ const hex2 = (v: number) => Math.round(Math.max(0, Math.min(255, v))).toString(1
  * the ring take it from here too, so the node turns over with the face rather
  * than around it.
  */
-export function displayedColor(faces: Map<string, FaceState>, id: string, target: string, time: number): string {
+export function displayedColor(faces: Map<string, FaceState>, id: string, state: AgentState, time: number): string {
+  const target = getStateColor(state)
   const face = faces.get(id)
   if (!face) return target
   const to = channels(target)
@@ -626,9 +628,10 @@ export function displayedColor(faces: Map<string, FaceState>, id: string, target
   }
   // Waking is noticed here rather than in drawFace: the glow and the ring need
   // the color before the face has been advanced, so this call comes first and
-  // a new color arriving while the face is still resting is the wake itself
+  // work's color arriving while the face is still resting is the wake itself.
+  // Any other change it sleeps through (a finished agent coming back idle) is cut
   const differs = Math.abs(face.rgb[0] - to[0]) + Math.abs(face.rgb[1] - to[1]) + Math.abs(face.rgb[2] - to[2]) > 2
-  if (differs && RESTING_DEEP.has(face.expression)) face.colorEaseUntil = time + FACE.colorEaseWindow
+  if (differs && WORKING.has(state) && RESTING_DEEP.has(face.expression)) face.colorEaseUntil = time + FACE.colorEaseWindow
   if (time >= face.colorEaseUntil) {
     face.rgb = to
     face.rgbTime = time
@@ -675,7 +678,8 @@ export function drawFace(
   if (face.expression !== expression) {
     face.expression = expression
     face.since = time
-    if (expression === 'asleep') face.nextZ = time + ZZZ.gap
+    // Every sleep's Zs climb from the smallest, wherever the last one's stopped
+    if (expression === 'asleep') { face.nextZ = time + ZZZ.gap; face.zStep = 0 }
   }
   const dt = Math.min(Math.max(time - face.lastTime, 0), 0.1)
   face.lastTime = time

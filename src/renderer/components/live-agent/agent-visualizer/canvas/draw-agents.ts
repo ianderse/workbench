@@ -184,7 +184,7 @@ export function drawAgents(
     // The main agent's color is eased, so waking up into work turns the whole
     // node over from one state's color to the next instead of cutting to it
     const color = agent.isMain
-      ? displayedColor(faces, agent.id, getStateColor(state), time)
+      ? displayedColor(faces, agent.id, state, time)
       : getStateColor(state)
 
     const isWaiting = state === 'waiting_permission'
