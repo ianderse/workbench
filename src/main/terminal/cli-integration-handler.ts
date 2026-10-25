@@ -44,6 +44,8 @@ import { getClaudeGlobalConfigPath, isDefaultClaudeConfigDir } from '../claude-p
 import { lastAgentSession, readAgentSessions, recordAgentSession, recordAgentSessionAsync } from '../agent-session-store';
 import { getSessionFilePath, migrateSession } from '../claude-profile/session-utils';
 import { runTool } from '../platform/runtime-exec';
+import { listDirectorySessions } from './claude-sessions';
+import type { ClaudeSessionItem } from '../../shared/types';
 import { findSessionTranscript, latestTranscript } from '../claude-code/session-spending';
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
 import { appLog } from '../app-logger';
@@ -1985,14 +1987,56 @@ export async function invokeCLIAsync(
  */
 export async function resumeClaudeAsync(
   terminal: TerminalProcess,
-  getWindow: WindowGetter
+  getWindow: WindowGetter,
+  options: {
+    /**
+     * Type the command only once this settles (the window's previous Claude Code exiting). The
+     * command is worked out meanwhile, so it goes in the moment the shell is back
+     */
+    until?: Promise<unknown>;
+  } = {}
 ): Promise<void> {
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
 
   try {
+    const preparing = prepareResumeCommand(terminal);
+    if (options.until) {
+      // A failed preparation is reported below, once the wait is over
+      preparing.catch(() => undefined);
+      await options.until;
+    }
     terminal.isCLIMode = true;
+    const command = await preparing;
 
+    // Use PtyManager.writeToPty for safer write with error handling
+    writeCliCommand(terminal, command);
+
+    // Only auto-rename if terminal has default name
+    // This preserves user-customized names and prevents renaming on every resume
+    if (shouldAutoRenameTerminal(terminal.title)) {
+      terminal.title = 'Claude';
+      safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_TITLE_CHANGE, terminal.id, 'Claude');
+    }
+
+    // Persist session (async, fire-and-forget to prevent main process blocking)
+    if (terminal.projectPath) {
+      SessionHandler.persistSessionAsync(terminal);
+    }
+  } catch (error) {
+    // Reset terminal state on error to prevent inconsistent state
+    terminal.isCLIMode = wasClaudeMode;
+    debugError('[ClaudeIntegration:resumeClaudeAsync] Resume failed:', error);
+    throw error; // Re-throw to allow caller to handle
+  }
+}
+
+/**
+ * The command that picks a window's own session up again: the CLI, the session and the account
+ * that holds it (a session running in the background is stopped first, so it can be resumed)
+ */
+async function prepareResumeCommand(terminal: TerminalProcess): Promise<string> {
+  {
     // Async CLI invocation - non-blocking
     // Add timeout protection for CLI detection (10s timeout)
     const cliInvocationPromise = getClaudeCliInvocationAsync();
@@ -2038,27 +2082,67 @@ export async function resumeClaudeAsync(
           shellKindOf(terminal)
         )
       : `${cdCommand}${pathPrefix}${escapedClaudeCmd}${extraFlags}`;
-
-    // Use PtyManager.writeToPty for safer write with error handling
-    writeCliCommand(terminal, command);
-
-    // Only auto-rename if terminal has default name
-    // This preserves user-customized names and prevents renaming on every resume
-    if (shouldAutoRenameTerminal(terminal.title)) {
-      terminal.title = 'Claude';
-      safeSendToRenderer(getWindow, IPC_CHANNELS.TERMINAL_TITLE_CHANGE, terminal.id, 'Claude');
-    }
-
-    // Persist session (async, fire-and-forget to prevent main process blocking)
-    if (terminal.projectPath) {
-      SessionHandler.persistSessionAsync(terminal);
-    }
-  } catch (error) {
-    // Reset terminal state on error to prevent inconsistent state
-    terminal.isCLIMode = wasClaudeMode;
-    debugError('[ClaudeIntegration:resumeClaudeAsync] Resume failed:', error);
-    throw error; // Re-throw to allow caller to handle
+    return command;
   }
+}
+
+/**
+ * The account an agent window's sessions are listed and opened under: its own session's account,
+ * else the account in use (undefined is Claude Code's default `~/.claude`)
+ */
+async function windowSessionAccount(
+  terminal: Pick<TerminalProcess, 'id' | 'projectPath'>
+): Promise<{ own: Awaited<ReturnType<typeof lastAgentSession>>; configDir: string | undefined }> {
+  const own = terminal.projectPath ? await lastAgentSession(terminal.projectPath, terminal.id) : undefined;
+  const configDir = own ? own.configDir : getClaudeProfileManager().getActiveProfile()?.configDir;
+  return { own, configDir };
+}
+
+/**
+ * The sessions an agent window can open: what `/resume` lists where the window resumes sessions
+ * (the project folder), under the window's account, with the window's own one marked
+ */
+export async function listWindowSessions(terminal: TerminalProcess): Promise<ClaudeSessionItem[]> {
+  const { own, configDir } = await windowSessionAccount(terminal);
+  const dir = sessionSearchDirs(configDir)[0];
+  if (!dir) return [];
+  const sessions = await listDirectorySessions(dir, toRuntimePath(terminal.projectPath || terminal.cwd));
+  return sessions.map((session) => ({ ...session, current: session.sessionId === own?.sessionId }));
+}
+
+/**
+ * End an agent window's Claude Code session and open another one in the window: the given session
+ * (recorded as the window's own, so the resume finds it on its account and the window restores it
+ * later), or a new session when `sessionId` is null
+ */
+export async function openWindowSession(
+  terminal: TerminalProcess,
+  sessionId: string | null,
+  getWindow: WindowGetter,
+  dangerouslySkipPermissions?: boolean
+): Promise<void> {
+  if (sessionId && !isValidClaudeSessionId(sessionId)) throw new Error('Not a Claude Code session id');
+  const exited = terminal.isCLIMode ? exitClaudeForRestart(terminal) : Promise.resolve();
+
+  if (!sessionId) {
+    await exited;
+    await invokeCLIAsync(terminal, terminal.cwd, undefined, getWindow, dangerouslySkipPermissions);
+    return;
+  }
+  // While Claude Code exits, the session is recorded as the window's own and its command worked
+  // out, so the resume is typed the moment the previous session has ended
+  if (terminal.projectPath) {
+    const { configDir } = await windowSessionAccount(terminal);
+    await recordAgentSession(terminal.projectPath, {
+      sessionId,
+      configDir: resolveSessionConfigDir(configDir),
+      // Where the window resumes sessions, which is where it was listed
+      cwd: terminal.projectPath || terminal.cwd,
+      terminalId: terminal.id,
+      startedAt: new Date().toISOString(),
+    });
+  }
+  await resumeClaudeAsync(terminal, getWindow, { until: exited });
 }
 
 /**
@@ -2203,6 +2287,16 @@ async function waitForClaudeExit(
   });
 }
 
+/** Resolves once the CLI exit marker of an app-made restart was seen (it clears cliRestarting) */
+async function waitForRestartMarker(terminal: TerminalProcess, timeout: number): Promise<WaitForExitResult> {
+  const started = Date.now();
+  while (Date.now() - started < timeout) {
+    if (!terminal.cliRestarting || terminal.hasExited) return { success: true };
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  return { success: false, timedOut: true, error: `Timeout waiting for Claude to exit after ${timeout}ms` };
+}
+
 /**
  * End Claude Code in a window for a restart the app makes itself: Ctrl+C, then `/exit`, then wait
  * for the shell prompt. The CLI exit marker that follows keeps the window open (cliRestarting), and
@@ -2215,7 +2309,14 @@ async function exitClaudeForRestart(terminal: TerminalProcess): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 100));
   PtyManager.writeToPty(terminal, '/exit\r');
 
-  const exitResult = await waitForClaudeExit(terminal, { timeout: 5000, pollInterval: 100 });
+  // The exit marker the shell prints when the CLI exits is consumed for this restart, which clears
+  // cliRestarting: the surest sign, and the soonest (the output buffer is capped, so a full window
+  // shows no new output to look for a prompt in). The prompt check stays for cmd.exe windows, which
+  // can't print the marker
+  const exitResult = await Promise.race([
+    waitForRestartMarker(terminal, 5000),
+    waitForClaudeExit(terminal, { timeout: 5000, pollInterval: 20 }),
+  ]);
   // Going on regardless: the alternative would leave the window stuck
   if (exitResult.timedOut) {
     appLog.warn('[ClaudeIntegration] Timed out waiting for Claude Code to exit in window', terminal.id);

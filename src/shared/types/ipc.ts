@@ -76,6 +76,7 @@ import type {
   TerminalWorktreeConfig,
   TerminalWorktreeResult,
   OtherWorktreeInfo,
+  ClaudeSessionItem,
 } from './terminal';
 import type {
   ClaudeProfileSettings,
@@ -225,6 +226,10 @@ export interface ElectronAPI {
   restoreTerminalSession: (session: TerminalSession, cols?: number, rows?: number) => Promise<IPCResult<TerminalRestoreResult>>;
   clearTerminalSessions: (projectPath: string) => Promise<IPCResult>;
   resumeClaudeInTerminal: (id: string, options?: { dangerouslySkipPermissions?: boolean }) => void;
+  /** The Claude Code sessions an agent window can open: what `/resume` lists in its directory */
+  listClaudeSessions: (id: string) => Promise<IPCResult<ClaudeSessionItem[]>>;
+  /** End the window's Claude Code session and open the given one, or a new one (null) */
+  openClaudeSession: (id: string, sessionId: string | null) => Promise<IPCResult>;
   activateDeferredClaudeResume: (id: string) => void;
   saveTerminalBuffer: (terminalId: string, serialized: string) => Promise<void>;
   checkTerminalPtyAlive: (terminalId: string) => Promise<IPCResult<{ alive: boolean }>>;
