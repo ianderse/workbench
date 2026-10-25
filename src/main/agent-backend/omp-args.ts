@@ -57,6 +57,9 @@ export function modelAliasOf(model: string | undefined): ClaudeModelAlias | unde
 
 /** `--model` value: the OMP model configured for the tier, or undefined for OMP's default */
 export function ompModelFor(model: string | undefined, settings: OmpBackendSettings): string | undefined {
+  // An exact OMP selector (`provider/model`) the user pinned goes straight to `--model`;
+  // Claude ids (`claude-opus-4-1`) have no slash and still map through their tier
+  if (model && model.includes('/')) return model.trim();
   const alias = modelAliasOf(model);
   const mapped = alias ? settings.models[alias]?.trim() : undefined;
   return mapped || undefined;

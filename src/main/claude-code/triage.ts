@@ -24,6 +24,8 @@ import type {
   TaskTriage,
 } from '../../shared/types/claude-code';
 import { CLAUDE_EFFORTS } from '../../shared/types/claude-code';
+import type { AgentBackendKind } from '../../shared/types/agent-backend';
+import type { AgentOverride } from '../../shared/types/task';
 
 const TRIAGE_SYSTEM_PROMPT = `You triage coding tasks for an autonomous Claude Code run. You do NOT do the task.
 Look at the task and, briefly, at the project (structure, the files the task names, how it is tested), then decide how the task should run.
@@ -83,6 +85,29 @@ export interface TriageInput {
   settings: ClaudeCodeTaskSettings;
   abortSignal?: AbortSignal;
   profileId?: string;
+  /** The task's backend (default: the app-wide backend) */
+  backend?: AgentBackendKind;
+  /** Model/effort the user pinned on the task; they replace triage's choice */
+  override?: AgentOverride;
+}
+
+/**
+ * Replace triage's model and effort with what the user pinned on the task, and say so in the
+ * reasoning. Planning, scope, title and verification stay triage's.
+ */
+export function applyAgentOverrideToTriage(triage: TaskTriage, override: AgentOverride | undefined): TaskTriage {
+  const model = override?.model?.trim() || undefined;
+  const effort = override?.effort && (CLAUDE_EFFORTS as readonly string[]).includes(override.effort) ? override.effort : undefined;
+  if ((!model && !effort) || triage.pinned) return triage;
+  const parts = [model ? `model ${model}` : '', effort ? `effort ${effort}` : ''].filter(Boolean).join(', ');
+  const note = `Model pinned on the task: ${parts}.`;
+  return {
+    ...triage,
+    ...(model ? { model } : {}),
+    ...(effort ? { effort } : {}),
+    reasoning: triage.reasoning ? `${note} ${triage.reasoning}` : note,
+    pinned: { ...(model ? { model: true } : {}), ...(effort ? { effort: true } : {}) },
+  };
 }
 
 /**
@@ -179,10 +204,11 @@ export async function triageTask(input: TriageInput): Promise<{ triage: TaskTria
     timeoutMs: 3 * 60 * 1000,
     abortSignal: input.abortSignal,
     profileId: input.profileId,
+    backend: input.backend,
   });
 
   const raw = (result.structured ?? {}) as Record<string, unknown>;
-  const model = isOneOf(raw.model, allowedModels) ? raw.model : settings.fixedModel;
+  const model: string = isOneOf(raw.model, allowedModels) ? raw.model : settings.fixedModel;
   const effort: ClaudeEffort = isOneOf(raw.effort, CLAUDE_EFFORTS) ? raw.effort : settings.fixedEffort;
   const scope: TaskScope = isOneOf(raw.scope, ['trivial', 'small', 'medium', 'large'] as const) ? raw.scope : 'medium';
   const title = typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim().replace(/\.$/, '') : '';
@@ -193,7 +219,7 @@ export async function triageTask(input: TriageInput): Promise<{ triage: TaskTria
     input.cwd,
   );
 
-  const triage = applyPlanningPolicy({
+  const triage = applyPlanningPolicy(applyAgentOverrideToTriage({
     model,
     effort,
     needsPlan: raw.needsPlan === true,
@@ -202,6 +228,6 @@ export async function triageTask(input: TriageInput): Promise<{ triage: TaskTria
     reasoning: typeof raw.reasoning === 'string' ? raw.reasoning : '',
     verification,
     source: 'auto',
-  }, settings);
+  }, input.override), settings);
   return { triage, costUsd: result.costUsd };
 }

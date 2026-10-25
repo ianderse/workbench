@@ -16,7 +16,8 @@ vi.mock('../run-text', () => ({
   READ_ONLY_TOOLS: ['Read'],
 }));
 
-import { triageTask } from '../triage';
+import { triageTask, applyAgentOverrideToTriage } from '../triage';
+import type { TaskTriage } from '../../../shared/types/claude-code';
 
 let cwd: string;
 
@@ -83,5 +84,38 @@ describe('triageTask verification commands', () => {
   it('leaves the commands alone when the project has no package.json', async () => {
     rmSync(path.join(cwd, 'package.json'));
     expect(await verificationFor(['npm run typecheck'])).toEqual(['npm run typecheck']);
+  });
+});
+
+describe('applyAgentOverrideToTriage', () => {
+  const base: TaskTriage = {
+    model: 'sonnet', effort: 'medium', needsPlan: true, scope: 'large', title: 'T', reasoning: 'Cross-module change', verification: ['npm test'], source: 'auto',
+  };
+
+  it('replaces model and effort, keeps the rest and notes the pin', () => {
+    const out = applyAgentOverrideToTriage(base, { model: 'claude-opus-5-5', effort: 'high' });
+    expect(out).toMatchObject({ model: 'claude-opus-5-5', effort: 'high', needsPlan: true, scope: 'large', verification: ['npm test'], pinned: { model: true, effort: true } });
+    expect(out.reasoning).toContain('Model pinned on the task: model claude-opus-5-5, effort high.');
+    expect(out.reasoning).toContain('Cross-module change');
+  });
+
+  it('pins only what is set', () => {
+    const out = applyAgentOverrideToTriage(base, { effort: 'max' });
+    expect(out.model).toBe('sonnet');
+    expect(out.pinned).toEqual({ effort: true });
+  });
+
+  it('does nothing without a pinned model or effort, or when already applied', () => {
+    expect(applyAgentOverrideToTriage(base, undefined)).toBe(base);
+    expect(applyAgentOverrideToTriage(base, { backend: 'omp' })).toBe(base);
+    const once = applyAgentOverrideToTriage(base, { model: 'opus' });
+    expect(applyAgentOverrideToTriage(once, { model: 'opus' })).toBe(once);
+  });
+
+  it('is applied to the triage run result', async () => {
+    runClaudeTextMock.mockResolvedValue({ structured: { model: 'haiku', effort: 'low', needsPlan: false, scope: 'small', title: 'x', reasoning: 'r', verification: [] } });
+    const { triage } = await triageTask({ description: 'd', cwd, settings: DEFAULT_CLAUDE_CODE_TASK_SETTINGS, backend: 'omp', override: { model: 'omlx/Big' } });
+    expect(triage.model).toBe('omlx/Big');
+    expect(runClaudeTextMock.mock.calls.at(-1)?.[0]).toMatchObject({ backend: 'omp' });
   });
 });

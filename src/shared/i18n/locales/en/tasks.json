@@ -355,5 +355,31 @@
       "noProject": "The task's project is not open",
       "noRoom": "All agent windows of this project are in use. Close one to open this session"
     }
+  },
+  "agentPicker": {
+    "title": "Model",
+    "description": "Pin the model for this task, or let triage pick",
+    "auto": "Auto (triage picks)",
+    "claudeGroup": "Claude Code",
+    "ompGroup": "OMP",
+    "otherClaude": "Other Claude model id...",
+    "otherOmp": "Other OMP model...",
+    "detected": "Detected OMP models",
+    "claudeIdPlaceholder": "claude-opus-5-5",
+    "ompIdPlaceholder": "provider/model",
+    "customLabel": "Model id",
+    "effort": "Effort",
+    "effortAuto": "Auto",
+    "effortLevel": {
+      "low": "Low",
+      "medium": "Medium",
+      "high": "High",
+      "xhigh": "Extra high",
+      "max": "Max"
+    },
+    "usesClaudeAccount": "This task uses the Claude account, not OMP",
+    "usesOmp": "This task runs on OMP with a local model",
+    "pinnedTitle": "Model pinned on the task: {{model}}",
+    "pinnedBadge": "Model: {{model}}"
   }
 }

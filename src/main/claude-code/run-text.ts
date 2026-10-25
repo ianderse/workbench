@@ -13,6 +13,7 @@ import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-c
 import type { OmpBackendSettings } from '../../shared/types/agent-backend';
 import type { ClaudeUserContentBlock } from './stream-types';
 import { getAgentBackendSettings } from '../agent-backend/settings';
+import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import { ompToolsFromClaude } from '../agent-backend/omp-args';
 import { startOmpProcess } from '../agent-backend/omp-process';
 
@@ -42,6 +43,8 @@ export interface RunClaudeTextOptions {
   abortSignal?: AbortSignal;
   /** Claude profile to use (defaults to the best available one) */
   profileId?: string;
+  /** Backend for this call (default: the app-wide backend); tasks pass their own */
+  backend?: AgentBackendKind;
 }
 
 export interface RunClaudeTextResult {
@@ -62,7 +65,7 @@ class ClaudeCodeRunError extends Error {
 /** Run Claude Code once and return its answer */
 export async function runClaudeText(options: RunClaudeTextOptions): Promise<RunClaudeTextResult> {
   const backend = getAgentBackendSettings();
-  if (backend.kind === 'omp') return runOmpText(options, backend.omp);
+  if ((options.backend ?? backend.kind) === 'omp') return runOmpText(options, backend.omp);
 
   const { command, env } = await resolveClaudeEnv({ profileId: options.profileId });
   const tools = options.tools ?? [];

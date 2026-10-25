@@ -8,9 +8,13 @@ import { ChevronRight } from 'lucide-react';
 import { Switch } from '../ui/switch';
 import { cn } from '../../lib/utils';
 import type { BreakdownTask } from '../../../shared/types/task-breakdown';
+import type { AgentOverride } from '../../../shared/types/task';
+import { TaskAgentPicker } from './TaskAgentPicker';
 
 export interface BreakdownItem extends BreakdownTask {
   included: boolean;
+  /** Model pinned on the task (unset = triage decides) */
+  agentOverride?: AgentOverride;
 }
 
 /**
@@ -96,6 +100,18 @@ export function TaskBreakdownReview({ items, onItemsChange, queue, onQueueChange
                   <ChevronRight className={cn('h-4 w-4 transition-transform', isOpen && 'rotate-90')} strokeWidth={1.75} />
                 </button>
               </div>
+              {item.included && (
+                <div className="mt-1.5 flex items-center justify-between gap-2 pl-6.5">
+                  <span className="text-xs text-(--nav-label-color)">{t('tasks:agentPicker.title')}</span>
+                  <TaskAgentPicker
+                    compact
+                    value={item.agentOverride}
+                    onChange={(agentOverride) => update(item.key, { agentOverride })}
+                    disabled={disabled}
+                    idPrefix={`breakdown-${item.key}`}
+                  />
+                </div>
+              )}
               {item.included && after.length > 0 && (
                 <p className="mt-1 pl-6.5 text-xs text-(--nav-label-color) wrap-anywhere">
                   {t('tasks:breakdown.after', { titles: after.join(', ') })}

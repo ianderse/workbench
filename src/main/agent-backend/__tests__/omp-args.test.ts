@@ -13,6 +13,11 @@ describe('omp args', () => {
     expect(modelAliasOf(undefined)).toBeUndefined();
   });
 
+  it('passes an exact provider/model selector through, bypassing the tier map', () => {
+    expect(ompModelFor('omlx/Qwen3.8-27B-oQ8e-mtp', settings)).toBe('omlx/Qwen3.8-27B-oQ8e-mtp');
+    expect(ompModelFor('opus', settings)).toBe('lmstudio/big');
+  });
+
   it('maps Claude tools', () => {
     expect(ompToolsFromClaude(['Read', 'Glob', 'Grep'])).toEqual(['read', 'glob', 'grep']);
     expect(ompToolsFromClaude([], ['Bash(git log *)', 'Edit'])).toEqual(['bash', 'edit']);

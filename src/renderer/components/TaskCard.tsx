@@ -20,6 +20,8 @@ import {
 } from '../../shared/constants';
 import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask, useTaskStore, unmetDependencyTitles } from '../stores/task-store';
 import type { Task, TaskStatus } from '../../shared/types';
+import { useSettingsStore } from '../stores/settings-store';
+import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
 
 // Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
 // catches a task left In Progress or AI Review without a run (e.g. the app quit mid-run),
@@ -59,7 +61,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.reviewReason === nextTask.reviewReason &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
-    prevTask.metadata?.prUrl === nextTask.metadata?.prUrl
+    prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
+    prevTask.metadata?.agentOverride === nextTask.metadata?.agentOverride
   );
 
   // Only log when actually re-rendering (reduces noise significantly)
@@ -232,6 +235,9 @@ export const TaskCard = memo(function TaskCard({
   };
 
   const isArchived = !!task.metadata?.archivedAt;
+  // Stable references from the store; the label is derived here
+  const agentBackendSettings = useSettingsStore((state) => state.settings.agentBackend);
+  const pinnedLabel = pinnedModelLabel(task.metadata?.agentOverride, agentBackendSettings?.kind ?? 'claude', agentBackendSettings?.omp?.models);
   // Failed tasks show the usage badge's "sign in again" alert icon next to the title; stuck
   // tasks show it in the color of their "Stuck" label
   const hasErrors = taskHasErrors(task);
@@ -284,7 +290,14 @@ export const TaskCard = memo(function TaskCard({
 
         {/* Footer */}
         <div className="mt-3 flex items-center justify-between">
-          <span className="text-sm text-(--nav-label-color)">{relativeTime}</span>
+          <span className="flex min-w-0 items-baseline gap-1.5 text-sm text-(--nav-label-color)">
+            <span className="shrink-0">{relativeTime}</span>
+            {pinnedLabel && (
+              <span className="truncate text-xs" title={t('agentPicker.pinnedTitle', { model: pinnedLabel })}>
+                {pinnedLabel}
+              </span>
+            )}
+          </span>
 
           <div className="flex items-center gap-1.5">
             {/* Action buttons: icon buttons like the settings dialog's (label in the tooltip) */}

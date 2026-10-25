@@ -2,8 +2,8 @@
  * TaskEditDialog - Dialog for editing task details
  *
  * Edits the task's description, reference images, MCP connectors and git options - the base
- * branch and whether its branch is pushed (the title is kept). Model, effort and planning are
- * decided by the Claude Code triage run when the task starts.
+ * branch and whether its branch is pushed (the title is kept), and the model and effort pinned on
+ * the task. Unpinned model and effort, and planning, are decided by the triage run when it starts.
  *
  * The base branch is the one the task's next run starts from, and the branch its changes are
  * counted and merged against, so a task created with a branch that no longer exists can be
@@ -22,7 +22,8 @@ import { TaskFormFields } from './task-form/TaskFormFields';
 import { PROJECT_DEFAULT_BRANCH, TaskGitOptionsSection, useTaskGitOptions } from './task-form/TaskGitOptions';
 import { persistUpdateTask } from '../stores/task-store';
 import { useProjectStore } from '../stores/project-store';
-import type { Task, TaskMetadata, ImageAttachment } from '../../shared/types';
+import type { Task, TaskMetadata, ImageAttachment, AgentOverride } from '../../shared/types';
+import { normalizeAgentOverride } from '../../shared/utils/agent-override';
 import { useSettingsStore } from '../stores/settings-store';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 
@@ -64,6 +65,10 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   const taskConnectors = task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors);
   const [mcpConnectors, setMcpConnectors] = useState<string[]>(taskConnectors);
 
+  // Model and effort pinned on the task (unset = triage decides)
+  const taskAgentOverride = task.metadata?.agentOverride;
+  const [agentOverride, setAgentOverride] = useState<AgentOverride | undefined>(taskAgentOverride);
+
   // Git options: the task's own base branch, listed even when the project no longer has it, and
   // whether its branch is pushed (unset follows the project's own setting)
   const taskBaseBranch = task.metadata?.baseBranch || PROJECT_DEFAULT_BRANCH;
@@ -78,6 +83,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       setDescription(task.description);
       setImages(task.metadata?.attachedImages || []);
       setMcpConnectors(task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors));
+      setAgentOverride(task.metadata?.agentOverride);
       setBaseBranch(task.metadata?.baseBranch || PROJECT_DEFAULT_BRANCH);
       setPushNewBranches(task.metadata?.pushNewBranches ?? gitOptions.projectPushNewBranches);
       setError(null);
@@ -96,6 +102,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
     const hasChanges =
       trimmedDescription !== task.description ||
       [...mcpConnectors].sort().join(',') !== [...taskConnectors].sort().join(',') ||
+      JSON.stringify(normalizeAgentOverride(agentOverride) ?? null) !== JSON.stringify(normalizeAgentOverride(taskAgentOverride) ?? null) ||
       baseBranch !== taskBaseBranch ||
       pushNewBranches !== taskPushNewBranches ||
       JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []);
@@ -124,6 +131,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       // Always set attachedImages to persist removal when all images are deleted
       attachedImages: images,
       mcpConnectors,
+      // `undefined` clears the pin
+      agentOverride: normalizeAgentOverride(agentOverride),
       baseBranch: resolvedBaseBranch,
       useLocalBranch,
       // Unset again when it matches the project's own setting, so the task follows it
@@ -182,6 +191,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         onImagesChange={setImages}
         mcpConnectors={mcpConnectors}
         onMcpConnectorsChange={setMcpConnectors}
+        agentOverride={agentOverride}
+        onAgentOverrideChange={setAgentOverride}
         disabled={isSaving}
         error={error}
         onError={setError}

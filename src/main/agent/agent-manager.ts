@@ -16,6 +16,8 @@ import { detectClaudeLimitMessage } from '../claude-code/limit';
 import { createOrGetWorktree } from '../worktree';
 import { addToWorktree } from '../live-agent/project-setup';
 import { readSettingsFile } from '../settings-utils';
+import { getAgentBackendSettings } from '../agent-backend/settings';
+import { resolveEffectiveAgent } from '../../shared/utils/agent-override';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { isSelfImproveEnabled, SELF_IMPROVE_NUDGE } from '../self-improve';
 import { getCompengDir } from '../self-improve/paths';
@@ -482,6 +484,7 @@ export class AgentManager extends EventEmitter {
       resetClaudeRunInfo(specDir);
     }
 
+    const effectiveAgent = resolveEffectiveAgent(task.metadata?.agentOverride, getAgentBackendSettings().kind);
     const config: TaskRunConfig = {
       taskId,
       projectId: project.id,
@@ -507,6 +510,8 @@ export class AgentManager extends EventEmitter {
         ? { feedback: options.feedback ?? '', feedbackAttachments }
         : {}),
       profileId: options.profileId,
+      backend: effectiveAgent.backend,
+      ...(task.metadata?.agentOverride ? { agentOverride: task.metadata.agentOverride } : {}),
     };
 
     if (isSelfImproveEnabled(project.settings)) {

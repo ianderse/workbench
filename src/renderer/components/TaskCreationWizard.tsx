@@ -17,7 +17,8 @@ import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { PROJECT_DEFAULT_BRANCH, TaskGitOptionsSection, useTaskGitOptions } from './task-form/TaskGitOptions';
 import { createTask, queueTasksInOrder, saveDraft, loadDraft, clearDraft, isDraftEmpty, type TaskCreationDraft } from '../stores/task-store';
-import type { TaskMetadata, ImageAttachment } from '../../shared/types';
+import type { TaskMetadata, ImageAttachment, AgentOverride } from '../../shared/types';
+import { normalizeAgentOverride } from '../../shared/utils/agent-override';
 import { useSettingsStore } from '../stores/settings-store';
 import { TaskBreakdownReview, effectiveDependencies, type BreakdownItem } from './task-form/TaskBreakdownReview';
 import { sortByDependencies } from '../../shared/utils/task-breakdown-order';
@@ -63,6 +64,9 @@ export function TaskCreationWizard({
   // MCP connectors start from the Connectors defaults; changes stay with this task
   const defaultConnectors = useMemo(() => getDefaultMcpConnectorIds(settings.mcpConnectors), [settings.mcpConnectors]);
   const [mcpConnectors, setMcpConnectors] = useState<string[]>(defaultConnectors);
+
+  // Model and effort pinned on the task (unset = triage decides)
+  const [agentOverride, setAgentOverride] = useState<AgentOverride | undefined>(undefined);
 
   // "Break into tasks": 'form' -> 'working' (model call) -> 'review' -> creating
   const [step, setStep] = useState<'form' | 'working' | 'review'>('form');
@@ -112,7 +116,7 @@ export function TaskCreationWizard({
     savedAt: new Date()
   }), [projectId, description, images, mcpConnectors, pushNewBranches]);
 
-  const buildMetadata = (): TaskMetadata => {
+  const buildMetadata = (override: AgentOverride | undefined): TaskMetadata => {
     const metadata: TaskMetadata = { sourceType: 'manual' };
     if (images.length > 0) metadata.attachedImages = images;
     // Always include baseBranch - resolve PROJECT_DEFAULT_BRANCH to actual branch name
@@ -130,6 +134,8 @@ export function TaskCreationWizard({
     if (isSelectedBranchLocal) metadata.useLocalBranch = true;
     if (!pushNewBranches) metadata.pushNewBranches = false;
     metadata.mcpConnectors = mcpConnectors;
+    const pinned = normalizeAgentOverride(override);
+    if (pinned) metadata.agentOverride = pinned;
     return metadata;
   };
 
@@ -143,7 +149,7 @@ export function TaskCreationWizard({
     setError(null);
 
     try {
-      const metadata = buildMetadata();
+      const metadata = buildMetadata(agentOverride);
 
       // The title is generated from the description (and refined by triage when the task starts)
       const task = await createTask(projectId, '', description.trim(), metadata);
@@ -220,7 +226,7 @@ export function TaskCreationWizard({
           doneCount += 1;
           continue;
         }
-        const metadata = buildMetadata();
+        const metadata = buildMetadata(item.agentOverride);
         const dependsOnTaskIds = (dependencies[item.key] ?? [])
           .map((key) => createdIds.current.get(key))
           .filter((id): id is string => !!id);
@@ -254,6 +260,7 @@ export function TaskCreationWizard({
     setDescription('');
     setImages([]);
     setMcpConnectors(defaultConnectors);
+    setAgentOverride(undefined);
     setBaseBranch(PROJECT_DEFAULT_BRANCH);
     setUseWorktree(true);
     setPushNewBranches(projectPushNewBranches);
@@ -396,6 +403,8 @@ export function TaskCreationWizard({
         onImagesChange={setImages}
         mcpConnectors={mcpConnectors}
         onMcpConnectorsChange={setMcpConnectors}
+        agentOverride={agentOverride}
+        onAgentOverrideChange={setAgentOverride}
         disabled={isCreating}
         error={error}
         onError={setError}

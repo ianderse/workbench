@@ -195,6 +195,8 @@ hidden, and agent windows launch `omp` (`buildOmpLaunchCommand` in `terminal/cli
 (`omp --version`, `omp models --json`, cached in the renderer refresh cache) is `ipc-handlers/agent-backend-handlers.ts`;
 the settings UI is `settings/AgentBackendSettings.tsx`.
 
+A task can pin its own backend, model and effort (`TaskMetadata.agentOverride`, the Model control in the task dialogs, `task-form/TaskAgentPicker.tsx`). `resolveEffectiveAgent()` (`shared/utils/agent-override.ts`) turns it and the app backend into the task's backend; the runner (`TaskRunConfig.backend`), the auth check and one-shot calls (`runClaudeText({ backend })`) use that instead of the global backend, and triage's model/effort are replaced by the pin (`applyAgentOverrideToTriage`).
+
 ### Task Directory
 
 Each task's `.workbench/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and

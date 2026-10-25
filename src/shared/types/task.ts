@@ -4,7 +4,8 @@
 
 import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
-import type { ClaudeRunInfo, ClaudeRunPhase } from './claude-code';
+import type { ClaudeRunInfo, ClaudeRunPhase, ClaudeEffort } from './claude-code';
+import type { AgentBackendKind } from './agent-backend';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -160,6 +161,12 @@ export interface TaskDraft {
 export type { ThinkingLevel };
 /** Model identifier — Claude shorthands or concrete model IDs from any provider */
 export type ModelType = string;
+export interface AgentOverride {
+  backend?: AgentBackendKind;
+  model?: string;
+  effort?: ClaudeEffort;
+}
+
 export interface TaskMetadata {
   // The description the user entered (shown on the task card)
   userDescription?: string;
@@ -197,6 +204,13 @@ export interface TaskMetadata {
   // MCP connectors enabled for this task (ids: context7, memory, electron, puppeteer, custom ids).
   // Copied from the Connectors defaults when the task is created; unset means use the defaults
   mcpConnectors?: string[];
+
+  /**
+   * Pin the backend, model and/or effort for this task (set in the task dialog). Unset fields follow
+   * the app: backend = Settings > Agents, model/effort = triage. `model` is a tier alias
+   * (haiku/sonnet/opus/fable) or an exact model id / OMP `provider/model` selector.
+   */
+  agentOverride?: AgentOverride;
 
   // Git/Worktree configuration
   baseBranch?: string;  // Override base branch for this task's worktree

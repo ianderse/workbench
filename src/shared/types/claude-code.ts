@@ -56,7 +56,8 @@ export type TaskScope = 'trivial' | 'small' | 'medium' | 'large';
 
 /** Triage decision for a task */
 export interface TaskTriage {
-  model: ClaudeModelAlias;
+  /** Tier alias, or the exact model id when the user pinned one on the task */
+  model: string;
   effort: ClaudeEffort;
   needsPlan: boolean;
   scope: TaskScope;
@@ -68,6 +69,8 @@ export interface TaskTriage {
   verification: string[];
   /** auto: decided by the triage run; fixed: from settings; fallback: triage failed */
   source: 'auto' | 'fixed' | 'fallback';
+  /** The user pinned the model and/or effort on the task (they replace what triage chose) */
+  pinned?: { model?: boolean; effort?: boolean };
 }
 
 /** Steps of a task run */

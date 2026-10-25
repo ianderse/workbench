@@ -29,7 +29,8 @@ import { cancelFallbackTimer } from '../agent-events-handlers';
 import { safeSendToRenderer } from '../utils';
 import { readSettingsFile } from '../../settings-utils';
 import { getAPIProfileEnv } from '../../services/profile';
-import { isOmpBackend } from '../../agent-backend/settings';
+import { getAgentBackendSettings } from '../../agent-backend/settings';
+import { resolveEffectiveAgent } from '../../../shared/utils/agent-override';
 import { loadClaudeRunInfo } from '../../claude-code/task-runner';
 import { rateLimitResumeScheduler, type HeldTaskRef } from '../../services/rate-limit-resume-scheduler';
 import { clearRateLimitHold } from './rate-limit-hold';
@@ -88,9 +89,10 @@ async function ensureProfileManagerInitialized(): Promise<
  * Claude Code can run a task: a signed-in Claude profile, or an active API profile
  * (Anthropic-compatible endpoint).
  */
-async function checkClaudeCodeAuth(): Promise<{ ok: true } | { ok: false; error: string }> {
-  // OMP runs local models: no Claude account is needed
-  if (isOmpBackend()) return { ok: true };
+async function checkClaudeCodeAuth(task?: Pick<Task, 'metadata'>): Promise<{ ok: true } | { ok: false; error: string }> {
+  // OMP runs local models: no Claude account is needed. The task's own backend decides
+  // (a task can pin Claude while the app runs OMP, or the other way round)
+  if (resolveEffectiveAgent(task?.metadata?.agentOverride, getAgentBackendSettings().kind).backend === 'omp') return { ok: true };
   const initResult = await ensureProfileManagerInitialized();
   if (!initResult.success) {
     return { ok: false, error: initResult.error };
@@ -294,7 +296,7 @@ export function registerTaskExecutionHandlers(
       return;
     }
 
-    const auth = await checkClaudeCodeAuth();
+    const auth = await checkClaudeCodeAuth(task);
     if (!auth.ok) {
       console.warn('[TASK_START] No usable Claude Code authentication');
       sendTaskError(taskId, auth.error, project.id);
@@ -402,7 +404,7 @@ export function registerTaskExecutionHandlers(
     if (!gitStatus.isGitRepo || !gitStatus.hasCommits) {
       return { success: false, error: gitStatus.error || 'Git repository with commits required to run tasks.' };
     }
-    const auth = await checkClaudeCodeAuth();
+    const auth = await checkClaudeCodeAuth(task);
     if (!auth.ok) {
       return { success: false, error: auth.error };
     }
@@ -586,7 +588,7 @@ export function registerTaskExecutionHandlers(
         return { success: false, error: 'The task is still running. Stop it before requesting changes.' };
       }
 
-      const auth = await checkClaudeCodeAuth();
+      const auth = await checkClaudeCodeAuth(task);
       if (!auth.ok) {
         return { success: false, error: auth.error };
       }
@@ -736,7 +738,7 @@ export function registerTaskExecutionHandlers(
             sendTaskError(taskId, error, project.id);
             return { success: false, error };
           }
-          const auth = await checkClaudeCodeAuth();
+          const auth = await checkClaudeCodeAuth(task);
           if (!auth.ok) {
             sendTaskError(taskId, auth.error, project.id);
             return { success: false, error: auth.error };
@@ -889,7 +891,7 @@ export function registerTaskExecutionHandlers(
         if (autoRestart) {
           const gitStatusForRestart = await checkGitStatus(project.path);
           const auth = gitStatusForRestart.isGitRepo && gitStatusForRestart.hasCommits
-            ? await checkClaudeCodeAuth()
+            ? await checkClaudeCodeAuth(task)
             : { ok: false as const, error: gitStatusForRestart.error || 'Git repository with commits required.' };
           if (!auth.ok) {
             restartProblem = auth.error;

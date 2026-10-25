@@ -29,6 +29,8 @@ import {
   RotateCcw
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
+import { useSettingsStore } from '../../stores/settings-store';
+import { pinnedModelLabel } from '../../../shared/utils/agent-override-labels';
 import {
   DIALOG_ANIMATION_CLASS,
   DIALOG_CLOSE_BUTTON_CLASS,
@@ -92,6 +94,8 @@ export function TaskDetailModal({ open, task, onOpenChange }: TaskDetailModalPro
 function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; task: Task; onOpenChange: (open: boolean) => void }) {
   const { t } = useTranslation(['tasks']);
   const state = useTaskDetail({ task });
+  const agentBackendSettings = useSettingsStore((s) => s.settings.agentBackend);
+  const pinnedLabel = pinnedModelLabel(task.metadata?.agentOverride, agentBackendSettings?.kind ?? 'claude', agentBackendSettings?.omp?.models);
   const [isUnarchiving, setIsUnarchiving] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   // Why the last footer action failed, shown in the footer (cleared by the next action)
@@ -274,6 +278,11 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       <Badge variant="outline" className="text-xs font-mono">
                         {task.specId}
                       </Badge>
+                      {pinnedLabel && (
+                        <Badge variant="outline" className="text-xs" title={t('tasks:agentPicker.pinnedTitle', { model: pinnedLabel })}>
+                          {t('tasks:agentPicker.pinnedBadge', { model: pinnedLabel })}
+                        </Badge>
+                      )}
                       {/* The task's base branch: what it was branched from, and what it merges into */}
                       {state.worktreeStatus?.exists && (
                         <>

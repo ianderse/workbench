@@ -6,12 +6,15 @@
  *   a paperclip button to attach images, paste (Ctrl/Cmd+V) and drag and drop
  * - Connectors (MCP servers for the task's Claude Code session)
  *
- * Model, effort and planning are decided per task by the Claude Code triage run.
+ * Model and effort follow the triage run unless pinned in the Model section; planning is always triage's.
  */
 import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image as ImageIcon, Paperclip, X } from 'lucide-react';
 import { SettingsSection } from '../settings/SettingsSection';
+import { SettingsRows, SettingsRow } from '../settings/SettingsRow';
+import { TaskAgentPicker } from './TaskAgentPicker';
+import type { AgentOverride } from '../../../shared/types/task';
 import { useImageUpload } from './useImageUpload';
 import { ImagePreviewModal } from './ImagePreviewModal';
 import { cn } from '../../lib/utils';
@@ -39,6 +42,10 @@ interface TaskFormFieldsProps {
   mcpConnectors?: string[];
   onMcpConnectorsChange?: (value: string[]) => void;
 
+  // Model and effort pinned on the task (the section shows when a change handler is given)
+  agentOverride?: AgentOverride;
+  onAgentOverrideChange?: (value: AgentOverride | undefined) => void;
+
   // Form state
   disabled?: boolean;
   error?: string | null;
@@ -61,6 +68,8 @@ export function TaskFormFields({
   onImagesChange,
   mcpConnectors = [],
   onMcpConnectorsChange,
+  agentOverride,
+  onAgentOverrideChange,
   disabled = false,
   error,
   onError,
@@ -69,7 +78,9 @@ export function TaskFormFields({
 }: TaskFormFieldsProps) {
   const { t } = useTranslation(['tasks', 'common']);
   // Connectors are Claude Code's --mcp-config; OMP tasks ignore them, so the section is left out
-  const isOmp = useIsOmpBackend();
+  // The task's own backend decides (a task can pin Claude while the app runs OMP)
+  const appIsOmp = useIsOmpBackend();
+  const isOmp = (agentOverride?.backend ? agentOverride.backend === 'omp' : appIsOmp);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
   const prefix = idPrefix ? `${idPrefix}-` : '';
 
@@ -215,6 +226,17 @@ export function TaskFormFields({
             </div>
           )}
         </div>
+
+        {/* Model and effort: pinned on the task, or chosen by triage */}
+        {onAgentOverrideChange && (
+          <SettingsSection title={t('tasks:agentPicker.title')}>
+            <SettingsRows>
+              <SettingsRow label={t('tasks:agentPicker.title')} description={t('tasks:agentPicker.description')} htmlFor={`${prefix}task-model`}>
+                <TaskAgentPicker value={agentOverride} onChange={onAgentOverrideChange} disabled={disabled} idPrefix={idPrefix} />
+              </SettingsRow>
+            </SettingsRows>
+          </SettingsSection>
+        )}
 
         {/* MCP connectors for the task's Claude Code session */}
         {onMcpConnectorsChange && !isOmp && (

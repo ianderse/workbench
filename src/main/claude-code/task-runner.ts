@@ -27,7 +27,7 @@ import path from 'path';
 import { resolveClaudeEnv } from './env';
 import { startClaudeProcess, type ClaudeProcessHandle } from './process';
 import { buildMcpConfig } from './mcp-config';
-import { triageTask, fixedTriage, applyPlanningPolicy } from './triage';
+import { triageTask, fixedTriage, applyPlanningPolicy, applyAgentOverrideToTriage } from './triage';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
 import { buildParallelTasksPrompt } from '../task-changelog';
 import { git } from '../utils/git-exec';
@@ -65,7 +65,9 @@ import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/
 import { DATA_DIR_NAMES } from '../../shared/constants';
 import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
 import { appLog } from '../app-logger';
-import { agentDisplayName, getAgentBackendSettings } from '../agent-backend/settings';
+import { getAgentBackendSettings } from '../agent-backend/settings';
+import type { AgentBackendKind } from '../../shared/types/agent-backend';
+import type { AgentOverride } from '../../shared/types/task';
 import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
 import { buildOmpMemoryPrompt } from '../self-improve/nudge';
 import { startOmpProcess } from '../agent-backend/omp-process';
@@ -140,6 +142,10 @@ export interface TaskRunConfig {
   feedbackAttachments?: TaskAttachment[];
   /** Claude profile to use (undefined = best available) */
   profileId?: string;
+  /** Backend for the whole task (its override, else the app-wide backend); decided once per start */
+  backend: AgentBackendKind;
+  /** Model/effort the user pinned on the task; they replace triage's choice */
+  agentOverride?: AgentOverride;
 }
 
 interface TaskRunProgress {
@@ -427,6 +433,13 @@ export class ClaudeTaskRun {
       const triaged = await this.runTriage();
       if (triaged) return triaged;
     }
+    // A run that continues after the user changed the pin on the task takes the new pin
+    const ov = this.config.agentOverride;
+    const known = this.info.triage!;
+    if ((ov?.model && known.model !== ov.model) || (ov?.effort && known.effort !== ov.effort)) {
+      this.info.triage = applyAgentOverrideToTriage({ ...known, pinned: undefined }, ov);
+      this.saveInfo();
+    }
     const triage = this.info.triage!;
 
     // 2. Plan (only before implementation started)
@@ -454,6 +467,11 @@ export class ClaudeTaskRun {
   // ---------------------------------------------------------------------------
   // Steps
   // ---------------------------------------------------------------------------
+
+  /** Name of the task's backend, for log lines */
+  private backendName(): string {
+    return this.config.backend === 'omp' ? 'OMP' : 'Claude Code';
+  }
 
   private async runTriage(revision = false): Promise<TaskRunOutcome | null> {
     const { settings } = this.config;
@@ -483,6 +501,8 @@ export class ClaudeTaskRun {
           settings,
           abortSignal: this.abortController.signal,
           profileId: this.config.profileId,
+          backend: this.config.backend,
+          override: this.config.agentOverride,
         }));
       } catch (error) {
         if (this.stopped) return { status: 'stopped' };
@@ -493,7 +513,7 @@ export class ClaudeTaskRun {
         triage = fixedTriage(settings, this.config.title, 'fallback', `Triage failed (${message}); used the default model and effort`);
       }
     }
-    triage = applyPlanningPolicy(triage, settings);
+    triage = applyPlanningPolicy(applyAgentOverrideToTriage(triage, this.config.agentOverride), settings);
     if (revision) {
       // A change request is applied directly in the session (no separate plan) and keeps the title
       triage = { ...triage, needsPlan: false, title: this.info.triage?.title || this.config.title };
@@ -502,9 +522,9 @@ export class ClaudeTaskRun {
     this.endPhase(phase, triageCost !== undefined ? { costUsd: triageCost } : {});
     this.updateTotalCost();
     this.log.add('planning', 'info',
-      `Model ${triage.model}, effort ${triage.effort}, ${triage.needsPlan ? 'plan first' : 'no plan'} (${triage.scope})`,
+      `${triage.pinned ? 'Model pinned: ' : 'Model '}${triage.model}, effort ${triage.effort}, ${triage.needsPlan ? 'plan first' : 'no plan'} (${triage.scope})`,
       { detail: triage.reasoning || undefined });
-    this.emitLog(`Triage: ${triage.model} / ${triage.effort} / ${triage.needsPlan ? 'plan first' : 'no plan'}. ${triage.reasoning}`);
+    this.emitLog(`${triage.pinned ? 'Triage (model pinned)' : 'Triage'}: ${triage.model} / ${triage.effort} / ${triage.needsPlan ? 'plan first' : 'no plan'}. ${triage.reasoning}`);
     this.saveInfo();
     return null;
   }
@@ -512,15 +532,15 @@ export class ClaudeTaskRun {
   /** Run a Claude Code session step; returns an outcome when the run must stop */
   private async runSessionPhase(name: SessionPhaseName): Promise<TaskRunOutcome | null> {
     const triage = this.info.triage ?? fixedTriage(this.config.settings, this.config.title, 'fallback', 'No triage recorded');
-    const model = name === 'plan' ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
-    const effort: ClaudeEffort = name === 'plan' && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
+    const model = name === 'plan' && !triage.pinned?.model ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
+    const effort: ClaudeEffort = name === 'plan' && !triage.pinned?.effort && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
     const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' ? 'validation' : 'coding';
 
     // A session lives in the runtime it ran in (native or WSL); after a switch, start a new one
     await whenShellRuntimeReady();
     const runtime = currentRuntime();
     if (this.info.sessionId && (this.info.runtime ?? 'native') !== runtime) {
-      this.emitLog(`${agentDisplayName()} now runs ${runtime === 'wsl' ? 'in WSL' : 'natively'}, so this step starts a new session`);
+      this.emitLog(`${this.backendName()} now runs ${runtime === 'wsl' ? 'in WSL' : 'natively'}, so this step starts a new session`);
       this.info.sessionId = undefined;
     }
     if (this.info.runtime !== runtime) {
@@ -528,7 +548,7 @@ export class ClaudeTaskRun {
       this.saveInfo();
     }
     // A session belongs to the backend that made it (Claude Code transcript or OMP session file)
-    const backend = getAgentBackendSettings().kind;
+    const backend = this.config.backend;
     if (this.info.sessionId && (this.info.backend ?? 'claude') !== backend) {
       this.emitLog(`The agent backend is now ${backend === 'omp' ? 'OMP' : 'Claude Code'}, so this step starts a new session`);
       this.info.sessionId = undefined;
@@ -612,7 +632,7 @@ export class ClaudeTaskRun {
         || result?.errors?.join('; ')
         || (result?.subtype === 'error_max_budget_usd' ? 'The task reached its budget limit (Settings > Project)' : '')
         || result?.result
-        || `${agentDisplayName()} stopped with an error`;
+        || `${this.backendName()} stopped with an error`;
       this.endPhase(phase, { isError: true, error }, result);
       this.log.endPhase(logPhase, false, error);
       this.failEvent(name, error);
@@ -715,9 +735,9 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
       case 'validate':
         text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.validate}
 1. Run ${verificationHint(triage)}. Fix failures your change caused.
-2. ${this.reviewSection && getAgentBackendSettings().kind === 'omp'
+2. ${this.reviewSection && this.config.backend === 'omp'
   ? this.reviewSection
-  : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${getAgentBackendSettings().kind === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
+  : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${this.config.backend === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
 3. Commit any remaining changes.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
@@ -782,7 +802,7 @@ no notes came with the request, so review the change against the task with fresh
     logPhase: TaskLogPhase;
   }): Promise<PhaseResult> {
     if (this.stopped) return { stopped: true };
-    if (getAgentBackendSettings().kind === 'omp') return this.runOmp(params);
+    if (this.config.backend === 'omp') return this.runOmp(params);
     this.costIsPerRun = false;
     const { settings } = this.config;
     // Stay on the profile that holds the session transcript, unless the caller switched profiles
@@ -883,7 +903,7 @@ no notes came with the request, so review the change against the task with fresh
     if (rateLimit) return { rateLimit, stopped: false, result };
     if (authFailed) return { authFailed, stopped: false, result };
     if (!result) {
-      const error = outcome.stderr.trim().split('\n').slice(-3).join(' ') || `${agentDisplayName()} exited with code ${outcome.exitCode}`;
+      const error = outcome.stderr.trim().split('\n').slice(-3).join(' ') || `${this.backendName()} exited with code ${outcome.exitCode}`;
       return { stopped: false, error };
     }
     return { result, stopped: false };
@@ -1068,15 +1088,21 @@ no notes came with the request, so review the change against the task with fresh
       this.noteLog('validation', 'Review skipped: no changes to review');
       return;
     }
-    this.noteLog('validation', 'Reviewing the change with a fresh context (Large model)');
-    const phase = this.beginPhase('review', { model: 'opus', effort: 'high' });
+    const reviewTriage = this.info.triage;
+    const reviewModel = reviewTriage?.pinned?.model ? reviewTriage.model : 'opus';
+    const reviewEffort: ClaudeEffort = reviewTriage?.pinned?.effort ? reviewTriage.effort : 'high';
+    this.noteLog('validation', reviewTriage?.pinned?.model
+      ? `Reviewing the change with a fresh context (${reviewModel})`
+      : 'Reviewing the change with a fresh context (Large model)');
+    const phase = this.beginPhase('review', { model: reviewModel, effort: reviewEffort });
     const started = Date.now();
     try {
       const result = await runClaudeText({
         prompt: `${taskBlock(this.config)}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>`,
         appendSystemPrompt: REVIEW_SYSTEM_PROMPT,
-        model: 'opus',
-        effort: 'high',
+        model: reviewModel,
+        effort: reviewEffort,
+        backend: this.config.backend,
         jsonSchema: REVIEW_SCHEMA,
         cwd,
         tools: READ_ONLY_TOOLS,

@@ -120,6 +120,7 @@ describe('ClaudeTaskRun', () => {
       connectorIds: [],
       settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS },
       mode: 'start',
+      backend: 'claude',
       ...overrides,
     }, callbacks);
   }
