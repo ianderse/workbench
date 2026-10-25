@@ -65,18 +65,23 @@ jobs:
             { print }
           ' "$RUNNER_TEMP/merged" > "$RUNNER_TEMP/stripped"
 
-          # Unless the token merged it itself, in which case it is the author and no co-author
+          # Unless the token merged it itself, in which case it is the author and no co-author.
+          # --no-divider: the input is the message alone, so a `---` in it (a rule in a pull
+          # request's description) is not where it ends, which would put the trailer above it
           case "$author" in
             *"$token_author"*) cp "$RUNNER_TEMP/stripped" "$RUNNER_TEMP/message" ;;
-            *) git interpret-trailers --where start --trailer "Co-authored-by: $author" \
+            *) git interpret-trailers --no-divider --where start --trailer "Co-authored-by: $author" \
                  "$RUNNER_TEMP/stripped" > "$RUNNER_TEMP/message" ;;
           esac
 
           # Nobody the merge credited may fall off the message on the way here: this commit goes
-          # out in their name too, so a missing trailer stops the job instead of being published
+          # out in their name too, so a missing trailer stops the job instead of being published.
+          # Compared without case or whitespace: interpret-trailers writes the trailers it keeps
+          # back out tidied up (one space after the colon, no trailing spaces or CR)
           lost=$(awk -v token="$token_author" '
-            NR == FNR { kept[tolower($0)] = 1; next }
-            tolower($0) ~ /^co-authored-by:/ && index($0, token) == 0 && !kept[tolower($0)] { print }
+            { line = tolower($0); gsub(/[ \t\r]/, "", line) }
+            NR == FNR { kept[line] = 1; next }
+            line ~ /^co-authored-by:/ && index($0, token) == 0 && !kept[line] { print }
           ' "$RUNNER_TEMP/message" "$RUNNER_TEMP/merged")
           if [ -n "$lost" ]; then
             echo "the merge credits people the new message does not:"
