@@ -35,12 +35,9 @@ jobs:
         run: |
           # Not an identity to commit as (the token decides that), only the name to recognise it
           # by among the people the merge credits: the author of a commit is not its co-author.
-          # It lives here and not in env:, where it once went missing and read as "every
-          # co-author is the token", leaving the merge commit crediting nobody at all
+          # A literal here, not an env: entry, where it once went missing: empty, it read as
+          # "every co-author is the token" and the merge commit went out crediting nobody
           token_author='github-actions[bot]'
-          # An empty one would read as "every co-author is the token", which is how a merge commit
-          # once went out crediting nobody
-          : "${token_author:?the name the token commits under}"
 
           # Only the merge commit is ours to rewrite: anything pushed on top of it since would be
           # lost when the branch is moved to the new commit
