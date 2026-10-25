@@ -29,7 +29,7 @@ function project(id: string, name: string, updatedAt: string): Project {
     autoBuildPath: `/work/${name.toLowerCase()}/.workbench`,
     settings: {
       model: 'sonnet',
-      notifications: { onTaskComplete: true, onTaskFailed: true, onReviewNeeded: true, sound: false }
+      notifications: { onTaskComplete: true, onTaskFailed: true, onReviewNeeded: true, onDecisionNeeded: true, onQueueEmpty: true, sound: false }
     },
     createdAt: new Date(updatedAt),
     updatedAt: new Date(updatedAt)

@@ -18,6 +18,8 @@ function createTestProject(overrides: Partial<Project> = {}): Project {
       onTaskComplete: true,
       onTaskFailed: true,
       onReviewNeeded: true,
+      onDecisionNeeded: true,
+      onQueueEmpty: true,
       sound: false
     },
     

@@ -296,6 +296,8 @@ export interface AppSettings {
   // Maximum agent terminals per project (MIN_TERMINALS..MAX_TERMINALS_LIMIT)
   maxTerminals?: number;
   notifications: NotificationSettings;
+  /** Phone notifications through Home Assistant (the access token is kept encrypted, not here) */
+  phoneNotifications?: import('../utils/phone-notify').PhoneNotificationSettings;
   // Interface font (default Anthropic Sans)
   interfaceFont?: InterfaceFont;
   // Graph page colors (Settings > General > Appearance; default plain)

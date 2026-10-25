@@ -301,6 +301,10 @@
     "onTaskFailedDescription": "Notify when a task encounters an error",
     "onReviewNeeded": "On review needed",
     "onReviewNeededDescription": "Notify when QA requires your review",
+    "onDecisionNeeded": "On decision needed",
+    "onDecisionNeededDescription": "Notify when a follow-up ticket waits for your decision",
+    "onQueueEmpty": "On all work done",
+    "onQueueEmptyDescription": "Notify when a project has no queued or running tasks left",
     "sound": "Sound",
     "soundDescription": "Play sound with notifications"
   },
@@ -747,5 +751,34 @@
     },
     "maxMinutes": "Max minutes per phase",
     "maxMinutesDescription": "Stops a task phase after this long. 0 means no limit"
+  },
+  "phoneNotifications": {
+    "title": "Phone (Home Assistant)",
+    "description": "Send notifications to your phone through Home Assistant",
+    "enabled": "Send to phone",
+    "enabledDescription": "Push the selected events through the Home Assistant mobile app",
+    "baseUrl": "Home Assistant URL",
+    "baseUrlDescription": "Address of your Home Assistant server",
+    "service": "Notify service",
+    "serviceDescription": "The part after notify. in the service name",
+    "token": "Access token",
+    "tokenDescription": "A long-lived access token from your Home Assistant profile, stored encrypted",
+    "tokenSavedDescription": "A token is saved and encrypted, type a new one to replace it",
+    "saveToken": "Save token",
+    "removeToken": "Remove",
+    "tokenSaved": "Token saved",
+    "tokenFailed": "The token could not be saved",
+    "events": {
+      "decisionNeeded": "Decision needed",
+      "needsAttention": "Needs attention and failures",
+      "queueEmpty": "All work done",
+      "taskMerged": "Task merged",
+      "reviewNeeded": "Review needed"
+    },
+    "test": "Test notification",
+    "testDescription": "Send a test notification with the values above",
+    "testButton": "Send test",
+    "testSent": "Sent, Home Assistant answered {{status}}",
+    "testFailed": "Failed: {{error}}"
   }
 }

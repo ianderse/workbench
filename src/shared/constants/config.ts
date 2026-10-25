@@ -50,6 +50,8 @@ export const DEFAULT_APP_SETTINGS = {
     onTaskComplete: true,
     onTaskFailed: true,
     onReviewNeeded: true,
+    onDecisionNeeded: true,
+    onQueueEmpty: true,
     sound: false
   },
   // API key for OpenAI memory embeddings (used as the default for all projects)
@@ -81,6 +83,8 @@ export const DEFAULT_PROJECT_SETTINGS = {
     onTaskComplete: true,
     onTaskFailed: true,
     onReviewNeeded: true,
+    onDecisionNeeded: true,
+    onQueueEmpty: true,
     sound: false
   },
   // Include CLAUDE.md instructions in agent context (enabled by default)

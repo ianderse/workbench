@@ -37,6 +37,7 @@ import { appendNoteBlock, isGroomableStatus } from '../shared/utils/queue-groomi
 import { defaultGroomingDeps, readQueueProposals, type GroomingDeps } from './queue-grooming';
 import { inheritedMetadata } from './task-split';
 import { appLog } from './app-logger';
+import { taskHooks } from './task-hooks';
 
 /** Wait for the state machine and the run's own summary generation to start */
 const SETTLE_MS = 3000;
@@ -235,6 +236,7 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
   }
 
   const created: FollowUpOutcome['created'] = [];
+  const needDecision: Array<{ taskId: string; title: string }> = [];
   const queued: string[] = [];
   for (const plan of result.tickets) {
     try {
@@ -249,6 +251,7 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
       if (!id) continue;
       created.push({ taskId: id, action: plan.action });
       if (plan.action === 'queue') queued.push(id);
+      else needDecision.push({ taskId: id, title: plan.title });
     } catch (error) {
       appLog.warn(`[FollowUps] Could not create a ticket for "${plan.title}":`, error);
     }
@@ -273,6 +276,7 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
     metadata: { followUpsCreatedAt: new Date().toISOString(), ...(created.length > 0 ? { followUpTickets: created } : {}) },
   });
   deps.changed(projectId);
+  if (needDecision.length > 0) taskHooks.emit('decision-needed', { project, tickets: needDecision });
   appLog.info(`[FollowUps] ${source.id}: ${created.length} ticket(s) created, ${result.covered.length} covered`);
   return { created, coveredCount: result.covered.length };
 }

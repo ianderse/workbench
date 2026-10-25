@@ -240,6 +240,7 @@ async function blockAutoMerge(project: Project, task: Task, reason: 'conflicts' 
   logTask(project, task, 'warn', text);
   writeMetadata(project, task, { autoMergeBlocked: { reason, message: text, at: new Date().toISOString() } });
   notifyChanged(project.id);
+  taskHooks.emit('needs-attention', { project, task, reason: 'auto-merge-blocked', detail: message });
 }
 
 async function runAutoMerge(project: Project, task: Task, deps: AutoMergeDeps): Promise<void> {

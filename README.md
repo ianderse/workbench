@@ -16,6 +16,12 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 
 ### 2026-10-25
 
+**Notifications**
+- Notifications for the autonomous workflow: task merged (auto-merge or merge to Done, once per task), decision needed (one per new decision ticket, batched into one when several are created together), needs attention (blocked auto-merge, interrupted run that could not be resumed, task left in error) and all work done in a project ("N merged, M waiting for review or decision", after the queue, In Progress and AI review stay empty for a few seconds, never at app start)
+- Clicking a notification focuses the window and opens that task, or the project board for "all work done" and grouped decisions
+- New switches in Settings > General > Notifications: on decision needed and on all work done (needs attention uses the task failed switch)
+- Phone notifications through Home Assistant: URL, notify service, long-lived access token (stored encrypted with the OS keychain, never in settings.json), per-event switches (decision needed, needs attention and all work done on by default) and a "Send test" button that shows the result inline
+
 **Decision tickets**
 - The "Your decision" panel shows a suggested decision (written by the model when the follow-up ticket is made, or on request with "Suggest a decision" for older tickets) that you can use with one click and edit; an empty answer uses the suggestion, and the fixed example placeholder is gone
 

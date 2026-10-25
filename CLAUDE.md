@@ -357,6 +357,22 @@ detached worktree, then the branch is moved by `merge --ff-only` where it is che
   Queue (the old worktree is behind the target). Revert (`git revert -m 1`) and "Merge into main" (board banner) also use
   temporary worktrees. Undo of automatic queue changes is in the Queue updates panel.
 
+### Notifications (desktop and phone)
+
+`main/notification-service.ts` shows Electron `Notification`s (English strings built in the main process, not i18n; text,
+click routes and timing are pure in `shared/utils/notification-events.ts`) and pushes the same events to a phone through
+Home Assistant (`main/phone-notifier.ts`, pure payload/routing in `shared/utils/phone-notify.ts`). Events come from task
+hooks in `main/attention-notifier.ts` (started by `notification-handlers.ts`): `auto-merged` and `merged` (task merged, once
+per task), `decision-needed` (emitted by `createFollowUpTickets`, batched per project over 2 s), `needs-attention`
+(blocked auto-merge, failed startup resume) plus the `state` hook for tasks in `error` and the "all work done"
+`QueueEmptyTracker` (queue / in_progress / ai_review empty for 5 s after being active in this session). Desktop switches:
+`NotificationSettings` (`onTaskComplete`, `onTaskFailed`, `onReviewNeeded`, `onDecisionNeeded`, `onQueueEmpty`; needs
+attention and errors use `onTaskFailed`); phone switches: `AppSettings.phoneNotifications.events`. The two channels are
+independent, and the same kind for the same task is shown once per 30 s. A click sends `NOTIFICATION_OPEN` to the
+renderer (`App.tsx` opens the task or the board). The Home Assistant token is stored with `safeStorage` in
+`userData/phone-notify-token.bin` (`phone-token-store.ts`), never in settings.json, never logged, never sent to the
+renderer. In `npm run dev` the app is "Electron" to macOS: allow it in System Settings > Notifications > Electron.
+
 ### MCP Connectors
 
 Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and

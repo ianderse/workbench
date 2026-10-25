@@ -10,6 +10,7 @@ import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
+import { DEFAULT_APP_SETTINGS } from '../../../shared/constants';
 import { Button } from '../ui/button';
 import { Switch } from '../ui/switch';
 import { Progress } from '../ui/progress';
@@ -507,6 +508,8 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
     { key: 'onTaskComplete', labelKey: 'notifications.onTaskComplete', descriptionKey: 'notifications.onTaskCompleteDescription' },
     { key: 'onTaskFailed', labelKey: 'notifications.onTaskFailed', descriptionKey: 'notifications.onTaskFailedDescription' },
     { key: 'onReviewNeeded', labelKey: 'notifications.onReviewNeeded', descriptionKey: 'notifications.onReviewNeededDescription' },
+    { key: 'onDecisionNeeded', labelKey: 'notifications.onDecisionNeeded', descriptionKey: 'notifications.onDecisionNeededDescription' },
+    { key: 'onQueueEmpty', labelKey: 'notifications.onQueueEmpty', descriptionKey: 'notifications.onQueueEmptyDescription' },
     { key: 'sound', labelKey: 'notifications.sound', descriptionKey: 'notifications.soundDescription' }
   ];
 
@@ -525,7 +528,7 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
           >
             <Switch
               id={`notification-${item.key}`}
-              checked={settings.notifications[item.key]}
+              checked={settings.notifications[item.key] ?? DEFAULT_APP_SETTINGS.notifications[item.key]}
               onCheckedChange={(checked) =>
                 onSettingsChange({
                   ...settings,

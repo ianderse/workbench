@@ -12,6 +12,7 @@ import { SelfImproveAPI, createSelfImproveAPI } from './modules/self-improve-api
 import { UsageAPI, createUsageAPI } from './modules/usage-api';
 import { QueueGroomingAPI, createQueueGroomingAPI } from './modules/queue-grooming-api';
 import { AutonomousAPI, createAutonomousAPI } from './modules/autonomous-api';
+import { NotificationsAPI, createNotificationsAPI } from './modules/notifications-api';
 import { ProjectIndexAPI, createProjectIndexAPI } from './modules/project-index-api';
 import { LiveAgentAPI, createLiveAgentAPI } from './modules/live-agent-api';
 import { McpAPI, createMcpAPI } from './modules/mcp-api';
@@ -35,6 +36,7 @@ export interface ElectronAPI extends
   QueueGroomingAPI,
   UsageAPI,
   AutonomousAPI,
+  NotificationsAPI,
   ProjectIndexAPI,
   LiveAgentAPI,
   McpAPI,
@@ -59,6 +61,7 @@ export const createElectronAPI = (): ElectronAPI => ({
   ...createQueueGroomingAPI(),
   ...createUsageAPI(),
   ...createAutonomousAPI(),
+  ...createNotificationsAPI(),
   ...createProjectIndexAPI(),
   ...createLiveAgentAPI(),
   ...createMcpAPI(),

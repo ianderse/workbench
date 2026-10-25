@@ -537,6 +537,12 @@ export interface ElectronAPI {
   /** Import the tasks' earlier sessions again, then read the ledger */
   rebuildUsageFromHistory: (projectId: string) => Promise<IPCResult<import('./usage').UsageSummaryResult>>;
 
+  // Phone notifications (Home Assistant)
+  setPhoneNotifyToken: (token: string) => Promise<IPCResult>;
+  hasPhoneNotifyToken: () => Promise<IPCResult<boolean>>;
+  sendPhoneTestNotification: (target: { baseUrl: string; service: string }) => Promise<IPCResult<{ status?: number }>>;
+  onNotificationOpen: (callback: (target: { projectId: string; taskId?: string }) => void) => () => void;
+
   // Autonomous mode
   getAutonomousStatus: (projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousStatus | null>>;
   mergeIntegrationIntoBase: (projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousMergeIntoBaseResult>>;

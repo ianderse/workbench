@@ -83,6 +83,10 @@ export interface NotificationSettings {
   onTaskComplete: boolean;
   onTaskFailed: boolean;
   onReviewNeeded: boolean;
+  /** A follow-up ticket needs a decision from the person */
+  onDecisionNeeded: boolean;
+  /** A project's queue, In Progress and AI review are all empty */
+  onQueueEmpty: boolean;
   sound: boolean;
 }
 

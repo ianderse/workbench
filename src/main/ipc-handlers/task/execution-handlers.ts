@@ -1048,7 +1048,10 @@ async function resumeStuckTasksOnStart(
       const finished = action === 'review';
       appLog.info(`[TASK_RESUME_ON_START] ${task.specId}: left ${task.status} by the last session, ${finished ? 'moving its finished run to review' : 'resuming it'}`);
       const result = await recover(task.id, { autoRestart: !finished }, project.id);
-      if (!result.success) appLog.warn(`[TASK_RESUME_ON_START] ${task.specId}: could not recover: ${result.error ?? 'unknown error'}`);
+      if (!result.success) {
+        appLog.warn(`[TASK_RESUME_ON_START] ${task.specId}: could not recover: ${result.error ?? 'unknown error'}`);
+        taskHooks.emit('needs-attention', { project, task, reason: 'resume-failed' });
+      }
     }
   }
 }

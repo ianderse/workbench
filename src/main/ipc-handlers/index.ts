@@ -25,6 +25,7 @@ import { registerQueueGroomingHandlers } from './queue-grooming-handlers';
 import { registerSpecReviewHandlers } from './spec-review-handlers';
 import { registerUsageHandlers } from './usage-handlers';
 import { registerAutonomousHandlers } from './autonomous-handlers';
+import { registerNotificationHandlers } from './notification-handlers';
 import { registerProjectIndexHandlers } from './project-index-handlers';
 import { registerLiveAgentHandlers } from './live-agent-handlers';
 import { registerMcpHandlers } from './mcp-handlers';
@@ -97,6 +98,7 @@ export function setupIpcHandlers(
   registerSpecReviewHandlers(getMainWindow);
   registerUsageHandlers();
   registerAutonomousHandlers(getMainWindow);
+  registerNotificationHandlers();
   registerProjectIndexHandlers();
 
   // Live agent handlers (relay status, agent windows' graph subscriptions)

@@ -24,6 +24,7 @@ import { ThemeSettings } from './ThemeSettings';
 import { SettingsFlushProvider } from './WindowsShellSelector';
 import { GeneralSettings } from './GeneralSettings';
 import { ClaudeCodeTaskSettings } from './ClaudeCodeTaskSettings';
+import { PhoneNotificationSettings } from './PhoneNotificationSettings';
 import { AdvancedSettings } from './AdvancedSettings';
 import { ClaudeCodeSettings } from './ClaudeCodeSettings';
 import { GraphifySettings } from './GraphifySettings';
@@ -225,6 +226,7 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
           <>
             <ThemeSettings settings={settings} onSettingsChange={setSettings} />
             <AdvancedSettings settings={settings} onSettingsChange={setSettings} section="notifications" version={version} />
+            <PhoneNotificationSettings settings={settings} onSettingsChange={setSettings} />
           </>
         );
       case 'accounts':

@@ -209,6 +209,37 @@ export function App() {
     window.electronAPI.reportWindowProject(projectId);
   }, [activeProjectId, selectedProjectId, projects.length]);
 
+  // A clicked notification opens its task, or the project's board when it has no task. The project
+  // may need to be switched first and its tasks loaded, so the target waits until the task is there.
+  const [pendingOpen, setPendingOpen] = useState<{ projectId: string; taskId?: string } | null>(null);
+  useEffect(
+    () =>
+      window.electronAPI.onNotificationOpen((target) => {
+        setActiveView('kanban');
+        setPendingOpen(target);
+        const { activeProjectId: current, selectedProjectId: selected } = useProjectStore.getState();
+        if ((current ?? selected) !== target.projectId) setActiveProject(target.projectId);
+      }),
+    [setActiveProject]
+  );
+  useEffect(() => {
+    if (!pendingOpen) return;
+    if ((activeProjectId ?? selectedProjectId) !== pendingOpen.projectId) return;
+    if (!pendingOpen.taskId) {
+      setPendingOpen(null);
+      return;
+    }
+    const task = tasks.find((candidate) => candidate.id === pendingOpen.taskId);
+    if (task) {
+      setSelectedTask(task);
+      setPendingOpen(null);
+      return;
+    }
+    // Give up when the task does not show up (deleted, or the list never loaded)
+    const timer = setTimeout(() => setPendingOpen(null), 10_000);
+    return () => clearTimeout(timer);
+  }, [pendingOpen, tasks, activeProjectId, selectedProjectId]);
+
   const { t, i18n } = useTranslation('dialogs');
 
   // Sync spell check language with i18n language

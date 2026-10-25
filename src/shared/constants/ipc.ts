@@ -214,6 +214,10 @@ export const IPC_CHANNELS = {
   WINDOW_OPEN_PROJECT: 'window:openProject',         // Open a project in a new window (or focus the one showing it)
   WINDOW_CLOSE_PROJECT: 'window:closeProject',       // Close the window showing a project ("Quit window")
   WINDOW_PROJECTS_CHANGED: 'window:projectsChanged', // Event: the open windows changed (main -> renderer)
+  PHONE_NOTIFY_SET_TOKEN: 'phoneNotify:setToken',    // Save (or clear with an empty string) the Home Assistant token, encrypted
+  PHONE_NOTIFY_HAS_TOKEN: 'phoneNotify:hasToken',    // Whether a token is saved (the token itself never leaves the main process)
+  PHONE_NOTIFY_TEST: 'phoneNotify:test',             // Send a test notification: ({ baseUrl, service })
+  NOTIFICATION_OPEN: 'notification:open',            // Event: a notification was clicked, open its task or the project board (main -> renderer)
   PROJECT_LIST_CHANGED: 'project:listChanged',       // Event: a project was added or removed (main -> renderer)
 
   // Shell operations
