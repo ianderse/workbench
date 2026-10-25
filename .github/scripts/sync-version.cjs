@@ -9,8 +9,9 @@
  * - minor: the merge commits on this branch since that tag (one per merged pull request)
  * - patch: the plain commits since the newest of those merges, so a merge resets it to 0
  *
- * The `post-commit` hook runs this and folds the change into the commit that caused it. Run it by
- * hand with `npm run version:sync` (after pulling a merged pull request, say).
+ * The `post-commit` hook runs this and folds the change into the commit that caused it; a merge is
+ * made on GitHub, where no hook runs, so .github/workflows/version.yml does the same to the merge
+ * commit. Running it on its own only prints the version a clean checkout already has.
  *
  * The release workflows take the published version from the release tag, so what is written here
  * is what the app reports in a development or a locally packaged build.

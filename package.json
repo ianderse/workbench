@@ -1,6 +1,6 @@
 {
   "name": "workbench",
-  "version": "1.2.11",
+  "version": "1.2.12",
   "author": {
     "name": "Artyom Vancyan",
     "email": "44609997+artyomvancyan@users.noreply.github.com"
@@ -20,8 +20,7 @@
     "package:win": "electron-builder --win",
     "package:linux": "electron-builder --linux",
     "test": "tsc --noEmit --incremental && vitest run",
-    "lint": "knip --fix --fix-type exports,types && knip --production",
-    "version:sync": "node .github/scripts/sync-version.cjs"
+    "lint": "knip --fix --fix-type exports,types && knip --production"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
