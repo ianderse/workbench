@@ -107,6 +107,7 @@ export interface TaskAPI {
   setQueueOrder: (projectId: string, order: string[]) => void;
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
   cancelBreakDownTask: (requestId: string) => void;
+  registerSpecBatch: (projectId: string, batch: { id: string; prompt: string; sources: string[]; taskIds: string[] }) => Promise<IPCResult>;
   onBreakDownProgress: (callback: (requestId: string, progress: RunProgress) => void) => () => void;
   onTaskExecutionProgress: (
     callback: (taskId: string, progress: import('../../shared/types').ExecutionProgress, projectId?: string) => void
@@ -330,6 +331,9 @@ export const createTaskAPI = (): TaskAPI => ({
 
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]): Promise<IPCResult<TaskBreakdown>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_BREAKDOWN, projectId, requestId, description, attachmentNames),
+
+  registerSpecBatch: (projectId: string, batch: { id: string; prompt: string; sources: string[]; taskIds: string[] }): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.SPEC_BATCH_REGISTER, projectId, batch),
 
   onBreakDownProgress: (callback: (requestId: string, progress: RunProgress) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, requestId: string, progress: RunProgress): void => {

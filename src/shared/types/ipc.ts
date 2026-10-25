@@ -211,6 +211,7 @@ export interface ElectronAPI {
   setQueueOrder: (projectId: string, order: string[]) => void;
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
   cancelBreakDownTask: (requestId: string) => void;
+  registerSpecBatch: (projectId: string, batch: { id: string; prompt: string; sources: string[]; taskIds: string[] }) => Promise<IPCResult>;
   onBreakDownProgress: (callback: (requestId: string, progress: import('../utils/run-progress').RunProgress) => void) => () => void;
   onTaskClaudeRunUpdate: (callback: (taskId: string, run: import('./claude-code').ClaudeRunInfo, projectId?: string) => void) => () => void;
   onTaskExecutionProgress: (callback: (taskId: string, progress: ExecutionProgress, projectId?: string) => void) => () => void;

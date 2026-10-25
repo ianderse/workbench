@@ -78,6 +78,8 @@ export function TaskCreationWizard({
   const [breakdownProgress, setBreakdownProgress] = useState<RunProgress | null>(null);
   const [queueAfterCreate, setQueueAfterCreate] = useState(true);
   const breakdownRequestId = useRef<string | null>(null);
+  // The spec batch of the breakdown under review (Spec review loop)
+  const specBatch = useRef<{ id: string; sources: string[]; prompt: string } | null>(null);
   // Breakdown keys already created (key -> task id), so a retry after a failure continues
   const createdIds = useRef<Map<string, string>>(new Map());
 
@@ -192,6 +194,9 @@ export function TaskCreationWizard({
       if (breakdownRequestId.current !== requestId) return; // cancelled
       if (result.success && result.data) {
         createdIds.current = new Map();
+        specBatch.current = result.data.batchId
+          ? { id: result.data.batchId, sources: result.data.specSources ?? [], prompt: description.trim() }
+          : null;
         setBreakdownItems(result.data.tasks.map((task) => ({ ...task, included: true })));
         setOpenTickets(result.data.openTickets ?? []);
         setStep('review');
@@ -248,10 +253,20 @@ export function TaskCreationWizard({
           ...(dependencies[item.key] ?? []).map((key) => createdIds.current.get(key)).filter((id): id is string => !!id),
         ];
         if (dependsOnTaskIds.length > 0) metadata.dependsOnTaskIds = dependsOnTaskIds;
+        if (specBatch.current) metadata.specBatch = { id: specBatch.current.id, source: specBatch.current.sources, round: 0 };
         const task = await createTask(projectId, item.title.trim(), item.description.trim() || item.title.trim(), metadata);
         if (!task) throw new Error(t('tasks:wizard.errors.createFailed'));
         createdIds.current.set(item.key, task.id);
         doneCount += 1;
+      }
+      if (specBatch.current) {
+        // The batch gets its Spec review ticket once all these tickets are finished
+        await window.electronAPI.registerSpecBatch(projectId, {
+          id: specBatch.current.id,
+          prompt: specBatch.current.prompt,
+          sources: specBatch.current.sources,
+          taskIds: Array.from(createdIds.current.values()),
+        });
       }
       if (queueAfterCreate) {
         await queueTasksInOrder(projectId, selected.map((item) => createdIds.current.get(item.key)!));

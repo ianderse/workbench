@@ -54,6 +54,8 @@ export interface ProjectSettings {
   selfImprove?: boolean;
   /** After a task is merged, add context notes to queued tickets and propose queue changes (default: true) */
   groomQueueAfterMerge?: boolean;
+  /** Review a spec when all its tickets are done (default on) */
+  specReview?: boolean;
   /**
    * Let the agent working a ticket move part of its scope into new tickets at the top of the Queue:
    * off, propose (the task pauses after planning until the split is applied or dismissed) or auto

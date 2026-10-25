@@ -51,6 +51,7 @@
     "validate": "Validate",
     "revise": "Revise",
     "review": "AI review",
+    "spec_review": "Spec review",
     "breakdown": "Breakdown",
     "grooming": "Queue grooming",
     "title": "Titles",

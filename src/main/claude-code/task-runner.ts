@@ -90,6 +90,7 @@ import {
 } from '../../shared/utils/task-split';
 import type { SplitSubmission } from '../queue-grooming';
 import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
+import { SPEC_REVIEW_SCHEMA, normalizeSpecReview } from '../../shared/utils/spec-review';
 import { appLog } from '../app-logger';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import { ompSubagentsPerTask } from '../../shared/types/agent-backend';
@@ -184,6 +185,11 @@ export interface TaskRunConfig {
    * Unset when splitting is off, the ticket was made by a split or it split already.
    */
   splitMode?: 'propose' | 'auto';
+  /**
+   * A Spec review ticket: one read-only review step (no triage, plan, implement, validate or commit)
+   * that reads the spec and the code on the base branch, runs the tests and returns a SpecReviewReport.
+   */
+  specReview?: boolean;
 }
 
 interface TaskRunProgress {
@@ -285,7 +291,25 @@ export function ompSubagentGuidance(subagents: number): string {
 `;
 }
 
+/** System prompt of a Spec review ticket: read, run the tests, report; change and commit nothing */
+function buildSpecReviewSystemPrompt(config: TaskRunConfig, specDirRelative: string, omp: boolean): string {
+  return [
+    `You are running autonomously inside Workbench, a desktop app that hands coding tasks to ${omp ? 'a coding agent' : 'Claude Code'}. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your summary, and keep going.`,
+    `## Environment
+- Your working directory is a worktree on branch \`${config.branch}\`, created from \`${config.baseBranch}\`. It holds the code that was merged so far.
+- Workbench keeps its own task files in \`${specDirRelative}\`. Don't modify them.`,
+    `## Your job: a read-only spec review
+- Check whether the spec is complete as written, by reading the spec and the code. You do not build anything.
+- Do not edit, create or delete project files, do not commit, and do not run version control commands that change anything (commit, checkout, reset, stash, merge, push). Running the project's tests, type check and build is expected; they must not leave changes in tracked files.
+- Judge each spec section from evidence you saw: files you read, tests you ran, behaviour you observed. Do not assume a section is done because a ticket exists for it.
+- A gap needs the spec section it comes from and concrete evidence (a missing test, observed behaviour that differs from the spec, a missing file). Do not list opinions, style, or ideas beyond the spec. Write each gap's description so a coding agent with no other context can build it: what to build, the spec section to follow, acceptance criteria.
+- Answer with the structured report only.`,
+    ...(config.selfImprovePrompt ? [config.selfImprovePrompt] : []),
+  ].join('\n\n');
+}
+
 function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string, omp = false): string {
+  if (config.specReview) return buildSpecReviewSystemPrompt(config, specDirRelative, omp);
   const sections = [
     `You are running autonomously inside Workbench, a desktop app that hands coding tasks to ${omp ? 'a coding agent' : 'Claude Code'}. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
     config.isolated === false
@@ -388,6 +412,10 @@ function verificationHint(triage: TaskTriage | undefined): string {
 // Runner
 // =============================================================================
 
+/** Tools a Spec review ticket may not use (it reads, runs tests and reports; Bash stays for the tests) */
+const SPEC_REVIEW_DISALLOWED_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit'];
+const SPEC_REVIEW_OMP_TOOLS: readonly string[] = [...OMP_READ_ONLY_TOOLS, 'bash'];
+
 /** Steps that run in the task's session */
 type SessionPhaseName = Exclude<ClaudeRunPhaseName, 'triage' | 'review'>;
 
@@ -467,6 +495,8 @@ export class ClaudeTaskRun {
 
   private async runSteps(): Promise<TaskRunOutcome> {
     const settings = this.config.settings;
+
+    if (this.config.specReview) return this.runSpecReview();
 
     if (this.config.mode === 'revise') {
       // Each change request runs the same workflow: assess it (model and effort for the
@@ -595,6 +625,73 @@ export class ClaudeTaskRun {
     return this.config.backend === 'omp' ? 'OMP' : 'Claude Code';
   }
 
+  /**
+   * A Spec review ticket: one review step in a worktree cut from the base branch, with no triage,
+   * plan, implement, validate or commit. It ends in Human Review (QA_PASSED) with its report in
+   * the run info; it changes no code, so there is nothing to merge.
+   */
+  private async runSpecReview(): Promise<TaskRunOutcome> {
+    if (!this.info.triage) {
+      this.info.triage = applyAgentOverrideToTriage({
+        model: 'opus',
+        effort: 'high',
+        needsPlan: false,
+        scope: 'medium',
+        title: this.config.title,
+        reasoning: 'Spec review: reads the spec and the merged code, runs the tests and changes nothing',
+        verification: [],
+        source: 'fixed',
+      }, this.config.agentOverride);
+      this.saveInfo();
+    }
+    // Request changes on a finished review runs it again
+    if (this.config.mode === 'revise') this.info.specReview = undefined;
+    if (!this.hasCompleted('spec_review') || !this.info.specReview) {
+      const startHead = await this.currentHead();
+      const stopped = await this.runSessionPhase('spec_review');
+      await this.undoReviewChanges(startHead);
+      if (stopped) return stopped;
+    }
+    this.flushInfo();
+    this.emitProgress('complete', 1, 'Ready for review');
+    this.callbacks.onTaskEvent?.('QA_PASSED', { iteration: 1, maxIterations: 1, testsRun: {} });
+    return { status: 'completed' };
+  }
+
+  private async currentHead(): Promise<string | undefined> {
+    try {
+      return (await git(['rev-parse', 'HEAD'], { cwd: this.config.worktreePath })).stdout.trim() || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * The review must not change the project. The edit tools are removed, but a command can still
+   * write, so afterwards the worktree (the review's own, never the user's checkout) goes back to
+   * where it started when a commit or a change turns up.
+   */
+  private async undoReviewChanges(startHead: string | undefined): Promise<void> {
+    const cwd = this.config.worktreePath;
+    try {
+      const head = await this.currentHead();
+      const dirty = (await git(['status', '--porcelain', '--', '.', ':!.workbench'], { cwd })).stdout.trim();
+      if (head === startHead && !dirty) return;
+      if (this.config.isolated === false) {
+        // Never reset the user's own checkout
+        this.emitLog('The spec review changed files in the project checkout; they are left for you to look at');
+        appLog.warn(`[SpecReview] ${this.config.specId}: the review changed the project checkout`);
+        return;
+      }
+      this.emitLog('The spec review changed files; the worktree was reset to where it started');
+      appLog.warn(`[SpecReview] ${this.config.specId}: the review changed the worktree, resetting it`);
+      if (startHead) await git(['reset', '--hard', startHead], { cwd });
+      await git(['clean', '-fd', '-e', '.workbench'], { cwd });
+    } catch (error) {
+      appLog.warn(`[SpecReview] ${this.config.specId}: could not check the worktree: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   private async runTriage(revision = false): Promise<TaskRunOutcome | null> {
     const { settings } = this.config;
     const label = revision ? 'Assessing the requested changes' : 'Assessing the task';
@@ -656,8 +753,9 @@ export class ClaudeTaskRun {
     const triage = this.info.triage ?? fixedTriage(this.config.settings, this.config.title, 'fallback', 'No triage recorded');
     const model = name === 'plan' && !triage.pinned?.model ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
     const effort: ClaudeEffort = name === 'plan' && !triage.pinned?.effort && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
-    const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' ? 'validation' : 'coding';
+    const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' || name === 'spec_review' ? 'validation' : 'coding';
     const role = ompRoleForJob(name);
+    const reviewingSpec = name === 'spec_review';
 
     // A session lives in the runtime it ran in (native or WSL); after a switch, start a new one
     await whenShellRuntimeReady();
@@ -689,6 +787,7 @@ export class ClaudeTaskRun {
       implement: continuing ? 'Continuing implementation' : 'Implementing',
       validate: roundNote ? `AI review${roundNote}` : 'Validating',
       revise: this.loop?.feedback ? `Fixing review findings${roundNote}` : 'Applying requested changes',
+      spec_review: 'Reviewing the spec',
     }[name];
     // A new piece of work starts a new review loop: the old rounds and verdict no longer apply
     if (name === 'implement' || (name === 'revise' && !this.loop)) {
@@ -703,6 +802,10 @@ export class ClaudeTaskRun {
       this.callbacks.onTaskEvent?.('CODING_STARTED', { subtaskId: '', subtaskDescription: label });
       this.emitProgress('coding', 0.2, label);
       this.log.startPhase('coding', `${label} (${this.modelLabel(model, effort, role)})`);
+    } else if (reviewingSpec) {
+      this.callbacks.onTaskEvent?.('CODING_STARTED', { subtaskId: '', subtaskDescription: label });
+      this.emitProgress('qa_review', 0.5, label);
+      this.log.startPhase('validation', `${label} (${this.modelLabel(model, effort, role)})`);
     } else {
       this.callbacks.onTaskEvent?.('QA_STARTED', { iteration: this.loop?.round ?? 1, maxIterations: this.loop?.max ?? 1 });
       this.emitProgress('qa_review', 0.85, label);
@@ -721,7 +824,7 @@ export class ClaudeTaskRun {
 
     const sessionId = resumeSessionId ?? randomUUID();
     const phase = this.beginPhase(name, {
-      model: this.phaseModel(model, ompRoleForJob(name === 'plan' ? 'plan' : 'implement')),
+      model: this.phaseModel(model, ompRoleForJob(name === 'plan' || reviewingSpec ? 'plan' : 'implement')),
       effort,
       permissionMode: name === 'plan' ? 'plan' : this.config.isolated === false ? 'auto' : 'bypassPermissions',
       // OMP picks the session id itself: it is stored when the run reports it
@@ -737,7 +840,7 @@ export class ClaudeTaskRun {
       sessionId,
       resume: !!resumeSessionId,
       input: this.buildInput(name, continuing, !!resumeSessionId),
-      jsonSchema: name === 'plan' ? buildPlanSchema(this.splitActive()) : name === 'validate' ? VALIDATION_SCHEMA : undefined,
+      jsonSchema: name === 'plan' ? buildPlanSchema(this.splitActive()) : name === 'validate' ? VALIDATION_SCHEMA : reviewingSpec ? SPEC_REVIEW_SCHEMA : undefined,
       logPhase,
     });
 
@@ -768,8 +871,34 @@ export class ClaudeTaskRun {
       return { status: 'failed', error };
     }
 
+    let specReport = null as ReturnType<typeof normalizeSpecReview>;
+    if (reviewingSpec) {
+      let structured: unknown = result.structured_output;
+      if (!structured && result.result) {
+        try {
+          structured = JSON.parse(result.result);
+        } catch {
+          structured = undefined;
+        }
+      }
+      specReport = normalizeSpecReview(structured);
+      if (!specReport) {
+        const error = 'The review did not return a report';
+        this.endPhase(phase, { isError: true, error }, result);
+        this.log.endPhase(logPhase, false, error);
+        this.failEvent(name, error);
+        return { status: 'failed', error };
+      }
+    }
+
     this.endPhase(phase, {}, result);
-    if (name === 'plan') {
+    if (specReport) {
+      this.info.specReview = specReport;
+      this.info.summary = specReport.summary || this.info.summary;
+      const headline = specReport.gaps.length === 0 ? 'Spec complete' : `${specReport.gaps.length} ${specReport.gaps.length === 1 ? 'gap' : 'gaps'} found`;
+      this.log.add('validation', 'success', headline, { detail: specReport.summary });
+      this.log.endPhase('validation', true, headline);
+    } else if (name === 'plan') {
       const structured = result.structured_output as { plan?: unknown; split?: unknown } | undefined;
       const plan = typeof structured?.plan === 'string' && structured.plan.trim() ? structured.plan : (result.result ?? '');
       const split = this.splitActive() ? normalizeSplit(structured?.split, true) : null;
@@ -1080,6 +1209,9 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
 3. Commit any remaining changes.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
+      case 'spec_review':
+        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}Review the spec now: read it, inspect the code in this worktree, run the project's tests (and type check or build when it has them), and return the report. Set complete to true only when every section is done and you list no gap. Change nothing and commit nothing.`;
+        break;
       case 'revise': {
         const opening = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.revise}`;
         if (this.loop?.feedback) {
@@ -1196,6 +1328,11 @@ no notes came with the request, so review the change against the task with fresh
     ];
     if (params.name === 'plan') {
       args.push('--permission-mode', 'plan');
+    } else if (params.name === 'spec_review') {
+      // Read-only review: it runs commands (tests) but never edits files; the edit tools are removed
+      if (this.config.isolated === false) args.push('--permission-mode', 'auto');
+      else args.push('--dangerously-skip-permissions');
+      args.push('--disallowedTools', SPEC_REVIEW_DISALLOWED_TOOLS.join(','));
     } else if (this.config.isolated === false) {
       // Not isolated: a classifier reviews actions instead of skipping all checks
       args.push('--permission-mode', 'auto');
@@ -1283,6 +1420,7 @@ no notes came with the request, so review the change against the task with fresh
       ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir), toRuntimePath(this.config.changelogPath))
       : undefined;
     const planning = params.name === 'plan';
+    const reviewingSpec = params.name === 'spec_review';
     let systemPrompt = buildSystemPrompt(this.config, specDirRelative, parallelTasksPrompt, true);
     if (this.config.selfImprovePrompt && this.config.selfImproveDir) {
       // The memory index is read at every phase, so notes saved by an earlier phase are included
@@ -1329,7 +1467,8 @@ no notes came with the request, so review the change against the task with fresh
         allowFallback: fallbackAttempt,
         effort: params.effort,
         // Planning is read-only (OMP has no plan permission mode): fewer tools and a note in the prompt
-        tools: planning ? OMP_READ_ONLY_TOOLS : 'all',
+        // A spec review reads and runs commands (tests) but has no edit tools
+        tools: planning ? OMP_READ_ONLY_TOOLS : reviewingSpec ? SPEC_REVIEW_OMP_TOOLS : 'all',
         autoApprove: !planning,
         appendSystemPrompt: planning
           ? `${systemPrompt}\n\nYou are in planning mode: do not modify files, run only read-only commands, and finish with the implementation plan.`
@@ -1921,7 +2060,7 @@ export function loadClaudeRunInfo(specDir: string): ClaudeRunInfo | null {
 export function isClaudeRunFinished(info: ClaudeRunInfo | null, validation: boolean): boolean {
   const last = info?.phases.at(-1);
   if (!last?.endedAt || last.isError) return false;
-  if (last.name === 'validate') return true;
+  if (last.name === 'validate' || last.name === 'spec_review') return true;
   return !validation && (last.name === 'implement' || last.name === 'revise');
 }
 

@@ -80,7 +80,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
     prevTask.metadata?.contextNotes?.length === nextTask.metadata?.contextNotes?.length &&
     prevTask.metadata?.splitInto?.taskIds.length === nextTask.metadata?.splitInto?.taskIds.length &&
-    prevTask.metadata?.agentOverride === nextTask.metadata?.agentOverride
+    prevTask.metadata?.agentOverride === nextTask.metadata?.agentOverride &&
+    prevTask.metadata?.specReview?.round === nextTask.metadata?.specReview?.round
   );
 
   // Only log when actually re-rendering (reduces noise significantly)
@@ -327,6 +328,13 @@ export const TaskCard = memo(function TaskCard({
         {sanitizedDescription && (
           <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2 wrap-anywhere">
             {sanitizedDescription}
+          </p>
+        )}
+        {task.metadata?.specReview && (
+          <p className="mt-1.5 text-xs font-medium text-(--nav-label-color)">
+            {task.metadata.specReview.maxRounds !== undefined
+              ? t('specReview.cardRound', { round: task.metadata.specReview.round + 1, max: task.metadata.specReview.maxRounds + 1 })
+              : t('specReview.cardLabel')}
           </p>
         )}
         {failedReviewRounds > 0 && (

@@ -14,7 +14,7 @@ import type { ClaudeRunInfo } from '../types/claude-code';
 export function isRunFinished(run: ClaudeRunInfo | undefined | null, validation = true): boolean {
   const last = run?.phases.at(-1);
   if (!last?.endedAt || last.isError) return false;
-  if (last.name === 'validate') return true;
+  if (last.name === 'validate' || last.name === 'spec_review') return true;
   return !validation && (last.name === 'implement' || last.name === 'revise');
 }
 

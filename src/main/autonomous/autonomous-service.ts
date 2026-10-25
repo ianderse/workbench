@@ -175,6 +175,8 @@ export async function maybeAutoMerge(projectIn: Project, taskIn: Pick<Task, 'id'
   const project = projectStore.getProject(projectIn.id) ?? projectIn;
   const config = resolveAutonomousConfig(project.settings);
   if (!config.enabled) return;
+  // A Spec review ticket changes no code: there is nothing to merge
+  if (projectStore.getTasks(project.id).find((t) => t.id === taskIn.id)?.metadata?.specReview) return;
   const key = `${project.id}\0${taskIn.id}`;
   if (inFlight.has(key)) return;
   inFlight.add(key);

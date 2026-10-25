@@ -31,6 +31,8 @@ const failedSummaries = new Set<string>();
 
 /** Whether the panel has anything to show for a task */
 export function shouldShowWhatWasDone(task: Task): boolean {
+  // A Spec review ticket has its own panel and changes no code
+  if (task.metadata?.specReview) return false;
   return task.status === 'human_review' && hasWorkSummary(task.claudeRun);
 }
 

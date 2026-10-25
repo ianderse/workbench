@@ -6,6 +6,8 @@
  * Claude Code plans (optional), implements and validates in one resumable session.
  */
 
+import type { SpecReviewReport } from './spec-review';
+
 /** Model aliases accepted by `claude --model` */
 export type ClaudeModelAlias = 'haiku' | 'sonnet' | 'opus' | 'fable';
 
@@ -81,7 +83,7 @@ export interface TaskTriage {
 }
 
 /** Steps of a task run */
-export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise' | 'review';
+export type ClaudeRunPhaseName = 'triage' | 'plan' | 'implement' | 'validate' | 'revise' | 'review' | 'spec_review';
 
 export interface ClaudeRunPhase {
   name: ClaudeRunPhaseName;
@@ -240,6 +242,8 @@ export interface ClaudeRunInfo {
   phases: ClaudeRunPhase[];
   init?: ClaudeRunInit;
   validation?: ValidationReport;
+  /** Result of a Spec review ticket */
+  specReview?: SpecReviewReport;
   /** Every AI review round of the latest review loop */
   reviewRounds?: ReviewRound[];
   /** Final verdict of the latest review loop */

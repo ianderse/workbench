@@ -7,6 +7,7 @@ import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../
 import type { ClaudeRunInfo, ClaudeRunPhase, ClaudeEffort } from './claude-code';
 import type { AgentBackendKind } from './agent-backend';
 import type { TaskContextNote, TaskSplitRecord } from './queue-grooming';
+import type { TaskSpecBatchRef, TaskSpecReviewRef } from './spec-review';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -230,6 +231,11 @@ export interface TaskMetadata {
 
   /** Notes added after other tasks merged (queue grooming); each can be undone */
   contextNotes?: TaskContextNote[];
+
+  /** The spec batch this ticket belongs to (set by Break into tasks and by gap tickets of a Spec review) */
+  specBatch?: TaskSpecBatchRef;
+  /** Set on a Spec review ticket: it reads the spec and the merged code and changes no code */
+  specReview?: TaskSpecReviewRef;
 
   /** Autonomous mode: the task's merge into the target branch (one --no-ff merge commit) */
   autoMerge?: AutoMergeRecord;

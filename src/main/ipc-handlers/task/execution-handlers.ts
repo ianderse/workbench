@@ -687,8 +687,9 @@ export function registerTaskExecutionHandlers(
         if (worktreePath) {
           if (options?.keepWorktree) {
             console.warn(`[TASK_UPDATE_STATUS] Marking task ${taskId} as done while keeping worktree at ${worktreePath}`);
-          } else if (options?.forceCleanup || activeAutoMerge(task)) {
-            // (a task merged by autonomous mode is in its target branch already: Done only cleans up)
+          } else if (options?.forceCleanup || activeAutoMerge(task) || task.metadata?.specReview) {
+            // (a task merged by autonomous mode is in its target branch already: Done only cleans up;
+            // a Spec review ticket changes no code, so its worktree holds nothing to keep)
             console.warn(`[TASK_UPDATE_STATUS] Cleaning up worktree for task ${taskId} (user confirmed)`);
             try {
               // Validate the detected branch matches the expected pattern, so a corrupted

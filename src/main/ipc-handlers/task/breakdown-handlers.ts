@@ -11,6 +11,7 @@ import type { TaskBreakdown } from '../../../shared/types/task-breakdown';
 import { projectStore } from '../../project-store';
 import { appLog } from '../../app-logger';
 import { breakDownTask } from '../../task-breakdown';
+import { newSpecBatchId, specSourcesOf } from '../../spec-batches';
 import { listOpenTickets } from '../../../shared/utils/open-tickets';
 
 const running = new Map<string, AbortController>();
@@ -36,7 +37,8 @@ export function registerTaskBreakdownHandlers(): void {
           },
           abortSignal: controller.signal,
         });
-        return { success: true, data };
+        // The tickets made from this breakdown form a spec batch (Spec review loop)
+        return { success: true, data: { ...data, batchId: newSpecBatchId(), specSources: specSourcesOf(description) } };
       } catch (error) {
         if (controller.signal.aborted || (error instanceof Error && error.name === 'AbortError')) {
           return { success: false, error: 'cancelled' };

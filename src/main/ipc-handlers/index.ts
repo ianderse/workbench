@@ -22,6 +22,7 @@ import { registerGraphifyHandlers } from './graphify-handlers';
 import { registerAgentBackendHandlers } from './agent-backend-handlers';
 import { registerSelfImproveHandlers } from './self-improve-handlers';
 import { registerQueueGroomingHandlers } from './queue-grooming-handlers';
+import { registerSpecReviewHandlers } from './spec-review-handlers';
 import { registerUsageHandlers } from './usage-handlers';
 import { registerAutonomousHandlers } from './autonomous-handlers';
 import { registerProjectIndexHandlers } from './project-index-handlers';
@@ -92,6 +93,8 @@ export function setupIpcHandlers(
   registerSelfImproveHandlers();
   // Updates to queued tickets after a merge (notes, proposals)
   registerQueueGroomingHandlers(getMainWindow);
+  // Spec review loop: a review ticket when a spec's tickets are done, gap tickets after it
+  registerSpecReviewHandlers(getMainWindow);
   registerUsageHandlers();
   registerAutonomousHandlers(getMainWindow);
   registerProjectIndexHandlers();

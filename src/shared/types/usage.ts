@@ -6,7 +6,7 @@
  */
 
 export const USAGE_JOBS = [
-  'triage', 'plan', 'implement', 'validate', 'revise', 'review', 'breakdown', 'grooming', 'title',
+  'triage', 'plan', 'implement', 'validate', 'revise', 'review', 'spec_review', 'breakdown', 'grooming', 'title',
   'commit', 'pr', 'merge', 'insights', 'advisor', 'summary', 'other',
 ] as const;
 export type UsageJob = (typeof USAGE_JOBS)[number];

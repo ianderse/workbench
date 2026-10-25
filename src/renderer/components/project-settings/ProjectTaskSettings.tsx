@@ -120,6 +120,17 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
         </SettingsRow>
 
         <SettingsRow
+          label={t('projectPages.tasks.specReview')}
+          description={t('projectPages.tasks.specReviewDescription')}
+        >
+          <Switch
+            checked={settings.specReview !== false}
+            onCheckedChange={(checked) => setSettings({ ...settings, specReview: checked })}
+            aria-label={t('projectPages.tasks.specReview')}
+          />
+        </SettingsRow>
+
+        <SettingsRow
           label={t('projectPages.tasks.selfSplit')}
           description={t('projectPages.tasks.selfSplitDescription')}
         >

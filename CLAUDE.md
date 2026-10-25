@@ -258,6 +258,22 @@ dependents onto the last piece; undo (Queue updates panel) works while no piece 
 (`split_proposed`, `pendingSplit` in `claude_run.json`). Apply or Dismiss in the panel (or Resume) continues it: applied
 keeps the saved plan for the reduced scope, dismissed plans the whole ticket again. A deferred-work proposal does not pause.
 
+### Spec review loop (per project)
+
+Tickets made by Break into tasks carry `metadata.specBatch = { id, source, round }` and are recorded as a batch in
+`.workbench/spec-batches.json` (`src/main/spec-batches.ts`; `source` = the `docs/...md` paths in the prompt, else the batch
+keeps a copy of the prompt). When every ticket of a batch is in Human Review as `completed` / `auto_merged`, Done or
+archived (failed, stopped or errored tickets keep it waiting), the `state` / `merged` task hooks
+(`ipc-handlers/spec-review-handlers.ts`) create and queue one **Spec review** ticket (`metadata.specReview`, depends on the
+batch's tickets, so it starts once they are merged). Project setting `specReview` (default on) turns it off.
+The review ticket runs as `ClaudeTaskRun.runSpecReview()`: a single `spec_review` step (no triage, plan, implement, validate or
+commit; OMP `plan` role, Opus on Claude) with a `SpecReviewReport` schema (`shared/utils/spec-review.ts`). It is read-only: the
+edit tools are removed (`--disallowedTools`, OMP gets read/grep/glob/bash), the prompt forbids changes, and afterwards the
+worktree is reset if a commit or change turned up. It ends in Human Review (`completed`); autonomous auto-merge skips it and
+Done cleans its worktree without asking. `applySpecReview()` then drops gaps without spec section and evidence, creates the
+rest as next-round tickets (`round + 1`, queued, with their dependencies) while `round < maxReviewRounds` (default 2), else
+the batch is `gaps_open`; no gaps means `complete`. `SpecReviewPanel` shows the report on the review card.
+
 ### Autonomous mode (per project)
 
 Project settings `autonomous`, `autonomousTarget` (`integration` default | `main`), `autonomousBranch` (default

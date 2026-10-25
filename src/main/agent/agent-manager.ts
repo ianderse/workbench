@@ -541,10 +541,12 @@ export class AgentManager extends EventEmitter {
       profileId: options.profileId,
       backend: effectiveAgent.backend,
       ...(task.metadata?.agentOverride ? { agentOverride: task.metadata.agentOverride } : {}),
+      // A Spec review ticket runs one read-only review step
+      ...(task.metadata?.specReview ? { specReview: true } : {}),
     };
 
     // The agent may split the ticket (off, propose or auto; never a ticket a split made)
-    if (mode === 'start') {
+    if (mode === 'start' && !task.metadata?.specReview) {
       const splitMode = resolveSelfSplit(project.settings);
       if (splitMode !== 'off' && canTaskSplit(splitMode, task.metadata)) config.splitMode = splitMode;
     }

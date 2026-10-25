@@ -273,6 +273,26 @@
       "startFailed": "Failed to start task"
     }
   },
+  "specReview": {
+    "title": "Spec review",
+    "cardLabel": "Spec review",
+    "cardRound": "Spec review, review {{round}} of {{max}}",
+    "complete": "Spec complete",
+    "gapsCreated": "{{gaps}} gaps found, {{created}} tickets created",
+    "gapsOpen_one": "{{count}} gap still open",
+    "gapsOpen_other": "{{count}} gaps still open",
+    "section": "Section",
+    "status": "Status",
+    "evidence": "Evidence",
+    "gaps": "Gaps",
+    "gapSection": "Spec section: {{section}}",
+    "gapEvidence": "Evidence: {{evidence}}",
+    "statuses": {
+      "done": "Done",
+      "partial": "Partial",
+      "missing": "Missing"
+    }
+  },
   "autonomous": {
     "cardLabel": "Merged automatically",
     "cardLabelTitle": "Merged into {{branch}} on its own. Move it to Done to sign it off",

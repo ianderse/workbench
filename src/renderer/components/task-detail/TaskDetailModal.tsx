@@ -61,6 +61,7 @@ import { QAFeedbackSection } from './task-review/QAFeedbackSection';
 import { AIReviewFailedPanel } from './task-review/AIReviewFailedPanel';
 import { AutoMergePanel } from './task-review/AutoMergePanel';
 import { WhatWasDonePanel, shouldShowWhatWasDone } from './task-review/WhatWasDonePanel';
+import { SpecReviewPanel, shouldShowSpecReview } from './task-review/SpecReviewPanel';
 import { activeAutoMerge } from '../../../shared/utils/autonomous';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
 import { MergePRDialog } from './task-review/MergePRDialog';
@@ -399,6 +400,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                   <div className="h-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                     <div className="px-6 pb-6 pt-2 space-y-5 overflow-x-hidden max-w-full">
                       {/* What the agent did, how it checked itself and what it changed */}
+                      {shouldShowSpecReview(task) && <SpecReviewPanel task={task} />}
                       {shouldShowWhatWasDone(task) && <WhatWasDonePanel task={task} />}
 
                       {/* Human Review after the last AI review round still failed: why, and how the rounds went */}
