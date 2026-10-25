@@ -28,7 +28,7 @@ import { appLog } from './app-logger';
 const UNSTARTED = new Set(['backlog', 'queue']);
 
 /** Fields a new piece inherits from the task it came from, like a normal create would give it */
-function inheritedMetadata(metadata: TaskMetadata | undefined): Partial<TaskMetadata> {
+export function inheritedMetadata(metadata: TaskMetadata | undefined): Partial<TaskMetadata> {
   const inherited: Partial<TaskMetadata> = {};
   if (metadata?.agentOverride) inherited.agentOverride = metadata.agentOverride;
   if (metadata?.mcpConnectors) inherited.mcpConnectors = metadata.mcpConnectors;

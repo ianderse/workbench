@@ -18,6 +18,7 @@ import {
   topChangedFiles,
   type ReviewSummaryGeneration,
 } from '../../../../shared/utils/task-work-summary';
+import { taskNumber } from '../../../../shared/utils/queue-grooming';
 import type { Task, TaskChangeSummary } from '../../../../shared/types';
 
 interface WhatWasDonePanelProps {
@@ -87,6 +88,16 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
     : interruption === 'interrupted'
       ? t('workSummary.titleInterrupted')
       : t('workSummary.title');
+  // A string, so it only changes when the tickets do
+  const created = task.metadata?.followUpTickets;
+  const followUpLine = created && created.length > 0
+    ? t('queueGrooming.followUpsCreated', {
+        count: created.length,
+        list: created
+          .map((c) => t(c.action === 'queue' ? 'queueGrooming.followUpQueued' : 'queueGrooming.followUpPlanning', { number: taskNumber(c.taskId) }))
+          .join(', '),
+      })
+    : '';
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [findingsOpen, setFindingsOpen] = useState(false);
@@ -205,6 +216,7 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
                   <li key={item} className="wrap-anywhere">{item}</li>
                 ))}
               </ul>
+              {followUpLine && <p className="mt-2 text-xs text-(--nav-label-color) wrap-anywhere">{followUpLine}</p>}
             </div>
           )}
         </div>

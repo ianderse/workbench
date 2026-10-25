@@ -120,6 +120,17 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
         </SettingsRow>
 
         <SettingsRow
+          label={t('projectPages.tasks.followUpTickets')}
+          description={t('projectPages.tasks.followUpTicketsDescription')}
+        >
+          <Switch
+            checked={settings.followUpTickets !== false}
+            onCheckedChange={(checked) => setSettings({ ...settings, followUpTickets: checked })}
+            aria-label={t('projectPages.tasks.followUpTickets')}
+          />
+        </SettingsRow>
+
+        <SettingsRow
           label={t('projectPages.tasks.specReview')}
           description={t('projectPages.tasks.specReviewDescription')}
         >

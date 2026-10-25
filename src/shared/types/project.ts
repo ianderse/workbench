@@ -54,6 +54,8 @@ export interface ProjectSettings {
   selfImprove?: boolean;
   /** After a task is merged, add context notes to queued tickets and propose queue changes (default: true) */
   groomQueueAfterMerge?: boolean;
+  /** When a task reaches Human Review, turn the work its review summary flags into new tickets (default: true) */
+  followUpTickets?: boolean;
   /** Review a spec when all its tickets are done (default on) */
   specReview?: boolean;
   /**

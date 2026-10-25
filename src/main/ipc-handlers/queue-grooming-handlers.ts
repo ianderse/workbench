@@ -12,6 +12,7 @@ import { safeSendToRenderer } from './utils';
 import { taskHooks } from '../task-hooks';
 import { taskQueue } from '../services/task-queue';
 import { appLog } from '../app-logger';
+import { createFollowUpTickets } from '../follow-up-tickets';
 import {
   applyQueueProposal,
   configureQueueGrooming,
@@ -35,6 +36,14 @@ export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow
     void groomQueueAfterMerge(project.id, task.id, { autoApplyStructural: false }).catch((error) => {
       appLog.warn('[QueueGrooming] Grooming failed:', error);
     });
+  });
+
+  // A task that reached Human Review: the work its review summary flags becomes new tickets. This
+  // runs in the main process on the state change, not when the panel is opened. It handles each
+  // task once and ignores states that are not completed / auto-merged
+  taskHooks.on('state', ({ project, task, status }) => {
+    if (status !== 'human_review') return;
+    void createFollowUpTickets(project.id, task.id);
   });
 
   handleIpc(IPC_CHANNELS.QUEUE_PROPOSALS_LIST, async (_, projectId: string): Promise<IPCResult<QueueProposal[]>> => {

@@ -251,6 +251,22 @@ Tickets are written before the code exists, so later ones go stale as earlier ta
   leave an undo entry. The project setting `groomQueueAfterMerge` (default on) turns it off. The answer is validated by
   `normalizeGroomingResult()` (`shared/utils/queue-grooming.ts`).
 
+### Follow-up tickets
+
+When a task enters Human Review as `completed` / `auto_merged`, the `state` task hook in
+`ipc-handlers/queue-grooming-handlers.ts` calls `createFollowUpTickets()` (`src/main/follow-up-tickets.ts`), in the main
+process, not when the panel opens. The review summary (`claude_run.json` `reviewSummary`) is written in the background
+right after the run ends, so it takes the stored one, joins the run's generation (`trackReviewSummary`, same key) or writes
+it, and the panel reuses it. One read-only `runClaudeText` call (OMP role `plan`) gets the task, its `needsAttention` items
+and the open tickets (Planning, Queue, In progress; a pending split proposal's pieces count as handed off) and answers
+`none | covered | queue | planning` per item; `normalizeFollowUpResult()` (`shared/utils/follow-up-tickets.ts`) validates it
+(max 4 tickets, unknown `coveredBy` dropped, title and description required). Tickets get `metadata.followUpFrom`
+(`{ taskId, item, needsDecision? }`) and `dependsOnTaskIds = [source]`; `queue` goes to the end of the Queue, `planning` to
+Planning with a "Why this needs a decision" paragraph; `covered` adds a `kind: 'followUp'` context note. A ticket with
+`followUpFrom` can only create `planning` tickets (recursion guard); Spec review tickets are skipped; `metadata.followUpsCreatedAt`
+is written before the model call so each task is handled once (also across restarts). The created tickets are kept in
+`metadata.followUpTickets` for the line in the Human Review panel. Project setting `followUpTickets` (default on).
+
 ### Task splitting (per project)
 
 The project setting `selfSplit` (`off | propose | auto`; unset = auto while autonomous mode is on, else propose,

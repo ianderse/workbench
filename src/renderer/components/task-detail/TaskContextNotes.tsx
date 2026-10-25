@@ -42,7 +42,11 @@ export function TaskContextNotes({ task }: TaskContextNotesProps) {
           <li key={note.id} className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
               <p className="text-xs text-(--nav-label-color)">
-                {note.kind === 'split' ? t('queueGrooming.splitNoteTitle') : t('queueGrooming.noteFrom', { number: taskNumber(note.fromTaskId) })}
+                {note.kind === 'split'
+                  ? t('queueGrooming.splitNoteTitle')
+                  : note.kind === 'followUp'
+                    ? t('queueGrooming.followUpNoteTitle', { number: taskNumber(note.fromTaskId) })
+                    : t('queueGrooming.noteFrom', { number: taskNumber(note.fromTaskId) })}
               </p>
               <p className="text-sm text-foreground wrap-anywhere">{note.note}</p>
             </div>

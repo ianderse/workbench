@@ -50,6 +50,7 @@ import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
 import { TaskContextNotes } from './TaskContextNotes';
+import { TaskFollowUpLabel } from './TaskFollowUpLabel';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
 import { useTaskGitOptions } from '../task-form/TaskGitOptions';
 import { TaskWarnings } from './TaskWarnings';
@@ -412,6 +413,9 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
 
                       {/* Merged by autonomous mode: where it went, and Revert this task */}
                       {task.status === 'human_review' && <AutoMergePanel task={task} />}
+
+                      {/* A ticket made from the review of another task */}
+                      <TaskFollowUpLabel task={task} />
 
                       {/* Notes added to this ticket after other tasks merged, with Undo */}
                       <TaskContextNotes task={task} />

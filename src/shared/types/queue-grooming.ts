@@ -11,8 +11,9 @@ export interface TaskContextNote {
   block: string;
   /** ISO time */
   at: string;
-  /** 'split': written by a task split (fromTaskId is the task itself); undone with the split, not on its own */
-  kind?: 'split';
+  /** 'split': written by a task split (fromTaskId is the task itself); undone with the split, not on its own.
+   *  'followUp': written when a task's review flagged work this ticket already covers (fromTaskId is the reviewed task) */
+  kind?: 'split' | 'followUp';
 }
 
 interface QueueProposalBase {

@@ -27,6 +27,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 **Ticket dependencies**
 - Queued and backlog cards name what they wait for by ticket number ("Waits for #003 Title"), and the task detail lists every ticket it relies on with its state (done, merged, archived, waiting, not found).
 
+**Follow-up tickets**
+- When a task reaches Human Review (completed or auto-merged), the "needs your attention" items of its review summary that describe work become new tickets. One background model call judges each item: clear, in-scope work goes to the end of the Queue (waiting for the reviewed task's merge), work that needs your decision goes to Planning with a "Why this needs a decision" paragraph, work an open ticket already covers adds a note to that ticket, and information-only items make nothing. At most 4 tickets per task, each task is handled once, and a follow-up of a follow-up only goes to Planning. Cards and the task detail say "Follow-up from #014", and the review panel lists what was created. Turn it off per project with "Create tickets from review findings"
+
 **Task messaging under OMP**
 - OMP tasks can message parallel tasks: a per-run extension file (`omp -e`) adds `message_task` and `list_parallel_tasks`, which call Workbench's local tools server with the run's token. Messages for an OMP task are steered into the running step at its next turn (the step runs through `omp --mode rpc`; the Live messages switch turns that off, and a step that cannot start in RPC mode runs with `omp -p` instead), or wait in its inbox and join the next step's prompt. The Task messaging switch shows under OMP again
 

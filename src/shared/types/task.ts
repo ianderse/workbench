@@ -173,6 +173,16 @@ export interface AgentOverride {
   effort?: ClaudeEffort;
 }
 
+/** Where a follow-up ticket came from */
+export interface TaskFollowUpRef {
+  /** The reviewed task */
+  taskId: string;
+  /** The review item it came from */
+  item: string;
+  /** Needs a human decision first: it waits in Planning (never starts on its own) */
+  needsDecision?: boolean;
+}
+
 export interface TaskMetadata {
   // The description the user entered (shown on the task card)
   userDescription?: string;
@@ -230,6 +240,13 @@ export interface TaskMetadata {
   splitFrom?: string;
   /** Set when this ticket split part of its scope into new tickets (applyTaskSplit) */
   splitInto?: TaskSplitRecord;
+
+  /** Set on a ticket made from a "needs your attention" item of another task's review (follow-up tickets) */
+  followUpFrom?: TaskFollowUpRef;
+  /** Set on the reviewed task once its follow-ups were handled (ISO time); it is only handled once */
+  followUpsCreatedAt?: string;
+  /** The tickets its review created, for the line in the Human Review panel */
+  followUpTickets?: Array<{ taskId: string; action: 'queue' | 'planning' }>;
 
   /** Notes added after other tasks merged (queue grooming); each can be undone */
   contextNotes?: TaskContextNote[];

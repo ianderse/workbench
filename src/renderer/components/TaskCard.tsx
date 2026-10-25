@@ -83,6 +83,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
     prevTask.metadata?.contextNotes?.length === nextTask.metadata?.contextNotes?.length &&
     prevTask.metadata?.splitInto?.taskIds.length === nextTask.metadata?.splitInto?.taskIds.length &&
+    prevTask.metadata?.followUpFrom?.taskId === nextTask.metadata?.followUpFrom?.taskId &&
+    prevTask.metadata?.followUpFrom?.needsDecision === nextTask.metadata?.followUpFrom?.needsDecision &&
     prevTask.metadata?.agentOverride === nextTask.metadata?.agentOverride &&
     prevTask.metadata?.specReview?.round === nextTask.metadata?.specReview?.round
   );
@@ -125,8 +127,11 @@ export const TaskCard = memo(function TaskCard({
     task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task, autonomous) : ''
   );
   // A string (or undefined), so the memoized card compares it cheaply
-  const lastNoteFrom = task.metadata?.contextNotes?.filter((n) => n.kind !== 'split').at(-1)?.fromTaskId;
+  const lastNoteFrom = task.metadata?.contextNotes?.filter((n) => !n.kind).at(-1)?.fromTaskId;
   const splitCount = task.metadata?.splitInto?.taskIds.length ?? 0;
+  // Strings, so the memoized card compares them cheaply
+  const followUpFrom = task.metadata?.followUpFrom?.taskId;
+  const followUpNeedsDecision = task.metadata?.followUpFrom?.needsDecision === true;
   const isRunning = task.status === 'in_progress';
   // Validation (AI Review) also runs Claude Code, so it can be left stuck too (e.g. by an app quit)
   const isActive = isRunning || task.status === 'ai_review';
@@ -359,6 +364,11 @@ export const TaskCard = memo(function TaskCard({
         )}
         {splitCount > 0 && (
           <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1">{t('queueGrooming.splitCardLabel', { count: splitCount })}</p>
+        )}
+        {followUpFrom && (
+          <p className={cn('mt-1.5 text-xs line-clamp-1', followUpNeedsDecision ? 'font-medium text-warning' : 'text-(--nav-label-color)')}>
+            {t(followUpNeedsDecision ? 'queueGrooming.followUpDecisionCardLabel' : 'queueGrooming.followUpCardLabel', { number: taskNumber(followUpFrom) })}
+          </p>
         )}
         {interruption && (
           <p className="mt-1.5 text-xs font-medium text-warning">{t(`reviewInterruption.${interruption}`)}</p>

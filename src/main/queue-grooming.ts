@@ -83,8 +83,8 @@ export interface GroomingDeps {
   updateTask(projectId: string, taskId: string, updates: { description?: string; metadata?: Partial<TaskMetadata> }): Promise<void>;
   /** Create a card in Planning; resolves to its id */
   createTask(projectId: string, title: string, description: string, metadata: TaskMetadata): Promise<string | null>;
-  /** Move freshly created cards to the top of the Queue, in the given order */
-  queueTasks?(projectId: string, taskIds: string[]): Promise<void>;
+  /** Move freshly created cards to the top of the Queue (default) or append them to its end, in the given order */
+  queueTasks?(projectId: string, taskIds: string[], position?: 'top' | 'end'): Promise<void>;
   archive(projectId: string, taskIds: string[]): void;
   unarchive(projectId: string, taskIds: string[]): void;
   /** Whether task messaging is on; running dependents get their note only through it */
@@ -104,6 +104,11 @@ export function configureQueueGrooming(notify: (projectId: string) => void): voi
 }
 
 let cachedDefaults: GroomingDeps | null = null;
+
+/** The real effects (model call, task IPC, queue); other background jobs on tickets share them */
+export function defaultGroomingDeps(): GroomingDeps {
+  return defaultDeps();
+}
 
 function defaultDeps(): GroomingDeps {
   if (cachedDefaults) return cachedDefaults;
@@ -161,7 +166,7 @@ function defaultDeps(): GroomingDeps {
       if (!result?.success) throw new Error(result?.error || 'Could not create the task');
       return result.data?.id ?? null;
     },
-    async queueTasks(projectId, ids) {
+    async queueTasks(projectId, ids, position = 'top') {
       const { invokeIpcHandler } = await import('./ipc-handlers/ipc-registry');
       const { IPC_CHANNELS } = await import('../shared/constants');
       // The newest unplaced card sits at the top of the Queue, so the first piece moves last
@@ -171,7 +176,8 @@ function defaultDeps(): GroomingDeps {
       }
       // The main-process queue starts the top task first
       const { taskQueueOrder } = await import('./services/task-queue-order');
-      taskQueueOrder.set(projectId, [...ids, ...taskQueueOrder.get(projectId).filter((id) => !ids.includes(id))]);
+      const others = taskQueueOrder.get(projectId).filter((id) => !ids.includes(id));
+      taskQueueOrder.set(projectId, position === 'end' ? [...others, ...ids] : [...ids, ...others]);
     },
     async messagingEnabled() {
       return (await import('./task-messaging')).isTaskMessagingEnabled();
