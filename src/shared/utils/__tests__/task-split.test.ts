@@ -76,6 +76,22 @@ describe('normalizeSplit', () => {
 });
 
 describe('parseDeferredSection', () => {
+  it('treats "none" with an explanation as nothing deferred (made an empty follow-up ticket live)', () => {
+    for (const none of [
+      'None \u2014 everything in the ticket is done and committed.',
+      'None, everything is done.',
+      'Nothing left: all items shipped',
+      'N/A (all done)',
+      'All done.',
+      'No remaining work.',
+    ]) {
+      expect(parseDeferredSection(`Done.\n\n## Deferred\n- ${none}\n`).items).toEqual([]);
+    }
+    // A real item that happens to start with "None" stays
+    expect(parseDeferredSection('Done.\n\n## Deferred\n- None of the save tests cover mid-draft cancellation\n').items)
+      .toEqual(['None of the save tests cover mid-draft cancellation']);
+  });
+
   it('reads a Deferred list and returns the answer without it', () => {
     const answer = 'Added subtract.\n\n## Deferred\n- Add divide\n- Add modulo\n  with tests\n';
     const parsed = parseDeferredSection(answer);

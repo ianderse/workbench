@@ -152,7 +152,12 @@ If you deliberately left out part of this task because it is too big for this ch
 
 const DEFERRED_HEADING = /^\s{0,3}(?:#{1,6}\s*)?(?:\*\*|__)?\s*deferred(?:\s+(?:work|items?|scope|tasks?))?\s*:?\s*(?:\*\*|__)?\s*:?\s*$/i;
 const BULLET = /^\s*(?:[-*+•]|\d+[.)])\s+(.*\S)\s*$/;
-const NOTHING = /^(?:none|n\/a|nothing|no(?:thing)? (?:was )?deferred|-)\.?$/i;
+/**
+ * A deferred "item" that says nothing was deferred: "None", "N/A", "Nothing left", "All done", also
+ * with an explanation after punctuation ("None, everything in the ticket is done" made an empty
+ * follow-up ticket live). "None of the save tests cover X" is a real item and stays.
+ */
+const NOTHING = /^(?:none|n\/a|nothing(?: (?:left|remaining|else|deferred))?|no(?:thing)? (?:was |is )?deferred|no (?:remaining|outstanding|deferred) (?:work|items?)|all done|-)\s*(?:$|[.,;:!(\u2013\u2014-])/i;
 
 /**
  * The "## Deferred" list at the end of a final answer, tolerant of how local models write it
