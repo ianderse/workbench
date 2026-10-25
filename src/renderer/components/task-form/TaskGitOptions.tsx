@@ -10,6 +10,7 @@
  */
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Input } from '../ui/input';
 import { Switch } from '../ui/switch';
 import { Combobox, type ComboboxOption } from '../ui/combobox';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
@@ -17,9 +18,9 @@ import { SettingsSection } from '../settings/SettingsSection';
 import { buildBranchOptions } from '../../lib/branch-utils';
 import { useProjectBranches } from '../../hooks/useProjectBranches';
 import { useProjectStore } from '../../stores/project-store';
+import { PROJECT_DEFAULT_BRANCH, NEW_BASE_BRANCH, getNewBranchNameError } from './base-branch-metadata';
 
-/** Base branch value standing for "whatever the project's default branch is" */
-export const PROJECT_DEFAULT_BRANCH = '__project_default__';
+export { PROJECT_DEFAULT_BRANCH, NEW_BASE_BRANCH };
 
 export interface TaskGitOptions {
   /** Branch options for the picker, including the project default and the stored branch */
@@ -28,6 +29,8 @@ export interface TaskGitOptions {
   projectDefaultBranch: string;
   /** Whether the project pushes new task branches by default */
   projectPushNewBranches: boolean;
+  /** Names of the project's branches (a new branch cannot take one of them) */
+  branchNames: string[];
   isLoadingBranches: boolean;
   /** Whether a branch name is a local branch of the project */
   isLocalBranch: (branch: string) => boolean;
@@ -58,6 +61,8 @@ export function useTaskGitOptions(projectId: string, storedBranch?: string): Tas
     branch !== PROJECT_DEFAULT_BRANCH &&
     branches.length > 0 &&
     !branches.some((candidate) => candidate.name === branch);
+
+  const branchNames = useMemo(() => branches.map((branch) => branch.name), [branches]);
 
   const branchOptions = useMemo(() => {
     const options = buildBranchOptions(branches, {
@@ -102,6 +107,7 @@ export function useTaskGitOptions(projectId: string, storedBranch?: string): Tas
     branchOptions,
     projectDefaultBranch,
     projectPushNewBranches,
+    branchNames,
     isLoadingBranches: isLoading,
     isLocalBranch: (branch: string) => branches.find((candidate) => candidate.name === branch)?.type === 'local',
     isMissingBranch,
@@ -113,6 +119,13 @@ interface TaskGitOptionsProps {
   /** The selected base branch, or PROJECT_DEFAULT_BRANCH */
   baseBranch: string;
   onBaseBranchChange: (value: string) => void;
+  /** Offer "New branch" in the picker (the create dialog; a task that already started keeps its branch) */
+  allowNewBranch?: boolean;
+  /** The new branch's name and start branch (PROJECT_DEFAULT_BRANCH or an existing branch) */
+  newBranchName?: string;
+  onNewBranchNameChange?: (value: string) => void;
+  newBranchFrom?: string;
+  onNewBranchFromChange?: (value: string) => void;
   pushNewBranches: boolean;
   onPushNewBranchesChange: (value: boolean) => void;
   disabled?: boolean;
@@ -124,6 +137,11 @@ export function TaskGitOptionsSection({
   options,
   baseBranch,
   onBaseBranchChange,
+  allowNewBranch = false,
+  newBranchName = '',
+  onNewBranchNameChange,
+  newBranchFrom = PROJECT_DEFAULT_BRANCH,
+  onNewBranchFromChange,
   pushNewBranches,
   onPushNewBranchesChange,
   disabled = false,
@@ -131,7 +149,16 @@ export function TaskGitOptionsSection({
 }: TaskGitOptionsProps) {
   const { t } = useTranslation(['tasks', 'common']);
   const prefix = idPrefix ? `${idPrefix}-` : '';
-  const { branchOptions, projectDefaultBranch, isLoadingBranches } = options;
+  const { branchOptions, projectDefaultBranch, branchNames, isLoadingBranches } = options;
+  const isNewBranch = allowNewBranch && baseBranch === NEW_BASE_BRANCH;
+  const nameError = isNewBranch && newBranchName.trim()
+    ? getNewBranchNameError({ baseBranch, newBranchName }, branchNames)
+    : null;
+  // "New branch" comes first, above the project default and the existing branches
+  const baseOptions = allowNewBranch
+    ? [{ value: NEW_BASE_BRANCH, label: t('tasks:wizard.gitOptions.newBranchOption') }, ...branchOptions]
+    : branchOptions;
+  const triggerClass = 'h-8 w-auto max-w-[18rem] gap-1.5 border-transparent bg-transparent px-2 hover:bg-nav-hover focus:border-transparent focus:ring-0 focus-visible:shadow-(--shadow-focus) data-[state=open]:bg-nav-hover';
 
   return (
     <SettingsSection title={t('tasks:wizard.gitOptions.title')}>
@@ -145,7 +172,18 @@ export function TaskGitOptionsSection({
             id={`${prefix}base-branch`}
             value={baseBranch}
             onValueChange={onBaseBranchChange}
-            options={branchOptions}
+            options={baseOptions}
+            createOption={allowNewBranch
+              ? {
+                  label: (text) => t('tasks:wizard.gitOptions.createBranchOption', { name: text }),
+                  // Typing the name of a branch that exists has nothing to create
+                  canCreate: (text) => !branchNames.includes(text),
+                  onCreate: (text) => {
+                    onNewBranchNameChange?.(text);
+                    onBaseBranchChange(NEW_BASE_BRANCH);
+                  },
+                }
+              : undefined}
             placeholder={projectDefaultBranch
               ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
               : t('tasks:wizard.gitOptions.useProjectDefault')
@@ -153,9 +191,52 @@ export function TaskGitOptionsSection({
             searchPlaceholder={t('tasks:wizard.gitOptions.searchBranches')}
             emptyMessage={t('tasks:wizard.gitOptions.noBranchesFound')}
             disabled={disabled || isLoadingBranches}
-            className="h-8 w-auto max-w-[18rem] gap-1.5 border-transparent bg-transparent px-2 hover:bg-nav-hover focus:border-transparent focus:ring-0 focus-visible:shadow-(--shadow-focus) data-[state=open]:bg-nav-hover"
+            className={triggerClass}
           />
         </SettingsRow>
+        {isNewBranch && (
+          <>
+            <SettingsRow
+              label={t('tasks:wizard.gitOptions.newBranchNameLabel')}
+              description={nameError
+                ? <span className="text-destructive">{t(`tasks:wizard.gitOptions.newBranchErrors.${nameError}`)}</span>
+                : t('tasks:wizard.gitOptions.newBranchNameDescription')}
+              htmlFor={`${prefix}new-branch-name`}
+            >
+              <Input
+                id={`${prefix}new-branch-name`}
+                className="h-8 w-64"
+                value={newBranchName}
+                onChange={(e) => onNewBranchNameChange?.(e.target.value)}
+                placeholder={t('tasks:wizard.gitOptions.newBranchNamePlaceholder')}
+                aria-invalid={nameError ? true : undefined}
+                autoComplete="off"
+                spellCheck={false}
+                disabled={disabled}
+              />
+            </SettingsRow>
+            <SettingsRow
+              label={t('tasks:wizard.gitOptions.newBranchFromLabel')}
+              description={t('tasks:wizard.gitOptions.newBranchFromDescription')}
+              htmlFor={`${prefix}new-branch-from`}
+            >
+              <Combobox
+                id={`${prefix}new-branch-from`}
+                value={newBranchFrom}
+                onValueChange={(value) => onNewBranchFromChange?.(value)}
+                options={branchOptions}
+                placeholder={projectDefaultBranch
+                  ? t('tasks:wizard.gitOptions.useProjectDefaultWithBranch', { branch: projectDefaultBranch })
+                  : t('tasks:wizard.gitOptions.useProjectDefault')
+                }
+                searchPlaceholder={t('tasks:wizard.gitOptions.searchBranches')}
+                emptyMessage={t('tasks:wizard.gitOptions.noBranchesFound')}
+                disabled={disabled || isLoadingBranches}
+                className={triggerClass}
+              />
+            </SettingsRow>
+          </>
+        )}
         <SettingsRow
           label={t('tasks:wizard.gitOptions.pushNewBranchesLabel')}
           description={t('tasks:wizard.gitOptions.pushNewBranchesDescription')}

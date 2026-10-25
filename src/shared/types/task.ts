@@ -247,6 +247,8 @@ export interface TaskMetadata {
 
   // Git/Worktree configuration
   baseBranch?: string;  // Override base branch for this task's worktree
+  /** With a new `baseBranch`: the branch to create it from. Created when the first task starts, skipped once it exists */
+  newBaseBranchFrom?: string;
   prUrl?: string;  // GitHub PR URL if task has been submitted as a PR
   prState?: PullRequestState;  // The PR's last known state (set when created or merged, read once from GitHub otherwise)
   useWorktree?: boolean;  // If false, use direct mode (no worktree isolation) - default is true for safety

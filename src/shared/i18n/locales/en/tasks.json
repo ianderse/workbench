@@ -278,7 +278,31 @@
       "pushNewBranchesLabel": "Automatically push new branch",
       "pushNewBranchesDescription": "Publish this task branch to GitHub and set upstream tracking automatically. Disable to keep it local-only.",
       "useWorktreeLabel": "Use isolated workspace (recommended)",
-      "useWorktreeDescription": "Creates changes in a separate git worktree for safe review before merging. Disable to build directly in your project (faster but riskier)."
+      "useWorktreeDescription": "Creates changes in a separate git worktree for safe review before merging. Disable to build directly in your project (faster but riskier).",
+      "newBranchOption": "New branch...",
+      "createBranchOption": "Create branch \"{{name}}\"",
+      "newBranchNameLabel": "New branch name",
+      "newBranchNameDescription": "Created from the branch below when the first task using it starts",
+      "newBranchNamePlaceholder": "feature/my-branch",
+      "newBranchFromLabel": "From",
+      "newBranchFromDescription": "The branch the new branch starts from",
+      "newBranchErrors": {
+        "empty": "Enter a branch name",
+        "spaces": "A branch name cannot contain spaces",
+        "invalidChars": "A branch name cannot contain ~ ^ : ? * [ or \\",
+        "doubleDots": "A branch name cannot contain ..",
+        "doubleSlash": "A branch name cannot contain //",
+        "leadingDash": "A branch name cannot start with -",
+        "leadingSlash": "A branch name cannot start with /",
+        "trailingSlash": "A branch name cannot end with /",
+        "trailingDot": "A branch name cannot end with a dot",
+        "trailingLock": "A branch name cannot end with .lock",
+        "leadingDot": "No part of a branch name can start with a dot",
+        "atBrace": "A branch name cannot contain @{",
+        "reserved": "This name is reserved by git",
+        "exists": "A branch with this name already exists",
+        "conflicts": "This name clashes with an existing branch folder"
+      }
     },
     "errors": {
       "createFailed": "Failed to create task. Please try again.",

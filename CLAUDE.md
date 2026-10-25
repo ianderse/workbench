@@ -219,6 +219,17 @@ but first saves the work (commits, uncommitted and untracked files, minus genera
 `workbench/backup/<spec-id>-<yyyyMMdd-HHmmss>` branch (`utils/task-work-backup.ts`, used by `discardTaskWorktree()`); when
 that fails nothing is discarded. OMP session transcripts are copied into `previous_runs/<n>/`.
 
+### Base branch and "New branch"
+
+A task's worktree branch (`workbench/<spec-id>`) is cut from `metadata.baseBranch`, and merges go back into it. The new task
+dialog can create that base branch: choosing "New branch..." in the Base branch picker (`task-form/TaskGitOptions.tsx`)
+stores `baseBranch = <name>` plus `newBaseBranchFrom = <start branch>` (`task-form/base-branch-metadata.ts`; names are
+validated by `shared/utils/git-ref-name.ts`). `AgentManager.buildRunConfig` calls `ensureNewBaseBranch()`
+(`main/utils/new-base-branch.ts`, async `git()`) right before the worktree is created: a no-op when the branch exists
+(several tasks may share one), else `git branch --no-track <name> <from>`, pushed when the task's push-new-branches is on;
+a failure fails the start (appLog plus the task's recoverable error). With autonomous integration on, explicit base
+branches never override the integration branch (it is created from the task's base branch), and that holds for a new one.
+
 ### Task Directory
 
 Each task's `.workbench/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and

@@ -35,6 +35,15 @@ interface ComboboxProps {
   className?: string;
   /** ID for the trigger element */
   id?: string;
+  /**
+   * Offers a "create" row while the search text is not empty and `canCreate` (if given) accepts it.
+   * Picking it calls `onCreate` with the trimmed text and closes the list.
+   */
+  createOption?: {
+    label: (text: string) => string;
+    onCreate: (text: string) => void;
+    canCreate?: (text: string) => boolean;
+  };
 }
 
 const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
@@ -49,6 +58,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
       disabled = false,
       className,
       id,
+      createOption,
     },
     ref
   ) => {
@@ -74,12 +84,17 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
       );
     }, [options, search]);
 
+    // The "create" row comes after the matches, as one more keyboard stop
+    const createText = search.trim();
+    const showCreate = !!createOption && createText.length > 0 && (createOption.canCreate?.(createText) ?? true);
+    const itemCount = filteredOptions.length + (showCreate ? 1 : 0);
+
     // Get option ID for aria-activedescendant
     const getOptionId = (index: number) => `${listboxId}-option-${index}`;
 
     // Get the currently focused option ID
     const activeDescendant =
-      focusedIndex >= 0 && focusedIndex < filteredOptions.length
+      focusedIndex >= 0 && focusedIndex < itemCount
         ? getOptionId(focusedIndex)
         : undefined;
 
@@ -120,6 +135,13 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
       setFocusedIndex(-1);
     };
 
+    const handleCreate = () => {
+      createOption?.onCreate(createText);
+      setOpen(false);
+      setSearch('');
+      setFocusedIndex(-1);
+    };
+
     const handleKeyDown = (e: React.KeyboardEvent) => {
       if (!open) return;
 
@@ -127,19 +149,21 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
         case 'ArrowDown':
           e.preventDefault();
           setFocusedIndex((prev) =>
-            prev < filteredOptions.length - 1 ? prev + 1 : 0
+            prev < itemCount - 1 ? prev + 1 : 0
           );
           break;
         case 'ArrowUp':
           e.preventDefault();
           setFocusedIndex((prev) =>
-            prev > 0 ? prev - 1 : filteredOptions.length - 1
+            prev > 0 ? prev - 1 : itemCount - 1
           );
           break;
         case 'Enter':
           e.preventDefault();
           if (focusedIndex >= 0 && focusedIndex < filteredOptions.length) {
             handleSelect(filteredOptions[focusedIndex].value);
+          } else if (showCreate && focusedIndex === filteredOptions.length) {
+            handleCreate();
           }
           break;
         case 'Escape':
@@ -148,14 +172,14 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
           break;
         case 'Home':
           e.preventDefault();
-          if (filteredOptions.length > 0) {
+          if (itemCount > 0) {
             setFocusedIndex(0);
           }
           break;
         case 'End':
           e.preventDefault();
-          if (filteredOptions.length > 0) {
-            setFocusedIndex(filteredOptions.length - 1);
+          if (itemCount > 0) {
+            setFocusedIndex(itemCount - 1);
           }
           break;
       }
@@ -225,7 +249,7 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
           {/* Options list */}
           <ScrollArea className="max-h-[300px] [&_[data-radix-scroll-area-viewport]>div]:!block">
             <div id={listboxId} role="listbox" aria-label={searchPlaceholder || placeholder} className="p-1">
-              {filteredOptions.length === 0 ? (
+              {itemCount === 0 ? (
                 <div className="py-6 text-center text-sm text-muted-foreground">
                   {emptyMessage}
                 </div>
@@ -290,6 +314,32 @@ const Combobox = React.forwardRef<HTMLButtonElement, ComboboxProps>(
                     </React.Fragment>
                   );
                 })
+              )}
+              {showCreate && createOption && (
+                <button
+                  ref={(el) => {
+                    if (el) {
+                      optionRefs.current.set(filteredOptions.length, el);
+                    } else {
+                      optionRefs.current.delete(filteredOptions.length);
+                    }
+                  }}
+                  id={getOptionId(filteredOptions.length)}
+                  type="button"
+                  role="option"
+                  aria-selected={false}
+                  onClick={handleCreate}
+                  onMouseEnter={() => setFocusedIndex(filteredOptions.length)}
+                  className={cn(
+                    'flex w-full min-w-0 cursor-pointer select-none items-center',
+                    'rounded-lg px-3 py-2 text-left text-sm text-foreground outline-none',
+                    'hover:bg-nav-hover transition-colors duration-150',
+                    filteredOptions.length > 0 && 'mt-1',
+                    focusedIndex === filteredOptions.length && 'bg-nav-hover'
+                  )}
+                >
+                  <span className="min-w-0 truncate">{createOption.label(createText)}</span>
+                </button>
               )}
             </div>
           </ScrollArea>

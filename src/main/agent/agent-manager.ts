@@ -35,6 +35,7 @@ import { appLog } from '../app-logger';
 import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branch';
 import { resolveAutonomousConfig } from '../../shared/utils/autonomous';
 import { canTaskSplit, resolveSelfSplit } from '../../shared/utils/task-split';
+import { ensureNewBaseBranch } from '../utils/new-base-branch';
 import { prepareAutonomousBase } from '../autonomous/autonomous-service';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
@@ -473,6 +474,19 @@ export class AgentManager extends EventEmitter {
     // a git repository at all, or in one freshly `git init`ed with no commit, and there the
     // detection has nothing to answer with. Failing to start over a value that is only going to be
     // printed would make those runs impossible, so the name stands in as a label instead.
+    // A base branch the user asked to create ("New branch" in the task dialog) is made now, right
+    // before the branch is cut from it, unless it exists (an earlier task made it). With autonomous
+    // integration on, it is still what the integration branch is created from, so it is made first.
+    // A failure fails the start with its message (and is in the app log)
+    const newBaseBranch = task.metadata?.newBaseBranchFrom ? task.metadata.baseBranch : undefined;
+    if (newBaseBranch && task.metadata?.newBaseBranchFrom && branchingFromBase) {
+      await ensureNewBaseBranch(
+        project.path,
+        newBaseBranch,
+        task.metadata.newBaseBranchFrom,
+        { push: task.metadata?.pushNewBranches ?? project.settings?.pushNewBranches !== false },
+      );
+    }
     if (integrationBranch && branchingFromBase) {
       // A failure (no base branch to cut it from) fails the start with its message
       await prepareAutonomousBase(project, task);

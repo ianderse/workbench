@@ -141,6 +141,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       // `undefined` clears the choice, so triage decides again
       uiWork,
       baseBranch: resolvedBaseBranch,
+      // A task created with a new branch keeps the branch it starts from until another base branch is chosen
+      ...(baseBranch !== taskBaseBranch ? { newBaseBranchFrom: undefined } : {}),
       useLocalBranch,
       // Unset again when it matches the project's own setting, so the task follows it
       pushNewBranches: pushNewBranches === gitOptions.projectPushNewBranches ? undefined : pushNewBranches

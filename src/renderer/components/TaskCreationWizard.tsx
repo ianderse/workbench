@@ -26,6 +26,7 @@ import {
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { PROJECT_DEFAULT_BRANCH, TaskGitOptionsSection, useTaskGitOptions } from './task-form/TaskGitOptions';
+import { buildBaseBranchMetadata, isBaseBranchChoiceValid } from './task-form/base-branch-metadata';
 import { createTask, queueTasksInOrder, saveDraft, loadDraft, clearDraft, isDraftEmpty, useTaskStore, type TaskCreationDraft } from '../stores/task-store';
 import type { PendingBreakdownReview } from '../stores/breakdown-review-store';
 import { listOpenTickets } from '../../shared/utils/open-tickets';
@@ -69,6 +70,9 @@ export function TaskCreationWizard({
 
   // Git options state - using structured GitBranchDetail for type indicators
   const [baseBranch, setBaseBranch] = useState<string>(PROJECT_DEFAULT_BRANCH);
+  // "New branch": the name to create and the branch it starts from
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchFrom, setNewBranchFrom] = useState<string>(PROJECT_DEFAULT_BRANCH);
   // Worktree isolation - default to true for safety
   const [useWorktree, setUseWorktree] = useState(true);
   const [pushNewBranches, setPushNewBranches] = useState(true);
@@ -78,8 +82,15 @@ export function TaskCreationWizard({
   const gitOptions = useTaskGitOptions(projectId);
   const { projectDefaultBranch, projectPushNewBranches } = gitOptions;
 
-  // Determine if the selected branch is local (for useLocalBranch flag)
-  const isSelectedBranchLocal = baseBranch !== PROJECT_DEFAULT_BRANCH && gitOptions.isLocalBranch(baseBranch);
+  // A new branch needs a legal, unused name and a branch to start from before the task can be created
+  const baseBranchChoice = {
+    baseBranch,
+    newBranchName,
+    newBranchFrom,
+    projectDefaultBranch,
+    isLocalBranch: gitOptions.isLocalBranch,
+  };
+  const isBaseBranchValid = isBaseBranchChoiceValid(baseBranchChoice, gitOptions.branchNames);
 
   // Images
   const [images, setImages] = useState<ImageAttachment[]>([]);
@@ -129,6 +140,8 @@ export function TaskCreationWizard({
         setImages([]);
         setMcpConnectors(defaultConnectors);
         setBaseBranch(PROJECT_DEFAULT_BRANCH);
+        setNewBranchName('');
+        setNewBranchFrom(PROJECT_DEFAULT_BRANCH);
         setUseWorktree(true);
         setPushNewBranches(projectPushNewBranches);
         setIsDraftRestored(false);
@@ -153,18 +166,12 @@ export function TaskCreationWizard({
     const metadata: TaskMetadata = { sourceType: 'manual' };
     if (images.length > 0) metadata.attachedImages = images;
     // Always include baseBranch - resolve PROJECT_DEFAULT_BRANCH to actual branch name
-    // This ensures the backend always knows which branch to use for worktree creation
-    if (baseBranch === PROJECT_DEFAULT_BRANCH) {
-      // Use the resolved project default branch
-      if (projectDefaultBranch) metadata.baseBranch = projectDefaultBranch;
-    } else if (baseBranch) {
-      metadata.baseBranch = baseBranch;
-    }
+    // This ensures the backend always knows which branch to use for worktree creation. A new
+    // branch also stores the branch it is created from (newBaseBranchFrom) and, like a chosen
+    // local branch, useLocalBranch (keeps gitignored files by not switching to origin)
+    Object.assign(metadata, buildBaseBranchMetadata(baseBranchChoice));
     // Pass worktree preference - false means use --direct mode
     if (!useWorktree) metadata.useWorktree = false;
-    // Set useLocalBranch when user explicitly selects a local branch
-    // This preserves gitignored files (.env, configs) by not switching to origin
-    if (isSelectedBranchLocal) metadata.useLocalBranch = true;
     if (!pushNewBranches) metadata.pushNewBranches = false;
     metadata.mcpConnectors = mcpConnectors;
     const pinned = normalizeAgentOverride(override);
@@ -328,6 +335,8 @@ export function TaskCreationWizard({
     setMcpConnectors(defaultConnectors);
     setAgentOverride(undefined);
     setBaseBranch(PROJECT_DEFAULT_BRANCH);
+    setNewBranchName('');
+    setNewBranchFrom(PROJECT_DEFAULT_BRANCH);
     setUseWorktree(true);
     setPushNewBranches(projectPushNewBranches);
     setError(null);
@@ -446,6 +455,11 @@ export function TaskCreationWizard({
       options={gitOptions}
       baseBranch={baseBranch}
       onBaseBranchChange={setBaseBranch}
+      allowNewBranch
+      newBranchName={newBranchName}
+      onNewBranchNameChange={setNewBranchName}
+      newBranchFrom={newBranchFrom}
+      onNewBranchFromChange={setNewBranchFrom}
       pushNewBranches={pushNewBranches}
       onPushNewBranchesChange={setPushNewBranches}
       disabled={isCreating}
@@ -512,10 +526,10 @@ export function TaskCreationWizard({
             <Button variant="ghost" size="sm" onClick={handleClose} disabled={isCreating}>
               {t('common:buttons.cancel')}
             </Button>
-            <Button variant="outline" size="sm" onClick={handleBreakDown} disabled={isCreating || !description.trim()}>
+            <Button variant="outline" size="sm" onClick={handleBreakDown} disabled={isCreating || !description.trim() || !isBaseBranchValid}>
               {t('tasks:wizard.breakIntoTasks')}
             </Button>
-            <Button size="sm" onClick={handleCreate} disabled={isCreating || !description.trim()}>
+            <Button size="sm" onClick={handleCreate} disabled={isCreating || !description.trim() || !isBaseBranchValid}>
               {isCreating ? (
                 <>
                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />

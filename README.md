@@ -39,6 +39,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 **Task messaging under OMP**
 - OMP tasks can message parallel tasks: a per-run extension file (`omp -e`) adds `message_task` and `list_parallel_tasks`, which call Workbench's local tools server with the run's token. Messages for an OMP task are steered into the running step at its next turn (the step runs through `omp --mode rpc`; the Live messages switch turns that off, and a step that cannot start in RPC mode runs with `omp -p` instead), or wait in its inbox and join the next step's prompt. The Task messaging switch shows under OMP again
 
+**New branch as a base branch**
+- The "Base branch" picker in the new task dialog starts with "New branch...": name the branch and pick the branch it starts from (the project default unless you choose another). The name is checked while you type (legal git name, not already a branch). Typing a name in the picker's search offers "Create branch ..." as a shortcut. The branch is created right before the task's worktree, only if it does not exist yet, so several tasks can share one feature branch; it is pushed when "Automatically push new branch" is on, and a failed creation fails the task with the reason
+
 ### 2026-10-24
 
 **Local models with OMP**

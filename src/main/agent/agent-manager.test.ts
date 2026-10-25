@@ -40,6 +40,9 @@ vi.mock('../worktree', () => ({
   })),
 }));
 
+const ensureNewBaseBranchMock = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => ({ created: true })));
+vi.mock('../utils/new-base-branch', () => ({ ensureNewBaseBranch: ensureNewBaseBranchMock }));
+
 vi.mock('../settings-utils', () => ({
   readSettingsFile: vi.fn(() => ({ claudeCodeTasks: { triage: 'fixed', fixedModel: 'opus' } })),
 }));
@@ -315,6 +318,41 @@ describe('AgentManager', () => {
     });
     expect(logs.join('')).toContain(`Could not start the task: ${thrown}`);
     expect(errors).toEqual([thrown]);
+  });
+
+  it('creates a new base branch right before the worktree, from the branch the task named', async () => {
+    const task = makeTask({ metadata: { baseBranch: 'feature/login', newBaseBranchFrom: 'develop', pushNewBranches: false } } as Partial<Task>);
+
+    await manager.startTask(task.id, { project, task, mode: 'start' });
+    const run = await nextRun(1);
+
+    expect(ensureNewBaseBranchMock).toHaveBeenCalledWith('/project', 'feature/login', 'develop', { push: false });
+    expect(run.config.baseBranch).toBe('feature/login');
+  });
+
+  it('does not create a branch for a task without a new base branch', async () => {
+    const task = makeTask({ metadata: { baseBranch: 'develop' } } as Partial<Task>);
+
+    await manager.startTask(task.id, { project, task, mode: 'start' });
+    await nextRun(1);
+
+    expect(ensureNewBaseBranchMock).not.toHaveBeenCalled();
+  });
+
+  it('fails the start with the error when the new base branch cannot be created', async () => {
+    ensureNewBaseBranchMock.mockRejectedValueOnce(new Error('Cannot create the base branch "feature/login" from refs/heads/develop: boom'));
+    const taskEvents: Array<Record<string, unknown>> = [];
+    const errors: string[] = [];
+    manager.on('task-event', (_taskId: string, event: Record<string, unknown>) => taskEvents.push(event));
+    manager.on('error', (_taskId: string, message: string) => errors.push(message));
+    manager.on('exit', () => undefined);
+    const task = makeTask({ metadata: { baseBranch: 'feature/login', newBaseBranchFrom: 'develop' } } as Partial<Task>);
+
+    await manager.startTask(task.id, { project, task, mode: 'start' });
+
+    expect(runs).toHaveLength(0);
+    expect(taskEvents[0]).toMatchObject({ type: 'PLANNING_FAILED', recoverable: true });
+    expect(errors[0]).toContain('Cannot create the base branch "feature/login"');
   });
 
   it('forwards run callbacks as manager events', async () => {
