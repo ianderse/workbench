@@ -13,5 +13,6 @@ export function resolveClaudeCodeTaskSettings(stored: Partial<ClaudeCodeTaskSett
   if (!CLAUDE_EFFORTS.includes(merged.fixedEffort)) merged.fixedEffort = DEFAULT_CLAUDE_CODE_TASK_SETTINGS.fixedEffort;
   if (merged.triage !== 'auto' && merged.triage !== 'fixed') merged.triage = 'auto';
   if (!['auto', 'always', 'never'].includes(merged.planning)) merged.planning = 'auto';
+  if (typeof merged.taskMessaging !== 'boolean') merged.taskMessaging = DEFAULT_CLAUDE_CODE_TASK_SETTINGS.taskMessaging;
   return merged;
 }

@@ -299,7 +299,7 @@ export function resetTaskToolsBridgeForTests(): void {
 }
 
 /** The task tools entry of the turn's MCP config (the bridge script is written to `tempDir`) */
-async function taskToolsEntry(
+export async function taskToolsEntry(
   taskTools: TaskToolsMcpServer,
   route: Exclude<TaskToolsRoute, 'off'>,
   tempDir: string,

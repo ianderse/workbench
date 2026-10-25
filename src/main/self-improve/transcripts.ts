@@ -13,7 +13,7 @@ import { readdir, stat } from 'fs/promises';
 import path from 'path';
 import { createInterface } from 'readline';
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
-import { PHASE_PROMPT_OPENING_LIST } from '../claude-code/phase-prompts';
+import { PHASE_PROMPT_OPENING_LIST, WORKBENCH_INPUT_MARKER_PATTERN, WORKBENCH_TURN_PREFIXES } from '../claude-code/phase-prompts';
 import { isWindows } from '../platform';
 import { isClaudeHomeInWsl } from '../platform/claude-home';
 import { toHostPath } from '../platform/shell-runtime';
@@ -176,6 +176,8 @@ export async function readUserTurns(file: string, maxChars: number): Promise<str
       // around tool use
       if (trimmed === '' || trimmed.startsWith('<') || trimmed.startsWith('Caveat:')) continue;
       if (PHASE_PROMPT_OPENING_LIST.some((opening) => trimmed.startsWith(opening))) continue;
+      // Workbench's notices and peer messages written into the session are not the user
+      if (WORKBENCH_TURN_PREFIXES.some((prefix) => trimmed.startsWith(prefix)) || WORKBENCH_INPUT_MARKER_PATTERN.test(trimmed)) continue;
       const clipped = trimmed.slice(0, Math.max(0, maxChars - used));
       turns.push(clipped);
       used += clipped.length;

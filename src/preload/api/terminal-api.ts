@@ -107,7 +107,7 @@ export interface TerminalAPI {
   // Usage Monitoring (Proactive Account Switching)
   requestUsageUpdate: () => Promise<IPCResult<import('../../shared/types').ClaudeUsageSnapshot | null>>;
   requestAllProfilesUsage: (forceRefresh?: boolean) => Promise<IPCResult<import('../../shared/types').AllProfilesUsage | null>>;
-  onUsageUpdated: (callback: (usage: import('../../shared/types').ClaudeUsageSnapshot) => void) => () => void;
+  onUsageUpdated: (callback: (usage: import('../../shared/types').ClaudeUsageSnapshot | null) => void) => () => void;
   onAllProfilesUsageUpdated: (callback: (allProfilesUsage: import('../../shared/types').AllProfilesUsage) => void) => () => void;
   onProactiveSwapNotification: (callback: (notification: ProactiveSwapNotification) => void) => () => void;
 }
@@ -453,11 +453,11 @@ export const createTerminalAPI = (): TerminalAPI => ({
     ipcRenderer.invoke(IPC_CHANNELS.ALL_PROFILES_USAGE_REQUEST, forceRefresh ?? false),
 
   onUsageUpdated: (
-    callback: (usage: import('../../shared/types').ClaudeUsageSnapshot) => void
+    callback: (usage: import('../../shared/types').ClaudeUsageSnapshot | null) => void
   ): (() => void) => {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      usage: import('../../shared/types').ClaudeUsageSnapshot
+      usage: import('../../shared/types').ClaudeUsageSnapshot | null
     ): void => {
       callback(usage);
     };

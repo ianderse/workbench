@@ -95,6 +95,9 @@ process.stdin.on('end', () => {
   for (const key of ['cwd', 'transcript_path', 'agent_transcript_path']) {
     if (payload[key]) payload[key] = hostPath(payload[key]);
   }
+  // The relay doesn't use a call's input or output (a tool's output can be large)
+  delete payload.tool_input;
+  delete payload.tool_response;
   const cwd = payload.cwd;
   const terminalId = process.env.${LIVE_AGENT_TERMINAL_ENV};
   if (terminalId) payload.workbench_terminal_id = terminalId;
@@ -170,14 +173,18 @@ function ensureHookScript(projectPath: string) {
 
 // The relay reads sessions from their transcripts; hooks add what those can't
 // tell promptly (see relay/lib/hook-server.ts): tool calls and sub-agents as
-// they start, permission prompts, and turns, sub-agents and sessions ending.
-// SessionStart and UserPromptSubmit tell which agent window a session runs in
-// before it does anything.
-const HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Notification', 'Stop', 'SessionEnd', 'SubagentStop']
-// Run in the background, so Claude Code doesn't wait for them. Stop runs in
-// step, so the relay has it before the next turn can start (a late one would end
-// that turn); SessionEnd too, as Claude Code exits, which could cut it short.
-const ASYNC_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Notification', 'SubagentStop']
+// they start and end, permission prompts, and turns (also ones an API error
+// ends), sub-agents and sessions ending. SessionStart and UserPromptSubmit tell
+// which agent window a session runs in before it does anything.
+const HOOK_EVENTS = [
+  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification',
+  'Stop', 'StopFailure', 'SessionEnd', 'SubagentStop',
+]
+// Run in the background, so Claude Code doesn't wait for them. Stop and
+// StopFailure run in step, so the relay has them before the next turn can start
+// (a late one would end that turn); SessionEnd too, as Claude Code exits, which
+// could cut it short.
+const ASYNC_HOOK_EVENTS = ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'Notification', 'SubagentStop']
 
 interface CommandHook { type?: string; command?: string; url?: string; timeout?: number; async?: boolean }
 interface HookEntry { matcher?: string; hooks?: CommandHook[] }

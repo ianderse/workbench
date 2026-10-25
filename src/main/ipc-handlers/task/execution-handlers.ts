@@ -36,6 +36,10 @@ import { taskQueue } from '../../services/task-queue';
 import { taskQueueOrder } from '../../services/task-queue-order';
 import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
+import { branchMergeBlocker } from '../../worktree/merge-guard';
+import { taskResync } from '../../task-resync';
+import { clearStoppedByUser, markStoppedByUser } from '../../task-resync/user-stop';
+import { deliverToTask, noteTaskMergeBeforeDone } from '../../task-messaging';
 
 
 /**
@@ -235,6 +239,8 @@ export function registerTaskExecutionHandlers(
     // Cancel any pending fallback timer from a previous run's exit, so it can't stop the new run.
     // Named by project, or starting this task would cancel another project's stuck-run net
     cancelFallbackTimer(taskId, project.id);
+    // Started again: whatever the user stopped is over (task-resync/user-stop.ts)
+    clearStoppedByUser(getMainSpecDir(project, task));
 
     // The project travels with the watch: two projects can be running a task of the same spec id,
     // each writing its own plan file, and they need a watcher each
@@ -271,6 +277,13 @@ export function registerTaskExecutionHandlers(
     const project = (task.projectId && task.projectId !== foundProject.id)
       ? (projectStore.getProject(task.projectId) ?? foundProject)
       : foundProject;
+
+    // Not while the task's branch is being merged: the run would work on a branch that is moving
+    const merging = branchMergeBlocker(project.id, taskId);
+    if (merging) {
+      sendTaskError(taskId, merging, project.id);
+      return;
+    }
 
     // Git is required for worktree-based runs
     const gitStatus = await checkGitStatus(project.path);
@@ -393,6 +406,8 @@ export function registerTaskExecutionHandlers(
     if (agentManager.isRunning(taskId, project.id)) {
       return { success: false, error: 'The task is still running. Stop it before retrying.' };
     }
+    const merging = branchMergeBlocker(project.id, taskId);
+    if (merging) return { success: false, error: merging };
 
     // Check that the task can start before throwing its work away
     const gitStatus = await checkGitStatus(project.path);
@@ -510,6 +525,32 @@ export function registerTaskExecutionHandlers(
 
   configureTaskQueue(agentManager, startTask);
 
+  // Tasks on a branch another task was merged into go back to In Progress to take it in
+  // (task-resync/): started here, or queued when the project is at its parallel task limit
+  taskResync.configure({
+    getProject: (projectId) => projectStore.getProject(projectId),
+    getTasks: (projectId) => projectStore.getTasks(projectId),
+    isRunning: (taskId, projectId) => agentManager.isRunning(taskId, projectId),
+    isAtParallelLimit,
+    start: (taskId, projectId) => startTask(taskId, projectId),
+    queue: async (project, task) => {
+      const planPath = getPlanPath(project, task);
+      if (!(await persistPlanStatus(planPath, 'queue', project.id))) {
+        await createPlanIfNotExists(planPath, task, 'queue');
+        projectStore.invalidateTasksCache(project.id);
+      }
+      safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, task.id, 'queue', project.id);
+      taskHooks.emit('state', { project, task, status: 'queue' });
+      taskQueue.request(project.id);
+    },
+    note: async (project, task, text) => {
+      await deliverToTask(project.id, task, { kind: 'workbench' }, text);
+    },
+    runExclusive: (projectId, fn) => taskQueue.runExclusive(projectId, fn),
+  });
+  // Requests left from before the app was closed, once the projects are loaded
+  setTimeout(() => taskResync.scan(projectStore.getProjects().map((p) => p.id)), 10_000).unref?.();
+
   // The board's Queue column order (top first): the queue starts the top task first
   onIpc(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, (_, projectId: string, order: string[]) => {
     if (typeof projectId !== 'string' || !Array.isArray(order)) return;
@@ -539,6 +580,8 @@ export function registerTaskExecutionHandlers(
     // project would kill the right run and then transition whichever project holds the id first
     const { task, project } = findTaskAndProject(taskId, projectId ?? stoppedProjectId);
     if (!task || !project) return;
+    // Before the state changes: nothing restarts a task the user stopped (task-resync/user-stop.ts)
+    markStoppedByUser(getMainSpecDir(project, task));
 
     // Stopped before implementation started: back to backlog; otherwise to review
     const hasPlan = hasStartedImplementation(project, task);
@@ -582,6 +625,8 @@ export function registerTaskExecutionHandlers(
       if (agentManager.isRunning(taskId, project.id)) {
         return { success: false, error: 'The task is still running. Stop it before requesting changes.' };
       }
+      const merging = branchMergeBlocker(project.id, taskId);
+      if (merging) return { success: false, error: merging };
 
       const auth = await checkClaudeCodeAuth();
       if (!auth.ok) {
@@ -651,6 +696,11 @@ export function registerTaskExecutionHandlers(
       // deleting the worktree) or keepWorktree is requested
       if (status === 'done') {
         const worktreePath = findTaskWorktree(project.path, task.specId);
+        // A merge made outside Workbench is found from the task's branch, which the cleanup
+        // below deletes: look now (task-messaging/notices.ts)
+        if (task.status !== 'done' && (!worktreePath || options?.keepWorktree || options?.forceCleanup)) {
+          await noteTaskMergeBeforeDone(project, task);
+        }
         if (worktreePath) {
           if (options?.keepWorktree) {
             console.warn(`[TASK_UPDATE_STATUS] Marking task ${taskId} as done while keeping worktree at ${worktreePath}`);
@@ -721,11 +771,17 @@ export function registerTaskExecutionHandlers(
         // nothing while this project's run carried on, or start a second run over it
         if (status !== 'in_progress' && agentManager.isRunning(taskId, project.id)) {
           console.warn('[TASK_UPDATE_STATUS] Stopping task due to status change away from in_progress:', taskId);
+          markStoppedByUser(getMainSpecDir(project, task));
           agentManager.killTask(taskId, project.id);
           fileWatcher.unwatch(taskId, project.id).catch(() => undefined);
         }
 
         if (status === 'in_progress' && !agentManager.isRunning(taskId, project.id)) {
+          const merging = branchMergeBlocker(project.id, taskId);
+          if (merging) {
+            sendTaskError(taskId, merging, project.id);
+            return { success: false, error: merging };
+          }
           // Check git status and auth before the card moves
           const gitStatusCheck = await checkGitStatus(project.path);
           if (!gitStatusCheck.isGitRepo || !gitStatusCheck.hasCommits) {

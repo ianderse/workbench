@@ -58,6 +58,7 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.updatedAt === nextTask.updatedAt &&
     prevTask.reviewReason === nextTask.reviewReason &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
+    prevTask.executionProgress?.syncingWith === nextTask.executionProgress?.syncingWith &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl
   );
@@ -265,6 +266,12 @@ export const TaskCard = memo(function TaskCard({
         {sanitizedDescription && (
           <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2 wrap-anywhere">
             {sanitizedDescription}
+          </p>
+        )}
+        {/* Back in progress to take in a branch another task was merged into */}
+        {isActive && task.executionProgress?.syncingWith && (
+          <p className="mt-1.5 text-xs text-(--nav-label-color) truncate">
+            {t('tasks:execution.syncingWith', { branch: task.executionProgress.syncingWith })}
           </p>
         )}
         {actionError && (
