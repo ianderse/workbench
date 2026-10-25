@@ -34,6 +34,7 @@ This fork ([ianderse/workbench](https://github.com/ianderse/workbench), branch `
 - Starting tasks get a "Since this ticket was written" briefing on merged work. After each merge, queued tickets get context notes and proposals for obsolete, duplicate or follow-up tickets (`4144b4c`)
 - Resume continues a stopped or failed task in the same session and worktree. Retry is now Start over, asks first, and backs up all work to a `workbench/backup/...` branch before discarding anything (`24012b0`)
 - Autonomous mode (per project): tasks that pass AI review merge on their own into `workbench/auto` (or `main`), get pushed, and unblock the tasks waiting on them. You still review merged tasks and move them to Done, with Revert and Merge into main actions (`c610f26`)
+- Tickets can split themselves: when planning finds a ticket far too large, or implementing leaves work out on purpose (a `## Deferred` list), the agent moves that scope into 1 to 4 new tickets at the top of the Queue, chained after the original. Tickets that waited on the original now wait for the last piece. The setting "Split large tickets" (Off, Propose, Auto) is per project; Propose pauses the task after planning until you apply or dismiss the split, Auto applies it with an undo entry in Queue updates
 
 **Fixes**
 - Workbench's own commits never include `node_modules`, virtual environments or root build output, even without a `.gitignore` (`19b90a1`)

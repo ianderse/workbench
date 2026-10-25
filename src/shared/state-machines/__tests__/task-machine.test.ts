@@ -539,6 +539,13 @@ describe('taskMachine', () => {
       actor.stop();
     });
 
+    it('pauses in Human Review (split_proposed) when a split is proposed after planning, and resumes via planning', () => {
+      const paused = runEvents([{ type: 'PLANNING_STARTED' }, { type: 'SPLIT_PROPOSED' }]);
+      expect(paused.value).toBe('human_review');
+      expect(paused.context.reviewReason).toBe('split_proposed');
+      expect(runEvents([{ type: 'PLANNING_STARTED' }], 'human_review').value).toBe('planning');
+    });
+
     it('moves a failed task from error to coding, or to planning when nothing was implemented', () => {
       expect(runEvents([{ type: 'USER_RESUMED' }], 'error').value).toBe('coding');
       expect(runEvents([{ type: 'PLANNING_STARTED' }], 'error').value).toBe('planning');

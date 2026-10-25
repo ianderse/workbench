@@ -54,6 +54,12 @@ export interface ProjectSettings {
   selfImprove?: boolean;
   /** After a task is merged, add context notes to queued tickets and propose queue changes (default: true) */
   groomQueueAfterMerge?: boolean;
+  /**
+   * Let the agent working a ticket move part of its scope into new tickets at the top of the Queue:
+   * off, propose (the task pauses after planning until the split is applied or dismissed) or auto
+   * (applied at once, with an undo entry). Unset = auto while autonomous mode is on, else propose
+   */
+  selfSplit?: 'off' | 'propose' | 'auto';
   /** Autonomous mode: tasks that pass AI review merge on their own and the tasks waiting on them start (default: false) */
   autonomous?: boolean;
   /** Where autonomous mode merges: a separate integration branch (default) or the base branch */

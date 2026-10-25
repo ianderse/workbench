@@ -598,6 +598,147 @@ describe('ClaudeTaskRun', () => {
       rmSync(otherSpec, { recursive: true, force: true });
     }
   });
+  describe('splitting the ticket', () => {
+    const split = {
+      reason: 'Too big',
+      keepScope: 'Add the subtract function',
+      newTickets: [{ title: 'Add divide', description: 'Add a divide function with tests', reason: 'Separate area' }],
+    };
+    const schemaOf = (index: number) => JSON.parse(argValue(spawned[index].args, '--json-schema')!) as { properties: Record<string, unknown> };
+    const inputText = (index: number) => JSON.stringify(spawned[index].input);
+
+    it('proposes: pauses after planning, keeps the plan aside and emits SPLIT_PROPOSED', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      scripts.push({ messages: [result('s1', { structured_output: { plan: '# Plan for the kept scope', split } })] });
+      const events: string[] = [];
+      const onSplit = vi.fn(async () => ({ outcome: 'proposed' as const, proposalId: 'prop-1' }));
+      const outcome = await makeRun({ splitMode: 'propose', projectId: 'p1' }, { onSplit, onTaskEvent: (type: string) => events.push(type) }).run();
+
+      expect(outcome.status).toBe('split_proposed');
+      expect(events).toContain('SPLIT_PROPOSED');
+      expect(spawned).toHaveLength(1);
+      expect(schemaOf(0).properties).toHaveProperty('split');
+      expect(inputText(0)).toContain('keepScope');
+      expect(onSplit).toHaveBeenCalledWith(expect.objectContaining({ origin: 'plan', mode: 'propose' }));
+      const info = loadClaudeRunInfo(specDir)!;
+      expect(info.plan).toBeUndefined();
+      expect(info.pendingSplit).toEqual({ proposalId: 'prop-1', plan: '# Plan for the kept scope' });
+    });
+
+    it('resumes with the reduced scope once the split was applied', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      scripts.push({ messages: [result('s1', { structured_output: { plan: '# Reduced plan', split } })] });
+      const callbacks = { onSplit: async () => ({ outcome: 'proposed' as const, proposalId: 'prop-1' }) };
+      await makeRun({ splitMode: 'propose', projectId: 'p1' }, callbacks).run();
+
+      scripts.push({ messages: [result('s1', { result: 'Implemented' })] }, { messages: [result('s1', {
+        structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] },
+      })] });
+      const getSplitStatus = vi.fn(async () => 'applied' as const);
+      const outcome = await makeRun({ splitMode: 'propose', projectId: 'p1' }, { ...callbacks, getSplitStatus }).run();
+
+      expect(outcome.status).toBe('completed');
+      // No second plan: the next spawned run is the implementation, with the saved plan
+      expect(spawned).toHaveLength(3);
+      expect(argValue(spawned[1].args, '--permission-mode')).toBeUndefined();
+      const info = loadClaudeRunInfo(specDir)!;
+      expect(info.plan).toBe('# Reduced plan');
+      expect(info.pendingSplit).toBeUndefined();
+      expect(readFileSync(path.join(specDir, 'plan.md'), 'utf-8')).toBe('# Reduced plan');
+    });
+
+    it('plans the whole ticket again, without the split option, once the split was dismissed', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      scripts.push({ messages: [result('s1', { structured_output: { plan: '# Reduced plan', split } })] });
+      await makeRun({ splitMode: 'propose', projectId: 'p1' }, { onSplit: async () => ({ outcome: 'proposed' as const, proposalId: 'prop-1' }) }).run();
+
+      scripts.push(
+        { messages: [result('s1', { structured_output: { plan: '# Full plan' } })] },
+        { messages: [result('s1', { result: 'Implemented' })] },
+        { messages: [result('s1', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+      );
+      const dismissSplit = vi.fn(async () => undefined);
+      const getSplitStatus = vi.fn(async () => 'pending' as const);
+      const outcome = await makeRun({ splitMode: 'propose', projectId: 'p1' }, { getSplitStatus, dismissSplit }).run();
+
+      expect(outcome.status).toBe('completed');
+      // Resuming without a decision dismisses the proposal
+      expect(dismissSplit).toHaveBeenCalledWith('prop-1');
+      expect(argValue(spawned[1].args, '--permission-mode')).toBe('plan');
+      expect(schemaOf(1).properties).not.toHaveProperty('split');
+      expect(inputText(1)).not.toContain('keepScope');
+      expect(loadClaudeRunInfo(specDir)!.plan).toBe('# Full plan');
+    });
+
+    it('auto: applies at once and goes on implementing the reduced scope', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      scripts.push(
+        { messages: [result('s1', { structured_output: { plan: '# Reduced plan', split } })] },
+        { messages: [result('s1', { result: 'Implemented' })] },
+        { messages: [result('s1', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+      );
+      const onSplit = vi.fn(async () => ({ outcome: 'applied' as const, description: 'Add the subtract function' }));
+      const outcome = await makeRun({ splitMode: 'auto', projectId: 'p1' }, { onSplit }).run();
+      expect(outcome.status).toBe('completed');
+      expect(onSplit).toHaveBeenCalledTimes(1);
+      expect(loadClaudeRunInfo(specDir)!.plan).toBe('# Reduced plan');
+      // The ticket splits once: the implement prompt does not ask for a Deferred section any more
+      expect(inputText(1)).not.toContain('## Deferred');
+    });
+
+    it('plans the whole ticket again when the split could not be made', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      scripts.push(
+        { messages: [result('s1', { structured_output: { plan: '# Reduced plan', split } })] },
+        { messages: [result('s1', { structured_output: { plan: '# Full plan' } })] },
+        { messages: [result('s1', { result: 'Implemented' })] },
+        { messages: [result('s1', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+      );
+      const onSplit = vi.fn(async () => ({ outcome: 'ignored' as const, reason: 'nope' }));
+      await makeRun({ splitMode: 'auto', projectId: 'p1' }, { onSplit }).run();
+      expect(onSplit).toHaveBeenCalledTimes(1);
+      expect(loadClaudeRunInfo(specDir)!.plan).toBe('# Full plan');
+      expect(schemaOf(1).properties).not.toHaveProperty('split');
+    });
+
+    it('leaves the split option out of the schema and prompts when splitting is off or not allowed', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      scripts.push(
+        { messages: [result('s1', { structured_output: { plan: '# Plan', split } })] },
+        { messages: [result('s1', { result: 'Implemented\n## Deferred\n- more' })] },
+        { messages: [result('s1', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+      );
+      const onSplit = vi.fn();
+      // No splitMode: what the agent manager does for off and for a ticket made by a split
+      await makeRun({}, { onSplit }).run();
+      expect(schemaOf(0).properties).not.toHaveProperty('split');
+      expect(inputText(0)).not.toContain('keepScope');
+      expect(inputText(1)).not.toContain('## Deferred');
+      expect(onSplit).not.toHaveBeenCalled();
+      expect(loadClaudeRunInfo(specDir)!.plan).toBe('# Plan');
+    });
+
+    it('moves a Deferred list from the implement answer into one new ticket', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push(
+        { messages: [result('s1', { result: 'Added subtract.\n\n## Deferred\n- Add divide\n- Add modulo' })] },
+        { messages: [result('s1', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+      );
+      const onSplit = vi.fn(async () => ({ outcome: 'applied' as const, description: 'Reduced' }));
+      await makeRun({ splitMode: 'auto', projectId: 'p1' }, { onSplit }).run();
+      expect(inputText(0)).toContain('## Deferred');
+      expect(onSplit).toHaveBeenCalledTimes(1);
+      const request = (onSplit.mock.calls[0] as unknown as [{ split: { pieces: Array<{ description: string }> }; origin: string }])[0];
+      expect(request.origin).toBe('implement');
+      expect(request.split.pieces).toHaveLength(1);
+      expect(request.split.pieces[0].description).toContain('- Add divide');
+      expect(request.split.pieces[0].description).toContain('- Add modulo');
+      const keep = (onSplit.mock.calls[0] as unknown as [{ split: { keepScope: string } }])[0].split.keepScope;
+      expect(keep).toContain('Added subtract.');
+      expect(keep).not.toContain('Deferred');
+    });
+  });
+
   describe('in WSL', () => {
     it('reports edited files and the session cwd as host paths', async () => {
       runtimeRef.wsl = true;

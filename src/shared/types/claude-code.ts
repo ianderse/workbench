@@ -221,6 +221,8 @@ export interface ClaudeRunInfo {
   triage?: TaskTriage;
   /** Approved plan (Markdown), when the task was planned */
   plan?: string;
+  /** A split proposed after planning is waiting for Apply or Dismiss; `plan` covers only the kept scope */
+  pendingSplit?: { proposalId: string; plan: string };
   phases: ClaudeRunPhase[];
   init?: ClaudeRunInit;
   validation?: ValidationReport;

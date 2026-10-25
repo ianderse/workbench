@@ -26,6 +26,8 @@ export type TaskEvent =
   | { type: 'MOVED_TO_BACKLOG' }
   | { type: 'RATE_LIMIT_HOLD'; resetAt: string; message: string; phase?: string }
   | { type: 'USER_RESUMED' }
+  // The agent proposed splitting the ticket after planning; the run pauses until the split is applied or dismissed
+  | { type: 'SPLIT_PROPOSED' }
   // Autonomous mode merged the task into its target branch (from human_review)
   | { type: 'AUTO_MERGED' }
   // The automatic merge was reverted: the task is an ordinary completed task again
@@ -71,6 +73,7 @@ export const taskMachine = createMachine(
           CODING_FAILED: { target: 'error', actions: ['setReviewReasonErrors', 'setError'] },
           QA_AGENT_ERROR: { target: 'error', actions: 'setReviewReasonErrors' },
           RATE_LIMIT_HOLD: { target: 'queued', actions: 'clearReviewReason' },
+          SPLIT_PROPOSED: { target: 'human_review', actions: 'setReviewReasonSplitProposed' },
           USER_STOPPED: [
             { target: 'backlog', guard: 'noPlanYet', actions: 'clearReviewReason' },
             { target: 'human_review', actions: 'setReviewReasonStopped' }
@@ -205,6 +208,7 @@ export const taskMachine = createMachine(
       setReviewReasonCompleted: assign({ reviewReason: () => 'completed' }),
       setReviewReasonAutoMerged: assign({ reviewReason: () => 'auto_merged' }),
       setReviewReasonStopped: assign({ reviewReason: () => 'stopped' }),
+      setReviewReasonSplitProposed: assign({ reviewReason: () => 'split_proposed' }),
       setReviewReasonQaRejected: assign({ reviewReason: () => 'qa_rejected' }),
       setReviewReasonErrors: assign({ reviewReason: () => 'errors' }),
       clearReviewReason: assign({ reviewReason: () => undefined, error: () => undefined }),

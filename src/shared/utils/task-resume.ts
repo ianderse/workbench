@@ -19,14 +19,15 @@ export function isRunFinished(run: ClaudeRunInfo | undefined | null, validation 
 }
 
 /**
- * A task that is not running, was stopped (Human Review, reason `stopped`) or failed (Error, or
+ * A task that is not running, was stopped (Human Review, reason `stopped`), waits for a proposed split
+ * (reason `split_proposed`; resuming continues with whatever was decided) or failed (Error, or
  * Human Review with reason `errors`) and whose run still has an unfinished step.
  */
 export function canResumeTask(task: Task, validation = true): boolean {
   if (task.metadata?.archivedAt) return false;
   const stoppedOrFailed =
     task.status === 'error'
-    || (task.status === 'human_review' && (task.reviewReason === 'stopped' || task.reviewReason === 'errors'));
+    || (task.status === 'human_review' && (task.reviewReason === 'stopped' || task.reviewReason === 'errors' || task.reviewReason === 'split_proposed'));
   if (!stoppedOrFailed) return false;
   return !isRunFinished(task.claudeRun, validation);
 }

@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows, SegmentedControl } from '../settings/SettingsRow';
 import { DEFAULT_AUTONOMOUS_BRANCH, resolveAutonomousConfig } from '../../../shared/utils/autonomous';
+import { resolveSelfSplit } from '../../../shared/utils/task-split';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
 import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
@@ -115,6 +116,22 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
             checked={settings.groomQueueAfterMerge !== false}
             onCheckedChange={(checked) => setSettings({ ...settings, groomQueueAfterMerge: checked })}
             aria-label={t('projectPages.tasks.groomQueue')}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label={t('projectPages.tasks.selfSplit')}
+          description={t('projectPages.tasks.selfSplitDescription')}
+        >
+          <SegmentedControl
+            value={resolveSelfSplit(settings)}
+            options={[
+              { value: 'off', label: t('projectPages.tasks.selfSplitOff') },
+              { value: 'propose', label: t('projectPages.tasks.selfSplitPropose') },
+              { value: 'auto', label: t('projectPages.tasks.selfSplitAuto') },
+            ]}
+            onValueChange={(value) => setSettings({ ...settings, selfSplit: value })}
+            ariaLabel={t('projectPages.tasks.selfSplit')}
           />
         </SettingsRow>
 

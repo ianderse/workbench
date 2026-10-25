@@ -6,7 +6,7 @@ import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
 import type { ClaudeRunInfo, ClaudeRunPhase, ClaudeEffort } from './claude-code';
 import type { AgentBackendKind } from './agent-backend';
-import type { TaskContextNote } from './queue-grooming';
+import type { TaskContextNote, TaskSplitRecord } from './queue-grooming';
 
 export type TaskStatus = 'backlog' | 'queue' | 'in_progress' | 'ai_review' | 'human_review' | 'done' | 'pr_created' | 'error';
 
@@ -17,8 +17,9 @@ export type TaskOrderState = Record<TaskStatus, string[]>;
 // - 'completed': All subtasks done and QA passed, ready for final approval/merge
 // - 'errors': Subtasks failed during execution
 // - 'qa_rejected': QA found issues that need fixing
+// - 'split_proposed': the agent proposed splitting the ticket after planning; waits for Apply or Dismiss in the Queue updates panel, then Resume
 // - 'auto_merged': autonomous mode merged the task into its target branch; awaiting the human's sign-off
-export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'stopped' | 'auto_merged';
+export type ReviewReason = 'completed' | 'errors' | 'qa_rejected' | 'stopped' | 'auto_merged' | 'split_proposed';
 
 export type SubtaskStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
@@ -221,6 +222,11 @@ export interface TaskMetadata {
   useWorktree?: boolean;  // If false, use direct mode (no worktree isolation) - default is true for safety
   useLocalBranch?: boolean;  // If true, use the local branch directly instead of preferring origin/branch (preserves gitignored files)
   pushNewBranches?: boolean;  // If false, keep the task branch local-only instead of auto-pushing to origin
+
+  /** Id of the ticket whose split created this one (a ticket made by a split is never split again) */
+  splitFrom?: string;
+  /** Set when this ticket split part of its scope into new tickets (applyTaskSplit) */
+  splitInto?: TaskSplitRecord;
 
   /** Notes added after other tasks merged (queue grooming); each can be undone */
   contextNotes?: TaskContextNote[];

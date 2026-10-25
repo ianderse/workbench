@@ -18,6 +18,7 @@ export function TaskContextNotes({ task }: TaskContextNotesProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const notes = task.metadata?.contextNotes;
+  // A split note is undone with the split (Queue updates), not on its own
   if (!notes || notes.length === 0) return null;
 
   const undo = async (noteId: string) => {
@@ -40,12 +41,16 @@ export function TaskContextNotes({ task }: TaskContextNotesProps) {
         {notes.map((note) => (
           <li key={note.id} className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
-              <p className="text-xs text-(--nav-label-color)">{t('queueGrooming.noteFrom', { number: taskNumber(note.fromTaskId) })}</p>
+              <p className="text-xs text-(--nav-label-color)">
+                {note.kind === 'split' ? t('queueGrooming.splitNoteTitle') : t('queueGrooming.noteFrom', { number: taskNumber(note.fromTaskId) })}
+              </p>
               <p className="text-sm text-foreground wrap-anywhere">{note.note}</p>
             </div>
-            <Button size="sm" variant="ghost" disabled={busyId === note.id} onClick={() => void undo(note.id)}>
-              {t('queueGrooming.undo')}
-            </Button>
+            {note.kind !== 'split' && (
+              <Button size="sm" variant="ghost" disabled={busyId === note.id} onClick={() => void undo(note.id)}>
+                {t('queueGrooming.undo')}
+              </Button>
+            )}
           </li>
         ))}
       </ul>

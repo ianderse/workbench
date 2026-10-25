@@ -41,7 +41,8 @@
     "completed": "Completed",
     "hasErrors": "Has errors",
     "qaIssues": "QA issues",
-    "stopped": "Stopped"
+    "stopped": "Stopped",
+    "splitProposed": "Split proposed"
   },
   "aiReviewFailed": {
     "title_one": "Failed AI review after {{count}} round",
@@ -255,6 +256,8 @@
       "obsolete": "Archived {{title}}",
       "duplicate": "Archived {{title}}, a duplicate of {{kept}}",
       "newTask": "Added task {{title}}",
+      "split_one": "Split {{title}}, {{count}} new ticket",
+      "split_other": "Split {{title}}, {{count}} new tickets",
       "undo": "Undo",
       "undoFailed": "Could not undo the change: {{error}}"
     }
@@ -266,6 +269,14 @@
     "obsolete": "Archive {{title}}",
     "duplicate": "Archive {{title}}, a duplicate of {{kept}}",
     "newTask": "Add task {{title}}",
+    "split_one": "Propose splitting {{title}}, {{count}} new ticket",
+    "split_other": "Propose splitting {{title}}, {{count}} new tickets",
+    "splitIntro": "Proposed by #{{number}} while planning",
+    "splitPieces": "New tickets: {{titles}}",
+    "splitCardLabel_one": "Split into {{count}} more ticket",
+    "splitCardLabel_other": "Split into {{count}} more tickets",
+    "splitPendingCardLabel": "Split proposed, see Queue updates",
+    "splitNoteTitle": "Split",
     "waitsFor": "Waits for: {{titles}}",
     "apply": "Apply",
     "dismiss": "Dismiss",

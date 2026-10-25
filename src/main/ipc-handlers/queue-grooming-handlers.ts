@@ -6,7 +6,8 @@ import type { BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { IPCResult } from '../../shared/types';
 import type { QueueProposal } from '../../shared/types/queue-grooming';
-import { handleIpc } from './ipc-registry';
+import { handleIpc, invokeIpcHandler } from './ipc-registry';
+import { projectStore } from '../project-store';
 import { safeSendToRenderer } from './utils';
 import { taskHooks } from '../task-hooks';
 import { taskQueue } from '../services/task-queue';
@@ -44,13 +45,37 @@ export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow
     }
   });
 
+  /**
+   * A task paused after planning (Human Review, split_proposed) continues once its split is decided:
+   * on Apply with the reduced scope, on Dismiss with the whole ticket. Same as pressing Resume.
+   */
+  const resumeAfterSplitDecision = async (projectId: string, taskId: string): Promise<void> => {
+    try {
+      const task = projectStore.getTasks(projectId).find((t) => t.id === taskId);
+      if (!task || task.status !== 'human_review' || task.reviewReason !== 'split_proposed') return;
+      appLog.info(`[TaskSplit] Resuming ${taskId} after the split was decided`);
+      await invokeIpcHandler(IPC_CHANNELS.TASK_START, taskId, undefined, projectId);
+    } catch (error) {
+      appLog.warn(`[TaskSplit] Could not resume ${taskId} after the split was decided:`, error);
+    }
+  };
+
+  const splitTaskOf = async (projectId: string, proposalId: string): Promise<string | undefined> => {
+    const proposal = (await listQueueProposals(projectId)).find((p) => p.id === proposalId);
+    return proposal?.kind === 'split' ? proposal.taskId : undefined;
+  };
+
   handleIpc(IPC_CHANNELS.QUEUE_PROPOSAL_APPLY, async (_, projectId: string, proposalId: string): Promise<IPCResult> => {
+    const splitTaskId = await splitTaskOf(projectId, proposalId);
     const result = await applyQueueProposal(projectId, proposalId);
+    if (result.success && splitTaskId) void resumeAfterSplitDecision(projectId, splitTaskId);
     return result.success ? { success: true } : { success: false, error: result.error };
   });
 
   handleIpc(IPC_CHANNELS.QUEUE_PROPOSAL_DISMISS, async (_, projectId: string, proposalId: string): Promise<IPCResult> => {
+    const splitTaskId = await splitTaskOf(projectId, proposalId);
     const result = await dismissQueueProposal(projectId, proposalId);
+    if (result.success && splitTaskId) void resumeAfterSplitDecision(projectId, splitTaskId);
     return result.success ? { success: true } : { success: false, error: result.error };
   });
 

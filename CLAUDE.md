@@ -243,6 +243,21 @@ Tickets are written before the code exists, so later ones go stale as earlier ta
   leave an undo entry. The project setting `groomQueueAfterMerge` (default on) turns it off. The answer is validated by
   `normalizeGroomingResult()` (`shared/utils/queue-grooming.ts`).
 
+### Task splitting (per project)
+
+The project setting `selfSplit` (`off | propose | auto`; unset = auto while autonomous mode is on, else propose,
+`resolveSelfSplit()` in `shared/utils/task-split.ts`) lets the agent move part of a ticket's scope into 1 to 4 new
+tickets. Two sources: the plan step's optional structured `split` (`keepScope` + `newTickets`; the plan then covers only
+`keepScope`) and a `## Deferred` bullet list at the end of the implement answer (`parseDeferredSection()`, one follow-up
+ticket). A ticket made by a split (`metadata.splitFrom`) or that split before (`metadata.splitInto`) never gets the
+option (`canTaskSplit()`; the runner's `splitMode` is unset and the schema/prompts omit it). `applyTaskSplit()`
+(`main/task-split.ts`) rewrites the description (original kept in a collapsed block, a `kind: 'split'` context note says
+what moved where), creates the pieces at the top of the Queue chained after the task, and rewires queued/planning
+dependents onto the last piece; undo (Queue updates panel) works while no piece started. `auto` applies at once;
+`propose` at the plan step stores a `split` proposal, emits `SPLIT_PROPOSED` and the task pauses in Human Review
+(`split_proposed`, `pendingSplit` in `claude_run.json`). Apply or Dismiss in the panel (or Resume) continues it: applied
+keeps the saved plan for the reduced scope, dismissed plans the whole ticket again. A deferred-work proposal does not pause.
+
 ### Autonomous mode (per project)
 
 Project settings `autonomous`, `autonomousTarget` (`integration` default | `main`), `autonomousBranch` (default

@@ -65,7 +65,8 @@ const TERMINAL_EVENTS = new Set<string>([
   'QA_MAX_ITERATIONS',
   'QA_AGENT_ERROR',
   'ALL_SUBTASKS_DONE',
-  'RATE_LIMIT_HOLD'
+  'RATE_LIMIT_HOLD',
+  'SPLIT_PROPOSED'
 ]);
 
 export class TaskStateManager {

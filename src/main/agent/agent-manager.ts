@@ -33,6 +33,7 @@ import type { AppSettings } from '../../shared/types/settings';
 import { appLog } from '../app-logger';
 import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branch';
 import { resolveAutonomousConfig } from '../../shared/utils/autonomous';
+import { canTaskSplit, resolveSelfSplit } from '../../shared/utils/task-split';
 import { prepareAutonomousBase } from '../autonomous/autonomous-service';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
@@ -244,6 +245,18 @@ export class AgentManager extends EventEmitter {
       },
       onFilesEdited: (files) => {
         if (!entry.killed) taskHooks.emit('files-edited', { project: options.project, task: options.task, files });
+      },
+      onSplit: async ({ split, origin, mode }) => {
+        const { submitTaskSplit } = await import('../queue-grooming');
+        return submitTaskSplit(projectId, taskId, split, origin, mode);
+      },
+      getSplitStatus: async (proposalId) => {
+        const { getSplitStatus } = await import('../queue-grooming');
+        return getSplitStatus(projectId, taskId, proposalId);
+      },
+      dismissSplit: async (proposalId) => {
+        const { dismissQueueProposal } = await import('../queue-grooming');
+        await dismissQueueProposal(projectId, proposalId);
       },
     });
     entry.run = run;
@@ -530,6 +543,12 @@ export class AgentManager extends EventEmitter {
       ...(task.metadata?.agentOverride ? { agentOverride: task.metadata.agentOverride } : {}),
     };
 
+    // The agent may split the ticket (off, propose or auto; never a ticket a split made)
+    if (mode === 'start') {
+      const splitMode = resolveSelfSplit(project.settings);
+      if (splitMode !== 'off' && canTaskSplit(splitMode, task.metadata)) config.splitMode = splitMode;
+    }
+
     // What merged since the ticket was written; recomputed at every start, so a retried task sees new merges
     if (mode === 'start') {
       try {
@@ -735,7 +754,7 @@ export class AgentManager extends EventEmitter {
       this.emitError(taskId, message, projectId);
     }
 
-    this.emit('exit', taskId, outcome.status === 'completed' ? 0 : 1, 'task-execution', projectId);
+    this.emit('exit', taskId, outcome.status === 'completed' || outcome.status === 'split_proposed' ? 0 : 1, 'task-execution', projectId);
   }
 }
 

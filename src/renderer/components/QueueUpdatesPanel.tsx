@@ -84,6 +84,8 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
         return t('autonomous.recentChanges.duplicate', { title: titleOf(proposal.taskId), kept: titleOf(proposal.duplicateOf) });
       case 'newTask':
         return t('autonomous.recentChanges.newTask', { title: proposal.title });
+      case 'split':
+        return t('autonomous.recentChanges.split', { title: titleOf(proposal.taskId), count: proposal.pieces.length });
     }
   };
 
@@ -95,6 +97,8 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
         return t('queueGrooming.duplicate', { title: titleOf(proposal.taskId), kept: titleOf(proposal.duplicateOf) });
       case 'newTask':
         return t('queueGrooming.newTask', { title: proposal.title });
+      case 'split':
+        return t('queueGrooming.split', { title: titleOf(proposal.taskId), count: proposal.pieces.length });
     }
   };
 
@@ -122,9 +126,16 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-foreground wrap-anywhere">{describe(proposal)}</p>
                 <p className="mt-0.5 text-xs text-(--nav-label-color) wrap-anywhere">
-                  {t('queueGrooming.intro', { number: taskNumber(proposal.fromTaskId) })}
+                  {proposal.kind === 'split'
+                    ? t('queueGrooming.splitIntro', { number: taskNumber(proposal.fromTaskId) })
+                    : t('queueGrooming.intro', { number: taskNumber(proposal.fromTaskId) })}
                   {proposal.reason ? `: ${proposal.reason}` : ''}
                 </p>
+                {proposal.kind === 'split' && (
+                  <p className="mt-0.5 text-xs text-(--nav-label-color) wrap-anywhere">
+                    {t('queueGrooming.splitPieces', { titles: proposal.pieces.map((piece) => piece.title).join(', ') })}
+                  </p>
+                )}
                 {proposal.kind === 'newTask' && proposal.dependsOn.length > 0 && (
                   <p className="mt-0.5 text-xs text-(--nav-label-color) wrap-anywhere">
                     {t('queueGrooming.waitsFor', { titles: proposal.dependsOn.map(titleOf).join(', ') })}
@@ -172,7 +183,9 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium text-foreground wrap-anywhere">{describeApplied(entry.proposal)}</p>
                   <p className="mt-0.5 text-xs text-(--nav-label-color) wrap-anywhere">
-                    {t('queueGrooming.intro', { number: taskNumber(entry.proposal.fromTaskId) })}
+                    {entry.proposal.kind === 'split'
+                      ? t('queueGrooming.splitIntro', { number: taskNumber(entry.proposal.fromTaskId) })
+                      : t('queueGrooming.intro', { number: taskNumber(entry.proposal.fromTaskId) })}
                     {entry.proposal.reason ? `: ${entry.proposal.reason}` : ''}
                   </p>
                 </div>

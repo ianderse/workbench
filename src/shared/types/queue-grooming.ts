@@ -10,6 +10,8 @@ export interface TaskContextNote {
   block: string;
   /** ISO time */
   at: string;
+  /** 'split': written by a task split (fromTaskId is the task itself); undone with the split, not on its own */
+  kind?: 'split';
 }
 
 interface QueueProposalBase {
@@ -42,7 +44,39 @@ export interface NewTaskProposal extends QueueProposalBase {
   dependsOn: string[];
 }
 
-export type QueueProposal = ObsoleteProposal | DuplicateProposal | NewTaskProposal;
+/** One new ticket a split moves out of a task */
+export interface SplitPiece {
+  title: string;
+  /** Self-contained: the agent working it sees nothing else */
+  description: string;
+  reason: string;
+}
+
+/** A task moves part of its scope into new tickets (see shared/utils/task-split.ts) */
+export interface SplitProposal extends QueueProposalBase {
+  kind: 'split';
+  /** The task that splits (also `fromTaskId`) */
+  taskId: string;
+  /** What the task still does; becomes its description */
+  keepScope: string;
+  pieces: SplitPiece[];
+  /** Where the split came from: the plan step, or the end of implementing (deferred work) */
+  origin: 'plan' | 'implement';
+}
+
+export type QueueProposal = ObsoleteProposal | DuplicateProposal | NewTaskProposal | SplitProposal;
+
+/** Kept on a task that split (`metadata.splitInto`), so the card and detail can show it and undo can restore it */
+export interface TaskSplitRecord {
+  /** Proposal or undo id that applied the split */
+  proposalId: string;
+  /** The new tickets, in order */
+  taskIds: string[];
+  /** The task's description before the split (restored on undo) */
+  originalDescription: string;
+  /** ISO time */
+  at: string;
+}
 
 /** What applying a structural proposal changed, so it can be undone */
 export interface QueueUndoEntry {
@@ -56,6 +90,10 @@ export interface QueueUndoEntry {
   previousDependsOn: Record<string, string[]>;
   /** Card the proposal created */
   createdTaskId?: string;
+  /** Split: the cards it created (archived again on undo while none of them started) */
+  createdTaskIds?: string[];
+  /** Split: the task that split, with its description before the split */
+  splitTask?: { taskId: string; originalDescription: string; contextNoteIds: string[] };
 }
 
 /** `.workbench/queue-proposals.json` */

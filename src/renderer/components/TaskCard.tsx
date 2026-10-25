@@ -74,6 +74,7 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
     prevTask.metadata?.contextNotes?.length === nextTask.metadata?.contextNotes?.length &&
+    prevTask.metadata?.splitInto?.taskIds.length === nextTask.metadata?.splitInto?.taskIds.length &&
     prevTask.metadata?.agentOverride === nextTask.metadata?.agentOverride
   );
 
@@ -115,7 +116,8 @@ export const TaskCard = memo(function TaskCard({
     task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task, autonomous) : ''
   );
   // A string (or undefined), so the memoized card compares it cheaply
-  const lastNoteFrom = task.metadata?.contextNotes?.at(-1)?.fromTaskId;
+  const lastNoteFrom = task.metadata?.contextNotes?.filter((n) => n.kind !== 'split').at(-1)?.fromTaskId;
+  const splitCount = task.metadata?.splitInto?.taskIds.length ?? 0;
   const isRunning = task.status === 'in_progress';
   // Validation (AI Review) also runs Claude Code, so it can be left stuck too (e.g. by an app quit)
   const isActive = isRunning || task.status === 'ai_review';
@@ -321,6 +323,12 @@ export const TaskCard = memo(function TaskCard({
           <p className="mt-1.5 text-xs font-medium text-warning line-clamp-2 wrap-anywhere" title={autoMergeBlocked.message}>
             {t(`autonomous.blocked.${autoMergeBlocked.reason}`)}
           </p>
+        )}
+        {splitCount > 0 && (
+          <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1">{t('queueGrooming.splitCardLabel', { count: splitCount })}</p>
+        )}
+        {task.status === 'human_review' && task.reviewReason === 'split_proposed' && (
+          <p className="mt-1.5 text-xs font-medium text-warning line-clamp-2">{t('queueGrooming.splitPendingCardLabel')}</p>
         )}
         {lastNoteFrom && (
           <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1">

@@ -21,6 +21,7 @@ import path from 'path';
 import { randomUUID } from 'crypto';
 import type { Project, Task, TaskMetadata } from '../shared/types';
 import type {
+  SplitProposal,
   QueueProposal,
   QueueProposalsFile,
   QueueUndoEntry,
@@ -40,6 +41,8 @@ import { appLog } from './app-logger';
 import { readTaskChangelog, getTaskChangelogPath, foldTaskChangelog } from './task-changelog';
 import { mergedFromChangelog } from './task-briefing';
 import { projectStore } from './project-store';
+import { applyTaskSplit, undoTaskSplit } from './task-split';
+import type { NormalizedSplit } from '../shared/utils/task-split';
 
 export const QUEUE_PROPOSALS_FILE = 'queue-proposals.json';
 const MAX_UNDO_ENTRIES = 50;
@@ -73,6 +76,8 @@ export interface GroomingDeps {
   updateTask(projectId: string, taskId: string, updates: { description?: string; metadata?: Partial<TaskMetadata> }): Promise<void>;
   /** Create a card in Planning; resolves to its id */
   createTask(projectId: string, title: string, description: string, metadata: TaskMetadata): Promise<string | null>;
+  /** Move freshly created cards to the top of the Queue, in the given order */
+  queueTasks?(projectId: string, taskIds: string[]): Promise<void>;
   archive(projectId: string, taskIds: string[]): void;
   unarchive(projectId: string, taskIds: string[]): void;
   /** Tasks or proposals changed: refresh the board */
@@ -143,6 +148,18 @@ function defaultDeps(): GroomingDeps {
       );
       if (!result?.success) throw new Error(result?.error || 'Could not create the task');
       return result.data?.id ?? null;
+    },
+    async queueTasks(projectId, ids) {
+      const { invokeIpcHandler } = await import('./ipc-handlers/ipc-registry');
+      const { IPC_CHANNELS } = await import('../shared/constants');
+      // The newest unplaced card sits at the top of the Queue, so the first piece moves last
+      for (const id of [...ids].reverse()) {
+        const moved = await invokeIpcHandler<{ success: boolean; error?: string }>(IPC_CHANNELS.TASK_UPDATE_STATUS, id, 'queue', undefined, projectId);
+        if (!moved?.success) appLog.warn(`[QueueGrooming] Could not queue ${id}:`, moved?.error);
+      }
+      // The main-process queue starts the top task first
+      const { taskQueueOrder } = await import('./services/task-queue-order');
+      taskQueueOrder.set(projectId, [...ids, ...taskQueueOrder.get(projectId).filter((id) => !ids.includes(id))]);
     },
     archive: (projectId, ids) => {
       projectStore.archiveTasks(projectId, ids);
@@ -502,6 +519,8 @@ async function applyProposalNow(deps: GroomingDeps, projectId: string, proposal:
     return { ...base, archived: [], previousDependsOn: {}, ...(createdTaskId ? { createdTaskId } : {}) };
   }
 
+  if (proposal.kind === 'split') return applyTaskSplit(deps, projectId, proposal);
+
   // Obsolete and duplicate only touch tickets that still wait in Planning or the Queue
   const target = live.get(proposal.taskId);
   if (!target || !isGroomableStatus(target.status)) return null;
@@ -577,6 +596,12 @@ export function undoQueueChange(
     const entry = file.undo.find((u) => u.id === undoId);
     if (!entry) return { success: false, error: 'Nothing to undo' };
     try {
+      if (entry.splitTask) {
+        await undoTaskSplit(deps, projectId, entry);
+        await writeQueueProposals(project, { ...file, undo: file.undo.filter((u) => u.id !== undoId) });
+        deps.changed(projectId);
+        return { success: true };
+      }
       if (entry.archived.length > 0) deps.unarchive(projectId, entry.archived);
       for (const [taskId, previous] of Object.entries(entry.previousDependsOn)) {
         await deps.updateTask(projectId, taskId, { metadata: { dependsOnTaskIds: previous } });
@@ -589,4 +614,82 @@ export function undoQueueChange(
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   });
+}
+
+
+// =============================================================================
+// Task splits (a task moves part of its scope into new tickets)
+// =============================================================================
+
+export type SplitSubmission =
+  | { outcome: 'applied'; description: string }
+  | { outcome: 'proposed'; proposalId: string }
+  | { outcome: 'ignored'; reason: string };
+
+/**
+ * A task's split, from the plan step or the end of implementing. `auto` applies it at once and
+ * keeps an undo entry; `propose` stores it as a proposal (the Queue updates panel applies or
+ * dismisses it). Never throws.
+ */
+export function submitTaskSplit(
+  projectId: string,
+  taskId: string,
+  split: NormalizedSplit,
+  origin: SplitProposal['origin'],
+  mode: 'propose' | 'auto',
+  deps: GroomingDeps = defaultDeps()
+): Promise<SplitSubmission> {
+  return withStateLock(projectId, async (): Promise<SplitSubmission> => {
+    try {
+      const project = deps.getProject(projectId);
+      if (!project) return { outcome: 'ignored', reason: 'Project not found' };
+      const proposal: SplitProposal = {
+        id: randomUUID(),
+        kind: 'split',
+        fromTaskId: taskId,
+        taskId,
+        createdAt: new Date().toISOString(),
+        reason: split.reason,
+        keepScope: split.keepScope,
+        pieces: split.pieces,
+        origin,
+      };
+      const file = await readQueueProposals(project);
+      if (mode === 'propose') {
+        // Only one split proposal per task is waiting
+        const rest = file.proposals.filter((p) => !(p.kind === 'split' && p.taskId === taskId));
+        await writeQueueProposals(project, { ...file, proposals: [...rest, proposal] });
+        deps.changed(projectId);
+        appLog.info(`[TaskSplit] ${taskId} proposed a split into ${split.pieces.length} new ticket(s)`);
+        return { outcome: 'proposed', proposalId: proposal.id };
+      }
+      const undo = await applyProposalNow(deps, projectId, proposal);
+      if (!undo) return { outcome: 'ignored', reason: 'The ticket can no longer be split' };
+      await writeQueueProposals(project, { ...file, undo: [...file.undo, undo] });
+      deps.changed(projectId);
+      const description = deps.getTasks(projectId).find((t) => t.id === taskId)?.description ?? '';
+      return { outcome: 'applied', description };
+    } catch (error) {
+      appLog.warn(`[TaskSplit] Could not split ${taskId}:`, error);
+      return { outcome: 'ignored', reason: error instanceof Error ? error.message : String(error) };
+    }
+  });
+}
+
+/**
+ * What became of a split proposal a paused task waits for: still pending in the Queue updates
+ * panel, applied (the task carries `splitInto` for it), or dismissed (gone without being applied).
+ */
+export async function getSplitStatus(
+  projectId: string,
+  taskId: string,
+  proposalId: string,
+  deps: GroomingDeps = defaultDeps()
+): Promise<'pending' | 'applied' | 'dismissed'> {
+  const project = deps.getProject(projectId);
+  if (!project) return 'dismissed';
+  const task = deps.getTasks(projectId).find((t) => t.id === taskId);
+  if (task?.metadata?.splitInto?.proposalId === proposalId) return 'applied';
+  const file = await readQueueProposals(project);
+  return file.proposals.some((p) => p.id === proposalId) ? 'pending' : 'dismissed';
 }

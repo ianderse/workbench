@@ -77,6 +77,16 @@ import type { McpConnectorSettings } from '../../shared/types/settings';
 import type { ExecutionPhase } from '../../shared/constants/phase-protocol';
 import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
 import { DATA_DIR_NAMES } from '../../shared/constants';
+import {
+  buildPlanSchema,
+  deferredPrompt,
+  deferredToSplit,
+  normalizeSplit,
+  parseDeferredSection,
+  splitPlanPrompt,
+  type NormalizedSplit,
+} from '../../shared/utils/task-split';
+import type { SplitSubmission } from '../queue-grooming';
 import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
 import { appLog } from '../app-logger';
 import { getAgentBackendSettings } from '../agent-backend/settings';
@@ -165,6 +175,11 @@ export interface TaskRunConfig {
   backend: AgentBackendKind;
   /** Model/effort the user pinned on the task; they replace triage's choice */
   agentOverride?: AgentOverride;
+  /**
+   * The task may split itself into smaller tickets (propose: after approval, auto: at once).
+   * Unset when splitting is off, the ticket was made by a split or it split already.
+   */
+  splitMode?: 'propose' | 'auto';
 }
 
 interface TaskRunProgress {
@@ -193,9 +208,15 @@ export interface TaskRunCallbacks {
   onSubtasks?: (subtasks: TaskRunSubtask[]) => void;
   /** Files the session edits (relative to the worktree, forward slashes), for the task hooks */
   onFilesEdited?: (files: string[]) => void;
+  /** The task wants to split (plan step or deferred work): apply it or store it as a proposal */
+  onSplit?: (request: { split: NormalizedSplit; origin: 'plan' | 'implement'; mode: 'propose' | 'auto' }) => Promise<SplitSubmission>;
+  /** What became of the split proposal a paused task waits for */
+  getSplitStatus?: (proposalId: string) => Promise<'pending' | 'applied' | 'dismissed'>;
+  /** Drop a proposal nobody decided on (the user resumed the task) */
+  dismissSplit?: (proposalId: string) => Promise<void>;
 }
 
-type TaskRunStatus = 'completed' | 'failed' | 'rate_limited' | 'auth_failed' | 'stopped';
+type TaskRunStatus = 'completed' | 'failed' | 'rate_limited' | 'auth_failed' | 'stopped' | 'split_proposed';
 
 export interface TaskRunOutcome {
   status: TaskRunStatus;
@@ -207,15 +228,6 @@ export interface TaskRunOutcome {
 // =============================================================================
 // Prompts
 // =============================================================================
-
-const PLAN_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  properties: {
-    plan: { type: 'string', description: 'The implementation plan in Markdown' },
-  },
-  required: ['plan'],
-};
 
 const VALIDATION_SCHEMA = {
   type: 'object',
@@ -393,6 +405,8 @@ export class ClaudeTaskRun {
   private reviewSection: string | undefined;
   /** The AI review loop's current round (and the findings a fix round is sent to fix) */
   private loop: { round: number; max: number; feedback?: string } | undefined;
+  /** Splitting is off for the rest of this run (a proposal was dismissed or could not be applied) */
+  private splitDisabled = false;
 
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
     this.runFile = path.join(config.specDir, CLAUDE_RUN_FILE);
@@ -468,6 +482,8 @@ export class ClaudeTaskRun {
 
     // 2. Plan (only before implementation started)
     const implementStarted = this.info.phases.some((p) => p.name === 'implement');
+    // A split was proposed after the last plan: carry out what was decided
+    if (this.info.pendingSplit && !this.info.plan && !implementStarted) await this.resolvePendingSplit();
     if (triage.needsPlan && !this.info.plan && !implementStarted) {
       const planned = await this.runSessionPhase('plan');
       if (planned) return planned;
@@ -675,7 +691,7 @@ export class ClaudeTaskRun {
       sessionId,
       resume: !!resumeSessionId,
       input: this.buildInput(name, continuing, !!resumeSessionId),
-      jsonSchema: name === 'plan' ? PLAN_SCHEMA : name === 'validate' ? VALIDATION_SCHEMA : undefined,
+      jsonSchema: name === 'plan' ? buildPlanSchema(this.splitActive()) : name === 'validate' ? VALIDATION_SCHEMA : undefined,
       logPhase,
     });
 
@@ -708,8 +724,14 @@ export class ClaudeTaskRun {
 
     this.endPhase(phase, {}, result);
     if (name === 'plan') {
-      const structured = result.structured_output as { plan?: unknown } | undefined;
+      const structured = result.structured_output as { plan?: unknown; split?: unknown } | undefined;
       const plan = typeof structured?.plan === 'string' && structured.plan.trim() ? structured.plan : (result.result ?? '');
+      const split = this.splitActive() ? normalizeSplit(structured?.split, true) : null;
+      if (split) {
+        const handled = await this.handlePlanSplit(plan, split);
+        if (handled === 'replan') return this.runSessionPhase('plan');
+        if (handled) return handled;
+      }
       this.info.plan = plan;
       writeFileSafe(path.join(this.config.specDir, 'plan.md'), plan);
       this.log.add('planning', 'success', 'Plan ready', { detail: plan, collapsed: true });
@@ -724,11 +746,115 @@ export class ClaudeTaskRun {
       this.log.endPhase('validation', report.status !== 'failed', `Validation ${report.status}`);
     } else {
       this.info.summary = result.result?.trim() || this.info.summary;
+      if (name === 'implement' && this.splitActive()) await this.handleDeferred(result.result ?? '');
       this.log.endPhase('coding', true, name === 'revise' ? 'Changes applied' : 'Implementation finished');
       if (name === 'revise') this.info.validation = undefined;
     }
     this.saveInfo();
     return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Splitting the ticket into smaller ones
+  // ---------------------------------------------------------------------------
+
+  /** Whether the current step may offer a split (the project allows it and this run did not give it up) */
+  private splitActive(): boolean {
+    return !!this.config.splitMode && !!this.config.projectId && !this.splitDisabled && !this.info.pendingSplit;
+  }
+
+  /**
+   * The plan step asked to split. Auto applies it at once and goes on with the reduced scope;
+   * propose stores it, keeps the plan for the reduced scope aside and pauses the run (Human
+   * Review, split_proposed) until the user applies or dismisses it. Returns 'replan' when the split
+   * could not be made, so the plan is made again for the whole ticket.
+   */
+  private async handlePlanSplit(plan: string, split: NormalizedSplit): Promise<TaskRunOutcome | 'replan' | null> {
+    const mode = this.config.splitMode!;
+    const submission = await this.callbacks.onSplit?.({ split, origin: 'plan', mode });
+    if (!submission || submission.outcome === 'ignored') {
+      const reason = submission?.outcome === 'ignored' ? submission.reason : 'splitting is not available';
+      this.emitLog(`The plan asked to split the ticket, but it was not split (${reason}). Planning the whole ticket instead`);
+      this.log.add('planning', 'info', `Split not applied: ${reason}`);
+      appLog.warn(`[TaskSplit] ${this.config.taskId}: split not applied: ${reason}`);
+      this.splitDisabled = true;
+      return 'replan';
+    }
+    const titles = split.pieces.map((p) => p.title).join('; ');
+    if (submission.outcome === 'applied') {
+      this.config.description = submission.description.trim() || this.config.description;
+      // A ticket splits once
+      this.splitDisabled = true;
+      this.emitLog(`Split the ticket:${split.pieces.length} new ticket(s) (${titles})`);
+      this.log.add('planning', 'info', `Split the ticket into ${split.pieces.length + 1} tickets`, {
+        detail: `${split.reason}\n\nKept: ${split.keepScope}\n\nMoved: ${titles}`,
+        collapsed: true,
+      });
+      return null;
+    }
+    // Proposed: pause after planning
+    this.info.pendingSplit = { proposalId: submission.proposalId, plan };
+    this.saveInfo();
+    this.emitLog(`Proposed splitting the ticket into ${split.pieces.length + 1} tickets (${titles}). Waiting for Apply or Dismiss in Queue updates`);
+    this.log.add('planning', 'info', 'Proposed a split, waiting for a decision', {
+      detail: `${split.reason}\n\nKept: ${split.keepScope}\n\nMoved: ${titles}`,
+      collapsed: true,
+    });
+    this.log.endPhase('planning', true, 'Split proposed');
+    this.emitProgress('planning', 1, 'Waiting for the split decision');
+    this.callbacks.onTaskEvent?.('SPLIT_PROPOSED', {});
+    return { status: 'split_proposed' };
+  }
+
+  /** A resumed run after a proposed split: continue with the reduced scope, or plan the whole ticket again */
+  private async resolvePendingSplit(): Promise<void> {
+    const pending = this.info.pendingSplit!;
+    let status = (await this.callbacks.getSplitStatus?.(pending.proposalId)) ?? 'dismissed';
+    if (status === 'pending') {
+      // Resuming without deciding keeps the whole ticket
+      await this.callbacks.dismissSplit?.(pending.proposalId);
+      status = 'dismissed';
+    }
+    this.info.pendingSplit = undefined;
+    if (status === 'applied') {
+      this.info.plan = pending.plan;
+      writeFileSafe(path.join(this.config.specDir, 'plan.md'), pending.plan);
+      this.emitLog('The split was applied, continuing with the reduced scope');
+      this.log.add('planning', 'success', 'Split applied, continuing with the reduced scope', { detail: pending.plan, collapsed: true });
+    } else {
+      this.splitDisabled = true;
+      this.emitLog('The split was dismissed, planning the whole ticket');
+      this.log.add('planning', 'info', 'Split dismissed, planning the whole ticket');
+    }
+    appLog.info(`[TaskSplit] ${this.config.taskId}: split ${status}`);
+    this.saveInfo();
+  }
+
+  /** Work the agent deliberately left out ("## Deferred" in its final answer) becomes one new ticket */
+  private async handleDeferred(answer: string): Promise<void> {
+    const { items, rest } = parseDeferredSection(answer);
+    if (items.length === 0) return;
+    this.info.summary = rest.trim() || this.info.summary;
+    const split = deferredToSplit({ id: this.config.taskId, title: this.config.title }, items, rest);
+    if (!split) return;
+    const mode = this.config.splitMode!;
+    const submission = await this.callbacks.onSplit?.({ split, origin: 'implement', mode });
+    const list = items.map((item) => `- ${item}`).join('\n');
+    if (!submission || submission.outcome === 'ignored') {
+      const reason = submission?.outcome === 'ignored' ? submission.reason : 'splitting is not available';
+      this.emitLog(`Deferred work was not moved to a new ticket (${reason})`);
+      this.log.add('coding', 'info', `Deferred work was not moved to a new ticket: ${reason}`, { detail: list, collapsed: true });
+      appLog.warn(`[TaskSplit] ${this.config.taskId}: deferred work not split off: ${reason}`);
+      return;
+    }
+    if (submission.outcome === 'applied') {
+      this.config.description = submission.description.trim() || this.config.description;
+      this.emitLog('Moved the deferred work to a new ticket');
+      this.log.add('coding', 'info', 'Moved the deferred work to a new ticket', { detail: list, collapsed: true });
+    } else {
+      this.emitLog('Proposed moving the deferred work to a new ticket (see Queue updates)');
+      this.log.add('coding', 'info', 'Proposed moving the deferred work to a new ticket', { detail: list, collapsed: true });
+    }
   }
 
   private async finish(): Promise<TaskRunOutcome> {
@@ -843,7 +969,7 @@ export class ClaudeTaskRun {
         text = `${taskBlock(this.config)}${restartNotes(this.config, feedbackImages)}
 
 Explore the codebase as needed and produce an implementation plan for this task. Don't change any files yet.
-The plan should name the files to change, the approach and why, edge cases, and how to verify the result (${verificationHint(triage)}).`;
+The plan should name the files to change, the approach and why, edge cases, and how to verify the result (${verificationHint(triage)}).${this.splitActive() ? splitPlanPrompt(this.config.backend === 'omp') : ''}`;
         break;
       case 'implement':
         if (continuing && resume) {
@@ -901,6 +1027,7 @@ no notes came with the request, so review the change against the task with fresh
         break;
       }
     }
+    if (name === 'implement' && this.splitActive()) text += deferredPrompt();
     blocks.push({ type: 'text', text });
     blocks.push(...taskBlocks, ...feedbackBlocks);
     return blocks;
