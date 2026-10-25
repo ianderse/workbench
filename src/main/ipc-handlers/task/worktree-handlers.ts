@@ -28,6 +28,7 @@ import { persistPlanStatus, updateTaskMetadataFields } from './plan-file-utils';
 import { refreshGitIndex } from '../../utils/git-isolation';
 import { cleanupWorktree } from '../../utils/worktree-cleanup';
 import { taskStateManager } from '../../task-state-manager';
+import { taskQueue } from '../../services/task-queue';
 import { safeSendToRenderer } from '../utils';
 
 // Regex pattern for validating git branch names
@@ -1586,4 +1587,6 @@ async function markTaskDone(task: Task, project: Project, worktreePath: string):
     taskHooks.emit('state', { project, task, status: 'done' });
   }
   projectStore.invalidateTasksCache(project.id);
+  // A merged task may unblock queued tasks that depend on it
+  taskQueue.request(project.id);
 }

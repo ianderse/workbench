@@ -185,6 +185,7 @@
     "startFresh": "Start fresh",
     "creating": "Creating...",
     "createTask": "Create",
+    "breakIntoTasks": "Break into tasks",
     "gitOptions": {
       "title": "Git",
       "baseBranchLabel": "Base branch",
@@ -202,6 +203,29 @@
       "createFailed": "Failed to create task. Please try again.",
       "startFailed": "Failed to start task"
     }
+  },
+  "breakdown": {
+    "title": "Break into tasks",
+    "description": "Review the proposed tasks before they are created",
+    "working": "Reading the prompt and planning the tasks",
+    "workingHint": "This can take a few minutes for a long spec",
+    "cancel": "Cancel",
+    "failed": "Could not break the prompt into tasks: {{error}}",
+    "taskCheckbox": "Include {{title}}",
+    "titleLabel": "Task title",
+    "descriptionLabel": "Task description",
+    "showDescription": "Show description",
+    "hideDescription": "Hide description",
+    "after": "After {{titles}}",
+    "queueLabel": "Queue them to run in order",
+    "queueDescription": "Tasks that depend on others start after those are merged",
+    "createCount_one": "Create {{count}} task",
+    "createCount_other": "Create {{count}} tasks",
+    "creating": "Creating...",
+    "back": "Back",
+    "createFailed": "Created {{done}} of {{total}} tasks: {{error}}",
+    "noneSelected": "Select at least one task",
+    "waitsFor": "Waits for: {{titles}}"
   },
   "feedback": {
     "maxImagesError": "Maximum of {{count}} images allowed",

@@ -181,7 +181,9 @@ export interface TaskMetadata {
 
   // Technical details
   affectedFiles?: string[];  // Files likely to be modified
-  dependencies?: string[];  // Other features/tasks this depends on
+  dependencies?: string[];  // Other features/tasks this depends on (free text from ideation/roadmap)
+  /** Ids of tasks that must be done (merged) before this one is promoted from the Queue (set by "Break into tasks") */
+  dependsOnTaskIds?: string[];
   acceptanceCriteria?: string[];  // What defines "done"
 
   // Type-specific metadata (from different idea types)

@@ -15,6 +15,7 @@ import { registerTaskExecutionHandlers } from './execution-handlers';
 import { registerWorktreeHandlers } from './worktree-handlers';
 import { registerTaskLogsHandlers } from './logs-handlers';
 import { registerTaskArchiveHandlers } from './archive-handlers';
+import { registerTaskBreakdownHandlers } from './breakdown-handlers';
 
 /**
  * Register all task-related IPC handlers
@@ -37,6 +38,9 @@ export function registerTaskHandlers(
 
   // Register archive handlers (archive, unarchive)
   registerTaskArchiveHandlers();
+
+  // Register the "Break into tasks" handlers
+  registerTaskBreakdownHandlers();
 }
 
 // Export shared utilities for use by other modules if needed

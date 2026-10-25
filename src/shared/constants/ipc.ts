@@ -69,6 +69,8 @@ export const IPC_CHANNELS = {
   TASK_LIST_CHANGED: 'task:listChanged',  // Event: tasks were created, edited or moved outside the board, e.g. by the Claude chat (main -> renderer): (projectId)
   TASK_RATE_LIMIT_HOLD_CHANGE: 'task:rateLimitHoldChange',  // Rate-limit hold set/cleared (main -> renderer)
   TASK_EXECUTION_PROGRESS: 'task:executionProgress',
+  TASK_BREAKDOWN: 'task:breakdown',  // Break a big prompt into dependent tasks (renderer -> main, invoke): (projectId, requestId, description, attachmentNames)
+  TASK_BREAKDOWN_CANCEL: 'task:breakdownCancel',  // Cancel a running breakdown (renderer -> main): (requestId)
   TASK_QUEUE_ORDER_SET: 'task:queueOrderSet',  // Board's saved Queue column order (renderer -> main), used to start the top queued task first
   TASK_CLAUDE_RUN_UPDATE: 'task:claudeRunUpdate',  // Claude Code run state changed (main -> renderer): (taskId, ClaudeRunInfo, projectId)
 
