@@ -40,6 +40,7 @@ This fork ([ianderse/workbench](https://github.com/ianderse/workbench), branch `
 - Usage page (sidebar): per-project token usage from a new `.workbench/usage.jsonl` ledger. Total tokens split into input, output and cache, local versus cloud share with the cloud bill you didn't pay (local tokens priced as Sonnet 5.5 at list rates), by model with tokens per second, by job, top tasks, the last 30 days and a few fun facts. Every OMP and Claude Code run is recorded per model, and "Rebuild from history" imports what earlier tasks spent from their session files
 
 **Fixes**
+- Autonomous mode skipped the merge of a task that had just passed AI review, because the verdict reached disk after the merge check read it. The verdict is now written first, and tasks left unmerged by this are merged when the app starts (`aa2137d`)
 - Workbench's own commits never include `node_modules`, virtual environments or root build output, even without a `.gitignore` (`19b90a1`)
 
 ---
