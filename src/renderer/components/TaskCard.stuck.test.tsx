@@ -90,3 +90,21 @@ describe('a stuck task card', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'actions.resume' })).not.toBeInTheDocument(), { timeout: 5000 });
   }, 10_000);
 });
+
+describe('the Done button on a Human Review card', () => {
+  const reviewTask = (status: string) =>
+    ({ ...stuckTask(run([{ name: 'validate', startedAt: '2026-10-25T04:30:00Z', endedAt: '2026-10-25T04:40:00Z' }])), status, reviewReason: 'completed' } as unknown as Task);
+
+  it('moves the card to Done through the board', async () => {
+    const onStatusChange = vi.fn();
+    render(<TaskCard task={reviewTask('human_review')} onClick={() => undefined} onStatusChange={onStatusChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'actions.moveToDone' }));
+    expect(onStatusChange).toHaveBeenCalledWith('done');
+  });
+
+  it('only shows in Human Review', () => {
+    render(<TaskCard task={reviewTask('queue')} onClick={() => undefined} onStatusChange={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'actions.moveToDone' })).not.toBeInTheDocument();
+  });
+});
+

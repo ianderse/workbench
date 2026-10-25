@@ -15,6 +15,8 @@
     "stop": "Stop",
     "resume": "Resume",
     "moveToReview": "Move to review",
+    "done": "Done",
+    "moveToDone": "Move to Done",
     "recoverFailed": "Could not recover the task: {{error}}",
     "archive": "Archive",
     "delete": "Delete",

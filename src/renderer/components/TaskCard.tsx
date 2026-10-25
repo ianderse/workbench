@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical, ClipboardCheck } from 'lucide-react';
+import { AlertCircle, Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical, ClipboardCheck, Check } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import {
@@ -498,6 +498,22 @@ export const TaskCard = memo(function TaskCard({
                 aria-label={t('actions.stop')}
               >
                 <Square className="h-4 w-4" strokeWidth={1.75} />
+              </Button>
+            )}
+
+            {/* Human Review's usual next step, without opening the task or the Move to menu: the same
+                path as moving the card to Done (it asks about an unmerged worktree first) */}
+            {task.status === 'human_review' && onStatusChange && !isStuck && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs"
+                onClick={(e) => { e.stopPropagation(); void onStatusChange('done'); }}
+                title={t('actions.moveToDone')}
+                aria-label={t('actions.moveToDone')}
+              >
+                <Check className="h-3.5 w-3.5" strokeWidth={2} />
+                {t('actions.done')}
               </Button>
             )}
 

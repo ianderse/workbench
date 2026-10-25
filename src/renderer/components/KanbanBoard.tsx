@@ -29,7 +29,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { TaskCard } from './TaskCard';
 import { SortableTaskCard } from './SortableTaskCard';
 import { TASK_STATUS_COLUMNS, TASK_STATUS_LABELS } from '../../shared/constants';
-import { sortColumnTasks } from '../../shared/utils/task-column-order';
+import { sortColumnTasks, sortReviewColumn } from '../../shared/utils/task-column-order';
 import { cn } from '../lib/utils';
 import { persistTaskStatus, forceCompleteTask, archiveTasks, useTaskStore, isQueueAtCapacity } from '../stores/task-store';
 import { resolveMaxParallelTasks, getTaskColumn as getVisualColumn, canMoveTask } from '../../shared/constants/task';
@@ -494,7 +494,10 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
     // Sort tasks within each column: unplaced tasks first (newest first), then the saved order
     Object.keys(grouped).forEach((status) => {
       const statusKey = status as typeof TASK_STATUS_COLUMNS[number];
-      grouped[statusKey] = sortColumnTasks(grouped[statusKey], taskOrder?.[statusKey]);
+      // Human Review is a review queue: longest waiting on top
+      grouped[statusKey] = statusKey === 'human_review'
+        ? sortReviewColumn(grouped[statusKey])
+        : sortColumnTasks(grouped[statusKey], taskOrder?.[statusKey]);
     });
 
     return grouped;
