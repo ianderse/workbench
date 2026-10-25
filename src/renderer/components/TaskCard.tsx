@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { AlertCircle, Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical } from 'lucide-react';
+import { AlertCircle, Play, Square, Loader2, RotateCcw, Archive, GitPullRequest, MoreVertical, ClipboardCheck } from 'lucide-react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import {
@@ -18,14 +18,14 @@ import {
   JSON_ERROR_PREFIX,
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
-import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask, useTaskStore, unmetDependencyTitles } from '../stores/task-store';
+import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask, recoverStuckTask, useTaskStore, unmetDependencyTitles } from '../stores/task-store';
 import type { Task, TaskStatus } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useProjectStore } from '../stores/project-store';
 import { activeAutoMerge } from '../../shared/utils/autonomous';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
-import { canResumeTask } from '../../shared/utils/task-resume';
+import { canResumeTask, isRunFinished } from '../../shared/utils/task-resume';
 import { StartOverDialog } from './StartOverDialog';
 
 // Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
@@ -127,6 +127,21 @@ export const TaskCard = memo(function TaskCard({
   // Stopped or failed with an unfinished step: Resume continues the same worktree and session
   const validationOn = useSettingsStore((state) => state.settings.claudeCodeTasks?.validation) !== false;
   const canResume = !isStuck && !isIncomplete && canResumeTask(task, validationOn);
+  // A stuck task (the app quit mid-run) continues its unfinished run; a finished one just moves on
+  const stuckRunFinished = isStuck && isRunFinished(task.claudeRun, validationOn);
+  const [isRecovering, setIsRecovering] = useState(false);
+  const handleRecoverStuck = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsRecovering(true);
+    const result = await recoverStuckTask(task.id, !stuckRunFinished, task.projectId);
+    setIsRecovering(false);
+    if (result.success) {
+      setIsStuck(false);
+      setActionError(null);
+    } else {
+      setActionError(t('actions.recoverFailed', { error: result.error ?? '' }));
+    }
+  };
 
   // Memoize expensive computations to avoid running on every render
   // Truncate description for card display - full description shown in modal
@@ -365,19 +380,36 @@ export const TaskCard = memo(function TaskCard({
           <div className="flex items-center gap-1.5">
             {/* Action buttons: icon buttons like the settings dialog's (label in the tooltip) */}
             {isStuck ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                className={ICON_BUTTON_CLASS}
-                onClick={(e) => { e.stopPropagation(); setConfirmStartOver(true); }}
-                disabled={isRetrying}
-                title={t('actions.startOver')}
-                aria-label={t('actions.startOver')}
-              >
-                {isRetrying
-                  ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
-                  : <RotateCcw className="h-4 w-4" strokeWidth={1.75} />}
-              </Button>
+              <div className="flex gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={ICON_BUTTON_CLASS}
+                  onClick={handleRecoverStuck}
+                  disabled={isRecovering || isRetrying}
+                  title={t(stuckRunFinished ? 'actions.moveToReview' : 'actions.resume')}
+                  aria-label={t(stuckRunFinished ? 'actions.moveToReview' : 'actions.resume')}
+                >
+                  {isRecovering
+                    ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+                    : stuckRunFinished
+                      ? <ClipboardCheck className="h-4 w-4" strokeWidth={1.75} />
+                      : <Play className="h-4 w-4" strokeWidth={1.75} />}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={ICON_BUTTON_CLASS}
+                  onClick={(e) => { e.stopPropagation(); setConfirmStartOver(true); }}
+                  disabled={isRetrying || isRecovering}
+                  title={t('actions.startOver')}
+                  aria-label={t('actions.startOver')}
+                >
+                  {isRetrying
+                    ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={1.75} />
+                    : <RotateCcw className="h-4 w-4" strokeWidth={1.75} />}
+                </Button>
+              </div>
             ) : canResume ? (
               <div className="flex gap-1">
                 <Button

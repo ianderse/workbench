@@ -26,11 +26,12 @@ import {
   GitPullRequestCreate,
   GitMerge,
   Play,
-  RotateCcw
+  RotateCcw,
+  ClipboardCheck
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
-import { canResumeTask } from '../../../shared/utils/task-resume';
+import { canResumeTask, isRunFinished } from '../../../shared/utils/task-resume';
 import { StartOverDialog } from '../StartOverDialog';
 import { pinnedModelLabel } from '../../../shared/utils/agent-override-labels';
 import {
@@ -42,7 +43,7 @@ import {
   DIALOG_SURFACE_CLASS,
   DIALOG_TITLE_CLASS
 } from '../ui/dialog-styles';
-import { stopTask, submitReview, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, taskWasStopped, retryTask } from '../../stores/task-store';
+import { stopTask, submitReview, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, taskWasStopped, retryTask, recoverStuckTask } from '../../stores/task-store';
 import { useProjectStore } from '../../stores/project-store';
 import { TASK_STATUS_LABELS, getTaskColumn, type TaskStatusColumn } from '../../../shared/constants';
 import { TaskEditDialog } from '../TaskEditDialog';
@@ -140,6 +141,23 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
       // A queued task moves to the Queue column, which the dialog's status label shows
       const result = await startTaskOrQueue(task.id);
       if (!result.success) setActionError(result.error || t('tasks:wizard.errors.startFailed'));
+    }
+  };
+
+  // A stuck task (the app quit mid-run): an unfinished run continues in its worktree and session,
+  // a finished one just moves to where its run left it
+  const [isRecovering, setIsRecovering] = useState(false);
+  const stuckRunFinished = state.isStuck && isRunFinished(task.claudeRun, validationOn);
+  const handleRecoverStuck = async () => {
+    setIsRecovering(true);
+    setActionError(null);
+    const result = await recoverStuckTask(task.id, !stuckRunFinished, task.projectId);
+    setIsRecovering(false);
+    if (result.success) {
+      state.setIsStuck(false);
+      state.setHasCheckedRunning(false);
+    } else {
+      setActionError(t('tasks:actions.recoverFailed', { error: result.error ?? '' }));
     }
   };
 
@@ -560,6 +578,19 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                 <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => void handleStartStop()}>
                   <Play className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
                   {t('tasks:actions.resume')}
+                </Button>
+              )}
+              {/* Stuck (marked running, but the app quit mid-run): continue, or move a finished run on */}
+              {state.isStuck && (
+                <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRecovering || isRetrying} onClick={() => void handleRecoverStuck()}>
+                  {isRecovering ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : stuckRunFinished ? (
+                    <ClipboardCheck className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                  ) : (
+                    <Play className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
+                  )}
+                  {t(stuckRunFinished ? 'tasks:actions.moveToReview' : 'tasks:actions.resume')}
                 </Button>
               )}
               {/* Failed, stopped or stuck (marked running without a run): start over from a clean

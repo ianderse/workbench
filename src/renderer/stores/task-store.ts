@@ -941,6 +941,24 @@ export async function startTaskOrQueue(taskId: string, projectId?: string): Prom
 }
 
 /**
+ * A stuck task (marked running, but its run ended, e.g. the app quit mid-run): with `resume`, its
+ * unfinished run continues in the same worktree and session; without, the task moves to where its
+ * run left it (Human Review once implementation ran). Nothing is discarded either way.
+ */
+export async function recoverStuckTask(
+  taskId: string,
+  resume: boolean,
+  projectId?: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const result = await window.electronAPI.recoverStuckTask(taskId, { autoRestart: resume }, projectId ?? boardProjectId(taskId));
+    return result.success ? { success: true } : { success: false, error: result.error };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
  * Retry a task from a clean slate: the main process discards its worktree changes, resets
  * its spec files and starts it again (or queues it when the parallel limit is reached).
  * Clears the previous run's state (run steps, subtasks, logs) from the store.
