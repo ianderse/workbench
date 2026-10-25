@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchReadiness,
+  deriveSpecReviewNext,
+  specReviewNextKey,
   extractSpecPaths,
   isTicketFinished,
   normalizeSpecReview,
@@ -113,6 +115,34 @@ describe('planReviewOutcome', () => {
     expect(planReviewOutcome(withGaps, 0, 2)).toEqual({ kind: 'create_gaps', status: 'building', nextRound: 1 });
     expect(planReviewOutcome(withGaps, 1, 2)).toEqual({ kind: 'create_gaps', status: 'building', nextRound: 2 });
     expect(planReviewOutcome(withGaps, 2, 2)).toEqual({ kind: 'gaps_open', status: 'gaps_open' });
+  });
+});
+
+describe('deriveSpecReviewNext', () => {
+  const ref = { batchId: 'b1', round: 0 };
+  const ticket = (id: string, status: Task['status'], batchId: string, round: number) =>
+    task(id, status, undefined, { specBatch: { id: batchId, source: [], round } });
+  const tasks = [
+    ticket('037-b', 'queue', 'b1', 1),
+    ticket('036-a', 'in_progress', 'b1', 1),
+    ticket('038-done', 'done', 'b1', 1),
+    ticket('040-other', 'queue', 'b2', 1),
+    ticket('041-later', 'queue', 'b1', 2),
+  ];
+
+  it('lists the waiting next-round tickets of the batch in order', () => {
+    const next = deriveSpecReviewNext(tasks, ref, 2);
+    expect(next).toEqual({ kind: 'tickets', taskIds: ['036-a', '037-b'] });
+    expect(specReviewNextKey(next)).toBe('tickets:036-a,037-b');
+  });
+  it('says complete without gaps and gaps_open when no tickets were created', () => {
+    expect(deriveSpecReviewNext(tasks, ref, 0)).toEqual({ kind: 'complete' });
+    expect(deriveSpecReviewNext([], ref, 2)).toEqual({ kind: 'gaps_open' });
+  });
+  it('says nothing when the report is unknown or every ticket is already in review', () => {
+    expect(deriveSpecReviewNext([], ref, undefined)).toBeNull();
+    expect(deriveSpecReviewNext([ticket('036-a', 'human_review', 'b1', 1)], ref, 1)).toBeNull();
+    expect(specReviewNextKey(null)).toBe('');
   });
 });
 

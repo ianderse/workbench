@@ -1,6 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { useTaskStore } from '../../../stores/task-store';
 import type { Task } from '../../../../shared/types';
+import { deriveSpecReviewNext, specReviewNextKey } from '../../../../shared/utils/spec-review';
+import { specReviewNextText } from '../../../lib/spec-review-next';
 
 interface SpecReviewPanelProps {
   task: Task;
@@ -23,6 +25,9 @@ export function SpecReviewPanel({ task }: SpecReviewPanelProps) {
   const created = useTaskStore((state) =>
     ref ? state.tasks.filter((x) => x.metadata?.specBatch?.id === ref.batchId && x.metadata.specBatch.round === ref.round + 1).length : 0
   );
+  const nextKey = useTaskStore((state) =>
+    ref ? specReviewNextKey(deriveSpecReviewNext(state.tasks, ref, report?.gaps.length)) : ''
+  );
   if (!report || !ref) return null;
 
   const gaps = report.gaps.length;
@@ -36,6 +41,7 @@ export function SpecReviewPanel({ task }: SpecReviewPanelProps) {
     <section role="region" aria-label={t('specReview.title')} className="rounded-lg border border-border bg-card/60 p-4">
       <h3 className="text-sm font-medium text-foreground">{t('specReview.title')}</h3>
       <p className="mt-2 text-base font-medium leading-snug text-foreground wrap-anywhere">{headline}</p>
+      {nextKey && <p className="mt-1 text-sm font-medium text-(--nav-label-color)">{specReviewNextText(nextKey, t)}</p>}
       {report.summary && <p className="mt-1 text-sm text-foreground wrap-anywhere">{report.summary}</p>}
 
       {report.sections.length > 0 && (

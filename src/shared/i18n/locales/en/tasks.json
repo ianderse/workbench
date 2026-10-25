@@ -316,6 +316,8 @@
     "cardLabel": "Spec review",
     "cardRound": "Spec review, review {{round}} of {{max}}",
     "complete": "Spec complete",
+    "nextReview": "Next review after {{tickets}}",
+    "lastReview": "Last review: open gaps were left for you",
     "gapsCreated": "{{gaps}} gaps found, {{created}} tickets created",
     "gapsOpen_one": "{{count}} gap still open",
     "gapsOpen_other": "{{count}} gaps still open",

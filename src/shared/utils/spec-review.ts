@@ -272,3 +272,36 @@ How to review:
 
 This is review ${round + 1} of at most ${batch.maxReviewRounds + 1}${round >= batch.maxReviewRounds ? '; gaps found now stay open for you to decide' : '; gaps found now become new tickets'}.`;
 }
+
+/** What happens after a Spec review: tickets to wait for, a closed batch with open gaps, or done */
+export type SpecReviewNext =
+  | { kind: 'tickets'; taskIds: string[] }
+  | { kind: 'gaps_open' }
+  | { kind: 'complete' };
+
+/**
+ * The next step of a finished Spec review, derived from the tasks the renderer already has: the
+ * batch's tickets of the next round (`round + 1`) that are not yet in Human Review or Done (the next
+ * review is created once they are). Returns null when nothing is known yet (no report, no tickets).
+ */
+export function deriveSpecReviewNext(
+  tasks: Array<Pick<Task, 'id' | 'status' | 'metadata'>>,
+  ref: { batchId: string; round: number },
+  gapCount: number | undefined
+): SpecReviewNext | null {
+  if (gapCount === 0) return { kind: 'complete' };
+  const next = tasks
+    .filter((x) => x.metadata?.specBatch?.id === ref.batchId && x.metadata.specBatch.round === ref.round + 1)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  if (next.length > 0) {
+    const waiting = next.filter((x) => x.status !== 'human_review' && x.status !== 'done');
+    return waiting.length > 0 ? { kind: 'tickets', taskIds: waiting.map((x) => x.id) } : null;
+  }
+  return gapCount !== undefined ? { kind: 'gaps_open' } : null;
+}
+
+/** A string form of the next step, so a Zustand selector returns a stable primitive ('' for none) */
+export function specReviewNextKey(next: SpecReviewNext | null): string {
+  if (!next) return '';
+  return next.kind === 'tickets' ? `tickets:${next.taskIds.join(',')}` : next.kind;
+}

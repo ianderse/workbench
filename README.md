@@ -16,6 +16,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 
 ### 2026-10-25
 
+**Spec review**
+- A finished Spec review card and its panel now show what comes next: "Next review after #036, #037" while the follow-up tickets it created are still being built, "Last review: open gaps were left for you" when the round limit was reached, and "Spec complete" when nothing was missing
+
 **Queue**
 - Break into tasks no longer loses work: the prompt is saved when a run starts and the proposed tickets are saved as soon as they are ready (Queue updates panel), so closing the dialog or restarting the app keeps them; a run interrupted by a restart shows as failed with Retry, which reopens the dialog with the prompt. Tickets are removed from the panel when you create them or discard them in the dialog (edits made in the dialog are kept only with Save for later)
 - Project priority (Settings > Project > Tasks: High, Normal, Low) now uses free slots: the parallel task limit (Settings > Agents, "Tasks at once across all projects") is the TOTAL of running tasks (in progress plus AI review) across all projects, because they share one model server. A queued task starts whenever a slot is free, unless a higher-priority project has a startable queued task, which gets the free slot first; a higher project that only has tasks running or in review no longer blocks anything, and running tasks are never paused. A project's own limit still caps it additionally. Cards say why they wait ("Waiting for a free slot (8 of 8 in use)", "Waiting for <project> to start its queued tasks first", or the project's own limit), and the In Progress header shows this project's running count over the total with a tooltip about the other projects

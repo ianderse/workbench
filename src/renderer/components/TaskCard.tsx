@@ -25,6 +25,8 @@ import { useSettingsStore } from '../stores/settings-store';
 import { useProjectStore } from '../stores/project-store';
 import { activeAutoMerge } from '../../shared/utils/autonomous';
 import { taskNumber } from '../../shared/utils/queue-grooming';
+import { deriveSpecReviewNext, specReviewNextKey } from '../../shared/utils/spec-review';
+import { specReviewNextText } from '../lib/spec-review-next';
 import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
 import { isUiTask } from '../../shared/utils/ui-work';
 import { canResumeTask, isRunFinished, reviewInterruption } from '../../shared/utils/task-resume';
@@ -131,6 +133,12 @@ export const TaskCard = memo(function TaskCard({
   const waitsFor = useTaskStore((s) =>
     task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task, autonomous) : ''
   );
+  // Next step of a finished Spec review, as a string (see specReviewNextKey)
+  const specNext = useTaskStore((s) => {
+    const ref = task.metadata?.specReview;
+    if (!ref || (task.status !== 'human_review' && task.status !== 'done')) return '';
+    return specReviewNextKey(deriveSpecReviewNext(s.tasks, ref, task.claudeRun?.specReview?.gaps.length));
+  });
   // Why this queued task waits, one primitive per selector so each returns a stable value
   const heldKind = useQueueHoldStore((s) => (task.status === 'queue' ? (s.holds[task.projectId ?? '']?.kind ?? '') : ''));
   const heldProject = useQueueHoldStore((s) => {
@@ -383,6 +391,9 @@ export const TaskCard = memo(function TaskCard({
               ? t('specReview.cardRound', { round: task.metadata.specReview.round + 1, max: task.metadata.specReview.maxRounds + 1 })
               : t('specReview.cardLabel')}
           </p>
+        )}
+        {specNext && (
+          <p className="mt-0.5 text-xs text-(--nav-label-color) wrap-anywhere">{specReviewNextText(specNext, t)}</p>
         )}
         {failedReviewRounds > 0 && (
           <p className="mt-1.5 text-xs font-medium text-destructive">
