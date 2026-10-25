@@ -342,6 +342,10 @@
     }
   },
   "queueGrooming": {
+    "breakdownReady_one": "Ticket proposal ready ({{count}} ticket)",
+    "breakdownReady_other": "Ticket proposal ready ({{count}} tickets)",
+    "breakdownFailed": "Break into tasks failed: {{error}}",
+    "review": "Review",
     "panelTitle": "Queue updates ({{count}})",
     "panelToggle": "Show or hide queue updates",
     "intro": "Proposed after #{{number}} merged",
@@ -402,6 +406,16 @@
       "sharing_one": "Sharing the model server with {{count}} running task, this may be slower",
       "sharing_other": "Sharing the model server with {{count}} running tasks, this may be slower"
     },
+    "stopTitle": "Stop breaking this down?",
+    "stopDescription": "The work so far is lost",
+    "stopConfirm": "Stop",
+    "keepWaiting": "Keep waiting",
+    "background": "Keep working in the background",
+    "leaveTitle": "Close without creating these tickets?",
+    "leaveDescription": "The proposed tickets are lost unless you save them for later",
+    "saveForLater": "Save for later",
+    "discard": "Discard",
+    "keepReviewing": "Keep reviewing",
     "existingDependencies": "Wait for existing tickets",
     "existingDependenciesHint": "Pick open tickets this task needs merged first",
     "waitForTicketsNone": "Wait for tickets",

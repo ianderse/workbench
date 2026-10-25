@@ -40,6 +40,8 @@ interface TaskModalLayoutProps {
   footer: ReactNode;
   /** Whether the modal is in a loading/disabled state */
   disabled?: boolean;
+  /** A click outside or Escape does not close the modal (work in progress); the X and the buttons still ask to */
+  lockOutside?: boolean;
 }
 
 export function TaskModalLayout({
@@ -49,7 +51,8 @@ export function TaskModalLayout({
   description,
   children,
   footer,
-  disabled = false
+  disabled = false,
+  lockOutside = false
 }: TaskModalLayoutProps) {
   const { t } = useTranslation('common');
 
@@ -67,6 +70,9 @@ export function TaskModalLayout({
 
         {/* Full-height modal content - matches TaskDetailModal exactly */}
         <DialogPrimitive.Content
+          onPointerDownOutside={lockOutside ? (event) => event.preventDefault() : undefined}
+          onInteractOutside={lockOutside ? (event) => event.preventDefault() : undefined}
+          onEscapeKeyDown={lockOutside ? (event) => event.preventDefault() : undefined}
           className={cn(
             'fixed left-1/2 top-1/2 z-50',
             '-translate-x-1/2 -translate-y-1/2',

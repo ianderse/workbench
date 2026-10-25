@@ -124,6 +124,8 @@ export const taskMock = {
     },
   }),
   cancelBreakDownTask: () => {},
+  keepBreakDownInBackground: () => {},
+  saveBreakdownProposal: async () => ({ success: true }),
   registerSpecBatch: async () => ({ success: true }),
   onBreakDownProgress: () => () => {},
   onTaskExecutionProgress: () => () => {},

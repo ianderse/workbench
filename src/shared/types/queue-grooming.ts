@@ -1,4 +1,5 @@
 /** Queue grooming: what a merged task means for the tickets that were written before it landed */
+import type { TaskBreakdown } from './task-breakdown';
 
 /** A short context note added to a ticket after another task merged (applied automatically, can be undone) */
 export interface TaskContextNote {
@@ -64,7 +65,35 @@ export interface SplitProposal extends QueueProposalBase {
   origin: 'plan' | 'implement';
 }
 
-export type QueueProposal = ObsoleteProposal | DuplicateProposal | NewTaskProposal | SplitProposal;
+/** Changes to existing or new tickets that a merge proposes (applied with Apply, undoable) */
+export type StructuralProposal = ObsoleteProposal | DuplicateProposal | NewTaskProposal | SplitProposal;
+
+/** A Break into tasks run that finished in the background: the tickets are ready to review */
+export interface BreakdownProposal {
+  id: string;
+  kind: 'breakdown';
+  /** ISO time */
+  createdAt: string;
+  /** The prompt it was made from */
+  prompt: string;
+  attachmentNames: string[];
+  breakdown: TaskBreakdown;
+}
+
+/** A Break into tasks run that failed in the background */
+export interface BreakdownFailedProposal {
+  id: string;
+  kind: 'breakdownFailed';
+  createdAt: string;
+  prompt: string;
+  error: string;
+}
+
+export type QueueProposal = StructuralProposal | BreakdownProposal | BreakdownFailedProposal;
+
+export function isBreakdownProposal(p: QueueProposal): p is BreakdownProposal | BreakdownFailedProposal {
+  return p.kind === 'breakdown' || p.kind === 'breakdownFailed';
+}
 
 /** Kept on a task that split (`metadata.splitInto`), so the card and detail can show it and undo can restore it */
 export interface TaskSplitRecord {
@@ -81,7 +110,7 @@ export interface TaskSplitRecord {
 /** What applying a structural proposal changed, so it can be undone */
 export interface QueueUndoEntry {
   id: string;
-  proposal: QueueProposal;
+  proposal: StructuralProposal;
   /** ISO time */
   appliedAt: string;
   /** Tasks the proposal archived */

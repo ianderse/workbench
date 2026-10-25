@@ -5,7 +5,8 @@ import { Button } from './ui/button';
 import { cn } from '../lib/utils';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import type { Task } from '../../shared/types';
-import type { QueueProposal, QueueUndoEntry } from '../../shared/types/queue-grooming';
+import { isBreakdownProposal, type QueueProposal, type QueueUndoEntry, type StructuralProposal } from '../../shared/types/queue-grooming';
+import { useBreakdownReviewStore } from '../stores/breakdown-review-store';
 
 interface QueueUpdatesPanelProps {
   projectId: string;
@@ -76,7 +77,7 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
 
   if (proposals.length === 0 && undoEntries.length === 0) return null;
 
-  const describeApplied = (proposal: QueueProposal): string => {
+  const describeApplied = (proposal: StructuralProposal): string => {
     switch (proposal.kind) {
       case 'obsolete':
         return t('autonomous.recentChanges.obsolete', { title: titleOf(proposal.taskId) });
@@ -89,7 +90,7 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
     }
   };
 
-  const describe = (proposal: QueueProposal): string => {
+  const describe = (proposal: StructuralProposal): string => {
     switch (proposal.kind) {
       case 'obsolete':
         return t('queueGrooming.obsolete', { title: titleOf(proposal.taskId) });
@@ -121,7 +122,40 @@ export function QueueUpdatesPanel({ projectId, tasks }: QueueUpdatesPanelProps) 
       </button>
       {expanded && (
         <ul className="divide-y divide-border border-t border-border">
-          {proposals.map((proposal) => (
+          {proposals.map((proposal) => isBreakdownProposal(proposal) ? (
+            <li key={proposal.id} className="flex items-start gap-3 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-foreground wrap-anywhere">
+                  {proposal.kind === 'breakdown'
+                    ? t('queueGrooming.breakdownReady', { count: proposal.breakdown.tasks.length })
+                    : t('queueGrooming.breakdownFailed', { error: proposal.error })}
+                </p>
+                <p className="mt-0.5 line-clamp-2 text-xs text-(--nav-label-color) wrap-anywhere">{proposal.prompt}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                {proposal.kind === 'breakdown' && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={busyId === proposal.id}
+                    onClick={() =>
+                      useBreakdownReviewStore.getState().request({
+                        projectId,
+                        proposalId: proposal.id,
+                        prompt: proposal.prompt,
+                        breakdown: proposal.breakdown,
+                      })
+                    }
+                  >
+                    {t('queueGrooming.review')}
+                  </Button>
+                )}
+                <Button size="sm" variant="ghost" disabled={busyId === proposal.id} onClick={() => void run(proposal, 'dismiss')}>
+                  {t('queueGrooming.dismiss')}
+                </Button>
+              </div>
+            </li>
+          ) : (
             <li key={proposal.id} className="flex items-start gap-3 px-3 py-2">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-foreground wrap-anywhere">{describe(proposal)}</p>

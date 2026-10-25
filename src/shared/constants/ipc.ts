@@ -89,6 +89,8 @@ export const IPC_CHANNELS = {
   TASK_BREAKDOWN: 'task:breakdown',  // Break a big prompt into dependent tasks (renderer -> main, invoke): (projectId, requestId, description, attachmentNames)
   TASK_BREAKDOWN_PROGRESS: 'task:breakdownProgress',  // Live progress of a running breakdown (main -> renderer): (requestId, RunProgress)
   SPEC_BATCH_REGISTER: 'specReview:registerBatch',  // Record the tickets Break into tasks created as a spec batch (renderer -> main, invoke): (projectId, { id, prompt, sources, taskIds })
+  TASK_BREAKDOWN_BACKGROUND: 'task:breakdownBackground',  // Let a running breakdown finish after its dialog closed; the result becomes a proposal (renderer -> main): (requestId)
+  TASK_BREAKDOWN_SAVE: 'task:breakdownSave',  // Keep a breakdown under review as a proposal (renderer -> main, invoke): (projectId, prompt, attachmentNames, breakdown)
   TASK_BREAKDOWN_CANCEL: 'task:breakdownCancel',  // Cancel a running breakdown (renderer -> main): (requestId)
   TASK_QUEUE_ORDER_SET: 'task:queueOrderSet',  // Board's saved Queue column order (renderer -> main), used to start the top queued task first
   TASK_CLAUDE_RUN_UPDATE: 'task:claudeRunUpdate',  // Claude Code run state changed (main -> renderer): (taskId, ClaudeRunInfo, projectId)

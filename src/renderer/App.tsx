@@ -19,6 +19,7 @@ import { useMemoryGraphStore } from './stores/memory-graph-store';
 import { KanbanBoard } from './components/KanbanBoard';
 import { TaskDetailModal } from './components/task-detail/TaskDetailModal';
 import { TaskCreationWizard } from './components/TaskCreationWizard';
+import { useBreakdownReviewStore } from './stores/breakdown-review-store';
 import { AppSettingsDialog, type AppSection } from './components/settings/AppSettings';
 import type { ProjectSettingsSection } from './components/settings/ProjectSettingsContent';
 import { TerminalGrid } from './components/TerminalGrid';
@@ -82,6 +83,12 @@ export function App() {
   // UI State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
+  // A Break into tasks proposal chosen for review in the Queue updates panel opens the task dialog on it
+  const pendingBreakdown = useBreakdownReviewStore((state) => state.pending);
+  const clearPendingBreakdown = useBreakdownReviewStore((state) => state.clear);
+  useEffect(() => {
+    if (pendingBreakdown) setIsNewTaskDialogOpen(true);
+  }, [pendingBreakdown]);
   const [isSettingsDialogOpen, setIsSettingsDialogOpen] = useState(false);
   const [settingsInitialSection, setSettingsInitialSection] = useState<AppSection | undefined>(undefined);
   const [settingsFocusId, setSettingsFocusId] = useState<string | undefined>(undefined);
@@ -776,6 +783,8 @@ export function App() {
             projectId={activeProjectId || selectedProjectId!}
             open={isNewTaskDialogOpen}
             onOpenChange={setIsNewTaskDialogOpen}
+            initialBreakdown={pendingBreakdown}
+            onBreakdownConsumed={clearPendingBreakdown}
           />
         )}
 

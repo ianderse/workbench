@@ -12,18 +12,30 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Loader2, RotateCcw } from 'lucide-react';
-import { Button } from './ui/button';
+import { Button, buttonVariants } from './ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from './ui/alert-dialog';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { PROJECT_DEFAULT_BRANCH, TaskGitOptionsSection, useTaskGitOptions } from './task-form/TaskGitOptions';
-import { createTask, queueTasksInOrder, saveDraft, loadDraft, clearDraft, isDraftEmpty, type TaskCreationDraft } from '../stores/task-store';
+import { createTask, queueTasksInOrder, saveDraft, loadDraft, clearDraft, isDraftEmpty, useTaskStore, type TaskCreationDraft } from '../stores/task-store';
+import type { PendingBreakdownReview } from '../stores/breakdown-review-store';
+import { listOpenTickets } from '../../shared/utils/open-tickets';
 import type { TaskMetadata, ImageAttachment, AgentOverride } from '../../shared/types';
 import { normalizeAgentOverride } from '../../shared/utils/agent-override';
 import { useSettingsStore } from '../stores/settings-store';
 import { TaskBreakdownReview, effectiveDependencies, effectiveExistingDependencies, type BreakdownItem } from './task-form/TaskBreakdownReview';
 import type { RunProgress } from '../../shared/utils/run-progress';
 import { BreakdownWorking } from './task-form/BreakdownWorking';
-import type { OpenTicketRef } from '../../shared/types/task-breakdown';
+import type { OpenTicketRef, TaskBreakdown } from '../../shared/types/task-breakdown';
 import { sortByDependencies } from '../../shared/utils/task-breakdown-order';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 
@@ -31,13 +43,21 @@ interface TaskCreationWizardProps {
   projectId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** A stored Break into tasks proposal to review: the dialog opens on its review step */
+  initialBreakdown?: PendingBreakdownReview | null;
+  /** Called once the dialog took `initialBreakdown` */
+  onBreakdownConsumed?: () => void;
 }
 
+/** A breakdown running longer than this asks before it is stopped */
+const LONG_BREAKDOWN_MS = 30_000;
 
 export function TaskCreationWizard({
   projectId,
   open,
-  onOpenChange
+  onOpenChange,
+  initialBreakdown,
+  onBreakdownConsumed
 }: TaskCreationWizardProps) {
   const { t } = useTranslation(['tasks', 'common']);
   const { settings } = useSettingsStore();
@@ -80,6 +100,11 @@ export function TaskCreationWizard({
   const breakdownRequestId = useRef<string | null>(null);
   // The spec batch of the breakdown under review (Spec review loop)
   const specBatch = useRef<{ id: string; sources: string[]; prompt: string } | null>(null);
+  const breakdownStartedAt = useRef(0);
+  // The stored proposal being reviewed (dismissed once its tickets are created or discarded)
+  const reviewProposalId = useRef<string | null>(null);
+  // Asking whether to stop a running breakdown, or to leave the review step
+  const [leave, setLeave] = useState<{ kind: 'working' | 'review'; close: boolean } | null>(null);
   // Breakdown keys already created (key -> task id), so a retry after a failure continues
   const createdIds = useRef<Map<string, string>>(new Map());
 
@@ -181,6 +206,8 @@ export function TaskCreationWizard({
     }
     const requestId = `breakdown-${Date.now()}`;
     breakdownRequestId.current = requestId;
+    breakdownStartedAt.current = Date.now();
+    reviewProposalId.current = null;
     setBreakdownProgress(null);
     setError(null);
     setStep('working');
@@ -191,7 +218,8 @@ export function TaskCreationWizard({
         description.trim(),
         images.map((image) => image.filename)
       );
-      if (breakdownRequestId.current !== requestId) return; // cancelled
+      if (breakdownRequestId.current !== requestId) return; // cancelled, or left running in the background
+      setLeave(null);
       if (result.success && result.data) {
         createdIds.current = new Map();
         specBatch.current = result.data.batchId
@@ -271,6 +299,7 @@ export function TaskCreationWizard({
       if (queueAfterCreate) {
         await queueTasksInOrder(projectId, selected.map((item) => createdIds.current.get(item.key)!));
       }
+      if (reviewProposalId.current) void window.electronAPI.dismissQueueProposal(projectId, reviewProposalId.current);
       clearDraft(projectId);
       resetForm();
       onOpenChange(false);
@@ -289,6 +318,8 @@ export function TaskCreationWizard({
     setStep('form');
     setBreakdownItems([]);
     setOpenTickets([]);
+    reviewProposalId.current = null;
+    setLeave(null);
     createdIds.current = new Map();
     setDescription('');
     setImages([]);
@@ -301,10 +332,42 @@ export function TaskCreationWizard({
     setIsDraftRestored(false);
   };
 
-  const handleClose = () => {
-    if (isCreating) return;
-    if (step === 'working') handleCancelBreakDown();
+  // Review a stored proposal: the prompt, the tickets and their spec batch come back as they were
+  useEffect(() => {
+    if (!open || !initialBreakdown || initialBreakdown.projectId !== projectId) return;
+    const { breakdown } = initialBreakdown;
+    // Open tickets as they are now: one that was merged since no longer needs waiting for
+    const open_ = listOpenTickets(useTaskStore.getState().tasks);
+    const openIds = new Set(open_.map((ticket) => ticket.id));
+    createdIds.current = new Map();
+    specBatch.current = breakdown.batchId
+      ? { id: breakdown.batchId, sources: breakdown.specSources ?? [], prompt: initialBreakdown.prompt }
+      : null;
+    reviewProposalId.current = initialBreakdown.proposalId;
+    setDescription(initialBreakdown.prompt);
+    setOpenTickets(open_);
+    setBreakdownItems(
+      breakdown.tasks.map((task) => ({
+        ...task,
+        dependsOnExisting: (task.dependsOnExisting ?? []).filter((id) => openIds.has(id)),
+        included: true,
+      }))
+    );
+    setError(null);
+    setStep('review');
+    onBreakdownConsumed?.();
+  }, [open, initialBreakdown, projectId, onBreakdownConsumed]);
 
+  // The breakdown under review, as it can be stored again
+  const currentBreakdown = (): TaskBreakdown => ({
+    tasks: breakdownItems.map(({ included: _included, agentOverride: _agentOverride, ...task }) => task),
+    openTickets,
+    batchId: specBatch.current?.id,
+    specSources: specBatch.current?.sources,
+  });
+
+  /** Close the dialog, keeping the form as a draft */
+  const closeDialog = () => {
     const draft = getCurrentDraft();
     if (!isDraftEmpty(draft)) {
       saveDraft(draft);
@@ -314,6 +377,59 @@ export function TaskCreationWizard({
 
     resetForm();
     onOpenChange(false);
+  };
+
+  /** Stop the running breakdown (what the work did so far is lost) */
+  const stopBreakdown = (close: boolean) => {
+    setLeave(null);
+    handleCancelBreakDown();
+    if (close) closeDialog();
+  };
+
+  /** Stop was asked for: a short run stops at once, a long one asks first */
+  const requestStop = (close: boolean) => {
+    if (Date.now() - breakdownStartedAt.current < LONG_BREAKDOWN_MS) stopBreakdown(close);
+    else setLeave({ kind: 'working', close });
+  };
+
+  /** Close the dialog and let the run finish in main; its result waits in the Queue updates panel */
+  const keepWorkingInBackground = () => {
+    const requestId = breakdownRequestId.current;
+    breakdownRequestId.current = null;
+    if (requestId) window.electronAPI.keepBreakDownInBackground(requestId);
+    setLeave(null);
+    closeDialog();
+  };
+
+  /** Leave the review step: keep the proposal for later, or throw it away */
+  const leaveReview = (keep: boolean) => {
+    if (keep && !reviewProposalId.current) {
+      void window.electronAPI.saveBreakdownProposal(
+        projectId,
+        specBatch.current?.prompt ?? description.trim(),
+        images.map((image) => image.filename),
+        currentBreakdown()
+      );
+    } else if (!keep && reviewProposalId.current) {
+      void window.electronAPI.dismissQueueProposal(projectId, reviewProposalId.current);
+    }
+    setLeave(null);
+    closeDialog();
+  };
+
+  // A running breakdown and a review under way are not closed by a stray click or Escape: only the
+  // X and the buttons ask, and they ask before anything is lost
+  const handleClose = () => {
+    if (isCreating) return;
+    if (step === 'working') {
+      requestStop(true);
+      return;
+    }
+    if (step === 'review') {
+      setLeave({ kind: 'review', close: true });
+      return;
+    }
+    closeDialog();
   };
 
   const handleDiscardDraft = () => {
@@ -337,7 +453,9 @@ export function TaskCreationWizard({
   const includedCount = breakdownItems.filter((item) => item.included).length;
 
   return (
+    <>
     <TaskModalLayout
+      lockOutside={step === 'working' || step === 'review'}
       open={open}
       onOpenChange={handleClose}
       title={step === 'review' ? t('tasks:breakdown.title') : t('tasks:wizard.createTitle')}
@@ -362,7 +480,7 @@ export function TaskCreationWizard({
           </div>
         ) : step === 'working' ? (
           <div className="flex items-center justify-end">
-            <Button variant="ghost" size="sm" onClick={handleCancelBreakDown}>
+            <Button variant="ghost" size="sm" onClick={() => requestStop(false)}>
               {t('tasks:breakdown.cancel')}
             </Button>
           </div>
@@ -442,5 +560,35 @@ export function TaskCreationWizard({
         extraSections={gitOptionsSection}
       />}
     </TaskModalLayout>
+
+    <AlertDialog open={leave !== null} onOpenChange={(next) => { if (!next) setLeave(null); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{leave?.kind === 'review' ? t('tasks:breakdown.leaveTitle') : t('tasks:breakdown.stopTitle')}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {leave?.kind === 'review' ? t('tasks:breakdown.leaveDescription') : t('tasks:breakdown.stopDescription')}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>{leave?.kind === 'review' ? t('tasks:breakdown.keepReviewing') : t('tasks:breakdown.keepWaiting')}</AlertDialogCancel>
+          {leave?.kind === 'review' ? (
+            <>
+              <AlertDialogAction className={buttonVariants({ variant: 'outline' })} onClick={() => leaveReview(false)}>
+                {t('tasks:breakdown.discard')}
+              </AlertDialogAction>
+              <AlertDialogAction onClick={() => leaveReview(true)}>{t('tasks:breakdown.saveForLater')}</AlertDialogAction>
+            </>
+          ) : (
+            <>
+              <AlertDialogAction className={buttonVariants({ variant: 'outline' })} onClick={() => stopBreakdown(leave?.close ?? false)}>
+                {t('tasks:breakdown.stopConfirm')}
+              </AlertDialogAction>
+              <AlertDialogAction onClick={keepWorkingInBackground}>{t('tasks:breakdown.background')}</AlertDialogAction>
+            </>
+          )}
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

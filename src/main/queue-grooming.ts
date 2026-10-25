@@ -20,10 +20,14 @@ import { mkdir, readFile } from 'fs/promises';
 import path from 'path';
 import { randomUUID } from 'crypto';
 import type { Project, Task, TaskMetadata } from '../shared/types';
+import { isBreakdownProposal } from '../shared/types/queue-grooming';
 import type {
   SplitProposal,
+  BreakdownFailedProposal,
+  BreakdownProposal,
   QueueProposal,
   QueueProposalsFile,
+  StructuralProposal,
   QueueUndoEntry,
   TaskContextNote,
 } from '../shared/types/queue-grooming';
@@ -493,7 +497,7 @@ function sameProposal(a: QueueProposal, b: QueueProposal): boolean {
   return 'taskId' in a && 'taskId' in b && a.taskId === b.taskId;
 }
 
-async function addProposal(deps: GroomingDeps, project: Project, proposal: QueueProposal, autoApply: boolean): Promise<void> {
+async function addProposal(deps: GroomingDeps, project: Project, proposal: StructuralProposal, autoApply: boolean): Promise<void> {
   const file = await readQueueProposals(project);
   if (file.proposals.some((p) => sameProposal(p, proposal))) return;
   if (autoApply) {
@@ -505,7 +509,7 @@ async function addProposal(deps: GroomingDeps, project: Project, proposal: Queue
 }
 
 /** Apply one proposal to the tasks as they are now; null when it no longer applies */
-async function applyProposalNow(deps: GroomingDeps, projectId: string, proposal: QueueProposal): Promise<QueueUndoEntry | null> {
+async function applyProposalNow(deps: GroomingDeps, projectId: string, proposal: StructuralProposal): Promise<QueueUndoEntry | null> {
   const tasks = deps.getTasks(projectId);
   const graph = tasks.filter((t) => !t.metadata?.archivedAt).map(toGroomTask);
   const live = new Map(graph.map((t) => [t.id, t]));
@@ -556,6 +560,8 @@ export function applyQueueProposal(
     const file = await readQueueProposals(project);
     const proposal = file.proposals.find((p) => p.id === proposalId);
     if (!proposal) return { success: false, error: 'Proposal not found' };
+    // A Break into tasks proposal is reviewed in the task dialog, not applied here
+    if (isBreakdownProposal(proposal)) return { success: false, error: 'Review this proposal in the task dialog' };
     try {
       const undo = await applyProposalNow(deps, projectId, proposal);
       // Applied or no longer applicable: either way it leaves the list
@@ -566,6 +572,22 @@ export function applyQueueProposal(
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
+  });
+}
+
+/** Keep a Break into tasks result (or failure) that finished while its dialog was closed */
+export function addBreakdownProposal(
+  projectId: string,
+  proposal: BreakdownProposal | BreakdownFailedProposal,
+  deps: GroomingDeps = defaultDeps()
+): Promise<{ success: boolean; error?: string }> {
+  return withStateLock(projectId, async () => {
+    const project = deps.getProject(projectId);
+    if (!project) return { success: false, error: 'Project not found' };
+    const file = await readQueueProposals(project);
+    await writeQueueProposals(project, { ...file, proposals: [...file.proposals, proposal] });
+    deps.changed(projectId);
+    return { success: true };
   });
 }
 
