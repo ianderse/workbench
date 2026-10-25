@@ -234,6 +234,14 @@
     "problemSolved": "Problem solved",
     "targetAudience": "Target audience",
     "dependencies": "Dependencies",
+    "reliesOn": "Relies on",
+    "reliesOnState": {
+      "done": "Done",
+      "merged": "Merged",
+      "archived": "Archived",
+      "waiting": "Waiting",
+      "missing": "Not found"
+    },
     "acceptanceCriteria": "Acceptance criteria",
     "affectedFiles": "Affected files",
     "byAgent": "By agent",
@@ -396,7 +404,7 @@
     "back": "Back",
     "createFailed": "Created {{done}} of {{total}} tasks: {{error}}",
     "noneSelected": "Select at least one task",
-    "waitsFor": "Waits for: {{titles}}",
+    "waitsFor": "Waits for {{titles}}",
     "progress": {
       "starting": "Starting...",
       "elapsed": "Elapsed {{time}}",

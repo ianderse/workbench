@@ -1,4 +1,4 @@
-import { useState, useRef, useLayoutEffect, useId, type ReactNode } from 'react';
+import { useState, useRef, useLayoutEffect, useId, useMemo, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../ui/button';
@@ -8,6 +8,9 @@ import { cn, formatRelativeTime } from '../../lib/utils';
 import { JSON_ERROR_PREFIX } from '../../../shared/constants';
 import type { Task, WorktreeStatus } from '../../../shared/types';
 import { MarkdownContent } from '../ui/markdown-content';
+import { useTaskStore } from '../../stores/task-store';
+import { useProjectStore } from '../../stores/project-store';
+import { resolveTaskDependencies } from '../../../shared/utils/task-dependencies';
 
 interface TaskMetadataProps {
   task: Task;
@@ -33,6 +36,10 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction, collapseDes
   const [hasOverflow, setHasOverflow] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const contentId = useId();
+  const allTasks = useTaskStore((s) => s.tasks);
+  const autonomous = useProjectStore((s) => s.projects.find((p) => p.id === task.projectId)?.settings?.autonomous === true);
+  // Every ticket this one relies on, whatever its status
+  const dependencies = useMemo(() => resolveTaskDependencies(allTasks, task, autonomous), [allTasks, task, autonomous]);
 
   // Handle JSON error description with i18n
   const displayDescription = (() => {
@@ -153,6 +160,26 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction, collapseDes
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {/* The tickets this one relies on, with where each stands */}
+      {dependencies.length > 0 && (
+        <div className="text-sm">
+          <p className="text-xs text-(--nav-label-color)">{t('tasks:metadata.reliesOn')}</p>
+          <ul className="mt-1 space-y-0.5">
+            {dependencies.map((dep) => (
+              <li key={dep.ref} className="flex items-baseline gap-2">
+                <span className="min-w-0 flex-1 wrap-anywhere">
+                  <span className="tabular-nums text-(--nav-label-color)">#{dep.number}</span>
+                  {dep.title && <> {dep.title}</>}
+                </span>
+                <span className={cn('shrink-0 text-xs', dep.state === 'waiting' ? 'text-warning' : 'text-(--nav-label-color)')}>
+                  {t(`tasks:metadata.reliesOnState.${dep.state}`)}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 

@@ -20,6 +20,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 - One merge helper: autonomous auto-merge, PR merges, local merges and resync without a session all bring the target branch into the task branch through `mergeTargetIntoBranch`, with conflicts resolved by the merge agent on the task's own backend (a task pinned to Claude Code or OMP uses that, not the app-wide one)
 - Autonomous mode now resyncs the other open tasks when it auto-merges a task into its target branch (integration branch or main), not only when a task reaches Done; an auto-merged task moving to Done later does not trigger it again
 
+**Ticket dependencies**
+- Queued and backlog cards name what they wait for by ticket number ("Waits for #003 Title"), and the task detail lists every ticket it relies on with its state (done, merged, archived, waiting, not found).
+
 **Task messaging under OMP**
 - OMP tasks can message parallel tasks: a per-run extension file (`omp -e`) adds `message_task` and `list_parallel_tasks`, which call Workbench's local tools server with the run's token. Messages for an OMP task are steered into the running step at its next turn (the step runs through `omp --mode rpc`; the Live messages switch turns that off, and a step that cannot start in RPC mode runs with `omp -p` instead), or wait in its inbox and join the next step's prompt. The Task messaging switch shows under OMP again
 

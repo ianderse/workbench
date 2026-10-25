@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { arrayMove } from '@dnd-kit/sortable';
-import { ANY_TARGET_BRANCH, isDependencySatisfied } from '../../shared/utils/autonomous';
+import { unmetDependencyLabel } from '../../shared/utils/task-dependencies';
 import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft, ImageAttachment, TaskOrderState, TaskReviewOptions } from '../../shared/types';
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
 import { useProjectStore } from './project-store';
@@ -1293,15 +1293,9 @@ export async function queueTasksInOrder(projectId: string, taskIds: string[]): P
 }
 
 /**
- * Titles of the tasks a task still waits for (not done yet); '' when none. A string, so selectors stay stable.
+ * The tasks a task still waits for (not done yet), "#003 Title, #005 Title"; '' when none. A string, so selectors stay stable.
  * With autonomous mode on, a dependency merged automatically no longer counts as waited for.
  */
 export function unmetDependencyTitles(tasks: readonly Task[], task: Task, autonomous = false): string {
-  const ids = task.metadata?.dependsOnTaskIds;
-  if (!ids || ids.length === 0) return '';
-  return ids
-    .map((id) => tasks.find((x) => x.id === id || x.specId === id))
-    .filter((dep): dep is Task => !!dep && !isDependencySatisfied(dep, autonomous ? ANY_TARGET_BRANCH : undefined) && !dep.metadata?.archivedAt)
-    .map((dep) => dep.title)
-    .join(', ');
+  return unmetDependencyLabel(tasks, task, autonomous);
 }
