@@ -143,6 +143,10 @@ export interface WatchedSession {
   /** The directory it runs in, as the relay compares it (dirKey() in relay.ts):
    *  its events go to the clients of that directory */
   dirKey: string
+  /** The session that opened this one in the background (announced in its
+   *  transcript, see announcedBackgroundSessionId): this session has no graph of
+   *  its own, its events are shown as that session's */
+  attachedTo?: string
   fileWatcher: import('fs').FSWatcher | null
   pollTimer: NodeJS.Timeout | null
   fileSize: number

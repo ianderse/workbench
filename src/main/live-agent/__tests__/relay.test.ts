@@ -388,6 +388,325 @@ describe('relay', () => {
     ]));
   });
 
+  // ─── A session opened in the background ────────────────────────────────────
+
+  /** The agent events sent to the clients, with the session each was tagged with */
+  const taggedEvents = () => sent
+    .filter((entry) => entry.message.type === 'agent-event')
+    .map((entry) => entry.message.event as { type: string; sessionId: string; payload: Record<string, unknown> });
+
+  const BG_SESSION_ID = '9552db91-6666-7777-8888-999999999999';
+  const bgSubagentsDir = () => path.join(path.dirname(transcript), BG_SESSION_ID, 'subagents');
+  const postBgHook = (body: Record<string, unknown>) => fetch(`http://127.0.0.1:${hookPort()}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_id: BG_SESSION_ID, cwd: workspace, transcript_path: path.join(path.dirname(transcript), `${BG_SESSION_ID}.jsonl`), ...body }),
+  });
+
+  /**
+   * Have the watched session open a background session, as Claude Code does for /code-review and
+   * the like: a session of its own, which the opening session records only as the local command's
+   * output naming the start of its id. Returns its transcript, once the relay is reading it.
+   */
+  async function openBackgroundSession(): Promise<string> {
+    const bgTranscript = path.join(path.dirname(transcript), `${BG_SESSION_ID}.jsonl`);
+    // Its own transcript says nothing of the session that opened it, and records the
+    // directory Claude Code runs it in rather than the workspace
+    appendTo(bgTranscript, [
+      {
+        type: 'user', uuid: 'bg-u0', isMeta: true, cwd: path.join(workspace, 'review'),
+        message: { role: 'user', content: '<command-name>/code-review</command-name>' },
+      },
+      toolUse('toolu_bg_open', 'Read'),
+    ]);
+    appendTo(transcript, [{
+      type: 'system', subtype: 'local_command', level: 'info',
+      content: `<local-command-stdout>Opening "Review the diff", running in the background (${BG_SESSION_ID.slice(0, 8)})</local-command-stdout>`,
+    }]);
+    // A hook reads the announcement at once (fs.watch is slow on macOS); the scan tick then
+    // finds the background session's file
+    await postHook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    // The call it had in flight when the relay attached is the first sign of it
+    await vi.waitFor(
+      () => expect(taggedEvents().some((event) => event.type === 'tool_call_start' && event.payload.id === 'toolu_bg_open')).toBe(true),
+      { timeout: 5000 }
+    );
+    return bgTranscript;
+  }
+
+  it('shows the work of a background session the session opened as the master agent\'s own', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    sent.length = 0;
+    const bgTranscript = await openBackgroundSession();
+
+    // Its calls and its sub-agents, written to its own transcript
+    fs.mkdirSync(bgSubagentsDir(), { recursive: true });
+    appendTo(bgTranscript, [toolUse('toolu_bg_bash'), toolUse('toolu_bg_agent', 'Agent')]);
+    fs.writeFileSync(path.join(bgSubagentsDir(), 'agent-abgworker.meta.json'), JSON.stringify({ toolUseId: 'toolu_bg_agent' }));
+    appendTo(path.join(bgSubagentsDir(), 'agent-abgworker.jsonl'), [toolUse('toolu_bg_read', 'Read')]);
+
+    // All of it arrives as the window's own session, on and under the master agent's node
+    await vi.waitFor(
+      () => expect(taggedEvents()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool_call_start', sessionId: SESSION_ID,
+          payload: { agent: 'orchestrator', tool: 'Bash', id: 'toolu_bg_bash' },
+        }),
+        expect.objectContaining({
+          type: 'agent_spawn', sessionId: SESSION_ID,
+          payload: expect.objectContaining({ name: 'toolu_bg_agent', parent: 'orchestrator' }),
+        }),
+      ])),
+      { timeout: 5000 }
+    );
+    expect(taggedEvents().every((event) => event.sessionId === SESSION_ID)).toBe(true);
+
+    // It is no session of its own to the clients
+    expect(sent.filter((entry) => entry.message.type === 'session-started')).toEqual([]);
+    sent.length = 0;
+    relay.subscribe('window-c', workspace, flowDir);
+    const list = sent.find((entry) => entry.message.type === 'session-list');
+    expect(list?.message.sessions).toEqual([expect.objectContaining({ id: SESSION_ID })]);
+    expect(sent.filter((entry) => entry.message.type === 'agent-event-batch')
+      .map((entry) => entry.message.sessionId)).toEqual([SESSION_ID]);
+  });
+
+  it('finishes the sub-agents a background session leaves running when it ends', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    const bgTranscript = await openBackgroundSession();
+    // A sub-agent of its own, drawn on the window session's graph
+    fs.mkdirSync(bgSubagentsDir(), { recursive: true });
+    appendTo(bgTranscript, [toolUse('toolu_bg_left', 'Agent')]);
+    fs.writeFileSync(path.join(bgSubagentsDir(), 'agent-aleftover.meta.json'), JSON.stringify({ toolUseId: 'toolu_bg_left' }));
+    appendTo(path.join(bgSubagentsDir(), 'agent-aleftover.jsonl'), [toolUse('toolu_left_read', 'Read')]);
+    await vi.waitFor(
+      () => expect(taggedEvents().some((event) => event.type === 'agent_spawn' && event.payload.name === 'toolu_bg_left')).toBe(true),
+      { timeout: 5000 }
+    );
+    sent.length = 0;
+
+    // Its end is dropped, since the window's session is still going: its sub-agent
+    // is finished on its own, so nothing is left drawn as working on that graph
+    await postBgHook({ hook_event_name: 'SessionEnd' });
+    await vi.waitFor(
+      () => expect(taggedEvents()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_complete', sessionId: SESSION_ID, payload: { name: 'toolu_bg_left' } }),
+      ])),
+      { timeout: 5000 }
+    );
+    expect(taggedEvents().some((event) => event.type === 'agent_complete'
+      && (event.payload.endsSession === true || event.payload.name === 'orchestrator'))).toBe(false);
+  });
+
+  it('ends the calls a background session leaves open on the master when it ends', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    // Its Read was in flight when the relay attached, and is drawn on the master
+    await openBackgroundSession();
+    sent.length = 0;
+    await postBgHook({ hook_event_name: 'SessionEnd' });
+    await vi.waitFor(
+      () => expect(taggedEvents()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool_call_end', sessionId: SESSION_ID,
+          payload: { agent: 'orchestrator', tool: 'Read', id: 'toolu_bg_open' },
+        }),
+      ])),
+      { timeout: 5000 }
+    );
+  });
+
+  it('hands the master back once the background work for a finished turn is over', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    await openBackgroundSession();
+    // The window's own turn is over: the master is done, apart from the background work
+    appendTo(transcript, [{ type: 'system', subtype: 'turn_duration', durationMs: 1000 }]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(taggedEvents().some((event) => event.type === 'agent_complete'
+        && event.payload.name === 'orchestrator' && event.sessionId === SESSION_ID)).toBe(true),
+      { timeout: 5000 }
+    );
+    sent.length = 0;
+
+    // The background session's turn ends: its own end is not shown, but the master is
+    // finished again rather than left looking busy
+    await postBgHook({ hook_event_name: 'Stop' });
+    await vi.waitFor(
+      () => expect(taggedEvents()).toEqual([
+        expect.objectContaining({ type: 'agent_complete', sessionId: SESSION_ID, payload: { name: 'orchestrator' } }),
+      ]),
+      { timeout: 5000 }
+    );
+  });
+
+  it('follows a background session announced next to another marker', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    const bgTranscript = path.join(path.dirname(transcript), `${BG_SESSION_ID}.jsonl`);
+    appendTo(bgTranscript, [
+      { type: 'user', uuid: 'bg-next', cwd: path.join(workspace, 'review'), message: { role: 'user', content: 'Review' } },
+      toolUse('toolu_next_to'),
+    ]);
+    appendTo(transcript, [{
+      type: 'system', subtype: 'local_command', level: 'info',
+      content: `<local-command-stdout>Opening "Review the diff", running in the background (${BG_SESSION_ID.slice(0, 8)})</local-command-stdout>\n`
+        + '<forked-skill-launch>{"agentId":"aunrelated","skillName":"code-review"}</forked-skill-launch>',
+    }]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    await vi.waitFor(
+      () => expect(taggedEvents()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'tool_call_start', sessionId: SESSION_ID, payload: expect.objectContaining({ id: 'toolu_next_to' }) }),
+      ])),
+      { timeout: 5000 }
+    );
+  });
+
+  it('keeps a background session\'s own master agent out of the window\'s session', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    const bgTranscript = await openBackgroundSession();
+    appendTo(bgTranscript, [toolUse('toolu_bg_agent', 'Agent')]);
+    await postBgHook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    sent.length = 0;
+
+    // Its turn ending and its session ending are its own master agent's: the window's
+    // master agent is still working, so neither reaches the clients
+    await postBgHook({ hook_event_name: 'Stop' });
+    await postBgHook({ hook_event_name: 'SessionEnd' });
+
+    const completions = taggedEvents().filter((event) => event.type === 'agent_complete');
+    expect(completions.map((event) => event.payload)).toEqual([{ name: 'toolu_bg_agent' }]);
+  });
+
+  it('follows a background session Claude Code keeps under another directory', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    sent.length = 0;
+    // Run in a directory of its own, so kept under that directory's name, which the
+    // workspace's scan never lists
+    const otherDir = path.join(path.dirname(path.dirname(transcript)), '-elsewhere-review');
+    fs.mkdirSync(otherDir, { recursive: true });
+    const bgTranscript = path.join(otherDir, `${BG_SESSION_ID}.jsonl`);
+    appendTo(bgTranscript, [
+      { type: 'user', uuid: 'bg-else', cwd: '/elsewhere/review', message: { role: 'user', content: 'Review' } },
+      toolUse('toolu_elsewhere'),
+    ]);
+    appendTo(transcript, [{
+      type: 'system', subtype: 'local_command', level: 'info',
+      content: `<local-command-stdout>Opening "Review the diff", running in the background (${BG_SESSION_ID.slice(0, 8)})</local-command-stdout>`,
+    }]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+
+    await vi.waitFor(
+      () => expect(taggedEvents()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool_call_start', sessionId: SESSION_ID,
+          payload: { agent: 'orchestrator', tool: 'Bash', id: 'toolu_elsewhere' },
+        }),
+      ])),
+      { timeout: 5000 }
+    );
+    expect(sent.filter((entry) => entry.message.type === 'session-started'
+      && (entry.message.session as { id: string }).id === BG_SESSION_ID)).toEqual([]);
+  });
+
+  it('ignores a notice that only looks like a background session opening', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    const bgTranscript = path.join(path.dirname(transcript), `${BG_SESSION_ID}.jsonl`);
+    appendTo(bgTranscript, [
+      { type: 'user', uuid: 'bg-own-2', cwd: workspace, message: { role: 'user', content: 'Unrelated' } },
+      toolUse('toolu_unrelated'),
+    ]);
+    await vi.waitFor(
+      () => expect(taggedEvents().some((event) => event.payload.id === 'toolu_unrelated')).toBe(true),
+      { timeout: 5000 }
+    );
+    // Some other command's output mentioning an id in brackets: no session is opened by it.
+    // A call after it shows when it has been read
+    sent.length = 0;
+    appendTo(transcript, [
+      {
+        type: 'system', subtype: 'local_command', level: 'info',
+        content: `<local-command-stdout>Command running in the background (${BG_SESSION_ID.slice(0, 8)})</local-command-stdout>`,
+      },
+      toolUse('toolu_after_notice'),
+    ]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    await vi.waitFor(
+      () => expect(taggedEvents().some((event) => event.payload.id === 'toolu_after_notice')).toBe(true),
+      { timeout: 5000 }
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    // Nothing was folded: no session set behind the others, none sent back to
+    expect(sent.some((entry) => entry.message.type === 'session-list'
+      && (entry.message.sessions as Array<{ id: string }>).some((session) => session.id === BG_SESSION_ID))).toBe(false);
+    expect(sent.filter((entry) => entry.message.type === 'agent-event-batch')).toEqual([]);
+  });
+
+  it('folds in a background session the scan took before the announcement', async () => {
+    relay.subscribe('window-a', workspace, flowDir);
+    const bgTranscript = path.join(path.dirname(transcript), `${BG_SESSION_ID}.jsonl`);
+    // Recording the workspace as its directory, it is a session like any other to the scan,
+    // which reaches it before its caller's transcript says what it is
+    appendTo(bgTranscript, [
+      { type: 'user', uuid: 'bg-own', cwd: workspace, message: { role: 'user', content: 'Review' } },
+      toolUse('toolu_bg_early', 'Read'),
+    ]);
+    await vi.waitFor(
+      () => expect(sent.some((entry) => entry.message.type === 'session-started'
+        && (entry.message.session as { id: string }).id === BG_SESSION_ID)).toBe(true),
+      { timeout: 5000 }
+    );
+
+    // On its own clock, which started when the relay reached it, after the window's session
+    const early = sent.filter((entry) => entry.message.type === 'agent-event')
+      .map((entry) => entry.message.event as { time: number; payload: Record<string, unknown> })
+      .find((event) => event.payload.id === 'toolu_bg_early');
+    expect(early).toBeDefined();
+
+    // Its caller names it: from here it is folded in, and the clients are sent back to the
+    // session that opened it
+    sent.length = 0;
+    appendTo(transcript, [{
+      type: 'system', subtype: 'local_command', level: 'info',
+      content: `<local-command-stdout>Opening "Review the diff", running in the background (${BG_SESSION_ID.slice(0, 8)})</local-command-stdout>`,
+    }]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'permission_prompt' });
+    await vi.waitFor(
+      () => expect(sent.some((entry) => entry.message.type === 'session-started'
+        && (entry.message.session as { id: string }).id === SESSION_ID)).toBe(true),
+      { timeout: 5000 }
+    );
+
+    // The work it had already done comes with it: the history the clients are sent
+    // for the session it was folded into holds the call it was making before
+    const batch = sent.filter((entry) => entry.message.type === 'agent-event-batch'
+      && entry.message.sessionId === SESSION_ID).pop();
+    const carried = (batch?.message.events as Array<{ time: number; payload: Record<string, unknown> }>)
+      .find((event) => event.payload.id === 'toolu_bg_early');
+    expect(carried).toBeDefined();
+    // …moved onto the clock of the session it now belongs to, which started first
+    expect(carried!.time).toBeGreaterThan(early!.time);
+    // …and merged into that session's history in time order
+    const times = (batch?.message.events as Array<{ time: number }>).map((event) => event.time);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    // The clients, which had it as a session of their own, are told it is no longer one to show
+    expect(sent.some((entry) => entry.message.type === 'session-list'
+      && (entry.message.sessions as Array<{ id: string; status: string }>)
+        .some((session) => session.id === BG_SESSION_ID && session.status === 'completed'))).toBe(true);
+
+    sent.length = 0;
+    appendTo(bgTranscript, [toolUse('toolu_bg_after')]);
+    await vi.waitFor(
+      () => expect(taggedEvents()).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          type: 'tool_call_start', sessionId: SESSION_ID,
+          payload: { agent: 'orchestrator', tool: 'Bash', id: 'toolu_bg_after' },
+        }),
+      ])),
+      { timeout: 5000 }
+    );
+    expect(taggedEvents().every((event) => event.sessionId === SESSION_ID)).toBe(true);
+  });
+
   it('finishes a sub-agent stopped by an API error (StopFailure inside it)', async () => {
     relay.subscribe('window-a', workspace, flowDir);
     fs.mkdirSync(subagentsDir(), { recursive: true });

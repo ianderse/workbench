@@ -142,17 +142,105 @@ function carriedOver(events: AgentEvent[]): AgentEvent[] {
   ]
 }
 
-function broadcastEvent(event: AgentEvent & { sessionId: string }) {
-  let history = eventBuffer.get(event.sessionId)
-  if (!history) { history = { prelude: [], events: [], total: 0 }; eventBuffer.set(event.sessionId, history) }
-  history.events.push(event)
-  history.total++
-  // Trim in chunks rather than copying the buffer on every event once it's full
+/**
+ * The events of an attached background session that are never passed on: the
+ * master agent's own state belongs to the window's session, which has its own
+ * spawn, its own turn completions and its own end. Everything else does pass on:
+ * the background session's sub-agent spawns name the orchestrator as their
+ * parent and its tool calls name it as their agent, so they land on the master's
+ * node, which is what it is working on.
+ */
+function isAttachedSessionState(event: AgentEvent): boolean {
+  if (event.type === 'agent_spawn') return event.payload.isMain === true
+  return event.type === 'agent_complete'
+    && (event.payload.endsSession === true || event.payload.name === ORCHESTRATOR_NAME)
+}
+
+/**
+ * The session an event is shown as: a background session's is the session it
+ * works for, and that one's, if it is a background session too (one opened by a
+ * background session), the session that one works for, and so on up. A chain
+ * that loops back on itself stops at the last session before the loop.
+ */
+function shownAs(sessionId: string): string {
+  const seen = new Set<string>([sessionId])
+  let shown = sessionId
+  for (;;) {
+    const next = sessions.get(shown)?.attachedTo
+    if (next === undefined || seen.has(next)) return shown
+    seen.add(next)
+    shown = next
+  }
+}
+
+/** A session's buffer, made the first time it has an event */
+function historyFor(sessionId: string) {
+  let history = eventBuffer.get(sessionId)
+  if (!history) { history = { prelude: [], events: [], total: 0 }; eventBuffer.set(sessionId, history) }
+  return history
+}
+
+/** Trim in chunks rather than copying the buffer on every event once it's full */
+function trimHistory(history: { prelude: AgentEvent[]; events: AgentEvent[] }) {
   if (history.events.length > MAX_EVENT_BUFFER * 1.1) {
     const trimmed = history.events.splice(0, history.events.length - MAX_EVENT_BUFFER)
     history.prelude = carriedOver([...history.prelude, ...trimmed])
   }
+}
 
+/** Keep an event in the buffer its session's clients are sent on subscribing */
+function bufferEvent(event: AgentEvent & { sessionId: string }) {
+  const history = historyFor(event.sessionId)
+  history.events.push(event)
+  history.total++
+  trimHistory(history)
+}
+
+/**
+ * A background session's turn or session ended. Its own end never reaches the
+ * clients (the master is the window session's), but the work it did on the
+ * master's node is over: the master is back to what the window's session says,
+ * which, with no turn of its own going and no other background work running for
+ * it, is finished. Without this, work that reopened a finished master would leave
+ * it shown as working until the window's session idled out.
+ */
+function settleAfterBackgroundWork(backgroundId: string) {
+  const parentId = shownAs(backgroundId)
+  const parent = sessions.get(parentId)
+  if (!parent || parent.turnOpen || parent.sessionCompleted) return
+  for (const other of sessions.values()) {
+    if (other.sessionId === backgroundId || other.sessionId === parentId) continue
+    if (shownAs(other.sessionId) === parentId && !other.sessionCompleted && other.turnOpen) return
+  }
+  broadcastEvent({ time: elapsed(parentId), type: 'agent_complete', payload: { name: ORCHESTRATOR_NAME }, sessionId: parentId })
+}
+
+function broadcastEvent(event: AgentEvent & { sessionId: string }) {
+  // A session run in the background works for a session of the window's and has
+  // no graph of its own, so its events are buffered and shown as that session's
+  // (see scanForActiveSessions and markBackgroundSession)
+  const parentSessionId = shownAs(event.sessionId)
+  if (parentSessionId !== event.sessionId) {
+    if (isAttachedSessionState(event)) {
+      if (event.type === 'agent_complete') settleAfterBackgroundWork(event.sessionId)
+      return
+    }
+    // Work done for it is that session's activity: without this it would go
+    // quiet, close and be disposed (taking its background session with it)
+    // while the background session is still busy on its behalf
+    const parent = sessions.get(parentSessionId)
+    if (parent) {
+      if (parent.sessionCompleted) resumeSession(parent)
+      touchSession(parent)
+    }
+    // On that session's clock as well as under its id: `time` is seconds since
+    // the relay attached to the session, and the graph holds a tool call on
+    // screen for a while by comparing it to its own, which the background
+    // session's clock (started later, and at its own moment) is no part of
+    event = { ...event, sessionId: parentSessionId, time: elapsed(parentSessionId) }
+  }
+
+  bufferEvent(event)
   broadcast(event.sessionId, JSON.stringify({ type: 'agent-event', event }))
 }
 
@@ -163,11 +251,31 @@ function historyBatch(sessionId: string) {
   return { type: 'agent-event-batch', sessionId, ...eventBuffer.get(sessionId)! }
 }
 
+/** Whether a session is one clients are told about at all: a background session
+ *  folded into the session that opened it is never announced as its own */
+function isAnnouncedSession(sessionId: string): boolean {
+  return sessions.get(sessionId)?.attachedTo === undefined
+}
+
 function broadcastSessionStarted(sessionId: string) {
+  if (!isAnnouncedSession(sessionId)) return
   broadcast(sessionId, JSON.stringify({
     type: 'session-started',
-    session: { id: sessionId, status: 'active', lastActivityTime: Date.now(), owner: sessionOwners.get(sessionId) } as SessionInfo,
+    // As it is: a session folded into after it closed is announced so the clients
+    // go back to it, but it is not working again for that
+    session: {
+      id: sessionId,
+      status: sessions.get(sessionId)?.sessionCompleted ? 'completed' : 'active',
+      lastActivityTime: Date.now(),
+      owner: sessionOwners.get(sessionId),
+    } as SessionInfo,
   }))
+}
+
+/** Send a session's buffered history to the clients that show it */
+function broadcastHistory(sessionId: string) {
+  if (!isAnnouncedSession(sessionId)) return
+  broadcast(sessionId, JSON.stringify(historyBatch(sessionId)))
 }
 
 // ─── Session owners ─────────────────────────────────────────────────────────
@@ -181,12 +289,176 @@ const sessionOwners = new Map<string, string>()
 function handleSessionOwner({ sessionId, terminalId }: SessionOwner) {
   if (sessionOwners.get(sessionId) === terminalId) return
   sessionOwners.set(sessionId, terminalId)
+  // A background session isn't a session of its own to clients: the window
+  // already knows the owner of the session that opened it
+  if (!isAnnouncedSession(sessionId)) return
   broadcast(sessionId, JSON.stringify({ type: 'session-owner', sessionId, owner: terminalId }))
 }
 
 // ─── Session watcher ────────────────────────────────────────────────────────
 
 const sessions = new Map<string, WatchedSession>()
+
+/** Background sessions announced but not found yet, by the start of their id
+ *  (all the announcement gives): the session that announced each, and when */
+const pendingBackgroundSessions = new Map<string, { parentId: string; at: number }>()
+/** Background sessions found, by their full id, and the session each works for */
+const backgroundSessionParents = new Map<string, string>()
+/** How long an announced background session is looked for: its file appears a
+ *  moment after the announcement, and one never written is given up on */
+const BACKGROUND_SESSION_WAIT_MS = 60 * 1000
+
+/** A session this one opened in the background is looked for, so its work is
+ *  shown as this session's wherever Claude Code keeps its transcript */
+function announceBackgroundSession(idPrefix: string, sessionId: string) {
+  if (pendingBackgroundSessions.get(idPrefix)?.parentId === sessionId) return
+  for (const [id, parentId] of backgroundSessionParents) {
+    if (parentId === sessionId && id.startsWith(idPrefix)) return
+  }
+  pendingBackgroundSessions.set(idPrefix, { parentId: sessionId, at: Date.now() })
+  log.info(`[session] ${sessionId.slice(0, SESSION_ID_DISPLAY)} opened background session ${idPrefix}`)
+  // Not from inside the announcing session's own start: its existing lines are
+  // read before it is announced to clients and its main agent spawned, and what
+  // is folded into it has to come after that, not ahead of the agent it belongs to
+  setImmediate(resolveBackgroundSessions)
+}
+
+/** The session files whose id starts with `idPrefix` and that are still active:
+ *  in the announcing session's own project dir first (where Claude Code keeps a
+ *  session run in the same directory), then in every project dir, since one run
+ *  in a directory of its own is kept under that directory's name */
+function findBackgroundSessionFiles(
+  idPrefix: string, parent: WatchedSession, list: (dir: string) => string[],
+): Array<{ sessionId: string; filePath: string; mtimeMs: number }> {
+  const search = (dirs: string[]) => {
+    const found: Array<{ sessionId: string; filePath: string; mtimeMs: number }> = []
+    for (const dir of dirs) {
+      for (const file of list(dir)) {
+        if (!file.startsWith(idPrefix) || !file.endsWith('.jsonl')) continue
+        const sessionId = path.basename(file, '.jsonl')
+        if (sessionId === parent.sessionId) continue
+        const filePath = path.join(dir, file)
+        try {
+          const { mtimeMs } = fs.statSync(filePath)
+          // Only one working now: an old session that merely shares the start of
+          // its id is no background session of this one
+          if ((Date.now() - mtimeMs) / 1000 <= ACTIVE_SESSION_AGE_S) found.push({ sessionId, filePath, mtimeMs })
+        } catch {}
+      }
+    }
+    return found
+  }
+  const own = search([path.dirname(parent.filePath)])
+  if (own.length > 0) return own
+  const all: string[] = []
+  for (const projectsDir of claudeProjectDirs) {
+    for (const name of list(projectsDir)) all.push(path.join(projectsDir, name))
+  }
+  return search(all)
+}
+
+/**
+ * Find the announced background sessions whose files have appeared, and fold
+ * each into the session that opened it: watched from here on as that session's
+ * work, or, if the scan already took it for a session of its own, folded in now.
+ * One that can't be told apart from another session sharing the start of its id
+ * is left alone rather than guessed at.
+ */
+function resolveBackgroundSessions() {
+  if (pendingBackgroundSessions.size === 0) return
+  // Each directory is listed once a pass, however many sessions are looked for
+  const listings = new Map<string, string[]>()
+  const list = (dir: string) => {
+    let files = listings.get(dir)
+    if (!files) {
+      try { files = fs.readdirSync(dir) } catch { files = [] }
+      listings.set(dir, files)
+    }
+    return files
+  }
+  for (const [idPrefix, { parentId, at }] of [...pendingBackgroundSessions]) {
+    const parent = sessions.get(parentId)
+    if (!parent) { pendingBackgroundSessions.delete(idPrefix); continue }
+    const found = findBackgroundSessionFiles(idPrefix, parent, list)
+    if (found.length !== 1) {
+      if (found.length > 1) {
+        log.info(`[session] background session ${idPrefix} of ${parentId.slice(0, SESSION_ID_DISPLAY)} is ambiguous, not followed`)
+        pendingBackgroundSessions.delete(idPrefix)
+      } else if (Date.now() - at > BACKGROUND_SESSION_WAIT_MS) {
+        pendingBackgroundSessions.delete(idPrefix)
+      }
+      continue
+    }
+    const [{ sessionId, filePath, mtimeMs }] = found
+    pendingBackgroundSessions.delete(idPrefix)
+    backgroundSessionParents.set(sessionId, parentId)
+    const watched = sessions.get(sessionId)
+    if (watched) {
+      // Only from the window's own directory: one a window of another directory
+      // has taken for its own stays that window's, whose clients would otherwise
+      // be left holding a session that no longer gets anything
+      if (watched.attachedTo === undefined && watched.dirKey === parent.dirKey) foldSession(watched, parentId)
+    } else if (hasActivitySinceDisposed(filePath)) {
+      watchSession(sessionId, filePath, mtimeMs, parent.dirKey, parentId)
+    }
+  }
+}
+
+/** Merge events into a session's buffer in time order. Both runs are already in
+ *  order, each on its own clock moved onto the buffer's (see foldSession) */
+function mergeIntoBuffer(sessionId: string, carried: Array<AgentEvent & { sessionId: string }>) {
+  if (carried.length === 0) return
+  const history = historyFor(sessionId)
+  const merged: AgentEvent[] = []
+  let i = 0, j = 0
+  while (i < history.events.length || j < carried.length) {
+    if (j >= carried.length || (i < history.events.length && history.events[i].time <= carried[j].time)) {
+      merged.push(history.events[i++])
+    } else {
+      merged.push(carried[j++])
+    }
+  }
+  history.events = merged
+  history.total += carried.length
+  trimHistory(history)
+}
+
+/**
+ * A background session already being watched as one of its own: the scan can
+ * reach its file before the announcement that says what it is, and the clients
+ * have switched to a graph of its own by now. From here its events are the
+ * working session's, and the clients are sent back to that session, where they
+ * will arrive.
+ */
+function foldSession(session: WatchedSession, parentId: string) {
+  session.attachedTo = parentId
+  // What it did before it was known for what it is belongs to that session too:
+  // its events are carried over rather than dropped with its buffer, or the work
+  // up to the announcement would be missing from the graph it lands on
+  const own = eventBuffer.get(session.sessionId)
+  eventBuffer.delete(session.sessionId)
+  const shown = shownAs(parentId)
+  if (own) {
+    // Onto that session's clock too, as live events are (see broadcastEvent):
+    // each `time` counts from when the relay attached to its own session, so the
+    // gap between the two starts moves them to when they happened on the other's
+    const start = sessions.get(shown)?.sessionStartTime ?? session.sessionStartTime
+    const offset = (session.sessionStartTime - start) / 1000
+    mergeIntoBuffer(shown, [...own.prelude, ...own.events]
+      .filter(event => !isAttachedSessionState(event))
+      .map(event => ({ ...event, sessionId: shown, time: event.time + offset })))
+  }
+  log.info(`[session] ${session.sessionId.slice(0, SESSION_ID_DISPLAY)} folded into ${parentId.slice(0, SESSION_ID_DISPLAY)}`)
+  // The clients still hold it as a session of their own, announced active: it is
+  // put behind every other (finished, and last active long ago) so no later choice
+  // of what to show lands on it, and they are sent back to the session it works for
+  broadcast(shown, JSON.stringify({
+    type: 'session-list',
+    sessions: [{ id: session.sessionId, status: 'completed', lastActivityTime: 0, owner: sessionOwners.get(session.sessionId) } as SessionInfo],
+  }))
+  broadcastSessionStarted(shown)
+  broadcastHistory(shown)
+}
 
 function elapsed(sessionId: string): number {
   const session = sessions.get(sessionId)
@@ -213,6 +485,7 @@ const parser = new TranscriptParser({
   elapsed,
   getSession: (sessionId: string) => sessions.get(sessionId),
   flushSubagent,
+  announceBackgroundSession,
 })
 
 const watcherDelegate = {
@@ -230,11 +503,19 @@ const watcherDelegate = {
  *  if they were seen live, got a node or have their file tailed: a launch found
  *  at attach whose file never shows up (or is never read) could otherwise
  *  never finish. */
-function hasWorkInFlight(session: WatchedSession): boolean {
+function hasWorkInFlight(session: WatchedSession, seen = new Set<string>()): boolean {
+  seen.add(session.sessionId)
   for (const id of session.pendingToolCalls.keys()) if (!session.launches.has(id)) return true
   const tailed = new Set([...session.subagentWatchers.values()].map(state => state.agentName))
   for (const [id, launch] of session.launches) {
     if (!launch.finished && (launch.seenLive || session.spawnedSubagents.has(id) || tailed.has(id))) return true
+  }
+  // A background session working for it is its work in flight too, quiet
+  // stretches and all (a long command writes nothing until it is done): the
+  // session it works for is kept on the longer timeout while it runs
+  for (const other of sessions.values()) {
+    if (other.attachedTo !== session.sessionId || other.sessionCompleted || seen.has(other.sessionId)) continue
+    if (other.turnOpen || hasWorkInFlight(other, seen)) return true
   }
   return false
 }
@@ -300,7 +581,7 @@ function resumeSession(session: WatchedSession) {
   // Clients switch to the resumed session; send its history so one that
   // dropped its buffer for it (see use-relay.ts) can draw it again
   broadcastSessionStarted(sessionId)
-  broadcast(sessionId, JSON.stringify(historyBatch(sessionId)))
+  broadcastHistory(sessionId)
 }
 
 /**
@@ -314,7 +595,35 @@ function closeSession(session: WatchedSession) {
   session.closedTime = Date.now()
   session.turnOpen = false
   if (session.inactivityTimer) clearTimeout(session.inactivityTimer)
+  // A background session's nodes are drawn on the graph of the session it works
+  // for, where its own end means nothing: that event is dropped, since the
+  // session it was working for is still going (see isAttachedSessionState). The
+  // calls it still had open on the master and the sub-agents it had running are
+  // ended one by one instead, or they would be left on that graph as still
+  // working, which is what the window would show.
+  if (session.attachedTo !== undefined) {
+    for (const [id, call] of session.pendingToolCalls) {
+      if (session.launches.has(id)) continue // a sub-agent, ended as one below
+      broadcastEvent({
+        time: elapsed(session.sessionId),
+        type: 'tool_call_end',
+        payload: { agent: ORCHESTRATOR_NAME, tool: call.name, id },
+        sessionId: session.sessionId,
+      })
+    }
+  }
   session.pendingToolCalls.clear()
+  if (session.attachedTo !== undefined) {
+    for (const id of session.spawnedSubagents) {
+      if (session.launches.get(id)?.finished) continue
+      broadcastEvent({
+        time: elapsed(session.sessionId),
+        type: 'agent_complete',
+        payload: { name: id },
+        sessionId: session.sessionId,
+      })
+    }
+  }
   for (const [id, launch] of session.launches) {
     launch.finished = true
     session.spawnedSubagents.add(id)
@@ -335,8 +644,9 @@ function closeSession(session: WatchedSession) {
 }
 
 /** Start watching a session run in the directory `sessionDirKey` (see dirKey());
- *  `lastActivity` is when its files last changed */
-function watchSession(sessionId: string, filePath: string, lastActivity: number, sessionDirKey: string) {
+ *  `lastActivity` is when its files last changed, and `attachedTo` the session
+ *  whose work this one is doing in the background */
+function watchSession(sessionId: string, filePath: string, lastActivity: number, sessionDirKey: string, attachedTo?: string) {
   // Read only complete lines up to the current size — anything appended (or
   // still being written) after this point is picked up by readNewLines.
   let existing: ReturnType<typeof readCompleteLines>
@@ -345,7 +655,7 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
   } catch { return /* unreadable right now; the next scan retries */ }
 
   const session: WatchedSession = {
-    sessionId, filePath, dirKey: sessionDirKey,
+    sessionId, filePath, dirKey: sessionDirKey, attachedTo,
     fileWatcher: null, pollTimer: null, fileSize: existing.nextOffset,
     sessionStartTime: Date.now(),
     pendingToolCalls: new Map(),
@@ -398,7 +708,7 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
   // Its history so far: clients that got the events above already have it;
   // ones that still have the session from an earlier watch (it was disposed
   // and is watched again) replace that with it
-  broadcast(sessionId, JSON.stringify(historyBatch(sessionId)))
+  broadcastHistory(sessionId)
 
   const watchable = !isWslUncPath(filePath)
   if (watchable) {
@@ -422,7 +732,8 @@ function watchSession(sessionId: string, filePath: string, lastActivity: number,
   session.attachScanDone = true
   armInactivityTimer(session)
 
-  log.info(`[session] Watching ${sessionId.slice(0, SESSION_ID_DISPLAY)}`)
+  log.info(`[session] Watching ${sessionId.slice(0, SESSION_ID_DISPLAY)}`
+    + (attachedTo ? ` as a background session of ${attachedTo.slice(0, SESSION_ID_DISPLAY)}` : ''))
 }
 
 function readNewLines(sessionId: string) {
@@ -504,6 +815,18 @@ function disposeSession(sessionId: string) {
   if (session.inactivityTimer) clearTimeout(session.inactivityTimer)
   for (const sub of session.subagentWatchers.values()) sub.watcher?.close()
   sessions.delete(sessionId)
+  // The background sessions it opened have no graph to be shown in any more:
+  // they stop being watched with it (one still running is picked up again if its
+  // session is watched again and announces it again)
+  for (const [id, parentId] of backgroundSessionParents) {
+    if (parentId === sessionId) backgroundSessionParents.delete(id)
+  }
+  for (const [idPrefix, pending] of pendingBackgroundSessions) {
+    if (pending.parentId === sessionId) pendingBackgroundSessions.delete(idPrefix)
+  }
+  for (const [id, attached] of sessions) {
+    if (attached.attachedTo === sessionId) disposeSession(id)
+  }
   eventBuffer.delete(sessionId)
   sessionCwds.delete(session.filePath)
   disposedOffsets.set(session.filePath, session.fileSize)
@@ -603,6 +926,9 @@ function isWorkspaceDir(cwd: string, workspace: Workspace): boolean {
 }
 
 function scanForActiveSessions(workspace: Workspace) {
+  // Announced background sessions whose files weren't there yet: looked for again
+  resolveBackgroundSessions()
+
   // Forget sessions that have stayed closed past the active window; if the
   // agent works in one again, the scan below picks it up again
   for (const [id, session] of sessions) {
@@ -628,7 +954,7 @@ function scanForActiveSessions(workspace: Workspace) {
 
   // Start watching in order of last activity, so the most recent session is
   // announced last and is the one clients end up showing
-  const found: Array<{ sessionId: string; filePath: string; newestMtime: number }> = []
+  const found: Array<{ sessionId: string; filePath: string; newestMtime: number; attachedTo?: string }> = []
   for (const dirPath of dirsToScan) {
     try {
       for (const file of fs.readdirSync(dirPath)) {
@@ -650,18 +976,27 @@ function scanForActiveSessions(workspace: Workspace) {
         } catch {}
 
         if ((Date.now() - newestMtime) / 1000 > ACTIVE_SESSION_AGE_S) continue
-        const cwd = sessionCwd(filePath)
-        if (cwd === undefined) {
-          // None recorded yet: taken once its whole file has been searched
-          // (until then it waits)
-          if ((cwdSearched.get(filePath) ?? 0) < stat.size) continue
-        } else if (!isWorkspaceDir(cwd, workspace)) continue
-        if (hasActivitySinceDisposed(filePath)) found.push({ sessionId, filePath, newestMtime })
+        // A session a watched one opened in the background is watched whatever
+        // directory it records (Claude Code runs it in a directory of its own):
+        // its work is the watched session's, shown on that session's graph
+        const parentId = backgroundSessionParents.get(sessionId)
+        const attachedTo = parentId !== undefined && sessions.get(parentId)?.dirKey === workspace.key ? parentId : undefined
+        if (attachedTo === undefined) {
+          const cwd = sessionCwd(filePath)
+          if (cwd === undefined) {
+            // None recorded yet: taken once its whole file has been searched
+            // (until then it waits)
+            if ((cwdSearched.get(filePath) ?? 0) < stat.size) continue
+          } else if (!isWorkspaceDir(cwd, workspace)) continue
+        }
+        if (hasActivitySinceDisposed(filePath)) found.push({ sessionId, filePath, newestMtime, attachedTo })
       }
     } catch {}
   }
   found.sort((a, b) => a.newestMtime - b.newestMtime)
-  for (const { sessionId, filePath, newestMtime } of found) watchSession(sessionId, filePath, newestMtime, workspace.key)
+  for (const { sessionId, filePath, newestMtime, attachedTo } of found) {
+    watchSession(sessionId, filePath, newestMtime, workspace.key, attachedTo)
+  }
 }
 
 /** Scan the workspace as soon as a session file in its project dir changes
@@ -793,7 +1128,10 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       addWorkspace(cwd, flowDir)
 
       // Send the session list, then each session's history
-      const sessionList: SessionInfo[] = [...sessions.values()].filter(session => session.dirKey === key).map(session => ({
+      // A background session is left out: its events are shown as those of the
+      // session that opened it, which is in the list itself
+      const sessionList: SessionInfo[] = [...sessions.values()].filter(session => session.dirKey === key
+        && session.attachedTo === undefined).map(session => ({
         id: session.sessionId,
         status: session.sessionCompleted ? 'completed' : 'active',
         lastActivityTime: session.lastActivityTime,
@@ -838,6 +1176,8 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
       for (const watcher of projectDirWatchers.values()) watcher.close()
       projectDirWatchers.clear()
       for (const id of [...sessions.keys()]) disposeSession(id)
+      backgroundSessionParents.clear()
+      pendingBackgroundSessions.clear()
       sessionOwners.clear()
       clients.clear()
       sendToClients = () => {}

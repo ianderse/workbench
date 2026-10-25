@@ -9,6 +9,7 @@ import {
   spawnSubagentNode, subagentDedupFor,
 } from './protocol'
 import {
+  ACTIVE_SESSION_AGE_S,
   HASH_PREFIX_MAX,
   HIDDEN_TOOLS,
   ORCHESTRATOR_NAME,
@@ -23,6 +24,9 @@ interface TranscriptParserDelegate {
   getSession(sessionId: string): WatchedSession | undefined
   /** Read whatever a sub-agent's transcript file has left, before it's finished */
   flushSubagent(sessionId: string, launchId: string): void
+  /** The session opened a background session of its own, named by the first
+   *  characters of its id (see announcedBackgroundSessionId) */
+  announceBackgroundSession(idPrefix: string, sessionId: string): void
 }
 
 /** Type guard: check if a value is a non-null object */
@@ -218,6 +222,26 @@ function typedForkedSkillAgentId(entry: Record<string, unknown>): string | undef
   }
 }
 
+/** How Claude Code prints the session it opened in the background, as a local command's output:
+ *  the new session's first characters, the only link between the two transcripts (its own
+ *  records nothing of its caller). The whole of the command's output block has to be the notice,
+ *  so no other output that happens to mention running in the background with an id in brackets
+ *  is taken for one; other markers may follow the block in the same entry */
+const BACKGROUND_SESSION_NOTICE =
+  /<local-command-stdout>Opening "[^\n]*?", running in the background \(([0-9a-f][0-9a-f-]{5,})\)<\/local-command-stdout>/
+
+/**
+ * The background session a line announces, by the start of its id: Claude Code can answer a
+ * command (/code-review and the like) in a session of its own, with its own transcript and its own
+ * sub-agents, and records that only as the local command's output in the session that opened it.
+ * The work happens there while this session sits idle, so the relay follows that session and shows
+ * its work as this one's (see relay.ts).
+ */
+export function announcedBackgroundSessionId(entry: Record<string, unknown>): string | undefined {
+  if (entry.type !== 'system' || entry.subtype !== 'local_command' || typeof entry.content !== 'string') return undefined
+  return BACKGROUND_SESSION_NOTICE.exec(entry.content)?.[1]
+}
+
 /** Whether a transcript line is the agent working (a message, a tool call or
  *  result), as opposed to bookkeeping such as titles, queue entries or local commands */
 export function isActivityLine(line: string): boolean {
@@ -268,6 +292,10 @@ export class TranscriptParser {
       session.launches.set(launchedId, { parent: ORCHESTRATOR_NAME, seenLive: true, background: true, fork: true, finished: false })
       spawnSubagentNode(this.delegate, session, launchedId)
     }
+
+    // A session opened in the background works on the session's behalf: the relay follows it
+    const backgroundSessionId = agentName === ORCHESTRATOR_NAME ? announcedBackgroundSessionId(parsed) : undefined
+    if (backgroundSessionId) this.delegate.announceBackgroundSession(backgroundSessionId, sessionId)
 
     // A background task finished. Only Agent/Task launches we're tracking are
     // acted on; background Bash and other tasks send the same block.
@@ -572,6 +600,13 @@ export class TranscriptParser {
         const launchedId = backgroundAgentLaunchId(raw)
         if (launchedId && !session.launches.has(launchedId)) {
           session.launches.set(launchedId, { parent: ORCHESTRATOR_NAME, seenLive: false, background: true, fork: true, finished: false })
+        }
+        // A background session opened before we attached may still be working,
+        // if it was opened recently enough to be: the rest are history
+        const backgroundSessionId = announcedBackgroundSessionId(raw)
+        const announcedAt = typeof raw.timestamp === 'string' ? Date.parse(raw.timestamp) : NaN
+        if (backgroundSessionId && Date.now() - announcedAt <= ACTIVE_SESSION_AGE_S * 1000) {
+          this.delegate.announceBackgroundSession(backgroundSessionId, session.sessionId)
         }
         // A background sub-agent that already sent its <task-notification> is finished
         const finishedLaunchId = taskNotificationLaunchId(raw, session.launches)
