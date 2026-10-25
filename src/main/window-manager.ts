@@ -2,7 +2,8 @@
  * Project windows: one window per project, so several projects can be worked on at once.
  *
  * The first window restores the project it showed last; further windows are opened for a
- * project from the Projects page ("New window"). Each window tells the main process which
+ * project from the Projects page ("New window"). The open windows are saved
+ * (window-session.ts) and all come back after a restart. Each window tells the main process which
  * project it shows (`WINDOW_REPORT_PROJECT`), so the tray menu can list the open projects
  * and the Projects page can focus a project that already has a window.
  */
@@ -15,6 +16,8 @@ interface WindowEntry {
   window: BrowserWindow;
   /** Project the window shows: the one it was opened for, then what its renderer reports */
   projectId: string | null;
+  /** Opened for a project, rather than being the window that restores the one it showed last */
+  assigned: boolean;
 }
 
 const entries = new Map<number, WindowEntry>();
@@ -53,7 +56,7 @@ export function onProjectWindowsChanged(listener: () => void): () => void {
 /** Track a new window; `projectId` is the project it was opened for */
 export function registerWindow(window: BrowserWindow, projectId: string | null): void {
   const id = window.id;
-  entries.set(id, { window, projectId });
+  entries.set(id, { window, projectId, assigned: projectId !== null });
   lastFocusedId = id;
   window.on('focus', () => {
     lastFocusedId = id;
@@ -83,6 +86,14 @@ export function getWindowProject(windowId: number): string | null {
 /** Every live window with the project it shows */
 export function listProjectWindows(): ProjectWindowInfo[] {
   return liveEntries().map((entry) => ({ windowId: entry.window.id, projectId: entry.projectId }));
+}
+
+/**
+ * Live windows with the project each shows and whether it was opened for it, in window order.
+ * Windows hidden to the tray are included (they are open); one closing for real is not.
+ */
+export function listWindowEntries(): { window: BrowserWindow; projectId: string | null; assigned: boolean }[] {
+  return liveEntries().map(({ window, projectId, assigned }) => ({ window, projectId, assigned }));
 }
 
 /** Live windows, in creation order (the first one is the window the app started with) */

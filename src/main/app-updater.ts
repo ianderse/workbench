@@ -19,6 +19,7 @@
 
 import { accessSync, constants as fsConstants } from 'fs';
 import { allowWindowClose } from './app-tray';
+import { freezeWindowSession } from './window-session';
 import { safeSendToRenderer } from './ipc-handlers/utils';
 import path from 'path';
 import { autoUpdater } from 'electron-updater';
@@ -534,6 +535,7 @@ export function quitAndInstall(): boolean {
   }
 
   console.warn('[app-updater] Quitting and installing update');
+  freezeWindowSession(); // quitAndInstall closes the windows before before-quit fires
   allowWindowClose(); // don't let hide-to-tray block the updater from closing the window
   autoUpdater.quitAndInstall(false, true);
   return true;

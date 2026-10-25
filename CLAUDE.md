@@ -456,6 +456,14 @@ lists them as accounts (`ClaudeProfile.detected`): usable and renamable, never r
 runs without `CLAUDE_CONFIG_DIR`, keeps its sign-in in `~/.claude.json` and its plain keychain entry
 (`config-dir-paths.ts`).
 
+**Windows** — One window per project (`src/main/window-manager.ts` registry; a window opened for a project gets it as a
+preload argument, so its renderer never switches to the shared restored project). The open windows are saved to
+`userData/window-session.json` (`window-session.ts`, pure rules and the debounced `WindowSessionSaver` in
+`window-session-state.ts`) and `planRestore()` reopens them at startup (missing projects skipped, one window per
+project, bounds clamped to the connected displays). `freezeWindowSession()` runs on `before-quit`, `will-quit` and
+before the updater's `quitAndInstall`, so windows closing during a quit never shrink the list; only a window closed
+while the app keeps running is removed. A killed process (SIGTERM) leaves the last written list.
+
 **Terminals** (`src/main/terminal/`) — `pty-daemon.ts` / `pty-manager.ts` (PTY processes), `terminal-lifecycle.ts`,
 `cli-integration-handler.ts`. Renderer uses xterm.js 6 with WebGL, fit, web-links, and serialize addons.
 

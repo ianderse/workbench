@@ -73,6 +73,14 @@ import { notifyProjectWindowsChanged } from './ipc-handlers/window-handlers';
 import { safeSendToRenderer, setRendererWindowsProvider } from './ipc-handlers/utils';
 import type { AppSettings, AuthFailureInfo } from '../shared/types';
 import { projectStore } from './project-store';
+import { planRestore, type RestoreItem } from './window-session-state';
+import {
+  enableWindowSession,
+  freezeWindowSession,
+  getDisplayWorkAreas,
+  loadWindowSession,
+  scheduleWindowSessionSave
+} from './window-session';
 import { migrateProjectDataDirs } from './data-dir-migration';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -320,7 +328,7 @@ function fillScreenOnMaximize(window: BrowserWindow): void {
  * Create an app window. `assignedProjectId` is the project the window opens (the Projects
  * page's "New window"); the first window passes null and restores the project it showed last.
  */
-function createWindow(assignedProjectId: string | null = null): BrowserWindow {
+function createWindow(assignedProjectId: string | null = null, restored: RestoreItem | null = null): BrowserWindow {
   // Get the primary display's work area (accounts for taskbar, dock, etc.)
   // Wrapped in try/catch to handle potential failures with fallback to safe defaults
   let workAreaSize: { width: number; height: number };
@@ -360,9 +368,12 @@ function createWindow(assignedProjectId: string | null = null): BrowserWindow {
   const minHeight: number = Math.min(WINDOW_MIN_HEIGHT, height);
 
   // Create the browser window
+  const savedBounds = restored?.bounds ?? null;
   const appWindow = new BrowserWindow({
-    width,
-    height,
+    width: savedBounds?.width ?? width,
+    height: savedBounds?.height ?? height,
+    ...(savedBounds ? { x: savedBounds.x, y: savedBounds.y } : {}),
+    ...(restored?.fullscreen ? { fullscreen: true } : {}),
     minWidth,
     minHeight,
     show: false,
@@ -389,6 +400,15 @@ function createWindow(assignedProjectId: string | null = null): BrowserWindow {
   });
 
   registerWindow(appWindow, assignedProjectId);
+  if (restored?.maximized && !restored.fullscreen) appWindow.maximize();
+  // Position, size and maximized state are part of the saved window list
+  appWindow.on('move', scheduleWindowSessionSave);
+  appWindow.on('resize', scheduleWindowSessionSave);
+  appWindow.on('maximize', scheduleWindowSessionSave);
+  appWindow.on('unmaximize', scheduleWindowSessionSave);
+  appWindow.on('enter-full-screen', scheduleWindowSessionSave);
+  appWindow.on('leave-full-screen', scheduleWindowSessionSave);
+  appWindow.on('focus', scheduleWindowSessionSave);
   if (isWSL()) {
     fillScreenOnMaximize(appWindow);
   }
@@ -698,8 +718,23 @@ app.whenReady().then(async () => {
     taskQueue.request();
   });
 
-  // Create the first window (it restores the project it showed last)
-  const firstWindow = createWindow();
+  // Reopen the windows the last run had open: the first one restores the project it showed
+  // last (or opens the first saved project), then one window per remaining saved project.
+  // Saving the list stays off until they all exist, so the partly built set can't replace it.
+  const restorePlan = planRestore(
+    loadWindowSession(),
+    (projectId) => projectStore.getProject(projectId) !== undefined,
+    getDisplayWorkAreas()
+  );
+  const restoredWindows = restorePlan.map((item) => {
+    const window = createWindow(item.assignedProjectId, item);
+    if (item.focus) window.once('ready-to-show', () => window.focus());
+    return window;
+  });
+  const firstWindow = restoredWindows[0] ?? createWindow();
+  appLog.warn(`[main] Opened ${restoredWindows.length || 1} window(s) at startup`);
+  // The renderers report their project a moment after loading; wait for that before saving
+  setTimeout(enableWindowSession, 3000);
 
   // Tray icon for background mode (a desktop without a tray just keeps the old close-to-quit behavior)
   try {
@@ -735,6 +770,7 @@ app.whenReady().then(async () => {
   onProjectWindowsChanged(() => {
     appTray?.refresh();
     notifyProjectWindowsChanged();
+    scheduleWindowSessionSave();
   });
 
   // Recolor the Windows/Linux window controls to match the active theme
@@ -887,6 +923,8 @@ app.on('before-quit', (event) => {
     return;
   }
   isQuitting = true;
+  // Windows close one by one from here on; the saved window list must stay as it was
+  freezeWindowSession();
 
   // Pause quit to perform async cleanup
   event.preventDefault();
@@ -934,6 +972,7 @@ app.on('before-quit', (event) => {
 
 // Safety net: no Live agent relay worker outlives the app (before-quit normally stopped it)
 app.on('will-quit', () => {
+  freezeWindowSession();
   liveAgentRelay.terminateNow();
 });
 

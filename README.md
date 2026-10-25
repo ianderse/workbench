@@ -55,6 +55,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 - UI work is always planned, by a design model (OMP role `design`, falling back to your `plan` role; Opus on Claude Code), and the saved plan starts with a design spec: layout and hierarchy, components, states, responsive behaviour, accessibility, copy and design system fit
 - Settings > Project > Tasks, "UI work built by": the design model builds the whole task (default), or the task's normal model builds it following the spec. Validation and the AI review treat deviations from the spec as findings; a model pinned on the task still wins
 
+**Windows**
+- Every open project window comes back after a restart, each with its project, position, size and maximized/fullscreen state (a display that is gone puts the window on the main one). Closing a window yourself removes it from the list; quitting (Cmd+Q, tray Quit, update restart) keeps it as it was
+
 **Development**
 - `npm run dev` waits for port 9222 to be free before starting Electron, so a quick restart keeps remote debugging (the previous instance can hold the port while it stops its agents)
 
