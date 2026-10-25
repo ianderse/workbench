@@ -103,6 +103,7 @@ describe('ClaudeTaskRun resync', () => {
     git(root, 'config', 'user.email', 'test@example.com');
     git(root, 'config', 'user.name', 'Test');
     git(root, 'config', 'commit.gpgsign', 'false');
+    git(root, 'config', 'core.autocrlf', 'false');
     commitFile(root, 'a.txt', 'one\ntwo\nthree\n', 'base');
     worktree = path.join(tmp, 'wt');
     git(root, 'worktree', 'add', '-q', '-b', 'workbench/002-b', worktree, 'main');
