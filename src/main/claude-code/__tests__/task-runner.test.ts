@@ -170,6 +170,26 @@ describe('ClaudeTaskRun', () => {
     expect(existsSync(path.join(specDir, 'task_logs.json'))).toBe(true);
   });
 
+
+  it('has the verdict on disk when QA_PASSED fires, so listeners reading claude_run.json see it (auto-merge race)', async () => {
+    scripts.push(
+      { messages: [result('s1', { structured_output: { plan: '# Plan' }, total_cost_usd: 0 })] },
+      { messages: [result('s1', { total_cost_usd: 0, result: 'Implemented' })] },
+      { messages: [result('s1', {
+        total_cost_usd: 0,
+        structured_output: { status: 'passed', summary: 'All good', checks: [], findings: [] },
+      })] },
+    );
+    let verdictOnDisk: string | undefined;
+    await makeRun({}, {
+      onTaskEvent: (type: string) => {
+        if (type !== 'QA_PASSED') return;
+        const onDisk = JSON.parse(readFileSync(path.join(specDir, 'claude_run.json'), 'utf-8'));
+        verdictOnDisk = onDisk.reviewVerdict?.status;
+      },
+    }).run();
+    expect(verdictOnDisk).toBe('passed');
+  });
   it('skips planning and validation when not needed', async () => {
     triageMock.mockResolvedValue({ triage: triage() });
     scripts.push({ messages: [result('s2')] });

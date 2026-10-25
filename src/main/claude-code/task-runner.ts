@@ -733,6 +733,9 @@ export class ClaudeTaskRun {
 
   private async finish(): Promise<TaskRunOutcome> {
     await this.commitLeftovers();
+    // QA_PASSED/QA_FAILED move the task to Human Review, and listeners on that (autonomous
+    // auto-merge) read claude_run.json from disk: write the verdict now, not after the debounce
+    this.flushInfo();
     const validation = this.info.validation;
     const verdict = this.info.reviewVerdict;
     this.emitProgress('complete', 1, 'Ready for review');

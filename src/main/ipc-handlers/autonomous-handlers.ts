@@ -28,6 +28,7 @@ import {
   previewRevert,
   revertAutoMerge,
 } from '../autonomous/autonomous-service';
+import { resolveAutonomousConfig } from '../../shared/utils/autonomous';
 
 const errorMessage = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
@@ -46,6 +47,20 @@ export function registerAutonomousHandlers(getMainWindow: () => BrowserWindow | 
       clearAutoMergeBlocked(project, task);
     }
   });
+
+  // Tasks that passed AI review but were never merged (the app quit before the merge ran, or an
+  // earlier build read the verdict before it reached disk): merge them once the app has settled
+  setTimeout(() => {
+    for (const project of projectStore.getProjects()) {
+      if (!resolveAutonomousConfig(project.settings).enabled) continue;
+      for (const task of projectStore.getTasks(project.id)) {
+        if (task.status !== 'human_review' || task.reviewReason !== 'completed') continue;
+        if (task.claudeRun?.reviewVerdict?.status !== 'passed') continue;
+        appLog.info(`[Autonomous] ${task.specId}: passed AI review but not merged yet, merging now`);
+        void maybeAutoMerge(project, task).catch((error) => appLog.warn('[Autonomous] Auto-merge failed:', error));
+      }
+    }
+  }, 10_000);
 
   handleIpc(IPC_CHANNELS.AUTONOMOUS_STATUS, async (_, projectId: string): Promise<IPCResult<AutonomousStatus | null>> => {
     const project = projectStore.getProject(projectId);
