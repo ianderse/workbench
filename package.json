@@ -13,7 +13,7 @@
   },
   "scripts": {
     "postinstall": "node .github/scripts/postinstall.cjs",
-    "dev": "electron-vite dev -- --ozone-platform=x11 --remote-debugging-port=9222",
+    "dev": "node scripts/wait-for-free-port.mjs 9222 && electron-vite dev -- --ozone-platform=x11 --remote-debugging-port=9222",
     "build": "electron-vite build",
     "package:mac": "electron-builder --mac",
     "package:win": "electron-builder --win",

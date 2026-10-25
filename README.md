@@ -43,6 +43,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 - UI work is always planned, by a design model (OMP role `design`, falling back to your `plan` role; Opus on Claude Code), and the saved plan starts with a design spec: layout and hierarchy, components, states, responsive behaviour, accessibility, copy and design system fit
 - Settings > Project > Tasks, "UI work built by": the design model builds the whole task (default), or the task's normal model builds it following the spec. Validation and the AI review treat deviations from the spec as findings; a model pinned on the task still wins
 
+**Development**
+- `npm run dev` waits for port 9222 to be free before starting Electron, so a quick restart keeps remote debugging (the previous instance can hold the port while it stops its agents)
+
 **Task messaging under OMP**
 - OMP tasks can message parallel tasks: a per-run extension file (`omp -e`) adds `message_task` and `list_parallel_tasks`, which call Workbench's local tools server with the run's token. Messages for an OMP task are steered into the running step at its next turn (the step runs through `omp --mode rpc`; the Live messages switch turns that off, and a step that cannot start in RPC mode runs with `omp -p` instead), or wait in its inbox and join the next step's prompt. The Task messaging switch shows under OMP again
 - A step that resumes a session too big for the model's window (a plan made on a 1M-window model, implemented on a 128k local one) no longer drops out of RPC mode: omp compacts the session before it starts, which can take minutes on a local model, and Workbench now waits for it instead of killing the process after 30 s and repeating the step with `omp -p`. Only a refused prompt, a missing ready message, an early exit or no output at all for 10 minutes ends the RPC run, and the warning names the task and phase

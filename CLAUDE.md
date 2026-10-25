@@ -110,7 +110,7 @@ remains about what the user wants.
 
 ```bash
 npm install            # Install dependencies (postinstall rebuilds native modules; on Linux it also fixes chrome-sandbox)
-npm run dev            # Development mode with HMR and remote debugging on port 9222 (Electron MCP)
+npm run dev            # Development mode with HMR and remote debugging on port 9222 (Electron MCP); waits for the port to be free first
 npm test               # Type check (strict) + all tests (Vitest)
 ```
 
