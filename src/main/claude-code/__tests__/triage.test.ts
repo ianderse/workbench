@@ -112,6 +112,24 @@ describe('applyAgentOverrideToTriage', () => {
     expect(applyAgentOverrideToTriage(once, { model: 'opus' })).toBe(once);
   });
 
+  it('reads uiWork from the triage answer; a missing or non-boolean field is false', async () => {
+    const answer = { model: 'sonnet', effort: 'medium', needsPlan: false, scope: 'small', title: 'x', reasoning: 'r', verification: [] };
+    runClaudeTextMock.mockResolvedValue({ structured: { ...answer, uiWork: true } });
+    expect((await triageTask({ description: 'd', cwd, settings: DEFAULT_CLAUDE_CODE_TASK_SETTINGS })).triage.uiWork).toBe(true);
+    runClaudeTextMock.mockResolvedValue({ structured: answer });
+    expect((await triageTask({ description: 'd', cwd, settings: DEFAULT_CLAUDE_CODE_TASK_SETTINGS })).triage.uiWork).toBe(false);
+    runClaudeTextMock.mockResolvedValue({ structured: { ...answer, uiWork: 'yes' } });
+    expect((await triageTask({ description: 'd', cwd, settings: DEFAULT_CLAUDE_CODE_TASK_SETTINGS })).triage.uiWork).toBe(false);
+  });
+
+  it('asks for uiWork in the schema and the rules', async () => {
+    runClaudeTextMock.mockResolvedValue({ structured: {} });
+    await triageTask({ description: 'd', cwd, settings: DEFAULT_CLAUDE_CODE_TASK_SETTINGS });
+    const call = runClaudeTextMock.mock.calls.at(-1)?.[0] as { jsonSchema: { required: string[] }; appendSystemPrompt: string };
+    expect(call.jsonSchema.required).toContain('uiWork');
+    expect(call.appendSystemPrompt).toContain('uiWork is true when the task involves frontend or UI work');
+  });
+
   it('is applied to the triage run result', async () => {
     runClaudeTextMock.mockResolvedValue({ structured: { model: 'haiku', effort: 'low', needsPlan: false, scope: 'small', title: 'x', reasoning: 'r', verification: [] } });
     const { triage } = await triageTask({ description: 'd', cwd, settings: DEFAULT_CLAUDE_CODE_TASK_SETTINGS, backend: 'omp', override: { model: 'omlx/Big' } });

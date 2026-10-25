@@ -7,6 +7,7 @@ import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows, SegmentedControl } from '../settings/SettingsRow';
 import { DEFAULT_AUTONOMOUS_BRANCH, resolveAutonomousConfig } from '../../../shared/utils/autonomous';
 import { resolveSelfSplit } from '../../../shared/utils/task-split';
+import { resolveUiImplementer } from '../../../shared/utils/ui-work';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
 import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
@@ -138,6 +139,21 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
             checked={settings.specReview !== false}
             onCheckedChange={(checked) => setSettings({ ...settings, specReview: checked })}
             aria-label={t('projectPages.tasks.specReview')}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label={t('projectPages.tasks.uiImplementer')}
+          description={t('projectPages.tasks.uiImplementerDescription')}
+        >
+          <SegmentedControl
+            value={resolveUiImplementer(settings)}
+            options={[
+              { value: 'design', label: t('projectPages.tasks.uiImplementerDesign') },
+              { value: 'default', label: t('projectPages.tasks.uiImplementerTask') },
+            ]}
+            onValueChange={(value) => setSettings({ ...settings, uiImplementer: value })}
+            ariaLabel={t('projectPages.tasks.uiImplementer')}
           />
         </SettingsRow>
 

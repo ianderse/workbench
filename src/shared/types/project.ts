@@ -56,6 +56,11 @@ export interface ProjectSettings {
   groomQueueAfterMerge?: boolean;
   /** When a task reaches Human Review, turn the work its review summary flags into new tickets (default: true) */
   followUpTickets?: boolean;
+  /**
+   * Who builds UI work: `design` (default) = the design model does the whole task,
+   * `default` = triage's model implements following the design spec
+   */
+  uiImplementer?: 'design' | 'default';
   /** Review a spec when all its tickets are done (default on) */
   specReview?: boolean;
   /**

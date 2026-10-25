@@ -612,5 +612,14 @@
     "usesOmp": "This task runs on OMP with a local model",
     "pinnedTitle": "Model pinned on the task: {{model}}",
     "pinnedBadge": "Model: {{model}}"
+  },
+  "uiWork": {
+    "title": "UI work",
+    "description": "UI work is planned with a design spec by the design model. Auto lets triage decide",
+    "auto": "Auto",
+    "yes": "Yes",
+    "no": "No",
+    "label": "UI",
+    "labelTitle": "UI work: planned with a design spec by the design model"
   }
 }

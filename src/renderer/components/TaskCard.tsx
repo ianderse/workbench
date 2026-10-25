@@ -25,6 +25,7 @@ import { useProjectStore } from '../stores/project-store';
 import { activeAutoMerge } from '../../shared/utils/autonomous';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
+import { isUiTask } from '../../shared/utils/ui-work';
 import { canResumeTask, isRunFinished, reviewInterruption } from '../../shared/utils/task-resume';
 import { StartOverDialog } from './StartOverDialog';
 
@@ -86,6 +87,7 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.metadata?.followUpFrom?.taskId === nextTask.metadata?.followUpFrom?.taskId &&
     prevTask.metadata?.followUpFrom?.needsDecision === nextTask.metadata?.followUpFrom?.needsDecision &&
     prevTask.metadata?.agentOverride === nextTask.metadata?.agentOverride &&
+    isUiTask(prevTask) === isUiTask(nextTask) &&
     prevTask.metadata?.specReview?.round === nextTask.metadata?.specReview?.round
   );
 
@@ -301,6 +303,7 @@ export const TaskCard = memo(function TaskCard({
   // Stable references from the store; the label is derived here
   const agentBackendSettings = useSettingsStore((state) => state.settings.agentBackend);
   const pinnedLabel = pinnedModelLabel(task.metadata?.agentOverride, agentBackendSettings?.kind ?? 'claude', agentBackendSettings?.omp?.models);
+  const uiWork = isUiTask(task);
   // Failed tasks show the usage badge's "sign in again" alert icon next to the title; stuck
   // tasks show it in the color of their "Stuck" label
   const hasErrors = taskHasErrors(task);
@@ -407,6 +410,11 @@ export const TaskCard = memo(function TaskCard({
         <div className="mt-3 flex items-center justify-between">
           <span className="flex min-w-0 items-baseline gap-1.5 text-sm text-(--nav-label-color)">
             <span className="shrink-0">{relativeTime}</span>
+            {uiWork && (
+              <span className="shrink-0 text-xs font-medium" title={t('tasks:uiWork.labelTitle')}>
+                {t('tasks:uiWork.label')}
+              </span>
+            )}
             {pinnedLabel && (
               <span className="truncate text-xs" title={t('agentPicker.pinnedTitle', { model: pinnedLabel })}>
                 {pinnedLabel}

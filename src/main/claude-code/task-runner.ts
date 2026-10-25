@@ -33,7 +33,9 @@ import { formatInboxSection, formatMessage } from '../task-messaging/broker';
 import { TASK_RUN_TOOL_NAMES } from '../task-messaging/tools';
 import type { TaskMessage, TaskRunMessaging } from '../task-messaging/types';
 import { taskSessionName } from '../../shared/utils/task-messaging';
-import { triageTask, fixedTriage, applyPlanningPolicy, applyAgentOverrideToTriage } from './triage';
+import { triageTask, fixedTriage, applyPlanningPolicy, applyAgentOverrideToTriage, applyUiWorkPlanning } from './triage';
+import { DESIGN_REVIEW_PROMPT, DESIGN_SPEC_PROMPT, DESIGN_VALIDATION_PROMPT, designModelFor, extractDesignSpec } from './ui-design';
+import { resolveUiWork, usesDesignModel, type UiImplementer } from '../../shared/utils/ui-work';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
 import { buildParallelTasksPrompt } from '../task-changelog';
 import { git } from '../utils/git-exec';
@@ -199,6 +201,10 @@ export interface TaskRunConfig {
   backend: AgentBackendKind;
   /** Model/effort the user pinned on the task; they replace triage's choice */
   agentOverride?: AgentOverride;
+  /** The ticket's own UI work choice (metadata.uiWork); unset = triage decides */
+  uiWork?: boolean;
+  /** Who builds UI work: the design model (default) or triage's model following the design spec */
+  uiImplementer?: UiImplementer;
   /**
    * The task may split itself into smaller tickets (propose: after approval, auto: at once).
    * Unset when splitting is off, the ticket was made by a split or it split already.
@@ -689,7 +695,8 @@ export class ClaudeTaskRun {
     const implementStarted = this.info.phases.some((p) => p.name === 'implement');
     // A split was proposed after the last plan: carry out what was decided
     if (this.info.pendingSplit && !this.info.plan && !implementStarted) await this.resolvePendingSplit();
-    if (triage.needsPlan && !this.info.plan && !implementStarted) {
+    // UI work is always planned: the plan carries the design spec
+    if ((triage.needsPlan || this.isUiWork(triage)) && !this.info.plan && !implementStarted) {
       const planned = await this.runSessionPhase('plan');
       if (planned) return planned;
     }
@@ -792,6 +799,16 @@ export class ClaudeTaskRun {
     if (this.config.backend !== 'omp') return model;
     const selection = resolveOmpSelection(model, getAgentBackendSettings().omp, role, getOmpRoles());
     return selection.concrete ?? selection.selector ?? 'OMP default model';
+  }
+
+  /** Whether the task counts as UI work: the ticket's own choice, else triage's */
+  private isUiWork(triage: TaskTriage | undefined = this.info.triage): boolean {
+    return resolveUiWork(this.config.uiWork, triage?.uiWork);
+  }
+
+  /** Whether a step runs on the design model (plan always, implement/revise/validate unless the project builds UI with the task model) */
+  private runsOnDesignModel(name: SessionPhaseName): boolean {
+    return usesDesignModel(name, this.isUiWork(), this.config.uiImplementer ?? 'design');
   }
 
   /** Name of the task's backend, for log lines */
@@ -1041,16 +1058,16 @@ export class ClaudeTaskRun {
         triage = fixedTriage(settings, this.config.title, 'fallback', `Triage failed (${message}); used the default model and effort`);
       }
     }
-    triage = applyPlanningPolicy(applyAgentOverrideToTriage(triage, this.config.agentOverride), settings);
+    triage = applyUiWorkPlanning(applyPlanningPolicy(applyAgentOverrideToTriage(triage, this.config.agentOverride), settings), this.config.uiWork);
     if (revision) {
-      // A change request is applied directly in the session (no separate plan) and keeps the title
-      triage = { ...triage, needsPlan: false, title: this.info.triage?.title || this.config.title };
+      // A change request is applied directly in the session (no separate plan) and keeps the title and the UI work call
+      triage = { ...triage, needsPlan: false, title: this.info.triage?.title || this.config.title, uiWork: this.info.triage?.uiWork ?? triage.uiWork };
     }
     this.info.triage = triage;
     this.endPhase(phase, triageCost !== undefined ? { costUsd: triageCost } : {});
     this.updateTotalCost();
     this.log.add('planning', 'info',
-      `${this.triageLabel(triage)}, ${triage.needsPlan ? 'plan first' : 'no plan'} (${triage.scope})`,
+      `${this.triageLabel(triage)}, ${triage.needsPlan ? 'plan first' : 'no plan'} (${triage.scope})${this.isUiWork(triage) ? ', UI work (design model)' : ''}`,
       { detail: triage.reasoning || undefined });
     this.emitLog(`${triage.pinned ? 'Triage (model pinned)' : 'Triage'}: ${this.triageLabel(triage)} / ${triage.needsPlan ? 'plan first' : 'no plan'}. ${triage.reasoning}`);
     this.saveInfo();
@@ -1063,10 +1080,13 @@ export class ClaudeTaskRun {
     resync?: { request: ResyncRequest; fix?: ResyncCheck },
   ): Promise<TaskRunOutcome | null> {
     const triage = this.info.triage ?? fixedTriage(this.config.settings, this.config.title, 'fallback', 'No triage recorded');
-    const model = name === 'plan' && !triage.pinned?.model ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
-    const effort: ClaudeEffort = name === 'plan' && !triage.pinned?.effort && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
+    // A task pin still wins; UI work puts the design model on the steps it covers
+    const design = this.runsOnDesignModel(name);
+    const model = design && !triage.pinned?.model ? designModelFor(this.config.backend, getOmpRoles())
+      : name === 'plan' && !triage.pinned?.model ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
+    const effort: ClaudeEffort = (name === 'plan' || design) && !triage.pinned?.effort && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
     const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' || name === 'spec_review' ? 'validation' : 'coding';
-    const role = ompRoleForJob(name);
+    const role = ompRoleForJob(design ? 'design' : name);
     const reviewingSpec = name === 'spec_review';
 
     // A session lives in the runtime it ran in (native or WSL); after a switch, start a new one
@@ -1149,7 +1169,7 @@ export class ClaudeTaskRun {
 
     const sessionId = resumeSessionId ?? randomUUID();
     const phase = this.beginPhase(name, {
-      model: this.phaseModel(model, ompRoleForJob(name === 'plan' || reviewingSpec ? 'plan' : 'implement')),
+      model: this.phaseModel(model, role),
       effort,
       permissionMode: name === 'plan' ? 'plan' : this.config.isolated === false ? 'auto' : 'bypassPermissions',
       // OMP picks the session id itself: it is stored when the run reports it
@@ -1162,6 +1182,7 @@ export class ClaudeTaskRun {
     const outcome = await this.runClaude({
       name,
       model,
+      role,
       effort,
       sessionId,
       resume: !!resumeSessionId,
@@ -1527,7 +1548,7 @@ export class ClaudeTaskRun {
         text = `${taskBlock(this.config)}${restartNotes(this.config, feedbackImages)}
 
 Explore the codebase as needed and produce an implementation plan for this task. Don't change any files yet.
-The plan should name the files to change, the approach and why, edge cases, and how to verify the result (${verificationHint(triage)}).${this.splitActive() ? splitPlanPrompt(this.config.backend === 'omp') : ''}`;
+The plan should name the files to change, the approach and why, edge cases, and how to verify the result (${verificationHint(triage)}).${this.isUiWork(triage) ? DESIGN_SPEC_PROMPT : ''}${this.splitActive() ? splitPlanPrompt(this.config.backend === 'omp') : ''}`;
         break;
       case 'implement':
         if (continuing && resume) {
@@ -1556,7 +1577,7 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
 2. ${this.reviewSection && this.config.backend === 'omp'
   ? this.reviewSection
   : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${this.config.backend === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
-3. Commit any remaining changes.
+3. Commit any remaining changes.${this.isUiWork(triage) && this.info.plan ? DESIGN_VALIDATION_PROMPT : ''}
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
       case 'spec_review':
@@ -1633,6 +1654,8 @@ no notes came with the request, so review the change against the task with fresh
   private async runClaude(params: {
     name: SessionPhaseName;
     model: string;
+    /** OMP role for the step (design on UI work) */
+    role?: OmpRole;
     effort: ClaudeEffort;
     sessionId: string;
     resume: boolean;
@@ -1666,6 +1689,8 @@ no notes came with the request, so review the change against the task with fresh
   private async runClaudeProcess(params: {
     name: SessionPhaseName;
     model: string;
+    /** OMP role for the step (design on UI work) */
+    role?: OmpRole;
     effort: ClaudeEffort;
     sessionId: string;
     resume: boolean;
@@ -1844,6 +1869,8 @@ no notes came with the request, so review the change against the task with fresh
   private async runOmp(params: {
     name: SessionPhaseName;
     model: string;
+    /** OMP role for the step (design on UI work) */
+    role?: OmpRole;
     effort: ClaudeEffort;
     sessionId: string;
     resume: boolean;
@@ -1919,7 +1946,7 @@ no notes came with the request, so review the change against the task with fresh
         env: this.config.extraEnv,
         prompt: input,
         model: params.model,
-        role: ompRoleForJob(params.name),
+        role: params.role ?? ompRoleForJob(params.name),
         allowFallback: fallbackAttempt,
         effort: params.effort,
         // Planning is read-only (OMP has no plan permission mode): fewer tools and a note in the prompt
@@ -2078,7 +2105,7 @@ no notes came with the request, so review the change against the task with fresh
     const started = Date.now();
     try {
       const result = await runClaudeText({
-        prompt: `${taskBlock(this.config)}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>`,
+        prompt: `${taskBlock(this.config)}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`,
         appendSystemPrompt: REVIEW_SYSTEM_PROMPT,
         model: reviewModel,
         ompRole: ompRoleForJob('review'),

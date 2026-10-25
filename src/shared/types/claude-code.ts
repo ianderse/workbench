@@ -87,6 +87,8 @@ export interface TaskTriage {
   source: 'auto' | 'fixed' | 'fallback';
   /** The user pinned the model and/or effort on the task (they replace what triage chose) */
   pinned?: { model?: boolean; effort?: boolean };
+  /** The ticket involves frontend / UI work: it gets a design spec from the design model (missing = false) */
+  uiWork?: boolean;
 }
 
 /**

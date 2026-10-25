@@ -176,6 +176,15 @@ workbench/
   - State in `<specDir>/claude_run.json` (`ClaudeRunInfo`: session id, triage, plan, phases with cost, `system/init`
     info, subagents, validation) so stopped / rate-limited runs continue; logs in `task_logs.json`. Claude Code's
     task list (TaskCreate/TaskUpdate, enabled with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`) is mirrored as the task's subtasks.
+- **UI work** (`ui-design.ts`, `shared/utils/ui-work.ts`) — triage's `uiWork` (schema field, missing = false) or the
+  ticket's `metadata.uiWork` (true/false forces, set in the task dialog) makes a task UI work (`resolveUiWork`). It forces
+  planning on (`applyUiWorkPlanning`), and the plan step runs on the **design model** with a "Design spec" requirement
+  (layout, components, states, responsive, accessibility, copy, design system fit) saved in `plan.md`. Design model = Opus
+  on Claude Code; on OMP the `design` role, falling back to `plan` (omp fails with "Model not found" for an undefined
+  role, so `ompRoleSelector` only passes roles the config defines; the design role also beats the size mapping) and to
+  the Large size when neither exists. Project setting `uiImplementer` (`design` default | `default`, in
+  `.workbench/settings.json`) decides whether implement, revise and validate also use it. Validation and the OMP fresh-context
+  review check the result against the design spec. A per-task `agentOverride` pin wins; Spec review is unaffected.
 - **One-shot calls** (`run-text.ts`, `runClaudeText`) — `claude -p --output-format json --no-session-persistence`, tools
   off unless asked, optional `--json-schema`.
 - **Process + env** (`process.ts`, `env.ts`) — async spawn, stream-json parsing (`stream-types.ts`), best available

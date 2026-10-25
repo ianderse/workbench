@@ -56,19 +56,29 @@ export function modelAliasOf(model: string | undefined): ClaudeModelAlias | unde
 }
 
 /** OMP model roles Workbench picks by job (`omp --model @<role>`) */
-export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny';
+export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny' | 'design';
 
 /** Role name -> model selector, from the user's OMP config (`modelRoles`) */
 export type OmpRoleMap = Readonly<Record<string, string>>;
 
 /** The kinds of work a run can be for; each has an OMP role */
-export type OmpJob = 'plan' | 'implement' | 'validate' | 'revise' | 'resync' | 'review' | 'spec_review' | 'utility';
+export type OmpJob = 'plan' | 'implement' | 'validate' | 'revise' | 'resync' | 'review' | 'spec_review' | 'utility' | 'design';
 
-/** OMP role for a job: plan and spec_review -> plan, review -> judge, everything else -> default */
+/** OMP role for a job: design -> design, plan and spec_review -> plan, review -> judge, everything else -> default */
 export function ompRoleForJob(job: OmpJob): OmpRole {
+  if (job === 'design') return 'design';
   if (job === 'plan' || job === 'spec_review') return 'plan';
   if (job === 'review') return 'judge';
   return 'default';
+}
+
+/** Roles tried after a role the OMP config does not define, before `default`: UI design falls back to the plan role */
+const OMP_ROLE_FALLBACKS: Readonly<Record<string, readonly string[]>> = { design: ['plan'] };
+
+/** The role (the given one, else its fallbacks) the OMP config defines, or undefined; never `default` */
+export function ompConfiguredRole(role: string, roles: OmpRoleMap | undefined): string | undefined {
+  if (!roles) return undefined;
+  return [role, ...(OMP_ROLE_FALLBACKS[role] ?? [])].find((name) => roles[name]?.trim());
 }
 
 /**
@@ -78,7 +88,8 @@ export function ompRoleForJob(job: OmpJob): OmpRole {
  */
 export function ompRoleSelector(role: string, roles: OmpRoleMap | undefined): string | undefined {
   if (!roles) return undefined;
-  if (roles[role]?.trim()) return `@${role}`;
+  const configured = ompConfiguredRole(role, roles);
+  if (configured) return `@${configured}`;
   if (roles.default?.trim()) return '@default';
   return undefined;
 }

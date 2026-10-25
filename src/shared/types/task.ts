@@ -228,6 +228,9 @@ export interface TaskMetadata {
    */
   agentOverride?: AgentOverride;
 
+  /** Force the task to count as UI work (true) or not (false); unset = triage decides */
+  uiWork?: boolean;
+
   // Git/Worktree configuration
   baseBranch?: string;  // Override base branch for this task's worktree
   prUrl?: string;  // GitHub PR URL if task has been submitted as a PR

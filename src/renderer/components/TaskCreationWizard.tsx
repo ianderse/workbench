@@ -90,6 +90,7 @@ export function TaskCreationWizard({
 
   // Model and effort pinned on the task (unset = triage decides)
   const [agentOverride, setAgentOverride] = useState<AgentOverride | undefined>(undefined);
+  const [uiWork, setUiWork] = useState<boolean | undefined>(undefined);
 
   // "Break into tasks": 'form' -> 'working' (model call) -> 'review' -> creating
   const [step, setStep] = useState<'form' | 'working' | 'review'>('form');
@@ -148,7 +149,7 @@ export function TaskCreationWizard({
     savedAt: new Date()
   }), [projectId, description, images, mcpConnectors, pushNewBranches]);
 
-  const buildMetadata = (override: AgentOverride | undefined): TaskMetadata => {
+  const buildMetadata = (override: AgentOverride | undefined, forceUiWork?: boolean): TaskMetadata => {
     const metadata: TaskMetadata = { sourceType: 'manual' };
     if (images.length > 0) metadata.attachedImages = images;
     // Always include baseBranch - resolve PROJECT_DEFAULT_BRANCH to actual branch name
@@ -168,6 +169,7 @@ export function TaskCreationWizard({
     metadata.mcpConnectors = mcpConnectors;
     const pinned = normalizeAgentOverride(override);
     if (pinned) metadata.agentOverride = pinned;
+    if (forceUiWork !== undefined) metadata.uiWork = forceUiWork;
     return metadata;
   };
 
@@ -181,7 +183,7 @@ export function TaskCreationWizard({
     setError(null);
 
     try {
-      const metadata = buildMetadata(agentOverride);
+      const metadata = buildMetadata(agentOverride, uiWork);
 
       // The title is generated from the description (and refined by triage when the task starts)
       const task = await createTask(projectId, '', description.trim(), metadata);
@@ -553,6 +555,8 @@ export function TaskCreationWizard({
         onMcpConnectorsChange={setMcpConnectors}
         agentOverride={agentOverride}
         onAgentOverrideChange={setAgentOverride}
+        uiWork={uiWork}
+        onUiWorkChange={setUiWork}
         disabled={isCreating}
         error={error}
         onError={setError}

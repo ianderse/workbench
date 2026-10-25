@@ -12,7 +12,7 @@ import { useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Image as ImageIcon, Paperclip, X } from 'lucide-react';
 import { SettingsSection } from '../settings/SettingsSection';
-import { SettingsRows, SettingsRow } from '../settings/SettingsRow';
+import { SettingsRows, SettingsRow, SegmentedControl } from '../settings/SettingsRow';
 import { TaskAgentPicker } from './TaskAgentPicker';
 import type { AgentOverride } from '../../../shared/types/task';
 import { useImageUpload } from './useImageUpload';
@@ -46,6 +46,10 @@ interface TaskFormFieldsProps {
   agentOverride?: AgentOverride;
   onAgentOverrideChange?: (value: AgentOverride | undefined) => void;
 
+  // Force the task to count as UI work (true) or not (false); undefined = triage decides
+  uiWork?: boolean;
+  onUiWorkChange?: (value: boolean | undefined) => void;
+
   // Form state
   disabled?: boolean;
   error?: string | null;
@@ -70,6 +74,8 @@ export function TaskFormFields({
   onMcpConnectorsChange,
   agentOverride,
   onAgentOverrideChange,
+  uiWork,
+  onUiWorkChange,
   disabled = false,
   error,
   onError,
@@ -234,6 +240,20 @@ export function TaskFormFields({
               <SettingsRow label={t('tasks:agentPicker.title')} description={t('tasks:agentPicker.description')} htmlFor={`${prefix}task-model`}>
                 <TaskAgentPicker value={agentOverride} onChange={onAgentOverrideChange} disabled={disabled} idPrefix={idPrefix} />
               </SettingsRow>
+              {onUiWorkChange && (
+                <SettingsRow label={t('tasks:uiWork.title')} description={t('tasks:uiWork.description')}>
+                  <SegmentedControl
+                    value={uiWork === undefined ? 'auto' : uiWork ? 'yes' : 'no'}
+                    options={[
+                      { value: 'auto', label: t('tasks:uiWork.auto') },
+                      { value: 'yes', label: t('tasks:uiWork.yes') },
+                      { value: 'no', label: t('tasks:uiWork.no') },
+                    ]}
+                    onValueChange={(value) => onUiWorkChange(value === 'auto' ? undefined : value === 'yes')}
+                    ariaLabel={t('tasks:uiWork.title')}
+                  />
+                </SettingsRow>
+              )}
             </SettingsRows>
           </SettingsSection>
         )}

@@ -68,6 +68,9 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   // Model and effort pinned on the task (unset = triage decides)
   const taskAgentOverride = task.metadata?.agentOverride;
   const [agentOverride, setAgentOverride] = useState<AgentOverride | undefined>(taskAgentOverride);
+  // UI work forced on or off (unset = triage decides)
+  const taskUiWork = task.metadata?.uiWork;
+  const [uiWork, setUiWork] = useState<boolean | undefined>(taskUiWork);
 
   // Git options: the task's own base branch, listed even when the project no longer has it, and
   // whether its branch is pushed (unset follows the project's own setting)
@@ -84,6 +87,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       setImages(task.metadata?.attachedImages || []);
       setMcpConnectors(task.metadata?.mcpConnectors ?? getDefaultMcpConnectorIds(settings.mcpConnectors));
       setAgentOverride(task.metadata?.agentOverride);
+      setUiWork(task.metadata?.uiWork);
       setBaseBranch(task.metadata?.baseBranch || PROJECT_DEFAULT_BRANCH);
       setPushNewBranches(task.metadata?.pushNewBranches ?? gitOptions.projectPushNewBranches);
       setError(null);
@@ -103,6 +107,7 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       trimmedDescription !== task.description ||
       [...mcpConnectors].sort().join(',') !== [...taskConnectors].sort().join(',') ||
       JSON.stringify(normalizeAgentOverride(agentOverride) ?? null) !== JSON.stringify(normalizeAgentOverride(taskAgentOverride) ?? null) ||
+      uiWork !== taskUiWork ||
       baseBranch !== taskBaseBranch ||
       pushNewBranches !== taskPushNewBranches ||
       JSON.stringify(images) !== JSON.stringify(task.metadata?.attachedImages || []);
@@ -133,6 +138,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       mcpConnectors,
       // `undefined` clears the pin
       agentOverride: normalizeAgentOverride(agentOverride),
+      // `undefined` clears the choice, so triage decides again
+      uiWork,
       baseBranch: resolvedBaseBranch,
       useLocalBranch,
       // Unset again when it matches the project's own setting, so the task follows it
@@ -193,6 +200,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         onMcpConnectorsChange={setMcpConnectors}
         agentOverride={agentOverride}
         onAgentOverrideChange={setAgentOverride}
+        uiWork={uiWork}
+        onUiWorkChange={setUiWork}
         disabled={isSaving}
         error={error}
         onError={setError}

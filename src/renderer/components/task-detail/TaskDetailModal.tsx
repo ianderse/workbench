@@ -34,6 +34,7 @@ import { useSettingsStore } from '../../stores/settings-store';
 import { canResumeTask, isRunFinished, reviewInterruption } from '../../../shared/utils/task-resume';
 import { StartOverDialog } from '../StartOverDialog';
 import { pinnedModelLabel } from '../../../shared/utils/agent-override-labels';
+import { isUiTask } from '../../../shared/utils/ui-work';
 import {
   DIALOG_ANIMATION_CLASS,
   DIALOG_CLOSE_BUTTON_CLASS,
@@ -106,6 +107,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   const state = useTaskDetail({ task });
   const agentBackendSettings = useSettingsStore((s) => s.settings.agentBackend);
   const pinnedLabel = pinnedModelLabel(task.metadata?.agentOverride, agentBackendSettings?.kind ?? 'claude', agentBackendSettings?.omp?.models);
+  const uiWork = isUiTask(task);
   const [isUnarchiving, setIsUnarchiving] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
   // Why the last footer action failed, shown in the footer (cleared by the next action)
@@ -313,6 +315,11 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       <Badge variant="outline" className="text-xs font-mono">
                         {task.specId}
                       </Badge>
+                      {uiWork && (
+                        <Badge variant="outline" className="text-xs" title={t('tasks:uiWork.labelTitle')}>
+                          {t('tasks:uiWork.label')}
+                        </Badge>
+                      )}
                       {pinnedLabel && (
                         <Badge variant="outline" className="text-xs" title={t('tasks:agentPicker.pinnedTitle', { model: pinnedLabel })}>
                           {t('tasks:agentPicker.pinnedBadge', { model: pinnedLabel })}

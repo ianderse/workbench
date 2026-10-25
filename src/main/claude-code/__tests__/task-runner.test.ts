@@ -98,6 +98,7 @@ import { ClaudeTaskRun, loadClaudeRunInfo, ompSubagentGuidance, pickPhaseResult,
 import { ompSubagentsPerTask } from '../../../shared/types/agent-backend';
 import type { TaskMessage, TaskRunMessaging } from '../../task-messaging/types';
 import { SELF_IMPROVE_NUDGE } from '../../self-improve/nudge';
+import { resetOmpRolesForTests } from '../../agent-backend/omp-roles';
 
 function result(sessionId: string, fields: Record<string, unknown> = {}): ClaudeStreamMessage {
   return {
@@ -1043,6 +1044,128 @@ describe('ClaudeTaskRun', () => {
       expect(keepStdinOpen).toBe(false);
       for (const flag of ['--replay-user-messages', '--settings', '--allowedTools']) expect(args).not.toContain(flag);
       expect(argValue(args, '--name')).toMatch(/^wb-[a-z0-9]{6}-001-task$/);
+    });
+  });
+
+  describe('UI work', () => {
+    const passed = { status: 'passed', summary: 'ok', checks: [], findings: [] };
+
+    function uiScripts(): void {
+      scripts.push(
+        { messages: [result('u1', { structured_output: { plan: '# Plan\n## Design spec\n- layout' } })] },
+        { messages: [result('u1', { result: 'Implemented' })] },
+        { messages: [result('u1', { structured_output: passed })] },
+      );
+    }
+
+    const textOf = (index: number) => (spawned[index].input as Array<{ text?: string }>)[0].text ?? '';
+
+    afterEach(() => resetOmpRolesForTests());
+
+    it('plans a UI task even when triage says no plan, and the design model plans and builds it on Claude Code', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({}).run();
+      const [plan, implement, validate] = spawned.map((s) => s.args);
+      expect(argValue(plan, '--permission-mode')).toBe('plan');
+      expect(argValue(plan, '--model')).toBe('opus');
+      expect(argValue(implement, '--model')).toBe('opus');
+      expect(argValue(implement, '--effort')).toBe('high');
+      expect(argValue(validate, '--model')).toBe('opus');
+      expect(textOf(0)).toContain('## Design spec');
+      expect(textOf(0)).toContain('States: loading, empty, error and disabled');
+      expect(textOf(2)).toContain('Check the result against it');
+      expect(loadClaudeRunInfo(specDir)?.phases.filter((p) => p.name !== 'triage').map((p) => p.model)).toEqual(['opus', 'opus', 'opus']);
+      expect(existsSync(path.join(specDir, 'plan.md'))).toBe(true);
+    });
+
+    it('with uiImplementer default the task model implements and validates following the design spec', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({ uiImplementer: 'default' }).run();
+      expect(argValue(spawned[0].args, '--model')).toBe('opus');
+      expect(argValue(spawned[1].args, '--model')).toBe('sonnet');
+      expect(argValue(spawned[1].args, '--effort')).toBe('medium');
+      expect(argValue(spawned[2].args, '--model')).toBe('sonnet');
+      // The spec still gets checked
+      expect(textOf(2)).toContain('Design spec');
+    });
+
+    it('the ticket decides before triage: forced on plans and uses the design model, forced off is an ordinary task', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      uiScripts();
+      await makeRun({ uiWork: true }).run();
+      expect(spawned).toHaveLength(3);
+      expect(argValue(spawned[1].args, '--model')).toBe('opus');
+
+      spawned.length = 0;
+      specDir = mkdtempSync(path.join(tmpdir(), 'spec-'));
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      scripts.push({ messages: [result('u2')] }, { messages: [result('u2', { structured_output: passed })] });
+      await makeRun({ uiWork: false }).run();
+      expect(spawned).toHaveLength(2);
+      expect(argValue(spawned[0].args, '--model')).toBe('sonnet');
+      expect(textOf(0)).not.toContain('Design spec');
+      expect(textOf(1)).not.toContain('Design spec');
+    });
+
+    it('a pinned model on the task wins over the design model', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({ agentOverride: { model: 'haiku' } }).run();
+      expect(spawned).toHaveLength(3);
+      // The plan step keeps its existing behavior for an unpinned model only: a pin is used as is
+      for (const s of spawned) expect(argValue(s.args, '--model')).toBe('haiku');
+    });
+
+    it('is forced on even when the planning policy is never', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, planning: 'never' } }).run();
+      expect(argValue(spawned[0].args, '--permission-mode')).toBe('plan');
+    });
+
+    it('does not touch a task that is not UI work', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('n1')] }, { messages: [result('n1', { structured_output: passed })] });
+      await makeRun({}).run();
+      expect(spawned).toHaveLength(2);
+      expect(argValue(spawned[0].args, '--model')).toBe('sonnet');
+    });
+
+    it('on OMP the design role plans and builds, falling back to the plan role', async () => {
+      resetOmpRolesForTests({ default: 'omlx/flash', plan: 'anthropic/claude-opus-5-5', design: 'anthropic/design' });
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({ backend: 'omp' }).run();
+      expect(ompSpawned.map((o) => o.role)).toEqual(['design', 'design', 'design']);
+      expect(ompSpawned.map((o) => o.model)).toEqual(['design', 'design', 'design']);
+      expect(loadClaudeRunInfo(specDir)?.phases.filter((p) => p.name !== 'triage').map((p) => p.model)).toEqual(['anthropic/design', 'anthropic/design', 'anthropic/design']);
+
+      ompSpawned.length = 0;
+      specDir = mkdtempSync(path.join(tmpdir(), 'spec-'));
+      resetOmpRolesForTests({ default: 'omlx/flash', plan: 'anthropic/claude-opus-5-5' });
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({ backend: 'omp' }).run();
+      expect(loadClaudeRunInfo(specDir)?.phases.filter((p) => p.name !== 'triage').map((p) => p.model)).toEqual(['anthropic/claude-opus-5-5', 'anthropic/claude-opus-5-5', 'anthropic/claude-opus-5-5']);
+    });
+
+    it('on OMP with the task model implementing, only the plan uses the design role', async () => {
+      resetOmpRolesForTests({ default: 'omlx/flash', plan: 'anthropic/claude-opus-5-5' });
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({ backend: 'omp', uiImplementer: 'default' }).run();
+      expect(ompSpawned.map((o) => o.role)).toEqual(['design', 'default', 'default']);
+      expect(loadClaudeRunInfo(specDir)?.phases.filter((p) => p.name !== 'triage').map((p) => p.model)).toEqual(['anthropic/claude-opus-5-5', 'omlx/flash', 'omlx/flash']);
+    });
+
+    it('on OMP a pinned model wins over the design role', async () => {
+      resetOmpRolesForTests({ default: 'omlx/flash', plan: 'anthropic/claude-opus-5-5' });
+      triageMock.mockResolvedValue({ triage: triage({ uiWork: true }) });
+      uiScripts();
+      await makeRun({ backend: 'omp', agentOverride: { model: 'omlx/pinned' } }).run();
+      expect(ompSpawned.map((o) => o.model)).toEqual(['omlx/pinned', 'omlx/pinned', 'omlx/pinned']);
     });
   });
 });

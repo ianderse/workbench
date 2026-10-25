@@ -26,6 +26,7 @@ import type {
 import { CLAUDE_EFFORTS } from '../../shared/types/claude-code';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import type { AgentOverride } from '../../shared/types/task';
+import { resolveUiWork } from '../../shared/utils/ui-work';
 
 const TRIAGE_SYSTEM_PROMPT = `You triage coding tasks for an autonomous Claude Code run. You do NOT do the task.
 Look at the task and, briefly, at the project (structure, the files the task names, how it is tested), then decide how the task should run.
@@ -48,6 +49,10 @@ Prefer lowering effort over choosing a smaller model when a task is borderline.
 needsPlan is true when the approach is uncertain, the change touches several files or components, or the relevant code is unfamiliar and must be explored first.
 needsPlan is false when the scope is clear and the change is small: if you can describe the diff in one sentence, skip the plan.
 
+## UI work
+uiWork is true when the task involves frontend or UI work: components, screens, layout, styling, interaction, UX copy or visual design. UI work gets a design spec from a design model before it is built.
+uiWork is false for pure backend, CLI, data, infrastructure or tooling work, even when a UI merely displays its result.
+
 ## Scope
 trivial (one-line or text change), small (one file or a few lines), medium (a few files in one area), large (many files or areas, or new subsystems).
 
@@ -67,12 +72,13 @@ function buildSchema(allowedModels: readonly ClaudeModelAlias[]): Record<string,
       model: { type: 'string', enum: [...allowedModels] },
       effort: { type: 'string', enum: [...CLAUDE_EFFORTS] },
       needsPlan: { type: 'boolean' },
+      uiWork: { type: 'boolean', description: 'The task involves frontend / UI work (components, screens, layout, styling, interaction, UX copy, visual design)' },
       scope: { type: 'string', enum: ['trivial', 'small', 'medium', 'large'] },
       title: { type: 'string' },
       reasoning: { type: 'string', description: 'One or two sentences on why this model, effort and planning decision fit' },
       verification: { type: 'array', items: { type: 'string' } },
     },
-    required: ['model', 'effort', 'needsPlan', 'scope', 'title', 'reasoning', 'verification'],
+    required: ['model', 'effort', 'needsPlan', 'uiWork', 'scope', 'title', 'reasoning', 'verification'],
   };
 }
 
@@ -108,6 +114,15 @@ export function applyAgentOverrideToTriage(triage: TaskTriage, override: AgentOv
     reasoning: triage.reasoning ? `${note} ${triage.reasoning}` : note,
     pinned: { ...(model ? { model: true } : {}), ...(effort ? { effort: true } : {}) },
   };
+}
+
+/**
+ * UI work forces planning on: the plan step carries the design spec. Whether the task counts as UI work
+ * is the ticket's own choice (`metadata.uiWork`) or else triage's.
+ */
+export function applyUiWorkPlanning(triage: TaskTriage, uiWorkOverride: boolean | undefined): TaskTriage {
+  if (!resolveUiWork(uiWorkOverride, triage.uiWork) || triage.needsPlan) return triage;
+  return { ...triage, needsPlan: true };
 }
 
 /**
@@ -224,6 +239,8 @@ export async function triageTask(input: TriageInput): Promise<{ triage: TaskTria
     model,
     effort,
     needsPlan: raw.needsPlan === true,
+    // A missing field means no UI work
+    uiWork: raw.uiWork === true,
     scope,
     title,
     reasoning: typeof raw.reasoning === 'string' ? raw.reasoning : '',

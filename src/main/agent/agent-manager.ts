@@ -18,6 +18,7 @@ import { addToWorktree } from '../live-agent/project-setup';
 import { readSettingsFile } from '../settings-utils';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import { resolveEffectiveAgent } from '../../shared/utils/agent-override';
+import { resolveUiImplementer } from '../../shared/utils/ui-work';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { isSelfImproveEnabled, SELF_IMPROVE_NUDGE } from '../self-improve';
 import { getCompengDir } from '../self-improve/paths';
@@ -563,6 +564,8 @@ export class AgentManager extends EventEmitter {
       profileId: options.profileId,
       backend: effectiveAgent.backend,
       ...(task.metadata?.agentOverride ? { agentOverride: task.metadata.agentOverride } : {}),
+      ...(typeof task.metadata?.uiWork === 'boolean' ? { uiWork: task.metadata.uiWork } : {}),
+      uiImplementer: resolveUiImplementer(project.settings),
       // A Spec review ticket runs one read-only review step
       ...(task.metadata?.specReview ? { specReview: true } : {}),
       ...(resync ? { resync } : {}),
