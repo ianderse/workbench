@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canResumeTask, isRunFinished } from '../task-resume';
+import { canResumeTask, isRunFinished, stuckTaskStartupAction } from '../task-resume';
 import type { Task } from '../../types/task';
 import type { ClaudeRunInfo, ClaudeRunPhase } from '../../types/claude-code';
 
@@ -46,5 +46,23 @@ describe('canResumeTask', () => {
     expect(canResumeTask(task({ status: 'human_review', reviewReason: 'completed', claudeRun: stoppedImplement }))).toBe(false);
     expect(canResumeTask(task({ status: 'done', claudeRun: stoppedImplement }))).toBe(false);
     expect(canResumeTask(task({ status: 'error', metadata: { archivedAt: 'x' } }))).toBe(false);
+  });
+});
+
+describe('stuckTaskStartupAction', () => {
+  const unfinished = { phases: [{ name: 'implement', startedAt: '2026-10-25T03:47:01Z' }] } as never;
+  const finished = { phases: [{ name: 'validate', startedAt: '2026-10-25T04:30:00Z', endedAt: '2026-10-25T04:40:00Z' }] } as never;
+
+  it('resumes a task left running with an unfinished run, and moves a finished one to review', () => {
+    expect(stuckTaskStartupAction({ status: 'in_progress', metadata: {} } as never, unfinished, false)).toBe('resume');
+    expect(stuckTaskStartupAction({ status: 'ai_review', metadata: {} } as never, unfinished, false)).toBe('resume');
+    expect(stuckTaskStartupAction({ status: 'in_progress', metadata: {} } as never, finished, false)).toBe('review');
+  });
+
+  it('leaves tasks alone that are running, archived or were not left running', () => {
+    expect(stuckTaskStartupAction({ status: 'in_progress', metadata: {} } as never, unfinished, true)).toBeNull();
+    expect(stuckTaskStartupAction({ status: 'in_progress', metadata: { archivedAt: 'x' } } as never, unfinished, false)).toBeNull();
+    expect(stuckTaskStartupAction({ status: 'queue', metadata: {} } as never, unfinished, false)).toBeNull();
+    expect(stuckTaskStartupAction({ status: 'human_review', metadata: {} } as never, unfinished, false)).toBeNull();
   });
 });

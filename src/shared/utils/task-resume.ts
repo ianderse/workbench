@@ -31,3 +31,19 @@ export function canResumeTask(task: Task, validation = true): boolean {
   if (!stoppedOrFailed) return false;
   return !isRunFinished(task.claudeRun, validation);
 }
+
+/**
+ * What to do at startup with a task the last app session left running (its run died with the app):
+ * resume an unfinished run, move a finished one to review, or leave it (not left running, archived,
+ * or actually running).
+ */
+export function stuckTaskStartupAction(
+  task: Pick<Task, 'status' | 'metadata'>,
+  run: ClaudeRunInfo | undefined | null,
+  isRunning: boolean,
+  validation = true
+): 'resume' | 'review' | null {
+  if (task.metadata?.archivedAt || isRunning) return null;
+  if (task.status !== 'in_progress' && task.status !== 'ai_review') return null;
+  return isRunFinished(run, validation) ? 'review' : 'resume';
+}

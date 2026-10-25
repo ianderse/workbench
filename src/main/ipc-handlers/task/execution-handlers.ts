@@ -30,6 +30,9 @@ import { detectWorktreeBranch } from '../../utils/git-isolation';
 import { cancelFallbackTimer } from '../agent-events-handlers';
 import { safeSendToRenderer } from '../utils';
 import { readSettingsFile } from '../../settings-utils';
+import { resolveClaudeCodeTaskSettings } from '../../claude-code/settings';
+import { stuckTaskStartupAction } from '../../../shared/utils/task-resume';
+import type { ClaudeCodeTaskSettings } from '../../../shared/types/claude-code';
 import { getAPIProfileEnv } from '../../services/profile';
 import { getAgentBackendSettings } from '../../agent-backend/settings';
 import { resolveEffectiveAgent } from '../../../shared/utils/agent-override';
@@ -823,10 +826,7 @@ export function registerTaskExecutionHandlers(
    * Moves it to review when Claude Code finished implementing, otherwise back to the
    * backlog (or the requested status), and optionally restarts it.
    */
-  handleIpc(
-    IPC_CHANNELS.TASK_RECOVER_STUCK,
-    async (
-      _,
+  const recoverStuckTask = async (
       taskId: string,
       options?: { targetStatus?: TaskStatus; autoRestart?: boolean },
       projectId?: string
@@ -959,8 +959,41 @@ export function registerTaskExecutionHandlers(
           error: error instanceof Error ? error.message : 'Failed to recover task'
         };
       }
-    }
+    };
+
+  handleIpc(
+    IPC_CHANNELS.TASK_RECOVER_STUCK,
+    (_, taskId: string, options?: { targetStatus?: TaskStatus; autoRestart?: boolean }, projectId?: string) =>
+      recoverStuckTask(taskId, options, projectId)
   );
+
+  // Tasks the app left running when it quit (a crash, a restart, the Mac going down) are stuck:
+  // their runs are gone. Once the app has settled, continue each unfinished run in its own
+  // worktree and session, and move a finished one on to review, so an unattended queue keeps going
+  setTimeout(() => {
+    void resumeStuckTasksOnStart(recoverStuckTask, (taskId, projectId) => agentManager.isRunning(taskId, projectId));
+  }, STUCK_RESUME_DELAY_MS).unref?.();
+}
+
+/** After startup, before the autonomous check merges finished tasks (10 s) */
+const STUCK_RESUME_DELAY_MS = 8_000;
+
+async function resumeStuckTasksOnStart(
+  recover: (taskId: string, options: { autoRestart: boolean }, projectId: string) => Promise<IPCResult<unknown>>,
+  isRunning: (taskId: string, projectId: string) => boolean
+): Promise<void> {
+  const validation = resolveClaudeCodeTaskSettings((readSettingsFile() as { claudeCodeTasks?: Partial<ClaudeCodeTaskSettings> } | undefined)?.claudeCodeTasks).validation;
+  for (const project of projectStore.getProjects()) {
+    for (const task of projectStore.getTasks(project.id)) {
+      if (task.status !== 'in_progress' && task.status !== 'ai_review') continue;
+      const action = stuckTaskStartupAction(task, loadClaudeRunInfo(getMainSpecDir(project, task)), isRunning(task.id, project.id), validation);
+      if (!action) continue;
+      const finished = action === 'review';
+      appLog.info(`[TASK_RESUME_ON_START] ${task.specId}: left ${task.status} by the last session, ${finished ? 'moving its finished run to review' : 'resuming it'}`);
+      const result = await recover(task.id, { autoRestart: !finished }, project.id);
+      if (!result.success) appLog.warn(`[TASK_RESUME_ON_START] ${task.specId}: could not recover: ${result.error ?? 'unknown error'}`);
+    }
+  }
 }
 
 // Re-exported for callers that reset a task's run (e.g. discarding its worktree)
