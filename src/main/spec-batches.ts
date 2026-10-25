@@ -30,6 +30,7 @@ import {
   reviewTicketTitle,
   specTextCopy,
 } from '../shared/utils/spec-review';
+import { openFollowUpIdsOf } from '../shared/utils/dependents-wait';
 import { isOpenTicket } from '../shared/utils/open-tickets';
 import { writeFileAtomicSync } from './utils/atomic-file';
 import { appLog } from './app-logger';
@@ -259,7 +260,8 @@ async function evaluateLocked(projectId: string, batchId: string, deps: SpecBatc
     const metadata: TaskMetadata = {
       sourceType: 'manual',
       specReview: { batchId: batch.id, round: batch.round, maxRounds: batch.maxReviewRounds },
-      dependsOnTaskIds: members.map((t) => t.id),
+      // Follow-ups of the batch's tickets are part of its scope, so the review waits for them too
+      dependsOnTaskIds: [...new Set([...members.map((t) => t.id), ...openFollowUpIdsOf(tasks, members.map((t) => t.id))])],
       // The review reads what was merged, including merges that were not pushed
       useLocalBranch: true,
       ...(baseBranch ? { baseBranch } : {}),

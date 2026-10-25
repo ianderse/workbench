@@ -37,6 +37,7 @@ import { isOpenForFollowUp } from '../shared/utils/follow-up-tickets';
 import { appendNoteBlock } from '../shared/utils/queue-grooming';
 import { defaultGroomingDeps, type GroomingDeps } from './queue-grooming';
 import { inheritedMetadata } from './task-split';
+import { makeDependentsWait } from './dependents-wait';
 import { appLog } from './app-logger';
 
 export interface DecisionDeps extends GroomingDeps {
@@ -189,6 +190,12 @@ async function run(projectId: string, taskId: string, request: DecisionRequest, 
     if (queued.length > 0) await deps.queueTasks?.(projectId, queued, 'end');
   } catch (error) {
     appLog.warn('[Decision] Could not queue the new tickets:', error);
+  }
+  // Tickets waiting for the reviewed task (or for this decision ticket) also wait for the queued result
+  if (queued.length > 0) {
+    const sourceIds = [fresh.id, ...(from?.taskId ? [from.taskId] : [])];
+    const ownDeps = [...(fresh.metadata?.dependsOnTaskIds ?? [])];
+    await makeDependentsWait(deps, projectId, sourceIds, queued, Object.fromEntries(queued.map((id) => [id, ownDeps])));
   }
 
   await deps.updateTask(projectId, fresh.id, {

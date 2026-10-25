@@ -36,6 +36,7 @@ import {
 import { appendNoteBlock, isGroomableStatus } from '../shared/utils/queue-grooming';
 import { defaultGroomingDeps, readQueueProposals, type GroomingDeps } from './queue-grooming';
 import { inheritedMetadata } from './task-split';
+import { makeDependentsWait } from './dependents-wait';
 import { appLog } from './app-logger';
 import { taskHooks } from './task-hooks';
 
@@ -261,6 +262,9 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
   } catch (error) {
     appLog.warn('[FollowUps] Could not queue the follow-up tickets:', error);
   }
+  // Tickets that wait for the source (e.g. a validation report) also wait for the work its review turned up.
+  // Needs-decision tickets are left out: a pending decision must not block the queue
+  if (queued.length > 0) await makeDependentsWait(deps, projectId, [source.id], queued, Object.fromEntries(queued.map((id) => [id, [source.id]])));
 
   for (const plan of result.covered) {
     try {

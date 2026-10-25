@@ -285,7 +285,7 @@ and the open tickets (Planning, Queue, In progress; a pending split proposal's p
 Planning with a "Why this needs a decision" paragraph; `covered` adds a `kind: 'followUp'` context note. A ticket with
 `followUpFrom` can only create `planning` tickets (recursion guard); Spec review tickets are skipped; `metadata.followUpsStartedAt`
 is written before the model call (blocks repeats for 15 min) and `followUpsCreatedAt` after the tickets exist, so each task is handled once but a restart mid-call is retried; a startup catch-up (20 s after start, `catchUpFollowUpTickets`) handles finished Human Review tasks from the last 7 days that missed the `state` hook. The created tickets are kept in
-`metadata.followUpTickets` for the line in the Human Review panel. Project setting `followUpTickets` (default on).
+`metadata.followUpTickets` for the line in the Human Review panel. Project setting `followUpTickets` (default on). Queued follow-up and decision tickets are added to the `dependsOnTaskIds` of every unstarted Planning/Queue ticket that depends on their source task (and on the decision ticket) so a dependent like a report waits for them (`addDependencyToDependents()`, `shared/utils/dependents-wait.ts`; needs-decision tickets never block, a new Spec review ticket also waits for the open follow-ups of its batch).
 
 A `needsDecision` ticket (also stores `followUpFrom.why`) shows a "Your decision" panel (`task-detail/TaskDecisionPanel.tsx`) in the
 task dialog instead of Start. `decideTicket()` (`src/main/decision-tickets.ts`, IPC `QUEUE_DECIDE_TICKET`, pure rules in
