@@ -91,8 +91,10 @@ export function addDependencyToDependents(
 
 /**
  * Open follow-up tickets (and their own follow-ups) of the given tasks that a new dependent should
- * wait for: not archived, not Done, not waiting for a decision. Used when a Spec review ticket is
- * made after the follow-ups of its batch already exist.
+ * wait for: queued or running, not archived and not Done. Tickets in Planning never count (a pending
+ * decision, or work a decision only planned, such as a next slice), so they cannot hold a Spec review
+ * of the current spec back. Used when a Spec review ticket is made after the follow-ups of its batch
+ * already exist.
  */
 export function openFollowUpIdsOf(tasks: readonly Task[], sourceIds: readonly string[]): string[] {
   const sources = new Set(sourceIds.map((id) => findByRef(tasks, id)?.id).filter((id): id is string => !!id));
@@ -106,7 +108,7 @@ export function openFollowUpIdsOf(tasks: readonly Task[], sourceIds: readonly st
       if (!fromTask || !sources.has(fromTask.id) || sources.has(task.id)) continue;
       sources.add(task.id);
       grew = true;
-      if (task.metadata?.archivedAt || task.status === 'done' || isAwaitingDecisionTicket(task)) continue;
+      if (task.metadata?.archivedAt || task.status === 'done' || task.status === 'backlog') continue;
       found.push(task.id);
     }
   }

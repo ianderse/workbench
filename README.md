@@ -59,6 +59,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 **Windows**
 - Every open project window comes back after a restart, each with its project, position, size and maximized/fullscreen state (a display that is gone puts the window on the main one). Closing a window yourself removes it from the list; quitting (Cmd+Q, tray Quit, update restart) keeps it as it was
 
+**Spec review**
+- A Spec review waits only for queued or running follow-ups of its batch: tickets in Planning (for example a next slice that a decision only planned) no longer hold it back
+
 **Development**
 - `npm run dev` waits for port 9222 to be free before starting Electron, so a quick restart keeps remote debugging (the previous instance can hold the port while it stops its agents)
 

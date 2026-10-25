@@ -70,4 +70,14 @@ describe('openFollowUpIdsOf', () => {
     ];
     expect(openFollowUpIdsOf(tasks, ['s']).sort()).toEqual(['f1', 'f2']);
   });
+
+  it('leaves out tickets in Planning, such as a next slice a decision only planned', () => {
+    const tasks = [
+      task('s', 'done'),
+      task('dec', 'done', { followUpFrom: { taskId: 's', item: 'b', needsDecision: true } }),
+      task('next', 'backlog', { followUpFrom: { taskId: 'dec', item: 'decision' } }),
+      task('now', 'in_progress', { followUpFrom: { taskId: 'dec', item: 'decision' } }),
+    ];
+    expect(openFollowUpIdsOf(tasks, ['s'])).toEqual(['now']);
+  });
 });
