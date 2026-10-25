@@ -15,6 +15,8 @@ interface TaskMetadataProps {
   worktreeStatus?: WorktreeStatus | null;
   /** Action shown at the right end of the change summary row (Create PR) */
   worktreeAction?: ReactNode;
+  /** Keep the original request closed until opened (the "What was done" panel is read first) */
+  collapseDescription?: boolean;
 }
 
 // Height threshold for collapsing long descriptions (~8 lines)
@@ -23,9 +25,11 @@ const COLLAPSED_HEIGHT = 200;
 /** Task sources that mean an agent created the task (e.g. a suggestion in the Claude chat) */
 const AGENT_SOURCES = new Set(['insights', 'ideation', 'roadmap']);
 
-export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetadataProps) {
+export function TaskMetadata({ task, worktreeStatus, worktreeAction, collapseDescription = false }: TaskMetadataProps) {
   const { t } = useTranslation(['tasks', 'errors', 'taskReview']);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [descriptionOpen, setDescriptionOpen] = useState(!collapseDescription);
+  const descriptionOpenId = useId();
   const [hasOverflow, setHasOverflow] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const contentId = useId();
@@ -50,7 +54,12 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
       const hasContentOverflow = element.scrollHeight > COLLAPSED_HEIGHT;
       setHasOverflow(hasContentOverflow);
     }
-  }, [task.id, task.description]);
+  }, [task.id, task.description, descriptionOpen]);
+
+  // A different task starts closed again when the original request is collapsed
+  useLayoutEffect(() => {
+    setDescriptionOpen(!collapseDescription);
+  }, [task.id, collapseDescription]);
 
   const origin = task.metadata
     ? [
@@ -90,8 +99,21 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction }: TaskMetad
       </div>
 
       {/* Description - primary content in the claude info box */}
-      {displayDescription && (
-        <div className="max-w-full overflow-hidden rounded-xl bg-segment-track px-4 py-3">
+      {displayDescription && collapseDescription && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => setDescriptionOpen(!descriptionOpen)}
+          className="-ml-2 text-muted-foreground hover:text-foreground"
+          aria-expanded={descriptionOpen}
+          aria-controls={descriptionOpenId}
+        >
+          {descriptionOpen ? <ChevronUp className="mr-1 h-4 w-4" aria-hidden="true" /> : <ChevronDown className="mr-1 h-4 w-4" aria-hidden="true" />}
+          {t('tasks:workSummary.description')}
+        </Button>
+      )}
+      {displayDescription && descriptionOpen && (
+        <div id={descriptionOpenId} className="max-w-full overflow-hidden rounded-xl bg-segment-track px-4 py-3">
           {/* Rendered like the Claude chat's replies; long lines and images stay inside the box */}
           <MarkdownContent
             ref={contentRef}

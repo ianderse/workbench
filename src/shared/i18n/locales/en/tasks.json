@@ -53,6 +53,53 @@
     "failingChecks": "Failing checks",
     "progress": "Progress by round"
   },
+  "workSummary": {
+    "title": "What was done",
+    "titlePartial": "What was done so far (partial)",
+    "showMore": "Show more",
+    "showLess": "Show less",
+    "noSummary": "The agent did not write a summary",
+    "review": {
+      "passed": "Passed AI review in {{rounds}} of {{max}} rounds",
+      "failed": "Failed AI review after {{rounds}} of {{max}} rounds",
+      "none": "Not reviewed"
+    },
+    "checks": "{{passed}} of {{total}} checks passed",
+    "checksFailing": "{{passed}} of {{total}} checks passed. Failing: {{names}}",
+    "noChecks": "No checks recorded",
+    "findings": {
+      "none": "No open findings",
+      "summary": "Open findings: {{parts}}",
+      "critical_one": "{{count}} critical",
+      "critical_other": "{{count}} critical",
+      "major_one": "{{count}} major",
+      "major_other": "{{count}} major",
+      "minor_one": "{{count}} minor",
+      "minor_other": "{{count}} minor",
+      "show": "Show findings",
+      "hide": "Hide findings"
+    },
+    "changes": {
+      "heading": "Changes",
+      "summary_one": "{{count}} file changed, +{{additions}} -{{deletions}}",
+      "summary_other": "{{count}} files changed, +{{additions}} -{{deletions}}",
+      "commits_one": "{{count}} commit",
+      "commits_other": "{{count}} commits",
+      "more_one": "and {{count}} more file",
+      "more_other": "and {{count}} more files",
+      "none": "No file changes found",
+      "merged": "Merged changes"
+    },
+    "effort": {
+      "heading": "Effort",
+      "time": "{{time}} of work",
+      "cost": "{{cost}}",
+      "model": "Model: {{model}}",
+      "models": "Models: {{list}}",
+      "modelEntry": "{{phases}} on {{model}}"
+    },
+    "description": "Original request"
+  },
   "tooltips": {
     "archiveTask": "Archive task",
     "archiveAllDone": "Archive all done tasks",

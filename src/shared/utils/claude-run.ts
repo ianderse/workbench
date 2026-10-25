@@ -29,7 +29,7 @@ export function formatDurationMs(ms: number): string {
 }
 
 /** How long a run step took: its reported duration, or the time between its start and end */
-function getRunPhaseDurationMs(phase: ClaudeRunPhase): number | undefined {
+export function getRunPhaseDurationMs(phase: ClaudeRunPhase): number | undefined {
   if (phase.durationMs !== undefined) return phase.durationMs;
   if (!phase.endedAt) return undefined;
   const ms = new Date(phase.endedAt).getTime() - new Date(phase.startedAt).getTime();

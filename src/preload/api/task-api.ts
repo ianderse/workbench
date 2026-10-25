@@ -79,6 +79,7 @@ export interface TaskAPI {
 
   // Workspace Management (for human review)
   getWorktreeStatus: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeStatus>>;
+  getTaskChangeSummary: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').TaskChangeSummary | null>>;
   mergeWorktree: (taskId: string, options?: { noCommit?: boolean }, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
   mergeWorktreePreview: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
   discardWorktree: (taskId: string, skipStatusChange?: boolean, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeDiscardResult>>;
@@ -191,6 +192,9 @@ export const createTaskAPI = (): TaskAPI => ({
   // Workspace Management
   getWorktreeStatus: (taskId: string, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeStatus>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_STATUS, taskId, projectId),
+
+  getTaskChangeSummary: (taskId: string, projectId?: string): Promise<IPCResult<import('../../shared/types').TaskChangeSummary | null>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_CHANGE_SUMMARY, taskId, projectId),
 
   mergeWorktree: (taskId: string, options?: { noCommit?: boolean }, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_MERGE, taskId, options, projectId),

@@ -3,6 +3,9 @@ import { BrowserWindow } from 'electron';
 import type { ConflictSeverity } from '../../../shared/types/task';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, DATA_DIR_NAMES, getSpecsDir } from '../../../shared/constants';
 import type { IPCResult, WorktreeStatus, WorktreeMergeResult, WorktreeDiscardResult, WorktreeListResult, WorktreeListItem, WorktreeCreatePROptions, WorktreeCreatePRResult, WorktreeMergePROptions, WorktreeMergePRResult, WorktreeLocalMergeResult, PullRequestState, Project, Task } from '../../../shared/types';
+import type { TaskChangeSummary, TaskChangeFile } from '../../../shared/types/task';
+import { parseNumstat } from '../../../shared/utils/task-work-summary';
+import { appLog } from '../../app-logger';
 import path from 'path';
 import { matchesExtensionGlob } from '../../utils/glob-markers';
 import { existsSync, readdirSync, statSync, readFileSync, promises as fsPromises } from 'fs';
@@ -398,6 +401,62 @@ export function registerWorktreeHandlers(
    * discarding that project's worktree instead of the one the user meant. The search stays as the
    * fallback for a caller that cannot name a project.
    */
+  /**
+   * Files a task changed with +/- counts, for the "What was done" panel. From the task's worktree
+   * (against its base branch, uncommitted work included), or, once an automatic merge removed the
+   * worktree, from the recorded merge commit. null when neither exists.
+   */
+  handleIpc(
+    IPC_CHANNELS.TASK_CHANGE_SUMMARY,
+    async (_, taskId: string, projectId?: string): Promise<IPCResult<TaskChangeSummary | null>> => {
+      try {
+        const { task, project } = findTaskAndProject(taskId, projectId);
+        if (!task || !project) return { success: false, error: 'Task not found' };
+
+        const worktreePath = findTaskWorktree(project.path, task.specId);
+        let files: TaskChangeFile[];
+        let commitCount: number | undefined;
+        let source: TaskChangeSummary['source'];
+
+        if (worktreePath) {
+          const baseBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+          const [diff, count] = await Promise.all([
+            git(['diff', '--numstat', baseBranch], { cwd: worktreePath, encoding: 'utf-8' }),
+            git(['rev-list', '--count', `${baseBranch}..HEAD`], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null),
+          ]);
+          files = parseNumstat(diff.stdout);
+          commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
+          source = 'worktree';
+        } else if (task.metadata?.autoMerge?.sha) {
+          const sha = task.metadata.autoMerge.sha;
+          const [diff, count] = await Promise.all([
+            git(['diff', '--numstat', `${sha}^1`, sha], { cwd: project.path, encoding: 'utf-8' }),
+            git(['rev-list', '--count', `${sha}^1..${sha}^2`], { cwd: project.path, encoding: 'utf-8' }).catch(() => null),
+          ]);
+          files = parseNumstat(diff.stdout);
+          commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
+          source = 'merge';
+        } else {
+          return { success: true, data: null };
+        }
+
+        return {
+          success: true,
+          data: {
+            files,
+            additions: files.reduce((sum, f) => sum + f.additions, 0),
+            deletions: files.reduce((sum, f) => sum + f.deletions, 0),
+            commitCount,
+            source,
+          },
+        };
+      } catch (error) {
+        appLog.warn(`[TASK_CHANGE_SUMMARY] ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+  );
+
   /**
    * Get the worktree status for a task
    * Per-spec architecture: Each spec has its own worktree at .workbench/worktrees/tasks/{spec-name}/

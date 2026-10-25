@@ -48,6 +48,7 @@ export const IPC_CHANNELS = {
   // Workspace management (for human review)
   // Per-spec architecture: Each spec has its own worktree at .worktrees/{spec-name}/
   TASK_WORKTREE_STATUS: 'task:worktreeStatus',
+  TASK_CHANGE_SUMMARY: 'task:changeSummary',  // Files changed with +/- counts: (taskId, projectId)
   TASK_WORKTREE_MERGE: 'task:worktreeMerge',
   TASK_WORKTREE_MERGE_PREVIEW: 'task:worktreeMergePreview',  // Preview merge conflicts before merging
   TASK_WORKTREE_DISCARD: 'task:worktreeDiscard',

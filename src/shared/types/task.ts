@@ -361,6 +361,22 @@ export interface WorktreeStatus {
   deletions?: number;
 }
 
+/** One file of a task's changes (git diff --numstat) */
+export interface TaskChangeFile {
+  path: string;
+  additions: number;
+  deletions: number;
+}
+
+/** What a task changed: from its worktree, or from its merge commit once the worktree is gone */
+export interface TaskChangeSummary {
+  files: TaskChangeFile[];
+  additions: number;
+  deletions: number;
+  commitCount?: number;
+  source: 'worktree' | 'merge';
+}
+
 // Conflict severity levels from merge system
 export type ConflictSeverity = 'none' | 'low' | 'medium' | 'high' | 'critical';
 
