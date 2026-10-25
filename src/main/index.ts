@@ -86,12 +86,13 @@ if (!hasInstanceLock) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Migrate userData from the previous app name (aperant)
+// Migrate userData from the previous app names: upstream Workbench (this is Workbench OMP, a
+// renamed fork with its own data folder so both can be installed) and before that aperant
 // Must run before any code accesses app.getPath('userData')
 // ─────────────────────────────────────────────────────────────────────────────
 {
   const newUserData = app.getPath('userData');
-  const oldUserData = ['aperant']
+  const oldUserData = ['workbench', 'aperant']
     .map((name) => join(dirname(newUserData), name))
     .find((dir) => existsSync(dir));
   if (oldUserData && !existsSync(join(newUserData, '.migrated'))) {
@@ -588,7 +589,7 @@ function readTrayStatus(): TrayStatus {
 // Set app name before ready (for dock tooltip on macOS in dev mode). Development builds get their
 // own name, which also gives their window its own class, so taskbars don't group them with (and
 // show the icon of) the installed app. userData was resolved above, so both still share it.
-const APP_NAME = is.dev ? 'Workbench Dev' : 'Workbench';
+const APP_NAME = is.dev ? 'Workbench OMP Dev' : 'Workbench OMP';
 app.setName(APP_NAME);
 if (isMacOS()) {
   // Force the name to appear in dock on macOS

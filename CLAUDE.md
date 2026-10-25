@@ -4,7 +4,7 @@ This file provides guidance to Claude Code when working with this repository.
 
 ## Product Overview
 
-Workbench is a TypeScript Electron desktop app where users describe a goal and the **Claude Code CLI** does the work
+Workbench OMP (a renamed, intentionally diverged fork of Workbench; upstream is merged in daily, see `docs/upstream-sync/`) is a TypeScript Electron desktop app where users describe a goal and the **Claude Code CLI** does the work
 autonomously. Every task runs in its own git worktree so the main branch stays safe.
 
 **Core workflow:** User creates a task (description, images, connectors, git options) → a short Claude Code **triage**

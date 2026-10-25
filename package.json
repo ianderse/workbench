@@ -1,5 +1,5 @@
 {
-  "name": "workbench",
+  "name": "workbench-omp",
   "version": "1.0.0",
   "author": {
     "name": "Artyom Vancyan",
@@ -99,16 +99,16 @@
     "@electron/rebuild": "$@electron/rebuild"
   },
   "build": {
-    "appId": "com.workbench.app",
-    "productName": "Workbench",
+    "appId": "com.workbench.omp",
+    "productName": "Workbench OMP",
     "npmRebuild": false,
-    "artifactName": "Workbench-${version}-${os}-${arch}.${ext}",
+    "artifactName": "WorkbenchOMP-${version}-${os}-${arch}.${ext}",
     "detectUpdateChannel": false,
     "publish": [
       {
         "provider": "github",
-        "owner": "proactive-agent",
-        "repo": "workbench"
+        "owner": "ianderse",
+        "repo": "workbench-omp"
       }
     ],
     "directories": {
