@@ -1,6 +1,7 @@
 import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { TaskBreakdown } from '../../shared/types/task-breakdown';
+import type { RunProgress } from '../../shared/utils/run-progress';
 import type {
   Task,
   IPCResult,
@@ -106,6 +107,7 @@ export interface TaskAPI {
   setQueueOrder: (projectId: string, order: string[]) => void;
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
   cancelBreakDownTask: (requestId: string) => void;
+  onBreakDownProgress: (callback: (requestId: string, progress: RunProgress) => void) => () => void;
   onTaskExecutionProgress: (
     callback: (taskId: string, progress: import('../../shared/types').ExecutionProgress, projectId?: string) => void
   ) => () => void;
@@ -328,6 +330,16 @@ export const createTaskAPI = (): TaskAPI => ({
 
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]): Promise<IPCResult<TaskBreakdown>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_BREAKDOWN, projectId, requestId, description, attachmentNames),
+
+  onBreakDownProgress: (callback: (requestId: string, progress: RunProgress) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, requestId: string, progress: RunProgress): void => {
+      callback(requestId, progress);
+    };
+    ipcRenderer.on(IPC_CHANNELS.TASK_BREAKDOWN_PROGRESS, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TASK_BREAKDOWN_PROGRESS, handler);
+    };
+  },
 
   cancelBreakDownTask: (requestId: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_BREAKDOWN_CANCEL, requestId),

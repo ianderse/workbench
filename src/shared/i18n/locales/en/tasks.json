@@ -370,6 +370,18 @@
     "createFailed": "Created {{done}} of {{total}} tasks: {{error}}",
     "noneSelected": "Select at least one task",
     "waitsFor": "Waits for: {{titles}}",
+    "progress": {
+      "starting": "Starting...",
+      "elapsed": "Elapsed {{time}}",
+      "reading": "Reading {{file}}",
+      "readingProject": "Reading the project",
+      "writing": "Writing tickets...",
+      "writingTokens": "Writing tickets... ~{{tokens}} tokens",
+      "thinking": "Thinking...",
+      "thinkingTokens": "Thinking... ~{{tokens}} tokens",
+      "sharing_one": "Sharing the model server with {{count}} running task, this may be slower",
+      "sharing_other": "Sharing the model server with {{count}} running tasks, this may be slower"
+    },
     "existingDependencies": "Wait for existing tickets",
     "existingDependenciesHint": "Pick open tickets this task needs merged first",
     "waitForTicketsNone": "Wait for tickets",

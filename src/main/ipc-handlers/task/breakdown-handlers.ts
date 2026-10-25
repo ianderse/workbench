@@ -18,7 +18,7 @@ const running = new Map<string, AbortController>();
 export function registerTaskBreakdownHandlers(): void {
   handleIpc(
     IPC_CHANNELS.TASK_BREAKDOWN,
-    async (_, projectId: string, requestId: string, description: string, attachmentNames?: string[]): Promise<IPCResult<TaskBreakdown>> => {
+    async (event, projectId: string, requestId: string, description: string, attachmentNames?: string[]): Promise<IPCResult<TaskBreakdown>> => {
       const project = projectStore.getProject(projectId);
       if (!project) return { success: false, error: 'Project not found' };
       if (typeof description !== 'string' || !description.trim()) return { success: false, error: 'Description is empty' };
@@ -31,6 +31,9 @@ export function registerTaskBreakdownHandlers(): void {
           description,
           attachmentNames: Array.isArray(attachmentNames) ? attachmentNames.filter((n) => typeof n === 'string') : undefined,
           openTickets: listOpenTickets(projectStore.getTasks(projectId)),
+          onProgress: (progress) => {
+            if (!event.sender.isDestroyed()) event.sender.send(IPC_CHANNELS.TASK_BREAKDOWN_PROGRESS, requestId, progress);
+          },
           abortSignal: controller.signal,
         });
         return { success: true, data };

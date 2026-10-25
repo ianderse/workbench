@@ -21,6 +21,8 @@ import type { TaskMetadata, ImageAttachment, AgentOverride } from '../../shared/
 import { normalizeAgentOverride } from '../../shared/utils/agent-override';
 import { useSettingsStore } from '../stores/settings-store';
 import { TaskBreakdownReview, effectiveDependencies, effectiveExistingDependencies, type BreakdownItem } from './task-form/TaskBreakdownReview';
+import type { RunProgress } from '../../shared/utils/run-progress';
+import { BreakdownWorking } from './task-form/BreakdownWorking';
 import type { OpenTicketRef } from '../../shared/types/task-breakdown';
 import { sortByDependencies } from '../../shared/utils/task-breakdown-order';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
@@ -73,6 +75,7 @@ export function TaskCreationWizard({
   const [step, setStep] = useState<'form' | 'working' | 'review'>('form');
   const [breakdownItems, setBreakdownItems] = useState<BreakdownItem[]>([]);
   const [openTickets, setOpenTickets] = useState<OpenTicketRef[]>([]);
+  const [breakdownProgress, setBreakdownProgress] = useState<RunProgress | null>(null);
   const [queueAfterCreate, setQueueAfterCreate] = useState(true);
   const breakdownRequestId = useRef<string | null>(null);
   // Breakdown keys already created (key -> task id), so a retry after a failure continues
@@ -176,6 +179,7 @@ export function TaskCreationWizard({
     }
     const requestId = `breakdown-${Date.now()}`;
     breakdownRequestId.current = requestId;
+    setBreakdownProgress(null);
     setError(null);
     setStep('working');
     try {
@@ -203,6 +207,14 @@ export function TaskCreationWizard({
       if (breakdownRequestId.current === requestId) breakdownRequestId.current = null;
     }
   };
+
+  // Live progress of the running breakdown
+  useEffect(() => {
+    if (step !== 'working') return undefined;
+    return window.electronAPI.onBreakDownProgress((requestId, progress) => {
+      if (requestId === breakdownRequestId.current) setBreakdownProgress(progress);
+    });
+  }, [step]);
 
   const handleCancelBreakDown = () => {
     const requestId = breakdownRequestId.current;
@@ -384,11 +396,7 @@ export function TaskCreationWizard({
       }
     >
       {step === 'working' && (
-        <div className="flex flex-col items-center gap-2 py-12 text-center" role="status">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          <p className="text-sm text-foreground">{t('tasks:breakdown.working')}</p>
-          <p className="text-xs text-(--nav-label-color)">{t('tasks:breakdown.workingHint')}</p>
-        </div>
+        <BreakdownWorking progress={breakdownProgress} />
       )}
       {step === 'review' && (
         <TaskBreakdownReview

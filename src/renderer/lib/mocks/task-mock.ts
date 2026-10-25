@@ -124,6 +124,7 @@ export const taskMock = {
     },
   }),
   cancelBreakDownTask: () => {},
+  onBreakDownProgress: () => () => {},
   onTaskExecutionProgress: () => () => {},
   onTaskLogsChanged: () => () => {},
   onTaskLogsStream: () => () => {},

@@ -14,7 +14,11 @@ import type { OmpBackendSettings } from '../../shared/types/agent-backend';
 import type { ClaudeUserContentBlock } from './stream-types';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
-import { ompToolsFromClaude } from '../agent-backend/omp-args';
+import { ompToolsFromClaude, resolveOmpSelection } from '../agent-backend/omp-args';
+import { getOmpRoles } from '../agent-backend/omp-roles';
+import { isOmpProgress } from '../agent-backend/omp-translate';
+import { isAssistantMessage } from './stream-types';
+import { RunProgressTracker, type RunProgress } from '../../shared/utils/run-progress';
 import type { OmpRole } from '../agent-backend/omp-args';
 import { startOmpProcess } from '../agent-backend/omp-process';
 import { projectUsage, type UsageContext } from '../usage/usage-record';
@@ -46,6 +50,11 @@ export interface RunClaudeTextOptions {
   maxTurns?: number;
   timeoutMs?: number;
   abortSignal?: AbortSignal;
+  /**
+   * Live progress, at most about once a second. With OMP it follows the stream (reading, writing,
+   * thinking, size so far); with Claude Code the call is not streamed, so it reports the model once at the start.
+   */
+  onProgress?: (progress: RunProgress) => void;
   /** Claude profile to use (defaults to the best available one) */
   profileId?: string;
   /** Backend for this call (default: the app-wide backend); tasks pass their own */
@@ -92,6 +101,7 @@ export async function runClaudeText(options: RunClaudeTextOptions): Promise<RunC
   if ((options.backend ?? backend.kind) === 'omp') return runOmpText(options, backend.omp);
 
   const { command, env } = await resolveClaudeEnv({ profileId: options.profileId });
+  options.onProgress?.({ stage: 'thinking', tokens: 0, elapsedMs: 0, model: String(options.model ?? 'haiku') });
   const tools = options.tools ?? [];
   const usesContentBlocks = typeof options.prompt !== 'string';
 
@@ -164,6 +174,34 @@ const OMP_TIMEOUT_FACTOR = 5;
  * `maxTurns` has no equivalent and the run is bounded by the timeout.
  */
 async function runOmpText(options: RunClaudeTextOptions, settings: OmpBackendSettings): Promise<RunClaudeTextResult> {
+  const model = options.model ?? 'haiku';
+  let tracker: RunProgressTracker | undefined;
+  if (options.onProgress) {
+    const selection = resolveOmpSelection(model, settings, options.ompRole ?? 'default', getOmpRoles());
+    tracker = new RunProgressTracker(Date.now(), selection.concrete ?? selection.selector ?? 'OMP default model', options.cwd);
+    options.onProgress(tracker.snapshot(Date.now()));
+  }
+  const onMessage = tracker
+    ? (message: Parameters<NonNullable<Parameters<typeof startOmpProcess>[0]['onMessage']>>[0]) => {
+        let changed = false;
+        if (isOmpProgress(message)) {
+          tracker.delta(message.kind, message.chars);
+          changed = true;
+        } else if (isAssistantMessage(message)) {
+          tracker.setModel(message.message.model);
+          for (const block of message.message.content) {
+            if (block.type === 'tool_use') {
+              const use = block as { name: string; input: unknown };
+              tracker.tool(use.name, use.input);
+              changed = true;
+            }
+          }
+        }
+        if (!changed) return;
+        const progress = tracker.next(Date.now());
+        if (progress) options.onProgress?.(progress);
+      }
+    : undefined;
   const handle = await startOmpProcess({
     settings,
     cwd: options.cwd ?? process.cwd(),
@@ -176,6 +214,8 @@ async function runOmpText(options: RunClaudeTextOptions, settings: OmpBackendSet
     appendSystemPrompt: options.appendSystemPrompt,
     jsonSchema: options.jsonSchema,
     oneShot: true,
+    emitProgress: !!onMessage,
+    onMessage,
     abortSignal: options.abortSignal,
     timeoutMs: (options.timeoutMs ?? 5 * 60 * 1000) * OMP_TIMEOUT_FACTOR,
     usage: usageContext(options),

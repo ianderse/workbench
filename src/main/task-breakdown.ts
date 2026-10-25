@@ -13,6 +13,7 @@ import { breakDependencyCycles, sortByDependencies } from '../shared/utils/task-
 import { READ_ONLY_TOOLS, runClaudeText } from './claude-code/run-text';
 import { resolveClaudeCodeTaskSettings } from './claude-code/settings';
 import { readSettingsFile } from './settings-utils';
+import type { RunProgress } from '../shared/utils/run-progress';
 
 export const MIN_BREAKDOWN_TASKS = 2;
 export const MAX_BREAKDOWN_TASKS = 12;
@@ -146,6 +147,8 @@ export interface BreakDownInput {
   attachmentNames?: string[];
   /** The project's open tickets, which the new tasks can depend on */
   openTickets?: OpenTicketRef[];
+  /** Live progress of the model run */
+  onProgress?: (progress: RunProgress) => void;
   abortSignal?: AbortSignal;
 }
 
@@ -170,6 +173,7 @@ export async function breakDownTask(input: BreakDownInput): Promise<TaskBreakdow
     // Local models are slow; OMP multiplies this
     timeoutMs: 10 * 60 * 1000,
     abortSignal: input.abortSignal,
+    onProgress: input.onProgress,
   });
   return normalizeBreakdown(result.structured ?? tryParseJson(result.text), input.openTickets ?? []);
 }
