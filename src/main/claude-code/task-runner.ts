@@ -31,6 +31,8 @@ import { triageTask, fixedTriage, applyPlanningPolicy, applyAgentOverrideToTriag
 import { TaskLogWriter, summarizeToolInput } from './task-log';
 import { buildParallelTasksPrompt } from '../task-changelog';
 import { git } from '../utils/git-exec';
+import { generateReviewSummary, trackReviewSummary } from './review-summary';
+import { parseNumstat } from '../../shared/utils/task-work-summary';
 import { stageTaskWork } from './stage-excludes';
 import { getWslInfo, toHostPath, toRuntimePath, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { buildAttachmentBlocks } from '../insights/message-content';
@@ -903,6 +905,8 @@ export class ClaudeTaskRun {
 
   private async finish(): Promise<TaskRunOutcome> {
     await this.commitLeftovers();
+    // A summary from an earlier run describes work that has changed since
+    this.info.reviewSummary = undefined;
     // QA_PASSED/QA_FAILED move the task to Human Review, and listeners on that (autonomous
     // auto-merge) read claude_run.json from disk: write the verdict now, not after the debounce
     this.flushInfo();
@@ -921,7 +925,38 @@ export class ClaudeTaskRun {
     } else {
       this.callbacks.onTaskEvent?.('QA_PASSED', { iteration: verdict?.rounds ?? 1, maxIterations: verdict?.maxRounds ?? 1, testsRun: {} });
     }
+    // After the events, so neither the move to Human Review nor an auto-merge waits for the model
+    void this.writeReviewSummary();
     return { status: 'completed', validation };
+  }
+
+  /** Background: write the plain-language reviewer summary into the run info when it is ready */
+  private async writeReviewSummary(): Promise<void> {
+    try {
+      let changes: Awaited<ReturnType<typeof collectChangeStat>> = null;
+      try {
+        changes = await collectChangeStat(this.config.worktreePath, this.config.baseBranch);
+      } catch (error) {
+        appLog.warn(`[ReviewSummary] ${this.config.specId}: no diff stat: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const phaseCount = this.info.phases.length;
+      const summary = await trackReviewSummary(`${this.config.projectId}:${this.config.specId}`, () => generateReviewSummary({
+        info: this.info,
+        title: this.config.title,
+        request: this.config.description,
+        changes,
+        backend: this.config.backend,
+        projectPath: path.dirname(path.dirname(path.dirname(this.config.specDir))),
+        projectId: this.config.projectId,
+        taskId: this.config.specId,
+      }));
+      // The run moved on (stopped, or a new step started) while the model wrote: the summary is stale
+      if (!summary || this.stopped || this.info.phases.length !== phaseCount) return;
+      this.info.reviewSummary = summary;
+      this.saveInfo();
+    } catch (error) {
+      appLog.warn(`[ReviewSummary] ${this.config.specId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /** Reviews a task gets: the setting (1 to 5) while validation is on */
@@ -1794,6 +1829,22 @@ no notes came with the request, so review the change against the task with fresh
   }
 }
 
+/** Files changed against the base branch with +/- counts (no code), for the reviewer summary */
+async function collectChangeStat(worktreePath: string, baseBranch: string) {
+  const [diff, count] = await Promise.all([
+    git(['diff', '--numstat', baseBranch], { cwd: worktreePath, encoding: 'utf-8' }),
+    git(['rev-list', '--count', `${baseBranch}..HEAD`], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null),
+  ]);
+  const files = parseNumstat(diff.stdout);
+  if (files.length === 0) return null;
+  return {
+    files,
+    additions: files.reduce((sum, f) => sum + f.additions, 0),
+    deletions: files.reduce((sum, f) => sum + f.deletions, 0),
+    commitCount: count ? parseInt(count.stdout.trim(), 10) || 0 : undefined,
+  };
+}
+
 // =============================================================================
 // Persistence helpers
 // =============================================================================
@@ -1841,6 +1892,11 @@ function writeFileSafe(file: string, content: string): void {
   } catch (error) {
     console.error('[ClaudeTaskRun] Failed to write', file, error);
   }
+}
+
+/** Write a task's run state (`claude_run.json`) */
+export function saveClaudeRunInfo(specDir: string, info: ClaudeRunInfo): void {
+  writeFileSafe(path.join(specDir, CLAUDE_RUN_FILE), JSON.stringify(info, null, 2));
 }
 
 /** Read a task's run state (`claude_run.json`), or null when the task never ran */

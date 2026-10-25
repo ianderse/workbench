@@ -13,6 +13,7 @@ import { AgentManager } from '../../agent';
 import { registerTaskCRUDHandlers } from './crud-handlers';
 import { registerTaskExecutionHandlers } from './execution-handlers';
 import { registerWorktreeHandlers } from './worktree-handlers';
+import { registerReviewSummaryHandlers } from './review-summary-handlers';
 import { registerTaskLogsHandlers } from './logs-handlers';
 import { registerTaskArchiveHandlers } from './archive-handlers';
 import { registerTaskBreakdownHandlers } from './breakdown-handlers';
@@ -32,6 +33,7 @@ export function registerTaskHandlers(
 
   // Register worktree handlers (status, diff, merge, discard, list)
   registerWorktreeHandlers(getMainWindow);
+  registerReviewSummaryHandlers(getMainWindow);
 
   // Register logs handlers (get, watch, unwatch)
   registerTaskLogsHandlers(getMainWindow);

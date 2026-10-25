@@ -126,3 +126,29 @@ export function topChangedFiles(files: TaskChangeFile[], limit: number): { shown
   const sorted = [...files].sort((a, b) => b.additions + b.deletions - (a.additions + a.deletions));
   return { shown: sorted.slice(0, limit), more: Math.max(0, sorted.length - limit) };
 }
+
+export type ReviewSummaryGeneration = 'idle' | 'pending' | 'failed';
+export type ReviewSummaryMode = 'summary' | 'pending' | 'fallback';
+
+/** What the top of the panel shows: the reviewer summary, a "writing" note, or the agent's own notes */
+export function reviewSummaryMode(run: ClaudeRunInfo | undefined, generation: ReviewSummaryGeneration): ReviewSummaryMode {
+  if (run?.reviewSummary) return 'summary';
+  return generation === 'pending' ? 'pending' : 'fallback';
+}
+
+/** Whether a task in Human Review should get a summary written on first view (finished before summaries existed) */
+export function shouldGenerateReviewSummary(task: { status: string; claudeRun?: ClaudeRunInfo }): boolean {
+  if (task.status !== 'human_review' || !task.claudeRun || task.claudeRun.reviewSummary) return false;
+  const work = buildWorkSummary(task.claudeRun);
+  return work.summary !== null || work.checks !== null;
+}
+
+/** "18 files, +3,500 -0, 3 commits" as parts, so the panel can translate each */
+export function changeStatsLine(changes: { files: unknown[]; additions: number; deletions: number; commitCount?: number }) {
+  return {
+    files: changes.files.length,
+    additions: changes.additions,
+    deletions: changes.deletions,
+    commits: changes.commitCount ?? 0,
+  };
+}

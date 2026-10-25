@@ -51,6 +51,13 @@ vi.mock('../triage', async (importOriginal) => {
   return { ...actual, triageTask: (...args: unknown[]) => triageMock(...args) };
 });
 
+// The reviewer summary is a background model call; keep it from consuming the scripted runs
+const reviewSummaryMock = vi.hoisted(() => vi.fn(async (): Promise<unknown> => null));
+vi.mock('../review-summary', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../review-summary')>();
+  return { ...actual, generateReviewSummary: (...args: unknown[]) => (reviewSummaryMock as (...a: unknown[]) => Promise<unknown>)(...args) };
+});
+
 import { ClaudeTaskRun, loadClaudeRunInfo, ompSubagentGuidance } from '../task-runner';
 import { ompSubagentsPerTask } from '../../../shared/types/agent-backend';
 import { SELF_IMPROVE_NUDGE } from '../../self-improve/nudge';
@@ -247,6 +254,25 @@ describe('ClaudeTaskRun', () => {
     expect(spawned[1].args).toContain('--resume');
     const text = (spawned[1].input as Array<{ type: string; text?: string }>)[0].text;
     expect(text).toMatch(/Continue the task/);
+  });
+
+  it('stores the reviewer summary after the run, without holding up the QA event', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    const summary = { headline: 'H', whatChanged: ['a'], verified: 'v', needsAttention: [], generatedAt: 'now' };
+    let release: (value: unknown) => void = () => {};
+    reviewSummaryMock.mockImplementationOnce(() => new Promise((resolve) => { release = resolve; }));
+    scripts.push(
+      { messages: [result('s9')] },
+      { messages: [result('s9', { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] },
+    );
+    const events: string[] = [];
+    const outcome = await makeRun({}, { onTaskEvent: (type: string) => events.push(type) }).run();
+    expect(outcome.status).toBe('completed');
+    expect(events).toContain('QA_PASSED');
+    expect(loadClaudeRunInfo(specDir)!.reviewSummary).toBeUndefined();
+    await vi.waitFor(() => expect(reviewSummaryMock).toHaveBeenCalled());
+    release(summary);
+    await vi.waitFor(() => expect(loadClaudeRunInfo(specDir)!.reviewSummary).toEqual(summary));
   });
 
   it('applies reviewer feedback in the same session and validates again', async () => {

@@ -28,6 +28,7 @@ This fork ([ianderse/workbench](https://github.com/ianderse/workbench), branch `
 - Tool names OMP accepts, and CLAUDE.md written without Claude Code's `/init` (`6e0e175`)
 
 **Task pipeline**
+- Plain-language reviewer summary: when a run finishes, Workbench writes a headline, what changed, how it was checked and what needs your attention, from the request, the validation report and the diff stat (no code). "What was done" leads with it; the agent's raw notes and the file list sit behind toggles. Tickets already in Human Review get one the first time you open them, and a Regenerate button rewrites it
 - "What was done" panel at the top of tickets in Human Review: the agent's summary, AI review verdict, check results, open findings by severity, files changed with +/- counts, and time, cost and models. The original request below it is collapsed
 - Break into tasks: one model run turns a big prompt or spec into 2 to 12 dependent tickets you review before they're created. Queued tickets wait for the tickets they depend on (`c44a11a`)
 - Pin the model, effort and backend per task, for example Opus 5.5 for one ticket while the rest run locally (`3dda352`)

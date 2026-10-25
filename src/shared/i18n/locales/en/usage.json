@@ -59,6 +59,7 @@
     "merge": "Merge help",
     "insights": "Claude chat",
     "advisor": "Advisor",
+    "summary": "Review summaries",
     "other": "Other"
   },
   "tasks": {

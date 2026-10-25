@@ -10,6 +10,7 @@ export const workspaceMock = {
     }
   }),
 
+  generateReviewSummary: async () => ({ success: true, data: null }),
   getTaskChangeSummary: async () => ({ success: true, data: null }),
 
   mergeWorktree: async () => ({

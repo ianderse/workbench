@@ -198,6 +198,20 @@ export interface ValidationReport {
 /** Where Claude Code ran: natively on the host OS, or inside WSL (Windows, wsl shell) */
 export type ClaudeRuntime = 'native' | 'wsl';
 
+/** Plain-language account of what a ticket delivered, written by Workbench for the person reviewing it */
+export interface ReviewSummary {
+  /** One sentence: what the ticket now delivers */
+  headline: string;
+  /** 3 to 5 short bullets about capabilities and behaviour */
+  whatChanged: string[];
+  /** One short sentence on how the work was checked */
+  verified: string;
+  /** 0 to 4 things the reviewer should know or decide */
+  needsAttention: string[];
+  /** When it was written (ISO) */
+  generatedAt: string;
+}
+
 /** Persisted run state of a task (`<specDir>/claude_run.json`) */
 export interface ClaudeRunInfo {
   version: 1;
@@ -232,6 +246,8 @@ export interface ClaudeRunInfo {
   reviewVerdict?: ReviewVerdict;
   /** Final summary Claude wrote for the user */
   summary?: string;
+  /** Reviewer summary Workbench wrote after the run (absent until generated, or when generation failed) */
+  reviewSummary?: ReviewSummary;
   subagents: ClaudeRunSubagent[];
   totalCostUsd: number;
   /** Absolute path of the worktree the session runs in */

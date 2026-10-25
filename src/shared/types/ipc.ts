@@ -186,6 +186,7 @@ export interface ElectronAPI {
   // Workspace management (for human review)
   // Per-spec architecture: Each spec has its own worktree at .worktrees/{spec-name}/
   getWorktreeStatus: (taskId: string, projectId?: string) => Promise<IPCResult<WorktreeStatus>>;
+  generateReviewSummary: (taskId: string, projectId?: string, force?: boolean) => Promise<IPCResult<import('./claude-code').ReviewSummary | null>>;
   getTaskChangeSummary: (taskId: string, projectId?: string) => Promise<IPCResult<import('./task').TaskChangeSummary | null>>;
   mergeWorktree: (taskId: string, options?: { noCommit?: boolean }, projectId?: string) => Promise<IPCResult<WorktreeMergeResult>>;
   mergeWorktreePreview: (taskId: string, projectId?: string) => Promise<IPCResult<WorktreeMergeResult>>;

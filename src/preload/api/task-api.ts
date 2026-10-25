@@ -79,6 +79,7 @@ export interface TaskAPI {
 
   // Workspace Management (for human review)
   getWorktreeStatus: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeStatus>>;
+  generateReviewSummary: (taskId: string, projectId?: string, force?: boolean) => Promise<IPCResult<import('../../shared/types/claude-code').ReviewSummary | null>>;
   getTaskChangeSummary: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').TaskChangeSummary | null>>;
   mergeWorktree: (taskId: string, options?: { noCommit?: boolean }, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
   mergeWorktreePreview: (taskId: string, projectId?: string) => Promise<IPCResult<import('../../shared/types').WorktreeMergeResult>>;
@@ -192,6 +193,9 @@ export const createTaskAPI = (): TaskAPI => ({
   // Workspace Management
   getWorktreeStatus: (taskId: string, projectId?: string): Promise<IPCResult<import('../../shared/types').WorktreeStatus>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_WORKTREE_STATUS, taskId, projectId),
+
+  generateReviewSummary: (taskId: string, projectId?: string, force?: boolean) =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_REVIEW_SUMMARY_GENERATE, taskId, projectId, force),
 
   getTaskChangeSummary: (taskId: string, projectId?: string): Promise<IPCResult<import('../../shared/types').TaskChangeSummary | null>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_CHANGE_SUMMARY, taskId, projectId),

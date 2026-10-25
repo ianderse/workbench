@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../../ui/button';
@@ -7,16 +7,27 @@ import { cn } from '../../../lib/utils';
 import { readRefreshCache, writeRefreshCache } from '../../../lib/refresh-cache';
 import { formatCostUsd, formatDurationMs } from '../../../../shared/utils/claude-run';
 import { formatFindingLocation } from '../../../../shared/utils/ai-review-loop';
-import { buildWorkSummary, hasWorkSummary, topChangedFiles } from '../../../../shared/utils/task-work-summary';
+import {
+  buildWorkSummary,
+  changeStatsLine,
+  hasWorkSummary,
+  reviewSummaryMode,
+  shouldGenerateReviewSummary,
+  topChangedFiles,
+  type ReviewSummaryGeneration,
+} from '../../../../shared/utils/task-work-summary';
 import type { Task, TaskChangeSummary } from '../../../../shared/types';
 
 interface WhatWasDonePanelProps {
   task: Task;
 }
 
-/** Height of the collapsed summary (about 8 lines) */
-const COLLAPSED_HEIGHT = 200;
+/** Height of the collapsed agent notes (about 3 lines) */
+const COLLAPSED_HEIGHT = 72;
 const MAX_FILES_SHOWN = 6;
+
+/** Tasks whose summary could not be written this session: not asked again until the user presses Regenerate */
+const failedSummaries = new Set<string>();
 
 /** Whether the panel has anything to show for a task */
 export function shouldShowWhatWasDone(task: Task): boolean {
@@ -69,14 +80,51 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [findingsOpen, setFindingsOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [generation, setGeneration] = useState<ReviewSummaryGeneration>('idle');
+  const summaryKey = `${task.projectId}:${task.id}`;
+  const hasReviewSummary = !!task.claudeRun?.reviewSummary;
+  const mode = reviewSummaryMode(task.claudeRun, generation);
+  const wantsSummary = shouldGenerateReviewSummary(task);
   const contentRef = useRef<HTMLDivElement>(null);
   const contentId = useId();
+
+  const requestSummary = useCallback(
+    (force: boolean) => {
+      let live = true;
+      failedSummaries.delete(summaryKey);
+      setGeneration('pending');
+      window.electronAPI
+        .generateReviewSummary(task.id, task.projectId, force)
+        .then((result) => {
+          if (!result.success || !result.data) failedSummaries.add(summaryKey);
+          if (live) setGeneration(result.success && result.data ? 'idle' : 'failed');
+        })
+        .catch(() => {
+          failedSummaries.add(summaryKey);
+          if (live) setGeneration('failed');
+        });
+      return () => {
+        live = false;
+      };
+    },
+    [summaryKey, task.id, task.projectId]
+  );
+
+  // A ticket that finished before summaries existed gets one written the first time it is opened;
+  // it is stored, so it is never written again on open
+  useEffect(() => {
+    setGeneration(failedSummaries.has(summaryKey) ? 'failed' : 'idle');
+    if (!wantsSummary || failedSummaries.has(summaryKey)) return undefined;
+    return requestSummary(false);
+  }, [summaryKey, wantsSummary, requestSummary]);
 
   useLayoutEffect(() => {
     setExpanded(false);
     const el = contentRef.current;
     setOverflows(!!el && el.scrollHeight > COLLAPSED_HEIGHT);
-  }, [task.id, work.summary]);
+  }, [task.id, work.summary, mode]);
 
   const { review, checks, findings, effort } = work;
   const reviewText =
@@ -96,6 +144,7 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
   // A failed AI review already lists its open findings in its own panel
   const listFindings = findings.open.length > 0 && review.kind !== 'failed';
 
+  const stats = changeStatsLine(changes ?? { files: [], additions: 0, deletions: 0 });
   const { shown, more } = changes ? topChangedFiles(changes.files, MAX_FILES_SHOWN) : { shown: [], more: 0 };
   const modelText =
     effort.models.length === 1
@@ -121,14 +170,63 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
     >
       <h3 className="text-sm font-medium text-foreground">{t(partial ? 'workSummary.titlePartial' : 'workSummary.title')}</h3>
 
-      {work.summary ? (
+      {task.claudeRun?.reviewSummary && (
+        <div className="mt-2 space-y-3">
+          <p className="text-base font-medium leading-snug text-foreground wrap-anywhere">{task.claudeRun.reviewSummary.headline}</p>
+          <div>
+            <h4 className="text-xs font-medium text-(--nav-label-color)">{t('workSummary.whatChanged')}</h4>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-foreground">
+              {task.claudeRun.reviewSummary.whatChanged.map((item) => (
+                <li key={item} className="wrap-anywhere">{item}</li>
+              ))}
+            </ul>
+          </div>
+          {task.claudeRun.reviewSummary.verified && (
+            <p className="text-sm text-foreground wrap-anywhere">
+              <span className="text-xs font-medium text-(--nav-label-color)">{t('workSummary.checked')}</span>
+              <span className="ml-2">{task.claudeRun.reviewSummary.verified}</span>
+            </p>
+          )}
+          {task.claudeRun.reviewSummary.needsAttention.length > 0 && (
+            <div className="rounded-md border border-border bg-muted/40 p-3">
+              <h4 className="text-xs font-medium text-foreground">{t('workSummary.needsAttention')}</h4>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-sm text-foreground">
+                {task.claudeRun.reviewSummary.needsAttention.map((item) => (
+                  <li key={item} className="wrap-anywhere">{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
+      {mode === 'pending' && <p className="mt-2 text-sm text-(--nav-label-color)">{t('workSummary.writing')}</p>}
+
+      {(wantsSummary || hasReviewSummary) && (generation !== 'pending' || hasReviewSummary) && (
+        <div className="mt-1 flex items-center gap-2">
+          {generation === 'pending' && <span className="text-xs text-(--nav-label-color)">{t('workSummary.writing')}</span>}
+          {generation !== 'pending' && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => requestSummary(true)}
+            >
+              {t('workSummary.regenerate')}
+            </Button>
+          )}
+        </div>
+      )}
+
+      {mode !== 'summary' && (
+      work.summary ? (
         <div className="mt-2">
           <MarkdownContent
             ref={contentRef}
             id={contentId}
             className={cn(
               'overflow-hidden prose-pre:overflow-x-auto [&_img]:h-auto [&_img]:max-w-full',
-              !expanded && overflows && 'max-h-[200px] [mask-image:linear-gradient(to_bottom,black_70%,transparent)]'
+              !expanded && overflows && 'max-h-[72px] [mask-image:linear-gradient(to_bottom,black_70%,transparent)]'
             )}
             style={{ overflowWrap: 'anywhere' }}
           >
@@ -152,6 +250,7 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
         </div>
       ) : (
         <p className="mt-2 text-sm text-(--nav-label-color)">{t('workSummary.noSummary')}</p>
+      )
       )}
 
       <ul className="mt-3 space-y-1 text-sm text-foreground">
@@ -192,12 +291,26 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
 
       {changes && (changes.files.length > 0 || changes.commitCount !== undefined) && (
         <div className="mt-3">
-          <h4 className="text-xs font-medium text-(--nav-label-color)">{t('workSummary.changes.heading')}</h4>
-          <p className="mt-1 text-sm text-foreground">
-            {t('workSummary.changes.summary', { count: changes.files.length, additions: changes.additions, deletions: changes.deletions })}
-            {changes.commitCount ? `, ${t('workSummary.changes.commits', { count: changes.commitCount })}` : ''}
+          <p className="text-xs text-(--nav-label-color)">
+            {t('workSummary.changes.line', {
+              count: stats.files,
+              additions: stats.additions.toLocaleString(),
+              deletions: stats.deletions.toLocaleString(),
+            })}
+            {stats.commits > 0 ? `, ${t('workSummary.changes.commits', { count: stats.commits })}` : ''}
+            {shown.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-2 h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+                onClick={() => setFilesOpen(!filesOpen)}
+                aria-expanded={filesOpen}
+              >
+                {t(filesOpen ? 'workSummary.hideFiles' : 'workSummary.showFiles')}
+              </Button>
+            )}
           </p>
-          {shown.length > 0 && (
+          {filesOpen && shown.length > 0 && (
             <ul className="mt-1 space-y-0.5">
               {shown.map((file) => (
                 <li key={file.path} className="flex items-baseline gap-2 text-xs">
@@ -208,6 +321,25 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
               ))}
               {more > 0 && <li className="text-xs text-(--nav-label-color)">{t('workSummary.changes.more', { count: more })}</li>}
             </ul>
+          )}
+        </div>
+      )}
+
+      {mode === 'summary' && work.summary && (
+        <div className="mt-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => setNotesOpen(!notesOpen)}
+            aria-expanded={notesOpen}
+          >
+            {t('workSummary.technicalNotes')}
+          </Button>
+          {notesOpen && (
+            <MarkdownContent className="mt-1 overflow-hidden prose-pre:overflow-x-auto [&_img]:h-auto [&_img]:max-w-full" style={{ overflowWrap: 'anywhere' }}>
+              {work.summary}
+            </MarkdownContent>
           )}
         </div>
       )}

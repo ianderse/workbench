@@ -90,7 +90,9 @@
       "more_one": "and {{count}} more file",
       "more_other": "and {{count}} more files",
       "none": "No file changes found",
-      "merged": "Merged changes"
+      "merged": "Merged changes",
+      "line_one": "{{count}} file, +{{additions}} -{{deletions}}",
+      "line_other": "{{count}} files, +{{additions}} -{{deletions}}"
     },
     "effort": {
       "heading": "Effort",
@@ -100,7 +102,15 @@
       "models": "Models: {{list}}",
       "modelEntry": "{{phases}} on {{model}}"
     },
-    "description": "Original request"
+    "description": "Original request",
+    "whatChanged": "What changed",
+    "checked": "Checked",
+    "needsAttention": "Needs your attention",
+    "writing": "Writing a summary…",
+    "regenerate": "Regenerate",
+    "technicalNotes": "Agent's technical notes",
+    "showFiles": "Show files",
+    "hideFiles": "Hide files"
   },
   "tooltips": {
     "archiveTask": "Archive task",

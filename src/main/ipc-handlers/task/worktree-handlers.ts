@@ -391,6 +391,50 @@ async function withRetry<T>(
 /**
  * Register worktree management handlers
  */
+/**
+ * Files a task changed with +/- counts. From the recorded merge commit of an automatic merge,
+ * otherwise from the task's worktree (against its base branch, uncommitted work included).
+ * null when neither exists.
+ */
+export async function collectTaskChanges(task: Task, project: Project): Promise<TaskChangeSummary | null> {
+  const worktreePath = findTaskWorktree(project.path, task.specId);
+  let files: TaskChangeFile[];
+  let commitCount: number | undefined;
+  let source: TaskChangeSummary['source'];
+
+  // An auto-merged task's branch is already in its base branch, so diffing the worktree against
+  // the base shows nothing: its merge commit holds what it changed (worktree or not)
+  if (task.metadata?.autoMerge?.sha) {
+    const sha = task.metadata.autoMerge.sha;
+    const [diff, count] = await Promise.all([
+      git(['diff', '--numstat', `${sha}^1`, sha], { cwd: project.path, encoding: 'utf-8' }),
+      git(['rev-list', '--count', `${sha}^1..${sha}^2`], { cwd: project.path, encoding: 'utf-8' }).catch(() => null),
+    ]);
+    files = parseNumstat(diff.stdout);
+    commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
+    source = 'merge';
+  } else if (worktreePath) {
+    const baseBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+    const [diff, count] = await Promise.all([
+      git(['diff', '--numstat', baseBranch], { cwd: worktreePath, encoding: 'utf-8' }),
+      git(['rev-list', '--count', `${baseBranch}..HEAD`], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null),
+    ]);
+    files = parseNumstat(diff.stdout);
+    commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
+    source = 'worktree';
+  } else {
+    return null;
+  }
+
+  return {
+    files,
+    additions: files.reduce((sum, f) => sum + f.additions, 0),
+    deletions: files.reduce((sum, f) => sum + f.deletions, 0),
+    commitCount,
+    source,
+  };
+}
+
 export function registerWorktreeHandlers(
   getMainWindow: () => BrowserWindow | null
 ): void {
@@ -412,46 +456,7 @@ export function registerWorktreeHandlers(
       try {
         const { task, project } = findTaskAndProject(taskId, projectId);
         if (!task || !project) return { success: false, error: 'Task not found' };
-
-        const worktreePath = findTaskWorktree(project.path, task.specId);
-        let files: TaskChangeFile[];
-        let commitCount: number | undefined;
-        let source: TaskChangeSummary['source'];
-
-        // An auto-merged task's branch is already in its base branch, so diffing the worktree against
-        // the base shows nothing: its merge commit holds what it changed (worktree or not)
-        if (task.metadata?.autoMerge?.sha) {
-          const sha = task.metadata.autoMerge.sha;
-          const [diff, count] = await Promise.all([
-            git(['diff', '--numstat', `${sha}^1`, sha], { cwd: project.path, encoding: 'utf-8' }),
-            git(['rev-list', '--count', `${sha}^1..${sha}^2`], { cwd: project.path, encoding: 'utf-8' }).catch(() => null),
-          ]);
-          files = parseNumstat(diff.stdout);
-          commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
-          source = 'merge';
-        } else if (worktreePath) {
-          const baseBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
-          const [diff, count] = await Promise.all([
-            git(['diff', '--numstat', baseBranch], { cwd: worktreePath, encoding: 'utf-8' }),
-            git(['rev-list', '--count', `${baseBranch}..HEAD`], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null),
-          ]);
-          files = parseNumstat(diff.stdout);
-          commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
-          source = 'worktree';
-        } else {
-          return { success: true, data: null };
-        }
-
-        return {
-          success: true,
-          data: {
-            files,
-            additions: files.reduce((sum, f) => sum + f.additions, 0),
-            deletions: files.reduce((sum, f) => sum + f.deletions, 0),
-            commitCount,
-            source,
-          },
-        };
+        return { success: true, data: await collectTaskChanges(task, project) };
       } catch (error) {
         appLog.warn(`[TASK_CHANGE_SUMMARY] ${taskId}: ${error instanceof Error ? error.message : String(error)}`);
         return { success: false, error: error instanceof Error ? error.message : String(error) };
