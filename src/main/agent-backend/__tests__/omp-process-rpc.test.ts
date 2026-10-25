@@ -153,7 +153,9 @@ describe('startOmpProcess with live messages', () => {
       tools: ['bash'],
       live: { onInputRead: (id, text) => read.push({ id, text }) },
       onMessage: (m) => messages.push(m),
-      rpcWaitsMs: { ready: 400, start: 400, settle: 400, state: 400 },
+      // `ready` waits on a fresh node process, which a loaded machine (the full suite) can take seconds to start;
+      // the misbehaving modes that test a missing `ready` shorten it themselves
+      rpcWaitsMs: { ready: 5000, start: 400, settle: 400, state: 400 },
       ...extra,
     });
     return { messages, read, promise };
@@ -196,7 +198,7 @@ describe('startOmpProcess with live messages', () => {
   });
 
   it.each(['rpc-exit', 'rpc-silent', 'rpc-garbage'])('falls back to omp -p when the RPC process misbehaves (%s)', async (mode) => {
-    const { messages, promise } = run(mode);
+    const { messages, promise } = run(mode, { rpcWaitsMs: { ready: 400, start: 400, settle: 400, state: 400 } });
     const handle = await promise;
     const early = handle.send('early message', 'wbm-test3');
     const outcome = await handle.done;
