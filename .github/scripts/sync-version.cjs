@@ -6,9 +6,11 @@
  * the branch (a commit, an amend, a cherry-pick, a pull):
  * - major: the first number in package.json, never touched here. Raising it is the user's call,
  *   and the `v<major>.0.0` tag of that release is where the counting below starts
- * - minor: the merge commits on this branch since that tag (one per merged pull request; a merge
- *   that only brings this branch up to date with main is not one of them)
- * - patch: the plain commits since the newest of those merges, so a merge resets it to 0
+ * - minor: the pull requests merged since that tag that this branch has: its own merge commits,
+ *   and main's that catching up with main brought in (a merge that only brings this branch up to
+ *   date with main is not one of them)
+ * - patch: the plain commits this branch has made since the newest of those merges it is built
+ *   on, so a merge resets it to 0 (catching up with main does not)
  *
  * The `post-commit` hook runs this and folds the change into the commit that caused it; a merge is
  * made on GitHub, where no hook runs, so .github/workflows/version.yml does the same to the merge
@@ -53,29 +55,45 @@ const exists = (ref) => {
 };
 /**
  * A merge counts when it brought a pull request in, not when it brought this branch up to date
- * with main: `git merge main` on a branch of your own raises nothing, since nothing was merged.
- * The two read the same in the history apart from which side main is on, so that is what decides:
- * a merge is this branch catching up when its first parent is off main and its second is on it.
+ * with main: `git merge main` on a branch of your own is no pull request of its own. The two read
+ * the same in the history apart from which side main is on, so that is what decides: a merge is
+ * this branch catching up when its first parent is off main and its second is on it. Main is its
+ * own line (its first parents), not all it reaches: once this branch's pull request is merged,
+ * main reaches all of it, and a catch-up made along the way would count after all. A merge is
+ * known by its parents, which version.yml keeps when it rewrites a merge commit on main, so the
+ * one this branch took in may not be the one main has now.
  *
  * Whether a commit is on main is worked out from two listings rather than asked of git commit by
  * commit, which ran up to three git processes for every merge on every commit: what the tag
  * reaches is on main (the release was made there), and of what came after, main lists its own.
  */
 const mainRef = ['refs/remotes/origin/main', 'refs/heads/main'].find(exists);
-const sinceAnchor = new Set(lines(git('rev-list', `${anchor}..HEAD`)));
-const mainSinceAnchor = new Set(mainRef ? lines(git('rev-list', `${anchor}..${mainRef}`)) : []);
-const onMain = (sha) => !sinceAnchor.has(sha) || mainSinceAnchor.has(sha);
+const parentsOf = new Map(lines(git('rev-list', '--parents', `${anchor}..HEAD`)).map((line) => {
+  const [sha, ...parents] = line.split(' ');
+  return [sha, parents.join(' ')];
+}));
+const mainLine = mainRef
+  ? lines(git('rev-list', '--first-parent', '--parents', `${anchor}..${mainRef}`)).map((line) => line.split(' '))
+  : [];
+const onMainLine = new Set(mainLine.map(([sha]) => sha));
+const mainMerges = new Set(mainLine.filter((commit) => commit.length > 2).map(([, ...parents]) => parents.join(' ')));
+const onMain = (sha) => !parentsOf.has(sha) || onMainLine.has(sha) || mainMerges.has(parentsOf.get(sha));
 const caughtUpWithMain = ([, first, second]) => !!mainRef && !!second && !onMain(first) && onMain(second);
 
 // --first-parent: only this branch's own history, so the commits a merge brought in are not
-// counted again as patches after it
-const merges = lines(git('rev-list', '--first-parent', '--merges', '--parents', `${anchor}..HEAD`))
-  .map((line) => line.split(' '))
-  .filter((commit) => !caughtUpWithMain(commit))
-  .map(([sha]) => sha);
-const since = merges[0] ?? anchor;
-const patch = lines(git('rev-list', '--first-parent', '--no-merges', `${since}..HEAD`)).length;
-const version = `${major}.${merges.length}.${patch}`;
+// counted again as patches after it. What catching up brings in counts all the same: the pull
+// requests main merged meanwhile, each once (by its parents), so a branch is never behind the main
+// it has taken in
+const merges = new Map();
+for (const line of lines(git('rev-list', '--first-parent', '--merges', '--parents', `${anchor}..HEAD`))) {
+  const [sha, ...parents] = line.split(' ');
+  if (!caughtUpWithMain([sha, ...parents])) merges.set(parents.join(' '), sha);
+}
+for (const [sha, parents] of parentsOf) {
+  if (mainMerges.has(parents) && !merges.has(parents)) merges.set(parents, sha);
+}
+const patch = lines(git('rev-list', '--first-parent', '--no-merges', 'HEAD', '--not', anchor, ...merges.values())).length;
+const version = `${major}.${merges.size}.${patch}`;
 
 if (version === current) {
   console.log(`[sync-version] ${version}`);
