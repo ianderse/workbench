@@ -11,7 +11,7 @@ export function TaskFollowUpLabel({ task }: TaskFollowUpLabelProps) {
   const { t } = useTranslation('tasks');
   const from = task.metadata?.followUpFrom;
   if (!from) return null;
-  const key = from.needsDecision ? 'queueGrooming.followUpDetailDecisionLabel' : 'queueGrooming.followUpDetailLabel';
+  const key = from.needsDecision && !task.metadata?.decision ? 'queueGrooming.followUpDetailDecisionLabel' : 'queueGrooming.followUpDetailLabel';
   return (
     <p className="text-xs font-medium text-(--nav-label-color) wrap-anywhere">
       {t(key, { number: taskNumber(from.taskId), item: from.item })}

@@ -52,6 +52,8 @@ import { useTaskDetail } from './hooks/useTaskDetail';
 import { TaskMetadata } from './TaskMetadata';
 import { TaskContextNotes } from './TaskContextNotes';
 import { TaskFollowUpLabel } from './TaskFollowUpLabel';
+import { TaskDecisionPanel } from './TaskDecisionPanel';
+import { isAwaitingDecision } from '../../../shared/utils/decision-tickets';
 import { TaskOpenAgentButton } from './TaskOpenAgentButton';
 import { useTaskGitOptions } from '../task-form/TaskGitOptions';
 import { TaskWarnings } from './TaskWarnings';
@@ -424,6 +426,9 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       {/* A ticket made from the review of another task */}
                       <TaskFollowUpLabel task={task} />
 
+                      {/* A ticket that needs a decision: answer it here (Start would have an agent decide) */}
+                      <TaskDecisionPanel task={task} />
+
                       {/* Notes added to this ticket after other tasks merged, with Undo */}
                       <TaskContextNotes task={task} />
 
@@ -643,7 +648,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                 {t('tasks:actions.edit')}
               </Button>
               {/* Start a task waiting in Planning (Backlog) */}
-              {task.status === 'backlog' && (
+              {task.status === 'backlog' && !isAwaitingDecision(task.metadata) && (
                 <Button size="sm" className="gap-1.5" onClick={() => void handleStartStop()}>
                   <Play className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
                   {t('tasks:actions.start')}

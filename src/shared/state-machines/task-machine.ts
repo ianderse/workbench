@@ -54,7 +54,9 @@ export const taskMachine = createMachine(
           PLANNING_STARTED: 'planning',
           // Fallback: if coding starts from backlog (e.g., resumed task), go to coding
           CODING_STARTED: 'coding',
-          USER_STOPPED: 'backlog'
+          USER_STOPPED: 'backlog',
+          // A ticket that needs no run (a decided needs-decision ticket) goes straight to Done
+          MARK_DONE: 'done'
         }
       },
       // Claude Code triage and (optional) plan mode

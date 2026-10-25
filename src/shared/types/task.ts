@@ -181,6 +181,20 @@ export interface TaskFollowUpRef {
   item: string;
   /** Needs a human decision first: it waits in Planning (never starts on its own) */
   needsDecision?: boolean;
+  /** needsDecision: what the person has to decide (the model's one-sentence reason) */
+  why?: string;
+}
+
+/** What the person decided on a needs-decision ticket (Your decision panel) */
+export interface TaskDecision {
+  /** The person's own words */
+  text: string;
+  /** ISO time */
+  at: string;
+  /** tickets: implementation tickets were made and the ticket is Done; deferred: stays in Planning; rejected: archived */
+  outcome: 'tickets' | 'deferred' | 'rejected';
+  /** Tickets made from the decision */
+  ticketIds?: string[];
 }
 
 export interface TaskMetadata {
@@ -246,6 +260,8 @@ export interface TaskMetadata {
 
   /** Set on a ticket made from a "needs your attention" item of another task's review (follow-up tickets) */
   followUpFrom?: TaskFollowUpRef;
+  /** Set on a needs-decision ticket once the person answered it */
+  decision?: TaskDecision;
   /** Set on the reviewed task once its follow-ups were handled (ISO time); it is only handled once */
   followUpsCreatedAt?: string;
   /** The tickets its review created, for the line in the Human Review panel */

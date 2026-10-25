@@ -75,6 +75,7 @@ export const IPC_CHANNELS = {
   QUEUE_PROPOSALS_LIST: 'queueGrooming:list',  // Pending queue proposals of a project
   QUEUE_PROPOSAL_APPLY: 'queueGrooming:apply',
   QUEUE_PROPOSAL_DISMISS: 'queueGrooming:dismiss',
+  QUEUE_DECIDE_TICKET: 'queueGrooming:decide',  // Answer a needs-decision ticket: make tickets, defer or reject
   QUEUE_NOTE_UNDO: 'queueGrooming:undoNote',  // Take a context note off a ticket
   QUEUE_UNDO_LIST: 'queueGrooming:undoList',  // Structural changes applied without asking (autonomous mode), newest last
   QUEUE_CHANGE_UNDO: 'queueGrooming:undoChange',  // Undo one of them: (projectId, undoId)

@@ -524,6 +524,7 @@ export interface ElectronAPI {
   applyQueueProposal: (projectId: string, proposalId: string) => Promise<IPCResult>;
   dismissQueueProposal: (projectId: string, proposalId: string) => Promise<IPCResult>;
   /** Take a context note off a ticket (its text leaves the description) */
+  decideTicket: (projectId: string, taskId: string, action: 'tickets' | 'defer' | 'reject', text: string) => Promise<IPCResult<import('../utils/decision-tickets').DecisionData>>;
   undoContextNote: (projectId: string, taskId: string, noteId: string) => Promise<IPCResult>;
   onQueueProposalsChanged: (callback: (projectId: string) => void) => () => void;
 

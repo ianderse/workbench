@@ -6,6 +6,7 @@
 import { IPC_CHANNELS } from '../../../shared/constants';
 import type { IPCResult } from '../../../shared/types';
 import type { QueueProposal } from '../../../shared/types/queue-grooming';
+import type { DecisionAction, DecisionData } from '../../../shared/utils/decision-tickets';
 import { createIpcListener, invokeIpc } from './ipc-utils';
 
 export interface QueueGroomingAPI {
@@ -15,6 +16,8 @@ export interface QueueGroomingAPI {
   dismissQueueProposal: (projectId: string, proposalId: string) => Promise<IPCResult>;
   /** Take a context note off a ticket (its text leaves the description) */
   undoContextNote: (projectId: string, taskId: string, noteId: string) => Promise<IPCResult>;
+  /** Answer a needs-decision ticket (one model call when making tickets) */
+  decideTicket: (projectId: string, taskId: string, action: DecisionAction, text: string) => Promise<IPCResult<DecisionData>>;
   /** Proposals were added, applied or dismissed */
   onQueueProposalsChanged: (callback: (projectId: string) => void) => () => void;
 }
@@ -25,6 +28,8 @@ export const createQueueGroomingAPI = (): QueueGroomingAPI => ({
   dismissQueueProposal: (projectId: string, proposalId: string) => invokeIpc(IPC_CHANNELS.QUEUE_PROPOSAL_DISMISS, projectId, proposalId),
   undoContextNote: (projectId: string, taskId: string, noteId: string) =>
     invokeIpc(IPC_CHANNELS.QUEUE_NOTE_UNDO, projectId, taskId, noteId),
+  decideTicket: (projectId: string, taskId: string, action: DecisionAction, text: string) =>
+    invokeIpc(IPC_CHANNELS.QUEUE_DECIDE_TICKET, projectId, taskId, action, text),
   onQueueProposalsChanged: (callback: (projectId: string) => void) =>
     createIpcListener(IPC_CHANNELS.QUEUE_PROPOSALS_CHANGED, callback),
 });

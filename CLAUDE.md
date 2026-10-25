@@ -276,6 +276,16 @@ Planning with a "Why this needs a decision" paragraph; `covered` adds a `kind: '
 is written before the model call so each task is handled once (also across restarts). The created tickets are kept in
 `metadata.followUpTickets` for the line in the Human Review panel. Project setting `followUpTickets` (default on).
 
+A `needsDecision` ticket (also stores `followUpFrom.why`) shows a "Your decision" panel (`task-detail/TaskDecisionPanel.tsx`) in the
+task dialog instead of Start. `decideTicket()` (`src/main/decision-tickets.ts`, IPC `QUEUE_DECIDE_TICKET`, pure rules in
+`shared/utils/decision-tickets.ts`) handles three answers: *Make tickets* makes one read-only `runClaudeText` call (OMP role `plan`) that
+returns 0..4 `{ title, description, queue }` tickets plus a `decisionRecord`; they are created like follow-ups (`followUpFrom: { item: 'decision' }`,
+no `needsDecision`, the decision ticket's own `dependsOnTaskIds`, queued ones at the end of the Queue; the recursion guard only
+applies to review-derived follow-ups, so the explicit queue choice stands), then the decision ticket gets a "## Decision" block,
+`metadata.decision = { text, at, outcome: 'tickets' | 'deferred' | 'rejected', ticketIds }` and moves to Done (backlog accepts
+`MARK_DONE`; it never ran, so there is no worktree or merge dialog). *Not now* saves the note (outcome `deferred`, stays in Planning and
+can be decided again); *Reject* archives. Any model failure, or an answer with no tickets, changes nothing.
+
 ### Task splitting (per project)
 
 The project setting `selfSplit` (`off | propose | auto`; unset = auto while autonomous mode is on, else propose,

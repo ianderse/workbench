@@ -13,6 +13,8 @@ import { taskHooks } from '../task-hooks';
 import { taskQueue } from '../services/task-queue';
 import { appLog } from '../app-logger';
 import { createFollowUpTickets } from '../follow-up-tickets';
+import { decideTicket } from '../decision-tickets';
+import type { DecisionAction } from '../../shared/utils/decision-tickets';
 import {
   applyQueueProposal,
   configureQueueGrooming,
@@ -87,6 +89,14 @@ export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow
     if (result.success && splitTaskId) void resumeAfterSplitDecision(projectId, splitTaskId);
     return result.success ? { success: true } : { success: false, error: result.error };
   });
+
+  handleIpc(
+    IPC_CHANNELS.QUEUE_DECIDE_TICKET,
+    async (_, projectId: string, taskId: string, action: DecisionAction, text: string) => {
+      if (action !== 'tickets' && action !== 'defer' && action !== 'reject') return { success: false, error: 'Unknown action' };
+      return decideTicket(projectId, taskId, { action, text: typeof text === 'string' ? text : '' });
+    }
+  );
 
   handleIpc(IPC_CHANNELS.QUEUE_NOTE_UNDO, async (_, projectId: string, taskId: string, noteId: string): Promise<IPCResult> => {
     const result = await undoContextNote(projectId, taskId, noteId);
