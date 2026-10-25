@@ -35,6 +35,7 @@ import {
 import type { AppSettings } from '../../../shared/types';
 import { useProjectStore } from '../../stores/project-store';
 import { useLiveAgentStore } from '../../stores/live-agent-store';
+import { DEFAULT_OMP_BACKEND_SETTINGS } from '../../../shared/types/agent-backend';
 import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 
 interface ClaudeCodeTaskSettingsProps {
@@ -59,6 +60,18 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
 
   const update = (patch: Partial<TaskSettings>) => {
     onSettingsChange({ ...settings, claudeCodeTasks: { ...stored, ...patch } });
+  };
+
+  const liveMessages = settings.agentBackend?.omp?.liveMessages !== false;
+  const setLiveMessages = (checked: boolean) => {
+    const agentBackend = settings.agentBackend;
+    onSettingsChange({
+      ...settings,
+      agentBackend: {
+        kind: agentBackend?.kind ?? 'claude',
+        omp: { ...DEFAULT_OMP_BACKEND_SETTINGS, ...(agentBackend?.omp ?? {}), liveMessages: checked },
+      },
+    });
   };
 
   // Live agent is the selected project's setting (its .workbench/flow directory), saved at once
@@ -221,7 +234,7 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             </Select>
           </SettingsRow>
 
-          {/* OMP tasks get the messaging tools from a per-run extension and read messages at their next step */}
+          {/* OMP tasks get the messaging tools from a per-run extension */}
           <SettingsRow
             label={t('claudeCode.execution.taskMessaging')}
             description={t(isOmp ? 'claudeCode.execution.taskMessagingOmpDescription' : 'claudeCode.execution.taskMessagingDescription')}
@@ -232,6 +245,21 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
               aria-label={t('claudeCode.execution.taskMessaging')}
             />
           </SettingsRow>
+
+          {/* OMP runs task steps through its RPC mode so a message reaches the running step at its next turn */}
+          {isOmp && (
+            <SettingsRow
+              label={t('claudeCode.execution.liveMessages')}
+              description={t('claudeCode.execution.liveMessagesDescription')}
+            >
+              <Switch
+                checked={liveMessages}
+                disabled={!current.taskMessaging}
+                onCheckedChange={setLiveMessages}
+                aria-label={t('claudeCode.execution.liveMessages')}
+              />
+            </SettingsRow>
+          )}
 
           {/* --fallback-model is a Claude Code flag; OMP has no equivalent */}
           {!isOmp && (

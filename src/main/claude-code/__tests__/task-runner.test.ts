@@ -978,7 +978,7 @@ describe('ClaudeTaskRun', () => {
       const { value, calls } = messaging(inbox);
       await makeRun({ settings, projectId: 'p1', messaging: value, backend: 'omp' }).run();
 
-      const options = ompSpawned[0] as { extensions: string[]; tools: string[]; appendSystemPrompt: string; prompt: Array<{ text?: string }> };
+      const options = ompSpawned[0] as { live?: unknown; extensions: string[]; tools: string[]; appendSystemPrompt: string; prompt: Array<{ text?: string }> };
       expect(options.extensions).toHaveLength(1);
       expect(options.extensions[0].endsWith('workbench-messaging.mjs')).toBe(true);
       expect(options.tools === ('all' as unknown)).toBe(true);
@@ -990,8 +990,11 @@ describe('ClaudeTaskRun', () => {
       const last = options.prompt[options.prompt.length - 1].text ?? '';
       expect(last).toContain('[Workbench] Task 002 started.');
       expect(calls.markRead).toHaveBeenCalledWith(['wbm-5']);
-      // No live delivery under OMP yet: the run never attaches, so messages wait in the inbox
-      expect(calls.attach).not.toHaveBeenCalled();
+      // Live delivery: the run attaches (the process goes through RPC mode) and reads of steered messages reach the broker
+      expect(calls.attach).toHaveBeenCalledTimes(1);
+      expect(options.live).toBeDefined();
+      (options.live as { onInputRead: (id: string, text: string) => void }).onInputRead('wbm-9', 'hello there');
+      expect(calls.inputRead).toHaveBeenCalledWith('wbm-9');
     });
 
     it('on OMP: the read-only plan step lists the messaging tools next to the read tools', async () => {

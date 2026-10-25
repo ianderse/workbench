@@ -8,11 +8,16 @@
  * (`omp -p` prepends piped input to the message); images and PDFs become temp files passed as
  * `@path`. Long system prompts also go through temp files. Everything is removed when the run ends.
  *
+ * Live messages: with `options.live` the step runs through `omp --mode rpc` instead (omp-rpc.ts documents the
+ * protocol): the same events, so the same translator, plus a stdin that stays open for `steer` commands.
+ * If the RPC process does not start a run, the step is repeated with `-p`.
+ *
  * A caller's JSON schema is put into the prompt (OMP has no `--json-schema`); when the final
  * answer has no parseable object the run is repeated once, asking for the JSON alone.
  */
 
 import type { ChildProcess } from 'child_process';
+import { randomBytes } from 'crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -27,6 +32,7 @@ import { resolveOmpCommand } from './omp-command';
 import { getOmpRoles } from './omp-roles';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
+import { isSessionSettled, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
 import { recordOmpUsage, type UsageContext } from '../usage/usage-record';
 
 type OmpProcessOutcome = Awaited<ClaudeProcessHandle['done']>;
@@ -72,6 +78,14 @@ export interface OmpRunOptions {
   extensions?: readonly string[];
   /** Where to book the run's tokens (the project's usage ledger); unset = not recorded */
   usage?: UsageContext;
+  /**
+   * Live messages: run through `omp --mode rpc` (unless the setting is off, attachments are given or the call is a
+   * utility call) so `send()` can steer the running step. `onInputRead` gets the id `send()` returned and the text
+   * once the model has read the message; the ones never read come back in `done`'s `unread`
+   */
+  live?: { onInputRead?: (id: string, text: string) => void };
+  /** Tests: override the RPC start-up waits (ms) */
+  rpcWaitsMs?: { ready?: number; start?: number; settle?: number; state?: number };
 }
 
 function extensionFor(mediaType: string): string {
@@ -169,28 +183,102 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     killRuntimeProcess(current, { debugPrefix: '[OMP]' });
   };
 
-  /** One `omp` process: stdin text + attachments in, translated messages out */
-  const runOnce = (args: string[], input: string, holdResult: boolean, resumeNote?: string) => {
+  /** Live messages: written to a running RPC process; `unread` keeps what the model has not read yet */
+  const live = {
+    child: undefined as ChildProcess | undefined,
+    /** Accepting messages: from the spawn of an RPC process until its run ended */
+    open: false,
+    /** The run started: messages are written at once; before that they wait in `pending` */
+    started: false,
+    pending: [] as Array<{ id: string; text: string }>,
+    unread: new Map<string, string>(),
+  };
+  const send = (text: string, id?: string): string | false => {
+    const target = live.child;
+    if (!live.open || !target || target.exitCode !== null || target.killed || !target.stdin || target.stdin.destroyed || target.stdin.writableEnded) return false;
+    const messageId = id ?? `wbm-${randomBytes(6).toString('hex')}`;
+    if (live.started) {
+      try {
+        target.stdin.write(rpcSteer(messageId, steerText(text, messageId)));
+      } catch {
+        return false;
+      }
+    } else {
+      // The run is still starting: the message goes in as soon as it began
+      live.pending.push({ id: messageId, text });
+    }
+    live.unread.set(messageId, text);
+    return messageId;
+  };
+  const waits = { ready: 20_000, start: 30_000, settle: 8_000, state: 5_000, ...(options.rpcWaitsMs ?? {}) };
+
+  interface RunOnceResult {
+    outcome: Omit<OmpProcessOutcome, 'result'>;
+    result?: ClaudeResultMessage;
+    text: string;
+    sessionId?: string;
+    /** RPC only: the run never started, this is why (the caller repeats the step in print mode) */
+    fallback?: string;
+  }
+
+  /**
+   * One `omp` process. Print mode: the prompt goes in on stdin, which is closed. RPC mode (`rpc`): the prompt
+   * is a `prompt` command and stdin stays open for `steer` commands until the session settled. An RPC process
+   * that never gets a run going resolves with `fallback` so the caller can run the step in print mode.
+   */
+  const runOnce = (args: string[], input: string, holdResult: boolean, resumeNote?: string, rpc = false) => {
     // `spawnTool` names only the tools cli-tool-manager knows; `command` is what runs
     // (inside WSL it must be an absolute Linux path)
     const child = spawnTool('claude', args, { command, cwd: options.cwd, env, windowsHide: true, stdio: 'pipe' });
     current = child;
     if (resumeNote) appLog.info(`[OMP] ${resumeNote}`);
-    return new Promise<{ outcome: Omit<OmpProcessOutcome, 'result'>; result?: ClaudeResultMessage; text: string; sessionId?: string }>((resolve) => {
+    return new Promise<RunOnceResult>((resolve) => {
       const translator = createOmpTranslator({ model: selection.concrete ?? selection.selector, emitDeltas: options.emitDeltas, emitProgress: options.emitProgress });
       let buffer = '';
       let stderr = '';
       let held: ClaudeResultMessage | undefined;
-
-      const handleLine = (line: string) => {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed[0] !== '{') return;
-        let event: unknown;
+      // RPC state
+      let started = false; // agent_start seen: the prompt is running, no fallback any more
+      let promptSent = false;
+      let ended = false; // agent_end seen
+      let fallback: string | undefined;
+      let stdinClosed = false;
+      const timers = new Set<NodeJS.Timeout>();
+      const after = (ms: number, fn: () => void) => {
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          fn();
+        }, ms);
+        timers.add(timer);
+        return timer;
+      };
+      const clearTimers = () => {
+        for (const timer of timers) clearTimeout(timer);
+        timers.clear();
+      };
+      const giveUp = (reason: string) => {
+        if (fallback || started) return;
+        fallback = reason;
+        stop();
+      };
+      const closeStdin = () => {
+        if (stdinClosed) return;
+        stdinClosed = true;
+        live.open = false;
         try {
-          event = JSON.parse(trimmed);
+          child.stdin?.end();
         } catch {
-          return;
+          // Already closed
         }
+      };
+      const forward = (message: ClaudeStreamMessage) => {
+        try {
+          options.onMessage?.(message);
+        } catch (error) {
+          appLog.error('[OMP] onMessage handler failed', error);
+        }
+      };
+      const emit = (event: unknown) => {
         for (const message of translator.translate(event)) {
           if (isOmpNotice(message)) {
             if (options.oneShot) appLog.warn(`[OMP] Notice (${message.source}): ${message.text}`);
@@ -203,12 +291,82 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
           }
         }
       };
-      const forward = (message: ClaudeStreamMessage) => {
-        try {
-          options.onMessage?.(message);
-        } catch (error) {
-          appLog.error('[OMP] onMessage handler failed', error);
+      const sendPrompt = () => {
+        if (promptSent || stdinClosed) return;
+        promptSent = true;
+        child.stdin?.write(rpcPrompt(input));
+        after(waits.start, () => giveUp('no agent_start after the prompt'));
+      };
+      const handleRpcLine = (line: string) => {
+        const parsed = parseRpcLine(line);
+        if (!parsed) return;
+        if (parsed.kind === 'invalid') {
+          if (!started) giveUp('unparseable output before the run started');
+          return;
         }
+        if (parsed.kind === 'ready') {
+          clearTimers();
+          child.stdin?.write(rpcGetState());
+          // The session id comes from get_state; without an answer the prompt goes out anyway
+          after(waits.state, sendPrompt);
+          return;
+        }
+        if (parsed.kind === 'response') {
+          if (parsed.id === RPC_STATE_ID) {
+            const sessionId = parsed.success ? sessionIdOf(parsed.data) : undefined;
+            if (sessionId) emit({ type: 'session', id: sessionId, cwd: options.cwd });
+            sendPrompt();
+          } else if (parsed.id === RPC_PROMPT_ID && !parsed.success) {
+            giveUp(`prompt refused: ${parsed.error ?? 'unknown error'}`);
+          }
+          return;
+        }
+        const event = parsed.event;
+        if (event.type === 'agent_start') {
+          started = true;
+          clearTimers();
+          live.started = true;
+          for (const message of live.pending.splice(0)) {
+            try {
+              child.stdin?.write(rpcSteer(message.id, steerText(message.text, message.id)));
+            } catch {
+              // Stays unread: back to the inbox when the process ends
+            }
+          }
+        }
+        const steerId = readSteerId(event);
+        if (steerId && live.unread.has(steerId)) {
+          const text = live.unread.get(steerId)!;
+          live.unread.delete(steerId);
+          try {
+            options.live?.onInputRead?.(steerId, text);
+          } catch (error) {
+            appLog.error('[OMP] onInputRead handler failed', error);
+          }
+        }
+        emit(event);
+        if (event.type === 'agent_end') {
+          // Nothing more can be injected into this run
+          ended = true;
+          live.open = false;
+          after(waits.settle, closeStdin);
+        }
+        if (ended && isSessionSettled(event)) closeStdin();
+      };
+      const handleLine = (line: string) => {
+        if (rpc) {
+          handleRpcLine(line);
+          return;
+        }
+        const trimmed = line.trim();
+        if (!trimmed || trimmed[0] !== '{') return;
+        let event: unknown;
+        try {
+          event = JSON.parse(trimmed);
+        } catch {
+          return;
+        }
+        emit(event);
       };
 
       child.stdout?.setEncoding('utf8');
@@ -228,8 +386,23 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       });
 
       const finish = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+        clearTimers();
+        live.open = false;
+        live.started = false;
+        live.pending = [];
         if (buffer.trim()) handleLine(buffer);
         buffer = '';
+        // An RPC process that never started a run: the caller repeats the step in print mode
+        // (messages taken meanwhile stay in `unread` and go back to the inbox with the print run's outcome)
+        if (rpc && !started && !aborted && !timedOut) {
+          const last = stderr.trim().split('\n').slice(-1)[0]?.slice(0, 200);
+          resolve({
+            outcome: { exitCode, signal, stderr, aborted, timedOut, results: [], resultOrigins: [], unread: [] },
+            text: '',
+            fallback: fallback ?? `omp exited with code ${exitCode} before the run started${last ? `: ${last}` : ''}`,
+          });
+          return;
+        }
         let result = held;
         if (!result) {
           result = translator.finalize({ exitCode, stderr, aborted, timedOut });
@@ -237,7 +410,9 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         }
         // Every process books its own tokens (a JSON repair run is a second one), also when it failed
         recordOmpUsage(options.usage, translator.usage, { sessionId: translator.sessionId });
-        resolve({ outcome: { exitCode, signal, stderr, aborted, timedOut, results: [], resultOrigins: [], unread: [] }, result, text: translator.lastText, sessionId: translator.sessionId });
+        const unread = [...live.unread].map(([id, text]) => ({ id, text }));
+        live.unread.clear();
+        resolve({ outcome: { exitCode, signal, stderr, aborted, timedOut, results: [], resultOrigins: [], unread }, result, text: translator.lastText, sessionId: translator.sessionId });
       };
       child.on('error', (error) => {
         stderr = (stderr + `\n${error.message}`).slice(-8000);
@@ -246,7 +421,13 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       child.on('close', (code, signal) => finish(code, signal));
 
       child.stdin?.on('error', () => { /* process exited before reading stdin */ });
-      child.stdin?.end(input);
+      if (rpc) {
+        live.child = child;
+        live.open = true;
+        after(waits.ready, () => giveUp('no ready message from omp'));
+      } else {
+        child.stdin?.end(input);
+      }
     });
   };
 
@@ -268,6 +449,29 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     attachmentPaths: setup.attachmentPaths,
     extensionPaths: options.extensions,
   });
+  // Live messages: an RPC process takes steer commands while the step runs. Attachments (`@file`) are not
+  // supported in RPC mode, so those steps stay on print mode, as do utility calls and the setting turned off
+  const useRpc = !!options.live && !options.oneShot && options.settings.liveMessages !== false && setup.attachmentPaths.length === 0;
+  const rpcArgs = useRpc
+    ? buildOmpArgs({
+      settings: options.settings,
+      model: options.model,
+      role,
+      roles,
+      effort: options.effort,
+      tools: options.tools,
+      autoApprove: options.autoApprove,
+      systemPromptFile: setup.systemPromptFile,
+      appendSystemPromptFile: setup.appendSystemPromptFile,
+      session: options.session,
+      maxTimeMinutes: options.maxTimeMinutes,
+      oneShot: options.oneShot,
+      advisorMode: advisor.mode,
+      advisorOverlayFile: setup.advisorOverlayFile,
+      extensionPaths: options.extensions,
+      transport: 'rpc',
+    })
+    : undefined;
 
   const onAbort = () => {
     aborted = true;
@@ -281,8 +485,16 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     }, options.timeoutMs)
     : undefined;
 
-  const first = runOnce(baseArgs, setup.text, !!options.jsonSchema);
-  const firstChild = current!;
+  const startFirst = async (): Promise<RunOnceResult> => {
+    if (!rpcArgs) return runOnce(baseArgs, setup.text, !!options.jsonSchema);
+    const rpcRun = await runOnce(rpcArgs, setup.text, !!options.jsonSchema, undefined, true);
+    if (!rpcRun.fallback) return rpcRun;
+    // Never lose a step to the new transport: run it again in print mode (the RPC process did not start the run)
+    appLog.warn(`[OMP] RPC mode did not start (${rpcRun.fallback}); running this step with omp -p, messages wait for the next step`);
+    if (aborted || timedOut) return rpcRun;
+    return runOnce(baseArgs, setup.text, !!options.jsonSchema, 'Falling back to omp -p for this step');
+  };
+  const first = startFirst();
   if (options.abortSignal?.aborted) onAbort();
 
   const done = (async (): Promise<OmpProcessOutcome> => {
@@ -320,7 +532,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
             true,
             'The answer had no valid JSON, asking once more for the JSON alone',
           );
-          outcome = repair.outcome;
+          outcome = { ...repair.outcome, unread: outcome.unread };
           if (repair.result && !repair.result.is_error) {
             structured = parseStructuredOutput(repair.text, schema);
             result = {
@@ -349,6 +561,11 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     }
   })();
 
-  // No live messages yet: they wait in the task's inbox for its next step (live delivery needs RPC mode)
-  return { child: firstChild, done, stop, send: () => false };
+  // Live messages go to the RPC process (`send` is false in print mode: they wait in the task's inbox)
+  return {
+    get child() { return current!; },
+    done,
+    stop,
+    send,
+  };
 }

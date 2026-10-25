@@ -21,7 +21,7 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 - Autonomous mode now resyncs the other open tasks when it auto-merges a task into its target branch (integration branch or main), not only when a task reaches Done; an auto-merged task moving to Done later does not trigger it again
 
 **Task messaging under OMP**
-- OMP tasks can message parallel tasks: a per-run extension file (`omp -e`) adds `message_task` and `list_parallel_tasks`, which call Workbench's local tools server with the run's token. Messages for an OMP task wait in its inbox and are added to its next step's prompt; live delivery to a running OMP step is not there yet. The Task messaging switch shows under OMP again
+- OMP tasks can message parallel tasks: a per-run extension file (`omp -e`) adds `message_task` and `list_parallel_tasks`, which call Workbench's local tools server with the run's token. Messages for an OMP task are steered into the running step at its next turn (the step runs through `omp --mode rpc`; the Live messages switch turns that off, and a step that cannot start in RPC mode runs with `omp -p` instead), or wait in its inbox and join the next step's prompt. The Task messaging switch shows under OMP again
 
 ### 2026-10-24
 

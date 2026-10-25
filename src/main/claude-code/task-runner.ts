@@ -1929,6 +1929,15 @@ no notes came with the request, so review the change against the task with fresh
           : reviewingSpec ? [...SPEC_REVIEW_OMP_TOOLS, ...messagingTools]
           : 'all',
         extensions: extensionFile ? [extensionFile] : undefined,
+        // Messages reach the running step through OMP's RPC mode (steered in at its next turn)
+        live: messaging ? {
+          onInputRead: (id, text) => {
+            messaging.inputRead(id);
+            const firstLine = text.split('\n')[0].trim();
+            this.log.add(params.logPhase, 'info', firstLine.length > 160 ? `${firstLine.slice(0, 160)}…` : firstLine, { detail: text });
+            this.emitLog(`Read: ${firstLine}`);
+          },
+        } : undefined,
         autoApprove: !planning,
         appendSystemPrompt: planning
           ? `${systemPrompt}\n\nYou are in planning mode: do not modify files, run only read-only commands, and finish with the implementation plan.`
@@ -1964,8 +1973,11 @@ no notes came with the request, so review the change against the task with fresh
       });
       this.current = handle;
       if (this.stopped) handle.stop();
+      // Messages for the task go to this process while it runs (false in print mode: they wait in the inbox)
+      const detach = messaging?.attach((text, id) => handle.send(text, id), params.inboxIds ?? []);
       const outcome = await handle.done;
       this.current = null;
+      detach?.(outcome.unread.map((input) => input.id));
 
       if (this.stopped || outcome.aborted) return { stopped: true };
       const result = outcome.result;

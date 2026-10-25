@@ -610,7 +610,9 @@
       "aiReviewRoundsDescription": "How many times AI review can send a task back to fix its findings before it goes to human review",
       "taskMessaging": "Task messaging",
       "taskMessagingDescription": "Tasks running at the same time can message each other, and Workbench tells them when another task starts, finishes, is merged or edits the same files",
-      "taskMessagingOmpDescription": "Tasks running at the same time can message each other, and Workbench tells them when another task starts, finishes, is merged or edits the same files. A running task reads messages at its next step, not in the middle of one",
+      "taskMessagingOmpDescription": "Tasks running at the same time can message each other, and Workbench tells them when another task starts, finishes, is merged or edits the same files. A running task reads a message at its next turn, and one that arrives while it cannot read waits for its next step",
+      "liveMessages": "Live messages",
+      "liveMessagesDescription": "Run task steps through OMP's RPC mode so messages reach a running step at its next turn. Off, messages wait for the next step",
       "fallbackModel": "Fallback model",
       "fallbackModelDescription": "Model Claude Code switches to when the chosen one is overloaded",
       "fallbackNone": "None"

@@ -201,11 +201,13 @@ export interface OmpArgsOptions {
   attachmentPaths?: readonly string[];
   /** Extension files loaded for this run (`-e`; they work with `--no-extensions` too) */
   extensionPaths?: readonly string[];
+  /** `rpc`: `omp --mode rpc --no-ui` (prompt over stdin as a JSON command); default `print`: `omp -p --mode json` */
+  transport?: 'print' | 'rpc';
 }
 
 export function buildOmpArgs(options: OmpArgsOptions): string[] {
   const { settings } = options;
-  const args = ['-p', '--mode', 'json', '--no-title'];
+  const args = options.transport === 'rpc' ? ['--mode', 'rpc', '--no-ui', '--no-title'] : ['-p', '--mode', 'json', '--no-title'];
   if (options.session) {
     args.push('--session-dir', options.session.dir);
     if (options.session.resume) args.push('--resume', options.session.resume);

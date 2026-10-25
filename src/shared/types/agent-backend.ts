@@ -59,6 +59,11 @@ export interface OmpBackendSettings {
    * single ticket can use several model-server slots. 0 = the agent works alone; 0-8, default 3
    */
   subagentsPerTask?: number;
+  /**
+   * Task phases with messaging run through `omp --mode rpc`, so messages from other tasks reach the
+   * running step at its next turn; off = `omp -p` and messages wait for the next step. Default true
+   */
+  liveMessages?: boolean;
 }
 
 /** Subagent concurrency for one task: the setting clamped to 0-8, default 3 */
@@ -83,6 +88,7 @@ export const DEFAULT_OMP_BACKEND_SETTINGS: OmpBackendSettings = {
   allowFallbackModels: false,
   retries: 5,
   subagentsPerTask: 3,
+  liveMessages: true,
 };
 
 export const DEFAULT_AGENT_BACKEND_SETTINGS: AgentBackendSettings = {
