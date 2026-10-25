@@ -308,6 +308,44 @@ describe('relay', () => {
     expect(completed).toEqual(['toolu_nested', 'toolu_agent', 'orchestrator']);
   });
 
+  it('completes a forked skill typed at the prompt (/code-review) on its report', async () => {
+    const agentId = 'a6d29d2cb8fa223f7';
+    relay.subscribe('window-a', workspace, flowDir);
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.forked-skill.json`), JSON.stringify({ skillName: 'code-review' }));
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.meta.json`),
+      JSON.stringify({ agentType: 'general-purpose', name: 'code-review', requestShape: 'background' }));
+    appendTo(path.join(subagentsDir(), `agent-${agentId}.jsonl`), [toolUse('toolu_typed_read', 'Read')]);
+    // Typed rather than called: no Skill call, only the command's output with its marker
+    appendTo(transcript, [{
+      type: 'system', subtype: 'local_command', level: 'info',
+      content: '<local-command-stdout>Running in the background as @code-review</local-command-stdout>\n'
+        + `<forked-skill-launch>{"agentId":"${agentId}","skillName":"code-review","description":"/code-review medium"}</forked-skill-launch>`,
+    }]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_spawn', payload: { name: agentId, parent: 'orchestrator', satellite: true } }),
+      ])),
+      { timeout: 5000 }
+    );
+
+    // Its report, as Claude Code records it: queued, then handed to the session
+    sent.length = 0;
+    const report = `<task-notification>\n<task-id>${agentId}</task-id>\n<status>completed</status>\n</task-notification>`;
+    appendTo(transcript, [
+      { type: 'queue-operation', operation: 'enqueue', content: report },
+      { type: 'user', uuid: 'u-report', origin: { kind: 'task-notification', producer: 'session-task' }, message: { role: 'user', content: report } },
+    ]);
+    await postHook({ hook_event_name: 'Notification', notification_type: 'idle_prompt' });
+    await vi.waitFor(
+      () => expect(events()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ type: 'agent_complete', payload: { name: agentId } }),
+      ])),
+      { timeout: 5000 }
+    );
+  });
+
   it('draws a forked skill\'s background agent (/code-review) and completes it on its report', async () => {
     const agentId = 'aedfe971f6aff305a';
     relay.subscribe('window-a', workspace, flowDir);

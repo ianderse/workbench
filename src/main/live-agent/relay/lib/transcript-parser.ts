@@ -190,9 +190,32 @@ function sessionTurnEffect(entry: Record<string, unknown>, session: WatchedSessi
  * and it reports back with a <task-notification>, like a background one.
  */
 function backgroundAgentLaunchId(entry: Record<string, unknown>): string | undefined {
-  return entry.type === 'system' && typeof entry.launchedAgentId === 'string' && entry.launchedAgentId
-    ? entry.launchedAgentId
-    : undefined
+  if (entry.type !== 'system') return undefined
+  if (typeof entry.launchedAgentId === 'string' && entry.launchedAgentId) return entry.launchedAgentId
+  return typedForkedSkillAgentId(entry)
+}
+
+/** The marker a forked skill typed as a command leaves in the command's output */
+const FORKED_SKILL_LAUNCH = /<forked-skill-launch>(\{.*?\})<\/forked-skill-launch>/s
+
+/**
+ * The background agent a forked skill typed as a command runs in (`/code-review` at the prompt):
+ * it runs like /subtask's, its work in subagents/agent-<id>.jsonl and its end a <task-notification>,
+ * but Claude Code records its start only as a marker in the command's output. Called from a Skill
+ * tool call instead, the same agent shows in the call's result (see forkedSkillAgentId). Without
+ * its launch the agent is still drawn, from its sidecar, but its notification has nothing to finish
+ * and it is left on the graph as still working.
+ */
+function typedForkedSkillAgentId(entry: Record<string, unknown>): string | undefined {
+  if (entry.subtype !== 'local_command' || typeof entry.content !== 'string') return undefined
+  const marker = FORKED_SKILL_LAUNCH.exec(entry.content)
+  if (!marker) return undefined
+  try {
+    const launch = JSON.parse(marker[1]) as Record<string, unknown>
+    return typeof launch.agentId === 'string' && launch.agentId ? launch.agentId : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** Whether a transcript line is the agent working (a message, a tool call or
