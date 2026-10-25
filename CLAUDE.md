@@ -230,7 +230,7 @@ them and avoid merge conflicts.
 Parallel tasks message each other through Workbench (`src/main/task-messaging/`: broker, inbox, notices, tools served over
 local MCP; Settings > Agents > Task messaging) and, when a task is merged, every other task on that base branch that lacks
 the merge goes back to In Progress to take it in (`src/main/task-resync/`, `ClaudeTaskRun` phase `resync`, request in
-`resync_request.json`). Messaging works on **Claude Code only** (`TaskRunConfig.messaging` is unset for OMP tasks);
+`resync_request.json`). Messaging reaches OMP tasks too, but without live delivery: the tools come from a per-run extension file (`task-messaging/omp-extension.ts`, `omp -e`) and messages wait in the inbox for the next step;
 resync runs on either backend. See `docs/upstream-sync/2026-10-25.md` for how it was merged with this fork's features.
 
 ### Stale tickets (briefing and queue grooming)

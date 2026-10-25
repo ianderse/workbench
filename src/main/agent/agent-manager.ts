@@ -588,10 +588,10 @@ export class AgentManager extends EventEmitter {
       config.selfImprovePrompt = SELF_IMPROVE_NUDGE;
       config.selfImproveDir = getCompengDir(project.path);
     }
-    // Parallel tasks message each other through Workbench (Settings > Agents). The messages travel
-    // over Workbench's MCP server, which only Claude Code can reach: an OMP task gets none (the
-    // changelog-based "Parallel tasks" prompt and resync still apply to it)
-    if (taskSettings.taskMessaging && effectiveAgent.backend === 'claude') {
+    // Parallel tasks message each other through Workbench (Settings > Agents). Claude Code reaches
+    // the tools over MCP and gets live messages; OMP gets the tools from a per-run extension file
+    // and reads waiting messages at the start of each step
+    if (taskSettings.taskMessaging) {
       config.messaging = createRunMessaging(project.id, task.specId);
     }
 

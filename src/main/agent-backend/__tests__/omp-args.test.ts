@@ -24,6 +24,14 @@ describe('omp args', () => {
     expect(ompToolsFromClaude([])).toEqual([]);
   });
 
+  it('loads extension files with -e, also with --no-extensions, and lists extra tool names', () => {
+    const args = buildOmpArgs({ settings: { ...settings, extraArgs: [] }, tools: ['read', 'message_task'], extensionPaths: ['/tmp/x/workbench-messaging.mjs'], oneShot: true });
+    expect(args).toContain('--no-extensions');
+    expect(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2)).toEqual(['--tools', 'read,message_task']);
+    expect(args.slice(args.indexOf('-e'), args.indexOf('-e') + 2)).toEqual(['-e', '/tmp/x/workbench-messaging.mjs']);
+    expect(buildOmpArgs({ settings, tools: 'all' })).not.toContain('-e');
+  });
+
   it('builds a one-shot command line', () => {
     const args = buildOmpArgs({ settings, model: 'haiku', effort: 'medium', tools: [], oneShot: true, maxTimeMinutes: 2 });
     expect(args).toEqual(['-p', '--mode', 'json', '--no-title', '--no-session', '--model', 'ollama/small', '--thinking', 'low', '--no-tools', '--max-time', '2m', '--no-extensions', '--no-skills', '--no-lsp']);

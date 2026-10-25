@@ -108,6 +108,9 @@ const TOOL_NAME_MAP: Record<string, string> = {
   todo: 'TodoWrite',
   web_search: 'WebSearch',
   task: 'Task',
+  // Workbench's task messaging tools (extension), named as the Claude MCP tools so the log reads the same
+  message_task: 'mcp__workbench__message_task',
+  list_parallel_tasks: 'mcp__workbench__list_parallel_tasks',
 };
 
 export function normalizeToolName(name: string): string {

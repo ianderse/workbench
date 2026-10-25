@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createOmpTranslator, isOmpNotice, isOmpTodos, normalizeToolInput } from '../omp-translate';
+import { createOmpTranslator, isOmpNotice, isOmpTodos, normalizeToolInput, normalizeToolName } from '../omp-translate';
 import { classifyOmpFailure } from '../omp-retry';
 import type { ClaudeResultMessage, ClaudeStreamMessage } from '../../claude-code/stream-types';
 
@@ -246,5 +246,12 @@ describe('omp notices and advisor notes', () => {
     const result = t.translate({ type: 'agent_end', messages: [] }).find((m) => m.type === 'result') as ClaudeResultMessage;
     expect(result.result).toBe('{"ok":true}');
     expect(result.is_error).toBe(false);
+  });
+});
+
+describe('task messaging tool names', () => {
+  it('shows OMP calls of the messaging extension like the Claude MCP tools', () => {
+    expect(normalizeToolName('message_task')).toBe('mcp__workbench__message_task');
+    expect(normalizeToolName('list_parallel_tasks')).toBe('mcp__workbench__list_parallel_tasks');
   });
 });

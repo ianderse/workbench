@@ -187,3 +187,16 @@ describe('formatting', () => {
     expect(formatInboxSection([])).toBe('');
   });
 });
+
+describe('OMP targets (no live run, no stdin)', () => {
+  it('queues a message for a running OMP task and keeps it until a step reads it', async () => {
+    // An OMP phase never calls registerLiveRun, so the task counts as not live
+    const outcome = await deliver('p1', '002', me, 'heads up');
+    expect(outcome.status).toBe('queued');
+    expect((await takeInbox('p1', '002-live')).map((m) => m.text)).toEqual(['heads up']);
+    // Taking the inbox does not consume it: it stays until the step reports it read
+    expect(await takeInbox('p1', '002-live')).toHaveLength(1);
+    await markInboxRead('p1', '002-live', [outcome.messageId!]);
+    expect(await takeInbox('p1', '002-live')).toEqual([]);
+  });
+});

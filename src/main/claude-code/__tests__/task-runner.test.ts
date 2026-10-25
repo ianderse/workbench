@@ -50,6 +50,28 @@ vi.mock('../process', () => ({
   }),
 }));
 
+/** OMP runs: the options each `startOmpProcess` got, and the extension file as it was then (removed after the phase) */
+const ompSpawned = vi.hoisted(() => [] as Array<Record<string, unknown>>);
+const ompExtensions = vi.hoisted(() => [] as string[]);
+vi.mock('../../agent-backend/omp-process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../agent-backend/omp-process')>();
+  const { readFileSync: read } = await import('fs');
+  return {
+    ...actual,
+    startOmpProcess: vi.fn(async (options: { extensions?: string[]; onMessage?: (m: unknown) => void }) => {
+      ompSpawned.push(options as Record<string, unknown>);
+      for (const file of options.extensions ?? []) ompExtensions.push(read(file, 'utf-8'));
+      const script = scripts.shift() ?? { messages: [] };
+      let last: ClaudeStreamMessage | undefined;
+      for (const message of script.messages) {
+        if (message.type === 'result') last = message;
+        options.onMessage?.(message);
+      }
+      return { child: {}, stop: vi.fn(), send: vi.fn(() => false), done: Promise.resolve({ exitCode: 0, signal: null, result: last, results: [], resultOrigins: [], unread: [], stderr: '', aborted: false, timedOut: false }) };
+    }),
+  };
+});
+
 /** Claude Code inside WSL: the session sees the worktree as /mnt/wt (mapped back to the real one) */
 const runtimeRef = vi.hoisted(() => ({ wsl: false, worktree: '' }));
 vi.mock('../../platform/shell-runtime', () => ({
@@ -118,6 +140,8 @@ describe('ClaudeTaskRun', () => {
     scripts.length = 0;
     spawned.length = 0;
     mcpConfigs.length = 0;
+    ompSpawned.length = 0;
+    ompExtensions.length = 0;
     triageMock.mockReset();
     specDir = mkdtempSync(path.join(tmpdir(), 'spec-'));
     worktree = mkdtempSync(path.join(tmpdir(), 'wt-'));
@@ -942,6 +966,41 @@ describe('ClaudeTaskRun', () => {
       const contents = logs.phases.coding.entries.map((e: { content: string }) => e.content);
       expect(contents).toContain('1 message received while not running');
       expect(contents).toContain('[Workbench] Task 003 started.');
+    });
+
+    it('on OMP: loads the messaging extension, lists its tools, starts the step with the inbox and marks it read', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      const inbox: TaskMessage[] = [{ id: 'wbm-5', at: '', status: 'queued', from: { kind: 'workbench' }, text: 'Task 002 started.' }];
+      scripts.push({ messages: [
+        { type: 'assistant', session_id: 'o1', parent_tool_use_id: null, message: { content: [{ type: 'text', text: 'on it' }] } } as ClaudeStreamMessage,
+        result('o1'),
+      ] });
+      const { value, calls } = messaging(inbox);
+      await makeRun({ settings, projectId: 'p1', messaging: value, backend: 'omp' }).run();
+
+      const options = ompSpawned[0] as { extensions: string[]; tools: string[]; appendSystemPrompt: string; prompt: Array<{ text?: string }> };
+      expect(options.extensions).toHaveLength(1);
+      expect(options.extensions[0].endsWith('workbench-messaging.mjs')).toBe(true);
+      expect(options.tools === ('all' as unknown)).toBe(true);
+      expect(ompExtensions[0]).toContain('Bearer secret');
+      expect(ompExtensions[0]).toContain('message_task');
+      expect(existsSync(options.extensions[0])).toBe(false);
+      expect(options.appendSystemPrompt).toContain('Your session is named `wb-abc123-001-task`');
+      expect(options.appendSystemPrompt).not.toContain('Claude Code session');
+      const last = options.prompt[options.prompt.length - 1].text ?? '';
+      expect(last).toContain('[Workbench] Task 002 started.');
+      expect(calls.markRead).toHaveBeenCalledWith(['wbm-5']);
+      // No live delivery under OMP yet: the run never attaches, so messages wait in the inbox
+      expect(calls.attach).not.toHaveBeenCalled();
+    });
+
+    it('on OMP: the read-only plan step lists the messaging tools next to the read tools', async () => {
+      triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+      scripts.push({ messages: [result('o2', { structured_output: { plan: '# Plan' } })] }, { messages: [result('o2')] });
+      const { value } = messaging();
+      await makeRun({ settings, projectId: 'p1', messaging: value, backend: 'omp' }).run();
+      const planTools = (ompSpawned[0] as { tools: string[] }).tools;
+      expect(planTools).toEqual(['read', 'grep', 'glob', 'message_task', 'list_parallel_tasks']);
     });
 
     it('reports native sends and peer messages to the broker', async () => {

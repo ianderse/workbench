@@ -199,6 +199,8 @@ export interface OmpArgsOptions {
   advisorOverlayFile?: string;
   /** Files attached to the message (`@path`) */
   attachmentPaths?: readonly string[];
+  /** Extension files loaded for this run (`-e`; they work with `--no-extensions` too) */
+  extensionPaths?: readonly string[];
 }
 
 export function buildOmpArgs(options: OmpArgsOptions): string[] {
@@ -226,6 +228,7 @@ export function buildOmpArgs(options: OmpArgsOptions): string[] {
   if (options.appendSystemPromptFile) args.push('--append-system-prompt', options.appendSystemPromptFile);
   if (options.maxTimeMinutes && options.maxTimeMinutes > 0) args.push('--max-time', `${Math.ceil(options.maxTimeMinutes)}m`);
   if (options.oneShot) args.push('--no-extensions', '--no-skills');
+  for (const extension of options.extensionPaths ?? []) args.push('-e', extension);
   if (options.advisorMode === 'on') args.push('--advisor');
   if (options.advisorOverlayFile) args.push('--config', options.advisorOverlayFile);
   if (settings.extraArgs?.length) args.push(...settings.extraArgs);

@@ -68,6 +68,8 @@ export interface OmpRunOptions {
   onStderr?: (chunk: string) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  /** Extension files to load for the run (`-e`), e.g. Workbench's task messaging tools */
+  extensions?: readonly string[];
   /** Where to book the run's tokens (the project's usage ledger); unset = not recorded */
   usage?: UsageContext;
 }
@@ -264,6 +266,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     advisorMode: advisor.mode,
     advisorOverlayFile: setup.advisorOverlayFile,
     attachmentPaths: setup.attachmentPaths,
+    extensionPaths: options.extensions,
   });
 
   const onAbort = () => {
@@ -346,6 +349,6 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     }
   })();
 
-  // OMP gets no live messages (task messaging is Claude Code only)
+  // No live messages yet: they wait in the task's inbox for its next step (live delivery needs RPC mode)
   return { child: firstChild, done, stop, send: () => false };
 }
