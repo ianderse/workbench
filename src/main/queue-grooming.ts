@@ -677,6 +677,30 @@ export function submitTaskSplit(
 }
 
 /**
+ * Drop a task's undecided split proposals. A proposal belongs to the run that made it, so Start
+ * over (which throws that run away) must not leave one behind that could split the new run later.
+ */
+export function dropSplitProposalsForTask(
+  projectId: string,
+  taskId: string,
+  deps: GroomingDeps = defaultDeps()
+): Promise<number> {
+  return withStateLock(projectId, async () => {
+    const project = deps.getProject(projectId);
+    if (!project) return 0;
+    const file = await readQueueProposals(project);
+    const rest = file.proposals.filter((p) => !(p.kind === 'split' && p.taskId === taskId));
+    const dropped = file.proposals.length - rest.length;
+    if (dropped > 0) {
+      await writeQueueProposals(project, { ...file, proposals: rest });
+      deps.changed(projectId);
+      appLog.info(`[TaskSplit] Dropped ${dropped} undecided split proposal(s) of ${taskId}: the task starts over`);
+    }
+    return dropped;
+  });
+}
+
+/**
  * What became of a split proposal a paused task waits for: still pending in the Queue updates
  * panel, applied (the task carries `splitInto` for it), or dismissed (gone without being applied).
  */

@@ -16,6 +16,7 @@ import {
   dismissQueueProposal,
   getSplitStatus,
   readQueueProposals,
+  dropSplitProposalsForTask,
   submitTaskSplit,
   undoQueueChange,
   type GroomingDeps,
@@ -254,6 +255,15 @@ describe('propose flow', () => {
     expect(tasks).toHaveLength(5);
     expect(find('007-calc').metadata?.splitInto).toBeUndefined();
     expect(await getSplitStatus('p1', '007-calc', proposalId, makeDeps())).toBe('dismissed');
+  });
+
+  it('Start over drops the task\'s undecided split proposal, so it cannot split the new run later', async () => {
+    await submitTaskSplit('p1', '007-calc', split, 'plan', 'propose', makeDeps());
+    expect((await readQueueProposals(project)).proposals).toHaveLength(1);
+    expect(await dropSplitProposalsForTask('p1', '007-calc', makeDeps())).toBe(1);
+    expect((await readQueueProposals(project)).proposals).toHaveLength(0);
+    expect(await dropSplitProposalsForTask('p1', '007-calc', makeDeps())).toBe(0);
+    expect(find('007-calc').description).toBe('Description of 007-calc');
   });
 
   it('answers ignored instead of throwing when the split cannot be made', async () => {

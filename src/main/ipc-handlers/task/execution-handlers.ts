@@ -19,6 +19,7 @@ import {
   resetTaskToInitialState
 } from './plan-file-utils';
 import { discardTaskWorktree } from '../../utils/worktree-cleanup';
+import { dropSplitProposalsForTask } from '../../queue-grooming';
 import { appLog } from '../../app-logger';
 import { taskLogService } from '../../task-log-service';
 import { archiveCurrentRun } from '../../task-run-archive';
@@ -442,6 +443,10 @@ export function registerTaskExecutionHandlers(
       //    happened in it, then forget it: the state machine is rebuilt from the reset plan file
       const specDir = getMainSpecDir(project, task);
       archiveCurrentRun(specDir);
+      // A split proposed by the run being thrown away no longer applies
+      await dropSplitProposalsForTask(project.id, taskId).catch((error) =>
+        appLog.warn(`[TASK_RESTART] ${taskId}: could not drop its split proposals:`, error)
+      );
       taskStateManager.clearTask(taskId, project.id);
       const queue = isAtParallelLimit(project, taskId);
       await resetTaskToInitialState(project, task, { status: queue ? 'queue' : 'backlog' });
