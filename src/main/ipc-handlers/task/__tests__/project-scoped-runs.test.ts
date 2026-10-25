@@ -29,6 +29,9 @@ const mocks = vi.hoisted(() => ({
   queue: {
     configure: vi.fn(),
     request: vi.fn(),
+    getBlockingProject: vi.fn(() => undefined),
+    getHolds: vi.fn(() => []),
+    requestLowerPriority: vi.fn(),
     runExclusive: vi.fn(async (_projectId: string, fn: () => unknown) => fn()),
   },
   stateManager: {

@@ -16,6 +16,10 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 
 ### 2026-10-25
 
+**Queue**
+- Project priority (Settings > Project > Tasks: High, Normal, Low): with several projects open on one local model server, a lower-priority project starts queued tasks only while every higher-priority project has nothing to run (no task in progress or AI review, no queued task that could start). Running tasks are never paused and a manual Start still starts at once; queued cards show "Waiting for <project>" and start about 2 seconds after the higher project frees up
+- The parallel task limit now counts tasks in AI review as well as in progress, so a task moving to AI review no longer frees a slot for a fourth model run
+
 **Notifications**
 - Notifications for the autonomous workflow: task merged (auto-merge or merge to Done, once per task), decision needed (one per new decision ticket, batched into one when several are created together), needs attention (blocked auto-merge, interrupted run that could not be resumed, task left in error) and all work done in a project ("N merged, M waiting for review or decision", after the queue, In Progress and AI review stay empty for a few seconds, never at app start)
 - Clicking a notification focuses the window and opens that task, or the project board for "all work done" and grouped decisions

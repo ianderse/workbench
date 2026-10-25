@@ -94,6 +94,8 @@ if (typeof window !== 'undefined') {
     onTaskError: vi.fn(() => vi.fn()),
     onTaskLog: vi.fn(() => vi.fn()),
     onTaskStatusChange: vi.fn(() => vi.fn()),
+    onQueueHold: vi.fn(() => vi.fn()),
+    getQueueHolds: vi.fn().mockResolvedValue([]),
     onTaskRateLimitHoldChange: vi.fn(() => vi.fn()),
     getSettings: vi.fn(),
     saveSettings: vi.fn(),

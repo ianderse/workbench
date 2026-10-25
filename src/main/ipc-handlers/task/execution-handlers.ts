@@ -41,6 +41,7 @@ import { rateLimitResumeScheduler, type HeldTaskRef } from '../../services/rate-
 import { clearRateLimitHold } from './rate-limit-hold';
 import { taskQueue } from '../../services/task-queue';
 import { taskQueueOrder } from '../../services/task-queue-order';
+import { countRunningTasks } from '../../../shared/utils/running-tasks';
 import { taskHooks } from '../../task-hooks';
 import { XSTATE_ACTIVE_STATES } from '../../../shared/state-machines';
 import { activeAutoMerge } from '../../../shared/utils/autonomous';
@@ -204,9 +205,14 @@ function saveFeedbackImages(specDir: string, images: ImageAttachment[] | undefin
  */
 function configureTaskQueue(
   agentManager: AgentManager,
-  startTask: (taskId: string, projectId?: string) => Promise<void>
+  startTask: (taskId: string, projectId?: string) => Promise<void>,
+  getMainWindow: () => BrowserWindow | null
 ): void {
   taskQueue.configure({
+    // Cross-project priority: a project below another that has runnable work does not start queued tasks
+    listProjects: () => projectStore.getProjects(),
+    onHoldChange: (projectId, blockedBy) =>
+      safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_QUEUE_HOLD, projectId, blockedBy ?? null),
     listProjectIds: () => projectStore.getProjects().map((p) => p.id),
     listTasks: (projectId) => projectStore.getTasks(projectId),
     getMaxParallelTasks: (projectId) => resolveMaxParallelTasks(
@@ -226,6 +232,9 @@ function configureTaskQueue(
   });
   // Any status change may free a slot (a task leaving In Progress) or queue a task
   taskStateManager.setStatusChangeListener((_taskId, _status, projectId) => taskQueue.request(projectId));
+  // When a project's last runnable work finishes, the queues of lower-priority projects may run
+  taskHooks.on('state', () => taskQueue.requestLowerPriority());
+  handleIpc(IPC_CHANNELS.TASK_QUEUE_HOLDS_GET, () => taskQueue.getHolds());
 }
 
 /**
@@ -375,10 +384,7 @@ export function registerTaskExecutionHandlers(
   const isAtParallelLimit = (project: Project, taskId: string): boolean => {
     const appMaxParallel = (readSettingsFile() as { maxParallelTasks?: number } | undefined)?.maxParallelTasks;
     const maxParallel = resolveMaxParallelTasks(appMaxParallel, project.settings?.maxParallelTasks);
-    const inProgressCount = projectStore.getTasks(project.id).filter(
-      (t) => t.id !== taskId && t.status === 'in_progress' && !t.metadata?.archivedAt
-    ).length;
-    return inProgressCount >= maxParallel;
+    return countRunningTasks(projectStore.getTasks(project.id), taskId) >= maxParallel;
   };
 
   /**
@@ -523,6 +529,14 @@ export function registerTaskExecutionHandlers(
       return;
     }
 
+    // An automatic start: a higher-priority project with work keeps it queued (the queue starts it later)
+    const blocker = taskQueue.getBlockingProject(projectId);
+    if (blocker) {
+      console.warn(`[RateLimitResume] Hold expired for ${taskId} but project ${blocker.name} has priority; leaving it queued`);
+      clearRateLimitHold(project, task, getMainWindow);
+      return;
+    }
+
     if (isAtParallelLimit(project, taskId)) {
       console.warn(`[RateLimitResume] Hold expired for ${taskId} but the parallel task limit is reached; leaving it queued`);
       clearRateLimitHold(project, task, getMainWindow);
@@ -549,7 +563,7 @@ export function registerTaskExecutionHandlers(
     resumeTask: (taskId, projectId) => taskQueue.runExclusive(projectId, () => resumeHeldTask(taskId, projectId)),
   });
 
-  configureTaskQueue(agentManager, startTask);
+  configureTaskQueue(agentManager, startTask, getMainWindow);
 
   // Tasks on a branch another task was merged into go back to In Progress to take it in
   // (task-resync/): started here, or queued when the project is at its parallel task limit

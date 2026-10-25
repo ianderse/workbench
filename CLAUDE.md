@@ -357,6 +357,19 @@ detached worktree, then the branch is moved by `merge --ff-only` where it is che
   Queue (the old worktree is behind the target). Revert (`git revert -m 1`) and "Merge into main" (board banner) also use
   temporary worktrees. Undo of automatic queue changes is in the Queue updates panel.
 
+### Queue priority between projects
+
+Project setting `priority` (`high | normal | low`, default normal, in `.workbench/settings.json`, Settings > Project > Tasks).
+All projects share one local model server, so `blockingHigherPriorityProject()` (`shared/utils/project-priority.ts`, pure)
+returns the first project with strictly higher priority that has runnable work: a task running (`isRunningStatus`:
+`in_progress` or `ai_review`, `shared/utils/running-tasks.ts`, also what the parallel task limit counts in the queue,
+`isAtParallelLimit` and the renderer's `isQueueAtCapacity`) or a queued task that could start (not archived, not on a
+rate-limit hold, dependencies satisfied by `getUnmetDependencyIds`). Only automatic starts are gated: `TaskQueue.promote`
+(every queue pass: status changes, autonomous runs, startup) and `resumeHeldTask` (rate-limit resume); a manual Start
+(`TASK_START`), a resumed in-progress task and resync starts are not, and running tasks are never paused. The queue reports
+holds (`onHoldChange`, IPC `TASK_QUEUE_HOLD`, plus `TASK_QUEUE_HOLDS_GET` once at start) into `queue-hold-store.ts`; cards
+show "Waiting for <project>". A `state` task hook calls `taskQueue.requestLowerPriority()`, which re-runs held projects' queues after 2 s.
+
 ### Notifications (desktop and phone)
 
 `main/notification-service.ts` shows Electron `Notification`s (English strings built in the main process, not i18n; text,

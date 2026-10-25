@@ -2,6 +2,9 @@
  * Project-related types
  */
 
+/** Cross-project queue priority: lower priorities start queued tasks only while higher ones have nothing to run */
+export type ProjectPriority = 'high' | 'normal' | 'low';
+
 export interface Project {
   id: string;
   name: string;
@@ -52,6 +55,8 @@ export interface ProjectSettings {
    * `.workbench/compeng` so every session in the project shares it); off unless set
    */
   selfImprove?: boolean;
+  /** Queue priority against other projects (default: normal) */
+  priority?: ProjectPriority;
   /** After a task is merged, add context notes to queued tickets and propose queue changes (default: true) */
   groomQueueAfterMerge?: boolean;
   /** When a task reaches Human Review, turn the work its review summary flags into new tickets (default: true) */

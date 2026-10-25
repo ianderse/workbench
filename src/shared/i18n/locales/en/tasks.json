@@ -468,6 +468,7 @@
     "createFailed": "Created {{done}} of {{total}} tasks: {{error}}",
     "noneSelected": "Select at least one task",
     "waitsFor": "Waits for {{titles}}",
+    "heldByPriority": "Waiting for {{project}}",
     "progress": {
       "starting": "Starting...",
       "elapsed": "Elapsed {{time}}",

@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { arrayMove } from '@dnd-kit/sortable';
+import { countRunningTasks } from '../../shared/utils/running-tasks';
 import { unmetDependencyLabel } from '../../shared/utils/task-dependencies';
 import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft, ImageAttachment, TaskOrderState, TaskReviewOptions } from '../../shared/types';
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
@@ -894,10 +895,7 @@ export function isQueueAtCapacity(excludeTaskId?: string): boolean {
     useProjectStore.getState().getActiveProject()?.settings?.maxParallelTasks
   );
   const currentTasks = useTaskStore.getState().tasks;
-  const inProgressCount = currentTasks.filter((t) =>
-    t.status === 'in_progress' && !t.metadata?.archivedAt && (!excludeTaskId || t.id !== excludeTaskId)
-  ).length;
-  return inProgressCount >= maxParallelTasks;
+  return countRunningTasks(currentTasks, excludeTaskId) >= maxParallelTasks;
 }
 
 export interface StartTaskOrQueueResult {

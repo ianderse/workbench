@@ -319,6 +319,90 @@ describe('TaskQueue', () => {
     expect(order).toEqual(['start:begin', 'start:end', 'resume']);
   });
 
+  it('counts a task in AI review against the parallel limit', async () => {
+    const { queue, startTask } = createHarness(
+      { p1: [makeTask('a', 'in_progress'), makeTask('b', 'in_progress'), makeTask('c', 'ai_review'), makeTask('d', 'queue')] },
+      3
+    );
+    await queue.processProject('p1');
+    expect(startTask).not.toHaveBeenCalled();
+  });
+
+  it('starts a queued task once an AI-review task leaves for Human Review', async () => {
+    const { tasks, queue, startTask } = createHarness(
+      { p1: [makeTask('a', 'in_progress'), makeTask('b', 'in_progress'), makeTask('c', 'ai_review'), makeTask('d', 'queue')] },
+      3
+    );
+    tasks.p1[2].status = 'human_review';
+    await queue.processProject('p1');
+    expect(startTask).toHaveBeenCalledWith('d', 'p1');
+  });
+
+  describe('project priority', () => {
+    function priorityHarness() {
+      const tasks: Record<string, Task[]> = {
+        hi: [makeTask('h1', 'in_progress', { projectId: 'hi' })],
+        lo: [makeTask('l1', 'queue', { projectId: 'lo' })],
+      };
+      const priorities: Record<string, 'high' | 'low'> = { hi: 'high', lo: 'low' };
+      const holds: Array<[string, string | undefined]> = [];
+      const startTask = vi.fn(async (taskId: string, projectId: string) => {
+        tasks[projectId].find((t) => t.id === taskId)!.status = 'in_progress';
+        return true;
+      });
+      const queue = new TaskQueue();
+      queue.configure({
+        listProjectIds: () => Object.keys(tasks),
+        listTasks: (id) => tasks[id] ?? [],
+        listProjects: () => Object.keys(tasks).map((id) => ({ id, name: `Project ${id}`, settings: { priority: priorities[id] } as never })),
+        onHoldChange: (id, blockedBy) => holds.push([id, blockedBy?.id]),
+        getMaxParallelTasks: () => 3,
+        startTask,
+        debounceMs: 10,
+      });
+      return { tasks, queue, startTask, holds };
+    }
+
+    it('holds an automatic start while a higher-priority project has work', async () => {
+      const { queue, startTask, holds } = priorityHarness();
+      await queue.processProject('lo');
+      expect(startTask).not.toHaveBeenCalled();
+      expect(holds).toEqual([['lo', 'hi']]);
+      expect(queue.getBlockingProject('lo')?.name).toBe('Project hi');
+    });
+
+    it('the higher-priority project itself is never held', async () => {
+      const { tasks, queue, startTask } = priorityHarness();
+      tasks.hi.push(makeTask('h2', 'queue', { projectId: 'hi' }));
+      await queue.processProject('hi');
+      expect(startTask).toHaveBeenCalledWith('h2', 'hi');
+    });
+
+    it('a manual start does not go through the gate', async () => {
+      const { queue, startTask } = priorityHarness();
+      // A user start calls the start flow directly and never asks the queue; the queue still reports the hold
+      await startTask('l1', 'lo');
+      expect(startTask).toHaveBeenCalledTimes(1);
+      expect(queue.getBlockingProject('lo')).toBeDefined();
+    });
+
+    it('wakes the lower-priority queue 2 s after the higher project frees', async () => {
+      vi.useFakeTimers();
+      const { tasks, queue, startTask, holds } = priorityHarness();
+      await queue.processProject('lo');
+      expect(startTask).not.toHaveBeenCalled();
+
+      tasks.hi[0].status = 'human_review';
+      queue.requestLowerPriority();
+      await vi.advanceTimersByTimeAsync(1900);
+      expect(startTask).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(startTask).toHaveBeenCalledWith('l1', 'lo');
+      expect(holds.at(-1)).toEqual(['lo', undefined]);
+      queue.dispose();
+    });
+  });
+
   it('ignores requests until configured', () => {
     const queue = new TaskQueue();
     expect(() => queue.request('p1')).not.toThrow();

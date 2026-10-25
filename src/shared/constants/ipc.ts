@@ -95,6 +95,8 @@ export const IPC_CHANNELS = {
   TASK_BREAKDOWN_BACKGROUND: 'task:breakdownBackground',  // Let a running breakdown finish after its dialog closed; the result becomes a proposal (renderer -> main): (requestId)
   TASK_BREAKDOWN_SAVE: 'task:breakdownSave',  // Keep a breakdown under review as a proposal (renderer -> main, invoke): (projectId, prompt, attachmentNames, breakdown)
   TASK_BREAKDOWN_CANCEL: 'task:breakdownCancel',  // Cancel a running breakdown (renderer -> main): (requestId)
+  TASK_QUEUE_HOLD: 'task:queueHold',  // A project's queue is held back (or released) by a higher-priority project (main -> renderer): (projectId, blockedBy { id, name } | null)
+  TASK_QUEUE_HOLDS_GET: 'task:queueHoldsGet',  // Current holds of all projects (renderer -> main, once at start)
   TASK_QUEUE_ORDER_SET: 'task:queueOrderSet',  // Board's saved Queue column order (renderer -> main), used to start the top queued task first
   TASK_CLAUDE_RUN_UPDATE: 'task:claudeRunUpdate',  // Claude Code run state changed (main -> renderer): (taskId, ClaudeRunInfo, projectId)
 

@@ -210,6 +210,8 @@ export interface ElectronAPI {
   onTaskStatusChange: (callback: (taskId: string, status: TaskStatus, projectId?: string, reviewReason?: ReviewReason) => void) => () => void;
   onTaskRateLimitHoldChange: (callback: (taskId: string, hold: RateLimitHold | null, projectId?: string) => void) => () => void;
   setQueueOrder: (projectId: string, order: string[]) => void;
+  onQueueHold: (callback: (projectId: string, blockedBy: { id: string; name: string } | null) => void) => () => void;
+  getQueueHolds: () => Promise<Array<{ projectId: string; blockedBy: { id: string; name: string } }>>;
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
   cancelBreakDownTask: (requestId: string) => void;
   keepBreakDownInBackground: (requestId: string) => void;

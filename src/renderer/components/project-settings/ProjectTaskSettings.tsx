@@ -7,6 +7,7 @@ import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows, SegmentedControl } from '../settings/SettingsRow';
 import { DEFAULT_AUTONOMOUS_BRANCH, resolveAutonomousConfig } from '../../../shared/utils/autonomous';
 import { resolveSelfSplit } from '../../../shared/utils/task-split';
+import { resolveProjectPriority } from '../../../shared/utils/project-priority';
 import { resolveUiImplementer } from '../../../shared/utils/ui-work';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
 import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
@@ -108,6 +109,22 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
             />
           </SettingsRow>
         )}
+
+        <SettingsRow
+          label={t('projectPages.tasks.priority')}
+          description={t('projectPages.tasks.priorityDescription')}
+        >
+          <SegmentedControl
+            value={resolveProjectPriority(settings)}
+            options={[
+              { value: 'high', label: t('projectPages.tasks.priorityHigh') },
+              { value: 'normal', label: t('projectPages.tasks.priorityNormal') },
+              { value: 'low', label: t('projectPages.tasks.priorityLow') },
+            ]}
+            onValueChange={(value) => setSettings({ ...settings, priority: value })}
+            ariaLabel={t('projectPages.tasks.priority')}
+          />
+        </SettingsRow>
 
         <SettingsRow
           label={t('projectPages.tasks.groomQueue')}

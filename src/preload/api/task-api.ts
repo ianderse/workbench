@@ -107,6 +107,8 @@ export interface TaskAPI {
   onTaskRateLimitHoldChange: (callback: (taskId: string, hold: RateLimitHold | null, projectId?: string) => void) => () => void;
   onTaskClaudeRunUpdate: (callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void) => () => void;
   setQueueOrder: (projectId: string, order: string[]) => void;
+  onQueueHold: (callback: (projectId: string, blockedBy: { id: string; name: string } | null) => void) => () => void;
+  getQueueHolds: () => Promise<Array<{ projectId: string; blockedBy: { id: string; name: string } }>>;
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
   cancelBreakDownTask: (requestId: string) => void;
   keepBreakDownInBackground: (requestId: string) => void;
@@ -342,6 +344,18 @@ export const createTaskAPI = (): TaskAPI => ({
 
   setQueueOrder: (projectId: string, order: string[]): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, projectId, order),
+
+  onQueueHold: (callback: (projectId: string, blockedBy: { id: string; name: string } | null) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, projectId: string, blockedBy: { id: string; name: string } | null): void =>
+      callback(projectId, blockedBy);
+    ipcRenderer.on(IPC_CHANNELS.TASK_QUEUE_HOLD, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TASK_QUEUE_HOLD, handler);
+    };
+  },
+
+  getQueueHolds: (): Promise<Array<{ projectId: string; blockedBy: { id: string; name: string } }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_QUEUE_HOLDS_GET),
 
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]): Promise<IPCResult<TaskBreakdown>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_BREAKDOWN, projectId, requestId, description, attachmentNames),

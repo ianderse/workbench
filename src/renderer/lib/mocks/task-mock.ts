@@ -112,6 +112,8 @@ export const taskMock = {
   onTaskRateLimitHoldChange: () => () => {},
   onTaskClaudeRunUpdate: () => () => {},
   setQueueOrder: () => {},
+  onQueueHold: () => () => {},
+  getQueueHolds: async () => [],
 
   breakDownTask: async () => ({
     success: true,

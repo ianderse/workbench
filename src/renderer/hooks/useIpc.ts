@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useQueueHoldStore } from '../stores/queue-hold-store';
 import { unstable_batchedUpdates } from 'react-dom';
 import { useTaskStore, loadTasks } from '../stores/task-store';
 import { useAuthFailureStore } from '../stores/auth-failure-store';
@@ -208,6 +209,14 @@ export function useIpcListeners(): void {
       }
     );
 
+    // Queue holds by project priority: current state once, then every change
+    const cleanupQueueHold = window.electronAPI.onQueueHold?.((projectId, blockedBy) =>
+      useQueueHoldStore.getState().setHold(projectId, blockedBy?.name ?? null)
+    );
+    void window.electronAPI.getQueueHolds?.()
+      .then((holds) => useQueueHoldStore.getState().setHolds(holds))
+      .catch(() => undefined);
+
     const cleanupStatus = window.electronAPI.onTaskStatusChange(
       (taskId: string, status: TaskStatus, projectId?: string, reviewReason?: import('../../shared/types').ReviewReason) => {
         // Debug: Log received status change
@@ -291,6 +300,7 @@ export function useIpcListeners(): void {
       cleanupError();
       cleanupLog();
       cleanupStatus();
+      cleanupQueueHold?.();
       cleanupRateLimitHold();
       cleanupClaudeRun();
       cleanupTaskList();

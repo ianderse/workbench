@@ -18,6 +18,7 @@ import {
   JSON_ERROR_PREFIX,
   JSON_ERROR_TITLE_SUFFIX
 } from '../../shared/constants';
+import { useQueueHoldStore } from '../stores/queue-hold-store';
 import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasRecentActivity, startTaskOrQueue, taskHasErrors, retryTask, recoverStuckTask, useTaskStore, unmetDependencyTitles } from '../stores/task-store';
 import type { Task, TaskStatus } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
@@ -130,6 +131,8 @@ export const TaskCard = memo(function TaskCard({
   const waitsFor = useTaskStore((s) =>
     task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task, autonomous) : ''
   );
+  // The higher-priority project holding this queued task back (a name, '' when none)
+  const heldBy = useQueueHoldStore((s) => (task.status === 'queue' ? (s.holds[task.projectId ?? ''] ?? '') : ''));
   // A string (or undefined), so the memoized card compares it cheaply
   const lastNoteFrom = task.metadata?.contextNotes?.filter((n) => !n.kind).at(-1)?.fromTaskId;
   const splitCount = task.metadata?.splitInto?.taskIds.length ?? 0;
@@ -400,6 +403,11 @@ export const TaskCard = memo(function TaskCard({
         {waitsFor && (
           <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1 wrap-anywhere" title={t('breakdown.waitsFor', { titles: waitsFor })}>
             {t('breakdown.waitsFor', { titles: waitsFor })}
+          </p>
+        )}
+        {heldBy && !waitsFor && (
+          <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1 wrap-anywhere" title={t('breakdown.heldByPriority', { project: heldBy })}>
+            {t('breakdown.heldByPriority', { project: heldBy })}
           </p>
         )}
         {notice && !actionError && (

@@ -26,7 +26,11 @@
 import type { Task } from '../../shared/types';
 import { isTaskOnRateLimitHold } from '../../shared/utils/rate-limit-hold';
 import { sortColumnTasks } from '../../shared/utils/task-column-order';
-import { isDependencySatisfied } from '../../shared/utils/autonomous';
+import type { Project } from '../../shared/types';
+import { isRunningStatus } from '../../shared/utils/running-tasks';
+import { blockingHigherPriorityProject, getUnmetDependencyIds } from '../../shared/utils/project-priority';
+
+export { getUnmetDependencyIds };
 
 /** Delay used to coalesce bursts of requests (e.g. "Queue all") into one pass. */
 const TASK_QUEUE_DEBOUNCE_MS = 100;
@@ -60,22 +64,12 @@ export interface TaskQueueDeps {
    * project's autonomous mode is off. A dependency auto-merged into it no longer blocks the task.
    */
   getAutonomousTarget?: (projectId: string, task: Task) => string | undefined;
+  /** All projects (name and settings, for the cross-project priority gate); unset = no gate */
+  listProjects?: () => Array<Pick<Project, 'id' | 'name' | 'settings'>>;
+  /** The project holding this project's queued tasks back changed (undefined = not held) */
+  onHoldChange?: (projectId: string, blockedBy: { id: string; name: string } | undefined) => void;
   /** Debounce override for tests. */
   debounceMs?: number;
-}
-
-/**
- * Ids of the tasks this task still waits for: dependencies that exist, aren't archived and
- * aren't done yet. A dependency that no longer exists (deleted) counts as satisfied.
- */
-export function getUnmetDependencyIds(task: Task, tasks: readonly Task[], autonomousTarget?: string): string[] {
-  const ids = task.metadata?.dependsOnTaskIds;
-  if (!ids || ids.length === 0) return [];
-  return ids.filter((depId) => {
-    if (depId === task.id) return false;
-    const dep = tasks.find((t) => t.id === depId || t.specId === depId);
-    return !!dep && !isDependencySatisfied(dep, autonomousTarget) && !dep.metadata?.archivedAt;
-  });
 }
 
 /**
@@ -142,8 +136,75 @@ export class TaskQueue {
     return this.runExclusive(projectId, () => this.promote(projectId));
   }
 
+  /**
+   * The higher-priority project that currently keeps this project's queued tasks from starting
+   * automatically, if any. Manual starts ignore it.
+   */
+  getBlockingProject(projectId: string): { id: string; name: string } | undefined {
+    const deps = this.deps;
+    if (!deps?.listProjects) return undefined;
+    try {
+      const projects = deps.listProjects();
+      const project = projects.find((p) => p.id === projectId);
+      if (!project) return undefined;
+      const blocker = blockingHigherPriorityProject(projects, (id) => deps.listTasks(id), project, {
+        getAutonomousTarget: deps.getAutonomousTarget,
+      });
+      return blocker ? { id: blocker.id, name: blocker.name } : undefined;
+    } catch (error) {
+      console.warn(`[TaskQueue] Failed to check the priority of project ${projectId}:`, error);
+      return undefined;
+    }
+  }
+
+  /** Holds last reported per project (project id -> blocking project id) */
+  private holds = new Map<string, string>();
+  private wakeTimer: ReturnType<typeof setTimeout> | null = null;
+
+  /** Current holds, for windows that open later */
+  getHolds(): Array<{ projectId: string; blockedBy: { id: string; name: string } }> {
+    const result: Array<{ projectId: string; blockedBy: { id: string; name: string } }> = [];
+    for (const projectId of this.holds.keys()) {
+      const blockedBy = this.getBlockingProject(projectId);
+      if (blockedBy) result.push({ projectId, blockedBy });
+    }
+    return result;
+  }
+
+  private reportHold(projectId: string, blockedBy: { id: string; name: string } | undefined): void {
+    if ((this.holds.get(projectId) ?? undefined) === blockedBy?.id) return;
+    if (blockedBy) this.holds.set(projectId, blockedBy.id);
+    else this.holds.delete(projectId);
+    try {
+      this.deps?.onHoldChange?.(projectId, blockedBy);
+    } catch (error) {
+      console.warn('[TaskQueue] Failed to report a queue hold:', error);
+    }
+  }
+
+  /**
+   * A project may have freed the queue of lower-priority projects (its last runnable work
+   * finished): run their queues after a short delay (bursts of state changes coalesce).
+   */
+  requestLowerPriority(wakeDelayMs = 2000): void {
+    const deps = this.deps;
+    if (!deps?.listProjects || this.wakeTimer) return;
+    this.wakeTimer = setTimeout(() => {
+      this.wakeTimer = null;
+      try {
+        for (const project of deps.listProjects?.() ?? []) {
+          if (this.holds.has(project.id)) this.request(project.id);
+        }
+      } catch (error) {
+        console.warn('[TaskQueue] Failed to wake lower-priority projects:', error);
+      }
+    }, wakeDelayMs);
+  }
+
   /** Cancel a pending debounced pass. */
   dispose(): void {
+    if (this.wakeTimer) clearTimeout(this.wakeTimer);
+    this.wakeTimer = null;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.pending.clear();
@@ -178,6 +239,12 @@ export class TaskQueue {
     const started = new Set<string>();
     const failed = new Set<string>();
 
+    // A higher-priority project with work it can run holds this project's queue back
+    // (running tasks are left alone)
+    const blocker = this.getBlockingProject(projectId);
+    this.reportHold(projectId, blocker);
+    if (blocker) return;
+
     while (failed.size < MAX_FAILED_STARTS_PER_PASS) {
       let tasks: Task[];
       let maxParallel: number;
@@ -189,8 +256,9 @@ export class TaskQueue {
         return;
       }
 
+      // In Progress and AI Review both run a model process, so both fill a slot
       const inProgressIds = new Set(
-        tasks.filter((t) => t.status === 'in_progress' && !t.metadata?.archivedAt).map((t) => t.id)
+        tasks.filter((t) => isRunningStatus(t.status) && !t.metadata?.archivedAt).map((t) => t.id)
       );
       for (const id of started) inProgressIds.add(id);
       if (inProgressIds.size >= maxParallel) return;
