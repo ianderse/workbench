@@ -1,7 +1,7 @@
 import { displayedState } from '../../hooks/graph/types'
 import { Agent, ANIM, type AgentState, type ToolCallNode } from '../../lib/agent-types'
 import { getStateColor } from '../../lib/colors'
-import { AGENT_DRAW } from '../../lib/canvas-constants'
+import { AGENT_DRAW, FACE } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
 import { CLAUDE_SPARK_D } from './draw-misc'
 import { displayedColor, drawFace, type FaceState } from './draw-face'
@@ -31,7 +31,7 @@ function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.translate(-AGENT_DRAW.sparkViewBox, -AGENT_DRAW.sparkViewBox + 1)
   ctx.fillStyle = color
   ctx.shadowColor = color
-  ctx.shadowBlur = 6 / scale
+  ctx.shadowBlur = FACE.glowBlur / 4
   ctx.fill(getClaudeSparkPath())
   ctx.restore()
 }
@@ -52,7 +52,7 @@ function drawAgentsIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
   ctx.translate(-512, -533)
   ctx.fillStyle = color
   ctx.shadowColor = color
-  ctx.shadowBlur = 6 / scale
+  ctx.shadowBlur = FACE.glowBlur / 4
   ctx.fill(getAgentsIconPath())
   ctx.restore()
 }
