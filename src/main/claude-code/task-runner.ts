@@ -31,6 +31,7 @@ import { triageTask, fixedTriage, applyPlanningPolicy } from './triage';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
 import { buildParallelTasksPrompt } from '../task-changelog';
 import { git } from '../utils/git-exec';
+import { stageTaskWork } from './stage-excludes';
 import { getWslInfo, toHostPath, toRuntimePath, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { buildAttachmentBlocks } from '../insights/message-content';
 import { detectClaudeLimitMessage, parseLimitResetTime } from './limit';
@@ -227,6 +228,7 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, paral
 - Use subagents only when they help: broad searches whose raw output you don't need, or independent investigations that can run in parallel. Do the implementation itself in this conversation.
 - Use skills and MCP tools when they fit the task.
 - Verify your work with the project's own checks (tests, type checker, linter, build) for the code you changed, and fix failures you caused. Show evidence rather than asserting success.
+- Keep generated folders (node_modules, build output, virtual environments) out of commits: if the project has no .gitignore for them, create or extend one before installing dependencies or committing.
 - When the work is done, commit it in this worktree with a descriptive message. Don't push.
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
@@ -1086,9 +1088,8 @@ no notes came with the request, so review the change against the task with fresh
   private async commitLeftovers(): Promise<void> {
     const cwd = this.config.worktreePath;
     try {
-      const { stdout } = await git(['status', '--porcelain', '--', '.', ':(exclude).workbench'], { cwd });
-      if (!stdout.trim()) return;
-      await git(['add', '-A', '--', '.', ':(exclude).workbench'], { cwd });
+      // Generated folders (node_modules, .venv, dist, ...) are never staged, even without a .gitignore
+      if (!(await stageTaskWork(cwd, ['.workbench']))) return;
       const title = this.info.triage?.title || this.config.title;
       await git(['commit', '-m', title, '--no-verify'], { cwd });
       this.emitLog('Committed remaining changes');

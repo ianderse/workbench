@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'fs';
 import path from 'path';
 import { git } from './utils/git-exec';
+import { stageTaskWork } from './claude-code/stage-excludes';
 import { DATA_DIR_NAMES } from '../shared/constants';
 
 /**
@@ -118,10 +119,7 @@ export async function initializeGit(projectPath: string): Promise<Initialization
       debug('Adding files and creating initial commit');
 
       // Add all files
-      await git(['add', '-A'], {
-        cwd: projectPath,
-        encoding: 'utf-8'
-      });
+      await stageTaskWork(projectPath, [], { encoding: 'utf-8' });
 
       // Create initial commit
       await git(['commit', '-m', 'Initial commit', '--allow-empty'], {
