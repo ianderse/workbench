@@ -48,7 +48,7 @@ export interface ProjectSettings {
   maxBudgetUsd?: number;
   /** Claude account (profile id) the project's tasks and chats run on; unset = the account in use */
   claudeProfileId?: string;
-  /** Maximum parallel tasks allowed (default: 3) */
+  /** Extra cap on this project's running tasks, on top of the app-wide total; unset = no extra cap */
   maxParallelTasks?: number;
   /**
    * Let sessions save what they learn about this project (Claude Code's auto memory, relocated to

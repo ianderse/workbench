@@ -20,6 +20,7 @@ vi.mock('../../ipc-handlers/ipc-registry', () => ({
 vi.mock('../../project-store', () => ({
   projectStore: {
     getProject: (id: string) => (id === 'p1' ? { id: 'p1', path: '/project', settings: { mainBranch: 'develop', maxParallelTasks: 1 } } : undefined),
+    getProjects: () => [{ id: 'p1' }],
     getTasks: () => tasks,
     invalidateTasksCache: vi.fn(),
   },

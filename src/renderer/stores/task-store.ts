@@ -1,12 +1,13 @@
 import { create } from 'zustand';
 import { arrayMove } from '@dnd-kit/sortable';
-import { countRunningTasks } from '../../shared/utils/running-tasks';
+import { countRunningTasks, reachedParallelCap } from '../../shared/utils/running-tasks';
 import { unmetDependencyLabel } from '../../shared/utils/task-dependencies';
 import type { Task, TaskStatus, SubtaskStatus, ImplementationPlan, Subtask, TaskMetadata, ExecutionProgress, ExecutionPhase, ReviewReason, TaskDraft, ImageAttachment, TaskOrderState, TaskReviewOptions } from '../../shared/types';
 import { debugLog, debugWarn } from '../../shared/utils/debug-logger';
 import { useProjectStore } from './project-store';
 import { useSettingsStore } from './settings-store';
-import { resolveMaxParallelTasks } from '../../shared/constants/task';
+import { resolveGlobalMaxParallelTasks, resolveProjectMaxParallelTasks } from '../../shared/constants/task';
+import { selectOtherProjectsRunning, useQueueHoldStore } from './queue-hold-store';
 
 /** Maximum log entries stored per task to prevent renderer OOM */
 export const MAX_LOG_ENTRIES = 5000;
@@ -890,12 +891,18 @@ export async function forceCompleteTask(taskId: string, projectId?: string): Pro
  * @param excludeTaskId - Task ID to exclude from the count (e.g., when restarting a stuck task already in in_progress)
  */
 export function isQueueAtCapacity(excludeTaskId?: string): boolean {
-  const maxParallelTasks = resolveMaxParallelTasks(
-    useSettingsStore.getState().settings.maxParallelTasks,
-    useProjectStore.getState().getActiveProject()?.settings?.maxParallelTasks
+  const activeProject = useProjectStore.getState().getActiveProject();
+  const projectRunning = countRunningTasks(useTaskStore.getState().tasks, excludeTaskId);
+  // All projects share one model server: the app setting is the total across projects
+  const otherRunning = selectOtherProjectsRunning(useQueueHoldStore.getState().running, activeProject?.id);
+  return (
+    reachedParallelCap({
+      globalRunning: projectRunning + otherRunning,
+      projectRunning,
+      globalMax: resolveGlobalMaxParallelTasks(useSettingsStore.getState().settings.maxParallelTasks),
+      projectMax: resolveProjectMaxParallelTasks(activeProject?.settings?.maxParallelTasks),
+    }) !== undefined
   );
-  const currentTasks = useTaskStore.getState().tasks;
-  return countRunningTasks(currentTasks, excludeTaskId) >= maxParallelTasks;
 }
 
 export interface StartTaskOrQueueResult {

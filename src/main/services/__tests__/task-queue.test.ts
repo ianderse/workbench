@@ -338,8 +338,8 @@ describe('TaskQueue', () => {
     expect(startTask).toHaveBeenCalledWith('d', 'p1');
   });
 
-  describe('project priority', () => {
-    function priorityHarness() {
+  describe('project priority and the shared slots', () => {
+    function priorityHarness(globalMax = 8, projectMax: Record<string, number> = {}) {
       const tasks: Record<string, Task[]> = {
         hi: [makeTask('h1', 'in_progress', { projectId: 'hi' })],
         lo: [makeTask('l1', 'queue', { projectId: 'lo' })],
@@ -352,48 +352,84 @@ describe('TaskQueue', () => {
       });
       const queue = new TaskQueue();
       queue.configure({
-        listProjectIds: () => Object.keys(tasks),
+        // Listed low first on purpose: passes must still run in priority order
+        listProjectIds: () => ['lo', 'hi'],
         listTasks: (id) => tasks[id] ?? [],
-        listProjects: () => Object.keys(tasks).map((id) => ({ id, name: `Project ${id}`, settings: { priority: priorities[id] } as never })),
-        onHoldChange: (id, blockedBy) => holds.push([id, blockedBy?.id]),
-        getMaxParallelTasks: () => 3,
+        listProjects: () => ['lo', 'hi'].map((id) => ({ id, name: `Project ${id}`, settings: { priority: priorities[id] } as never })),
+        onHoldChange: (id, hold) => holds.push([id, hold?.kind]),
+        getMaxParallelTasks: () => globalMax,
+        getProjectMaxParallelTasks: (id) => projectMax[id],
         startTask,
         debounceMs: 10,
       });
       return { tasks, queue, startTask, holds };
     }
 
-    it('holds an automatic start while a higher-priority project has work', async () => {
+    it('a higher project that only runs or reviews does not hold the lower one: it uses the free slots', async () => {
       const { queue, startTask, holds } = priorityHarness();
       await queue.processProject('lo');
-      expect(startTask).not.toHaveBeenCalled();
-      expect(holds).toEqual([['lo', 'hi']]);
-      expect(queue.getBlockingProject('lo')?.name).toBe('Project hi');
+      expect(startTask).toHaveBeenCalledWith('l1', 'lo');
+      expect(holds).toEqual([]);
     });
 
-    it('the higher-priority project itself is never held', async () => {
-      const { tasks, queue, startTask } = priorityHarness();
+    it('a higher project with a startable queued task goes first', async () => {
+      const { tasks, queue, startTask, holds } = priorityHarness();
       tasks.hi.push(makeTask('h2', 'queue', { projectId: 'hi' }));
+      await queue.processProject('lo');
+      expect(startTask).not.toHaveBeenCalled();
+      expect(holds).toEqual([['lo', 'project']]);
+      expect(queue.getHold('lo')).toMatchObject({ kind: 'project', name: 'Project hi' });
+      // The higher-priority project itself is never held
       await queue.processProject('hi');
       expect(startTask).toHaveBeenCalledWith('h2', 'hi');
     });
 
+    it('promotes in priority order when several projects have startable work', async () => {
+      const { tasks, queue, startTask } = priorityHarness(3);
+      tasks.hi.push(makeTask('h2', 'queue', { projectId: 'hi' }), makeTask('h3', 'queue', { projectId: 'hi' }));
+      tasks.lo.push(makeTask('l2', 'queue', { projectId: 'lo' }));
+      queue.request(); // all projects
+      await vi.waitFor(() => expect(startTask).toHaveBeenCalledTimes(2));
+      // 1 running + 2 free slots: both go to the high project, the low one waits
+      expect(startTask.mock.calls.map((c) => c.join(':')).sort()).toEqual(['h2:hi', 'h3:hi']);
+      expect(queue.getHold('lo')).toMatchObject({ kind: 'slots', used: 3, max: 3 });
+    });
+
+    it('the global cap counts the running tasks of all projects', async () => {
+      const { tasks, queue, startTask, holds } = priorityHarness(2);
+      tasks.hi.push(makeTask('h2', 'ai_review', { projectId: 'hi' }));
+      await queue.processProject('lo');
+      expect(startTask).not.toHaveBeenCalled();
+      expect(holds).toEqual([['lo', 'slots']]);
+      expect(queue.getHold('lo')).toEqual({ kind: 'slots', used: 2, max: 2 });
+    });
+
+    it("a project's own cap holds it while global slots are free", async () => {
+      const { tasks, queue, startTask } = priorityHarness(8, { lo: 1 });
+      tasks.lo.push(makeTask('l0', 'in_progress', { projectId: 'lo' }));
+      await queue.processProject('lo');
+      expect(startTask).not.toHaveBeenCalled();
+      expect(queue.getHold('lo')).toEqual({ kind: 'projectCap', used: 1, max: 1 });
+    });
+
     it('a manual start does not go through the gate', async () => {
-      const { queue, startTask } = priorityHarness();
+      const { tasks, queue, startTask } = priorityHarness();
+      tasks.hi.push(makeTask('h2', 'queue', { projectId: 'hi' }));
       // A user start calls the start flow directly and never asks the queue; the queue still reports the hold
       await startTask('l1', 'lo');
       expect(startTask).toHaveBeenCalledTimes(1);
-      expect(queue.getBlockingProject('lo')).toBeDefined();
+      expect(queue.getHold('lo')?.kind).toBe('project');
     });
 
-    it('wakes the lower-priority queue 2 s after the higher project frees', async () => {
+    it('a freed slot wakes the queues of all projects 2 s later', async () => {
       vi.useFakeTimers();
-      const { tasks, queue, startTask, holds } = priorityHarness();
+      const { tasks, queue, startTask, holds } = priorityHarness(1);
       await queue.processProject('lo');
       expect(startTask).not.toHaveBeenCalled();
+      expect(holds).toEqual([['lo', 'slots']]);
 
       tasks.hi[0].status = 'human_review';
-      queue.requestLowerPriority();
+      queue.requestAllProjects();
       await vi.advanceTimersByTimeAsync(1900);
       expect(startTask).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(300);

@@ -306,7 +306,7 @@ export interface AppSettings {
   windowsShell?: WindowsShell;
   // Custom tool paths inside WSL, used instead of the paths above while tools run in WSL (Settings > Developer > Paths)
   wslToolPaths?: WslToolPaths;
-  // Maximum tasks in progress at once per project; others wait in the Queue (Settings > Claude Code)
+  // Maximum tasks running at once (In Progress + AI Review) across ALL projects, which share one model server; others wait in the Queue (Settings > Agents)
   maxParallelTasks?: number;
   // MCP connector defaults for new tasks (Settings > Connectors)
   mcpConnectors?: McpConnectorSettings;

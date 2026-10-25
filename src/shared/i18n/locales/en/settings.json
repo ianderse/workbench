@@ -328,7 +328,7 @@
       "title": "Queue",
       "description": "Parallel task limit",
       "maxParallelTasks": "Maximum parallel tasks",
-      "maxParallelTasksDescription": "Tasks beyond this limit wait in the Queue before moving to In Progress ({{min}}–{{max}})"
+      "maxParallelTasksDescription": "Tasks at once across all projects, the rest wait in the Queue ({{min}}–{{max}})"
     },
     "knowledge": {
       "title": "Knowledge"

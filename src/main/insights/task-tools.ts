@@ -18,7 +18,8 @@
  */
 
 import { IPC_CHANNELS } from '../../shared/constants';
-import { canMoveTask, getAllowedTaskMoves, getTaskColumn, resolveMaxParallelTasks } from '../../shared/constants/task';
+import { canMoveTask, getAllowedTaskMoves, getTaskColumn, resolveGlobalMaxParallelTasks, resolveProjectMaxParallelTasks } from '../../shared/constants/task';
+import { countRunningTasks, reachedParallelCap } from '../../shared/utils/running-tasks';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import type {
   IPCResult,
@@ -115,11 +116,19 @@ function summarize(task: Task) {
 /** Start a task, or queue it when the project already runs as many tasks as it may */
 async function startOrQueue(context: TaskToolContext, task: Task): Promise<'started' | 'queued'> {
   const settings = (readSettingsFile() ?? {}) as Partial<AppSettings>;
-  const maxParallel = resolveMaxParallelTasks(settings.maxParallelTasks, project(context).settings?.maxParallelTasks);
-  const running = projectStore.getTasks(context.projectId).filter(
-    (t) => t.id !== task.id && t.status === 'in_progress' && !t.metadata?.archivedAt
-  ).length;
-  if (running >= maxParallel) {
+  // The app setting is the total across all projects (one shared model server); the project's own cap is extra
+  const projectRunning = countRunningTasks(projectStore.getTasks(context.projectId), task.id);
+  const otherRunning = projectStore
+    .getProjects()
+    .filter((p) => p.id !== context.projectId)
+    .reduce((sum, p) => sum + countRunningTasks(projectStore.getTasks(p.id)), 0);
+  const atLimit = reachedParallelCap({
+    globalRunning: projectRunning + otherRunning,
+    projectRunning,
+    globalMax: resolveGlobalMaxParallelTasks(settings.maxParallelTasks),
+    projectMax: resolveProjectMaxParallelTasks(project(context).settings?.maxParallelTasks),
+  });
+  if (atLimit) {
     await ipc(IPC_CHANNELS.TASK_UPDATE_STATUS, task.id, 'queue', undefined, context.projectId);
     return 'queued';
   }

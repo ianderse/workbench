@@ -2,6 +2,7 @@ import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { TaskBreakdown } from '../../shared/types/task-breakdown';
 import type { RunProgress } from '../../shared/utils/run-progress';
+import type { QueueHold, QueueHoldsSnapshot } from '../../shared/utils/project-priority';
 import type {
   Task,
   IPCResult,
@@ -107,8 +108,9 @@ export interface TaskAPI {
   onTaskRateLimitHoldChange: (callback: (taskId: string, hold: RateLimitHold | null, projectId?: string) => void) => () => void;
   onTaskClaudeRunUpdate: (callback: (taskId: string, run: ClaudeRunInfo, projectId?: string) => void) => () => void;
   setQueueOrder: (projectId: string, order: string[]) => void;
-  onQueueHold: (callback: (projectId: string, blockedBy: { id: string; name: string } | null) => void) => () => void;
-  getQueueHolds: () => Promise<Array<{ projectId: string; blockedBy: { id: string; name: string } }>>;
+  onQueueHold: (callback: (projectId: string, hold: QueueHold | null) => void) => () => void;
+  onQueueUsage: (callback: (running: Record<string, number>) => void) => () => void;
+  getQueueHolds: () => Promise<QueueHoldsSnapshot>;
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]) => Promise<IPCResult<TaskBreakdown>>;
   cancelBreakDownTask: (requestId: string) => void;
   saveBreakdownProposal: (projectId: string, prompt: string, attachmentNames: string[], breakdown: TaskBreakdown, proposalId?: string) => Promise<IPCResult>;
@@ -344,16 +346,24 @@ export const createTaskAPI = (): TaskAPI => ({
   setQueueOrder: (projectId: string, order: string[]): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_QUEUE_ORDER_SET, projectId, order),
 
-  onQueueHold: (callback: (projectId: string, blockedBy: { id: string; name: string } | null) => void): (() => void) => {
-    const handler = (_: Electron.IpcRendererEvent, projectId: string, blockedBy: { id: string; name: string } | null): void =>
-      callback(projectId, blockedBy);
+  onQueueHold: (callback: (projectId: string, hold: QueueHold | null) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, projectId: string, hold: QueueHold | null): void =>
+      callback(projectId, hold);
     ipcRenderer.on(IPC_CHANNELS.TASK_QUEUE_HOLD, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.TASK_QUEUE_HOLD, handler);
     };
   },
 
-  getQueueHolds: (): Promise<Array<{ projectId: string; blockedBy: { id: string; name: string } }>> =>
+  onQueueUsage: (callback: (running: Record<string, number>) => void): (() => void) => {
+    const handler = (_: Electron.IpcRendererEvent, running: Record<string, number>): void => callback(running);
+    ipcRenderer.on(IPC_CHANNELS.TASK_QUEUE_USAGE, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TASK_QUEUE_USAGE, handler);
+    };
+  },
+
+  getQueueHolds: (): Promise<QueueHoldsSnapshot> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_QUEUE_HOLDS_GET),
 
   breakDownTask: (projectId: string, requestId: string, description: string, attachmentNames?: string[]): Promise<IPCResult<TaskBreakdown>> =>

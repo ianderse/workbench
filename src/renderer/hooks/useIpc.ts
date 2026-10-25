@@ -210,11 +210,14 @@ export function useIpcListeners(): void {
     );
 
     // Queue holds by project priority: current state once, then every change
-    const cleanupQueueHold = window.electronAPI.onQueueHold?.((projectId, blockedBy) =>
-      useQueueHoldStore.getState().setHold(projectId, blockedBy?.name ?? null)
+    const cleanupQueueHold = window.electronAPI.onQueueHold?.((projectId, hold) =>
+      useQueueHoldStore.getState().setHold(projectId, hold)
+    );
+    const cleanupQueueUsage = window.electronAPI.onQueueUsage?.((running) =>
+      useQueueHoldStore.getState().setRunning(running)
     );
     void window.electronAPI.getQueueHolds?.()
-      .then((holds) => useQueueHoldStore.getState().setHolds(holds))
+      .then((snapshot) => useQueueHoldStore.getState().setSnapshot(snapshot))
       .catch(() => undefined);
 
     const cleanupStatus = window.electronAPI.onTaskStatusChange(
@@ -301,6 +304,7 @@ export function useIpcListeners(): void {
       cleanupLog();
       cleanupStatus();
       cleanupQueueHold?.();
+      cleanupQueueUsage?.();
       cleanupRateLimitHold();
       cleanupClaudeRun();
       cleanupTaskList();

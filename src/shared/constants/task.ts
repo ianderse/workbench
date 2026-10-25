@@ -81,11 +81,16 @@ export const MIN_PARALLEL_TASKS = 1;
 export const MAX_PARALLEL_TASKS_LIMIT = 10;
 
 /**
- * Maximum tasks in progress at once: the app setting (Settings > Terminal), otherwise a value a
- * project saved before the setting became app-wide, otherwise the default.
+ * Maximum tasks running (in progress or in AI review) at once across ALL projects, which share
+ * one model server: the app setting (Settings > Agents), else the default.
  */
-export function resolveMaxParallelTasks(appValue?: number, projectValue?: number): number {
-  return appValue ?? projectValue ?? DEFAULT_MAX_PARALLEL_TASKS;
+export function resolveGlobalMaxParallelTasks(appValue?: number): number {
+  return appValue ?? DEFAULT_MAX_PARALLEL_TASKS;
+}
+
+/** A project's own extra cap on its running tasks; undefined = only the global cap applies */
+export function resolveProjectMaxParallelTasks(projectValue?: number): number | undefined {
+  return typeof projectValue === 'number' && Number.isFinite(projectValue) && projectValue > 0 ? projectValue : undefined;
 }
 
 // Status priority for deduplication: higher = more complete

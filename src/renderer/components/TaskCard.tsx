@@ -131,8 +131,28 @@ export const TaskCard = memo(function TaskCard({
   const waitsFor = useTaskStore((s) =>
     task.status === 'queue' || task.status === 'backlog' ? unmetDependencyTitles(s.tasks, task, autonomous) : ''
   );
-  // The higher-priority project holding this queued task back (a name, '' when none)
-  const heldBy = useQueueHoldStore((s) => (task.status === 'queue' ? (s.holds[task.projectId ?? ''] ?? '') : ''));
+  // Why this queued task waits, one primitive per selector so each returns a stable value
+  const heldKind = useQueueHoldStore((s) => (task.status === 'queue' ? (s.holds[task.projectId ?? '']?.kind ?? '') : ''));
+  const heldProject = useQueueHoldStore((s) => {
+    const hold = task.status === 'queue' ? s.holds[task.projectId ?? ''] : undefined;
+    return hold?.kind === 'project' ? hold.name : '';
+  });
+  const heldUsed = useQueueHoldStore((s) => {
+    const hold = task.status === 'queue' ? s.holds[task.projectId ?? ''] : undefined;
+    return hold && hold.kind !== 'project' ? hold.used : 0;
+  });
+  const heldMax = useQueueHoldStore((s) => {
+    const hold = task.status === 'queue' ? s.holds[task.projectId ?? ''] : undefined;
+    return hold && hold.kind !== 'project' ? hold.max : 0;
+  });
+  const heldText =
+    heldKind === 'slots'
+      ? t('breakdown.heldBySlots', { used: heldUsed, max: heldMax })
+      : heldKind === 'projectCap'
+        ? t('breakdown.heldByProjectCap', { used: heldUsed, max: heldMax })
+        : heldKind === 'project'
+          ? t('breakdown.heldByProject', { project: heldProject })
+          : '';
   // A string (or undefined), so the memoized card compares it cheaply
   const lastNoteFrom = task.metadata?.contextNotes?.filter((n) => !n.kind).at(-1)?.fromTaskId;
   const splitCount = task.metadata?.splitInto?.taskIds.length ?? 0;
@@ -405,9 +425,9 @@ export const TaskCard = memo(function TaskCard({
             {t('breakdown.waitsFor', { titles: waitsFor })}
           </p>
         )}
-        {heldBy && !waitsFor && (
-          <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1 wrap-anywhere" title={t('breakdown.heldByPriority', { project: heldBy })}>
-            {t('breakdown.heldByPriority', { project: heldBy })}
+        {heldText && !waitsFor && (
+          <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1 wrap-anywhere" title={heldText}>
+            {heldText}
           </p>
         )}
         {notice && !actionError && (

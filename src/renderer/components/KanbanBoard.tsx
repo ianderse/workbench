@@ -32,7 +32,9 @@ import { TASK_STATUS_COLUMNS, TASK_STATUS_LABELS } from '../../shared/constants'
 import { sortColumnTasks, sortReviewColumn } from '../../shared/utils/task-column-order';
 import { cn } from '../lib/utils';
 import { persistTaskStatus, forceCompleteTask, archiveTasks, useTaskStore, isQueueAtCapacity } from '../stores/task-store';
-import { resolveMaxParallelTasks, getTaskColumn as getVisualColumn, canMoveTask } from '../../shared/constants/task';
+import { resolveGlobalMaxParallelTasks, resolveProjectMaxParallelTasks, getTaskColumn as getVisualColumn, canMoveTask } from '../../shared/constants/task';
+import { countRunningTasks } from '../../shared/utils/running-tasks';
+import { selectOtherProjectsRunning, useQueueHoldStore } from '../stores/queue-hold-store';
 import { useProjectStore } from '../stores/project-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { WorktreeCleanupDialog } from './WorktreeCleanupDialog';
@@ -83,7 +85,14 @@ interface DroppableColumnProps {
   onArchiveAll?: () => void;
   /** Opens the parallel task limit setting (Queue column) */
   onOpenSettings?: () => void;
+  /** Total running tasks allowed across all projects */
   maxParallelTasks?: number;
+  /** This project's running tasks (In Progress + AI Review) */
+  runningCount?: number;
+  /** Running tasks of other projects */
+  otherRunning?: number;
+  /** This project's own cap, when set */
+  projectMaxParallelTasks?: number;
   archivedCount?: number;
   showArchived?: boolean;
   onToggleArchived?: () => void;
@@ -129,6 +138,9 @@ function droppableColumnPropsAreEqual(
   if (prevProps.onArchiveAll !== nextProps.onArchiveAll) return false;
   if (prevProps.onOpenSettings !== nextProps.onOpenSettings) return false;
   if (prevProps.maxParallelTasks !== nextProps.maxParallelTasks) return false;
+  if (prevProps.runningCount !== nextProps.runningCount) return false;
+  if (prevProps.otherRunning !== nextProps.otherRunning) return false;
+  if (prevProps.projectMaxParallelTasks !== nextProps.projectMaxParallelTasks) return false;
   if (prevProps.archivedCount !== nextProps.archivedCount) return false;
   if (prevProps.showArchived !== nextProps.showArchived) return false;
   if (prevProps.onToggleArchived !== nextProps.onToggleArchived) return false;
@@ -191,7 +203,7 @@ const getEmptyStateContent = (status: TaskStatus, t: (key: string) => string): {
   }
 };
 
-const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskClick, onStatusChange, isOver, onAddClick, onArchiveAll, onOpenSettings, maxParallelTasks, archivedCount, showArchived, onToggleArchived }: DroppableColumnProps) {
+const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskClick, onStatusChange, isOver, onAddClick, onArchiveAll, onOpenSettings, maxParallelTasks, runningCount = 0, otherRunning = 0, projectMaxParallelTasks, archivedCount, showArchived, onToggleArchived }: DroppableColumnProps) {
   const { t } = useTranslation(['tasks', 'common']);
   const { setNodeRef } = useDroppable({
     id: status
@@ -270,12 +282,22 @@ const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskCli
             {t(TASK_STATUS_LABELS[status])}
           </h2>
           {status === 'in_progress' && maxParallelTasks ? (
-            <span className={cn(
-              "column-count-badge",
-              tasks.length >= maxParallelTasks && "bg-warning/20 text-warning border-warning/30"
-            )}>
-              {tasks.length}/{maxParallelTasks}
-            </span>
+            <Tooltip delayDuration={200}>
+              <TooltipTrigger asChild>
+                <span className={cn(
+                  "column-count-badge",
+                  (runningCount + otherRunning >= maxParallelTasks ||
+                    (projectMaxParallelTasks !== undefined && runningCount >= projectMaxParallelTasks)) &&
+                    "bg-warning/20 text-warning border-warning/30"
+                )}>
+                  {runningCount}/{maxParallelTasks}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {t('kanban.parallelUsage', { max: maxParallelTasks, others: otherRunning })}
+                {projectMaxParallelTasks !== undefined && ` ${t('kanban.parallelProjectCap', { max: projectMaxParallelTasks })}`}
+              </TooltipContent>
+            </Tooltip>
           ) : (
             <span className="column-count-badge">
               {tasks.length}
@@ -418,7 +440,12 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
   const projectId = tasks[0]?.projectId;
   const project = projectId ? projects.find((p) => p.id === projectId) : undefined;
   const appMaxParallelTasks = useSettingsStore((state) => state.settings.maxParallelTasks);
-  const maxParallelTasks = resolveMaxParallelTasks(appMaxParallelTasks, project?.settings?.maxParallelTasks);
+  // The app setting is the total across all projects (one shared model server); a project's own cap is extra
+  const maxParallelTasks = resolveGlobalMaxParallelTasks(appMaxParallelTasks);
+  const projectMaxParallelTasks = resolveProjectMaxParallelTasks(project?.settings?.maxParallelTasks);
+  const runningCount = useMemo(() => countRunningTasks(tasks), [tasks]);
+  // A number, so the selector returns a stable value
+  const otherRunning = useQueueHoldStore((s) => selectOtherProjectsRunning(s.running, projectId));
 
   // Worktree cleanup dialog state
   const [worktreeCleanupDialog, setWorktreeCleanupDialog] = useState<{
@@ -824,6 +851,9 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
               onArchiveAll={status === 'done' ? handleArchiveAll : undefined}
               onOpenSettings={status === 'queue' ? openQueueSettings : undefined}
               maxParallelTasks={status === 'in_progress' ? maxParallelTasks : undefined}
+              runningCount={status === 'in_progress' ? runningCount : undefined}
+              otherRunning={status === 'in_progress' ? otherRunning : undefined}
+              projectMaxParallelTasks={status === 'in_progress' ? projectMaxParallelTasks : undefined}
               archivedCount={status === 'done' ? archivedCount : undefined}
               showArchived={status === 'done' ? showArchived : undefined}
               onToggleArchived={status === 'done' ? toggleShowArchived : undefined}

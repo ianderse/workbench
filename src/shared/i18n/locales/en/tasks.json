@@ -140,6 +140,8 @@
     "error": "Error"
   },
   "kanban": {
+    "parallelUsage": "{{max}} tasks at once across all projects; {{others}} used by other projects.",
+    "parallelProjectCap": "This project runs at most {{max}} at once.",
     "emptyBacklog": "No tasks planned",
     "emptyBacklogHint": "Add a task to get started",
     "emptyQueue": "Queue is empty",
@@ -470,7 +472,9 @@
     "createFailed": "Created {{done}} of {{total}} tasks: {{error}}",
     "noneSelected": "Select at least one task",
     "waitsFor": "Waits for {{titles}}",
-    "heldByPriority": "Waiting for {{project}}",
+    "heldBySlots": "Waiting for a free slot ({{used}} of {{max}} in use)",
+    "heldByProject": "Waiting for {{project}} to start its queued tasks first",
+    "heldByProjectCap": "Waiting for a free slot in this project ({{used}} of {{max}})",
     "progress": {
       "starting": "Starting...",
       "elapsed": "Elapsed {{time}}",

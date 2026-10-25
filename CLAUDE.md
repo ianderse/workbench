@@ -360,16 +360,27 @@ detached worktree, then the branch is moved by `merge --ff-only` where it is che
 
 ### Queue priority between projects
 
-Project setting `priority` (`high | normal | low`, default normal, in `.workbench/settings.json`, Settings > Project > Tasks).
-All projects share one local model server, so `blockingHigherPriorityProject()` (`shared/utils/project-priority.ts`, pure)
-returns the first project with strictly higher priority that has runnable work: a task running (`isRunningStatus`:
-`in_progress` or `ai_review`, `shared/utils/running-tasks.ts`, also what the parallel task limit counts in the queue,
-`isAtParallelLimit` and the renderer's `isQueueAtCapacity`) or a queued task that could start (not archived, not on a
-rate-limit hold, dependencies satisfied by `getUnmetDependencyIds`). Only automatic starts are gated: `TaskQueue.promote`
-(every queue pass: status changes, autonomous runs, startup) and `resumeHeldTask` (rate-limit resume); a manual Start
-(`TASK_START`), a resumed in-progress task and resync starts are not, and running tasks are never paused. The queue reports
-holds (`onHoldChange`, IPC `TASK_QUEUE_HOLD`, plus `TASK_QUEUE_HOLDS_GET` once at start) into `queue-hold-store.ts`; cards
-show "Waiting for <project>". A `state` task hook calls `taskQueue.requestLowerPriority()`, which re-runs held projects' queues after 2 s.
+All projects share one local model server, so the app setting `maxParallelTasks` (Settings > Agents, default 3,
+`resolveGlobalMaxParallelTasks`) is the TOTAL number of running tasks across ALL projects: `isRunningStatus`
+(`in_progress` or `ai_review`, `shared/utils/running-tasks.ts`, `countRunningTasks`). A project's own
+`settings.maxParallelTasks` (`resolveProjectMaxParallelTasks`; unset = no extra cap) caps that project additionally.
+`reachedParallelCap()` (global first, then project) is used by every start gate: `TaskQueue.promote`, `isAtParallelLimit`
+(manual restart / resync / queue-or-start decisions), Insights `startOrQueue` and the renderer's `isQueueAtCapacity`.
+
+Project setting `priority` (`high | normal | low`, default normal, Settings > Project > Tasks). `getQueueHold()`
+(`shared/utils/project-priority.ts`, pure) says why a project's queued tasks do not start: `slots` (global cap used up),
+`projectCap` (its own cap), or `project` (a project with strictly higher priority has a STARTABLE queued task, i.e. queued,
+not archived, not on a rate-limit hold, dependencies satisfied by `getUnmetDependencyIds`, and its own cap not reached, so
+it gets the free slot first). Running or in-review work of a higher project does not block by itself; equal priority never
+orders projects. Only automatic starts are gated: `TaskQueue.promote` (every queue pass) and `resumeHeldTask`
+(rate-limit resume, via `taskQueue.getHold`); a manual Start (`TASK_START`), a resumed in-progress task and resync starts
+are not, and running tasks are never paused. Passes of several projects run one after the other, highest priority first
+(`flush`), so projects cannot overbook the shared slots. A `state` task hook calls `taskQueue.requestAllProjects()`, which
+re-runs the queues of all projects after 2 s (a slot may be free). The queue reports holds (`onHoldChange`, IPC
+`TASK_QUEUE_HOLD`, a `QueueHold` or null) and running counts per project (`onUsageChange`, `TASK_QUEUE_USAGE`), plus
+`TASK_QUEUE_HOLDS_GET` once at start, into `queue-hold-store.ts`. Cards show "Waiting for a free slot (8 of 8 in use)",
+"Waiting for <project> to start its queued tasks first" or "Waiting for a free slot in this project (N of M)"; the In
+Progress column header shows this project's running count over the total, with a tooltip counting the other projects.
 
 ### Notifications (desktop and phone)
 
