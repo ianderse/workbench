@@ -12,7 +12,7 @@ import * as path from 'path'
 import { AgentEvent, SubagentLaunch, SubagentState, WatchedSession, spawnSubagentNode, subagentDedupFor } from './protocol'
 import { SESSION_ID_DISPLAY, SUBAGENT_META_WAIT_MS, SUBAGENT_LAUNCH_WAIT_MS, INACTIVITY_TIMEOUT_MS, HIDDEN_TOOLS } from './constants'
 import { readCompleteLines, readNewFileLines } from './fs-utils'
-import { TranscriptParser, isAsyncLaunch, taskNotificationLaunchId } from './transcript-parser'
+import { TranscriptParser, isAsyncLaunch, isConversationEntry, taskNotificationLaunchId } from './transcript-parser'
 import { createLogger } from './logger'
 
 const log = createLogger('SubagentWatcher')
@@ -32,8 +32,9 @@ function agentIdFromPath(jsonlPath: string): string {
 
 /**
  * Read the launch ID a subagent's .meta.json sidecar gives it: the Agent tool_use that started
- * it, or, for a background agent session the user started (Claude Code's /subtask, which has no
- * launching tool call), the agent ID its file is named after.
+ * it, or, for a background agent the session started itself (Claude Code's /subtask, or a forked
+ * skill such as /code-review, marked by its .forked-skill.json sidecar; neither has a launching
+ * Agent call), the agent ID its file is named after.
  * `pending`: the sidecar doesn't exist yet (Claude Code writes the .jsonl a
  * moment before it). `none`: the sidecar has no launch ID (some Claude Code
  * versions/agent types), so the file can't be matched to a launch.
@@ -45,7 +46,8 @@ export function readLaunchIdFromMeta(jsonlPath: string): { id: string; fork?: bo
   try {
     const meta = JSON.parse(raw) as Record<string, unknown>
     if (typeof meta.toolUseId === 'string' && meta.toolUseId) return { id: meta.toolUseId }
-    return meta.isFork === true ? { id: agentIdFromPath(jsonlPath), fork: true } : 'none'
+    const forkedSkill = meta.isFork !== true && fs.existsSync(jsonlPath.replace(/\.jsonl$/, '.forked-skill.json'))
+    return meta.isFork === true || forkedSkill ? { id: agentIdFromPath(jsonlPath), fork: true } : 'none'
   } catch { return 'pending' /* partially written */ }
 }
 
@@ -168,9 +170,12 @@ function startWatchingSubagentFile(
             toolUseResult?: unknown
           }
           // One of its own background launches already reported back
-          const notified = taskNotificationLaunchId(entry as Record<string, unknown>)
+          const notified = taskNotificationLaunchId(entry as Record<string, unknown>, session.launches)
           const notifiedLaunch = notified ? session.launches.get(notified) : undefined
           if (notified && notifiedLaunch?.background && !notifiedLaunch.finished) finishNested(notified, notifiedLaunch)
+          // Only its conversation's own entries: request records (api-request-blob) repeat
+          // calls long answered, which would otherwise be drawn as running forever
+          if (!isConversationEntry(entry as Record<string, unknown>)) continue
           if (!entry?.message || !Array.isArray(entry.message.content)) continue
           for (const block of entry.message.content) {
             if (block.type === 'tool_use' && block.id && block.name) {
@@ -226,8 +231,8 @@ function startWatchingSubagentFile(
 }
 
 /** How long since a file was last written (ms); Infinity if it can't be read */
-function fileIdleMs(filePath: string): number {
-  try { return Date.now() - fs.statSync(filePath).mtimeMs } catch { return Infinity }
+export function fileIdleMs(filePath: string, now = Date.now()): number {
+  try { return now - fs.statSync(filePath).mtimeMs } catch { return Infinity }
 }
 
 /** Stop tailing a sub-agent's file for good */

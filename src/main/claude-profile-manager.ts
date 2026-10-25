@@ -66,6 +66,7 @@ import { expandClaudeHome, isClaudeHomeInWsl, joinClaudeHome } from './platform/
 import { whenShellRuntimeReady } from './platform/shell-runtime';
 import { detectClaudeCodeSetups, detectedAccountName, type DetectedSetup } from './claude-profile/claude-code-detection';
 import { getDefaultClaudeConfigDir } from './claude-profile/config-dir-paths';
+import { appLog } from './app-logger';
 
 /** Normalize a profile configDir for comparison (~ expansion, resolution, Windows case). */
 function normalizeConfigDir(configDir: string): string {
@@ -118,6 +119,8 @@ export class ClaudeProfileManager {
   private initialized: boolean = false;
   /** Set once the store for this session's runtime (native or WSL) is chosen; nothing is saved before */
   private storeReady: boolean = false;
+  /** Called whenever the account in use changes, from any caller (Settings, swaps, terminals) */
+  private activeProfileListeners = new Set<(profileId: string, previousProfileId: string) => void>();
 
   constructor() {
     this.configDir = join(app.getPath('userData'), 'config');
@@ -845,7 +848,22 @@ export class ClaudeProfileManager {
     this.data.activeProfileId = profileId;
     profile.lastUsedAt = new Date();
     this.save();
+    if (previousProfileId !== profileId) {
+      for (const listener of this.activeProfileListeners) {
+        try {
+          listener(profileId, previousProfileId);
+        } catch (error) {
+          appLog.warn('[ClaudeProfileManager] Active profile listener failed:', error);
+        }
+      }
+    }
     return true;
+  }
+
+  /** Listen for the account in use changing; returns the unsubscribe function */
+  onActiveProfileChanged(listener: (profileId: string, previousProfileId: string) => void): () => void {
+    this.activeProfileListeners.add(listener);
+    return () => { this.activeProfileListeners.delete(listener); };
   }
 
   /**

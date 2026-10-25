@@ -616,7 +616,7 @@ export function hasStartedImplementation(project: Project, task: Task): boolean 
     const info = safeParseJson<{ phases?: Array<{ name?: string }> }>(
       readFileSync(path.join(specDir, CLAUDE_RUN_FILE), 'utf-8')
     );
-    return !!info?.phases?.some((p) => p.name === 'implement' || p.name === 'revise');
+    return !!info?.phases?.some((p) => p.name === 'implement' || p.name === 'revise' || p.name === 'resync');
   } catch {
     return false;
   }

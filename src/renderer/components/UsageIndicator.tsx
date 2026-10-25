@@ -25,6 +25,9 @@ import {
   THRESHOLD_ELEVATED, THRESHOLD_WARNING, getBadgeColorClasses, getColorClass,
 } from './usage/usage-colors';
 
+/** How long the badge waits for a newly selected account's usage before showing it as unavailable */
+export const USAGE_LOADING_TIMEOUT_MS = 20_000;
+
 export function UsageIndicator() {
   const { t } = useTranslation(['common']);
   const [usage, setUsage] = useState<ClaudeUsageSnapshot | null>(null);
@@ -141,10 +144,21 @@ export function UsageIndicator() {
 
   useEffect(() => {
     // Listen for usage updates from main process
-    const unsubscribe = window.electronAPI.onUsageUpdated((snapshot: ClaudeUsageSnapshot) => {
+    // A null snapshot means the account in use changed to one whose usage isn't known yet: show
+    // the loading state until it arrives instead of the previous account's numbers. Its usage may
+    // never come (signed out, no subscription usage, rate limited), so stop waiting after a while
+    // and show it as unavailable.
+    let loadingTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearLoadingTimer = () => {
+      if (loadingTimer) clearTimeout(loadingTimer);
+      loadingTimer = null;
+    };
+    const unsubscribe = window.electronAPI.onUsageUpdated((snapshot: ClaudeUsageSnapshot | null) => {
       setUsage(snapshot);
-      setIsAvailable(true);
-      setIsLoading(false);
+      setIsAvailable(!!snapshot);
+      setIsLoading(!snapshot);
+      clearLoadingTimer();
+      if (!snapshot) loadingTimer = setTimeout(() => setIsLoading(false), USAGE_LOADING_TIMEOUT_MS);
     });
 
     // Listen for all profiles usage updates (to know whether the active profile needs re-auth)
@@ -182,13 +196,15 @@ export function UsageIndicator() {
     });
 
     return () => {
+      clearLoadingTimer();
       unsubscribe();
       unsubscribeAllProfiles?.();
     };
   }, []);
 
-  // Show loading state - only for Anthropic OAuth accounts awaiting usage data
-  if (isLoading && hasUsageMonitoring) {
+  // Show loading state - only for Anthropic OAuth accounts awaiting usage data (an account that
+  // needs signing in again shows that instead: its usage won't arrive)
+  if (isLoading && hasUsageMonitoring && !activeProfileNeedsReauth) {
     return (
       <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border bg-muted/50 text-muted-foreground">
         <Activity className="h-3.5 w-3.5 motion-safe:animate-pulse" />

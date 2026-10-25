@@ -14,9 +14,12 @@ const log = createLogger('HookServer')
  * Tool calls and sub-agents are read from the transcripts; hooks only add what
  * transcripts can't tell us promptly: a tool call starting (PreToolUse; Claude
  * Code writes it to the transcript up to seconds later, often after a short
- * tool has finished), a real permission prompt (Notification), the main agent
- * finishing its turn (Stop), the session ending (SessionEnd), and a backstop
- * completion for sub-agents (SubagentStop). Every hook also says which agent
+ * tool has finished), a tool call ending (PostToolUse / PostToolUseFailure: a
+ * backstop for a result written late, or never, as for an agent stopped
+ * mid-call), a real permission prompt (Notification), the main agent finishing
+ * its turn (Stop, or StopFailure when an API error such as a rate limit ends it),
+ * the session ending (SessionEnd), and a backstop completion for sub-agents
+ * (SubagentStop, and StopFailure inside one). Every hook also says which agent
  * window its session runs in (SessionStart and UserPromptSubmit only say that).
  *
  * It listens on an OS-assigned port, advertised to the hook script through the
@@ -125,6 +128,10 @@ export class HookServer implements TypedDisposable {
       case 'PreToolUse':
         this.handlePreToolUse(payload)
         break
+      case 'PostToolUse':
+      case 'PostToolUseFailure':
+        this.handlePostToolUse(payload, payload.hook_event_name === 'PostToolUseFailure')
+        break
       case 'SubagentStop':
         this.handleSubagentStop(payload)
         break
@@ -144,6 +151,15 @@ export class HookServer implements TypedDisposable {
         // turn ending, not the main one's.
         if (!payload.agent_id) this.emit('agent_complete', { name: ORCHESTRATOR_NAME }, payload.session_id)
         break
+      case 'StopFailure':
+        // An API error (e.g. a rate limit) ended the turn: the main agent's, or,
+        // inside one, the agent's own, which it doesn't survive (a fork too)
+        if (!payload.agent_id) this.emit('agent_complete', { name: ORCHESTRATOR_NAME }, payload.session_id)
+        else {
+          const agent = this.agentOf(payload)
+          if (agent) this.emit('agent_complete', { name: agent }, payload.session_id)
+        }
+        break
       case 'SessionEnd':
         this.emit('agent_complete', { name: ORCHESTRATOR_NAME, endsSession: true }, payload.session_id)
         break
@@ -159,6 +175,14 @@ export class HookServer implements TypedDisposable {
     if (typeof tool !== 'string' || typeof id !== 'string') return
     const agent = this.agentOf(payload)
     if (agent) this.emit('tool_call_start', { agent, tool, id }, payload.session_id)
+  }
+
+  /** A tool call ended (or failed), in the main agent or a sub-agent */
+  private handlePostToolUse(payload: HookPayload, isError: boolean): void {
+    const { tool_name: tool, tool_use_id: id } = payload
+    if (typeof tool !== 'string' || typeof id !== 'string') return
+    const agent = this.agentOf(payload)
+    if (agent) this.emit('tool_call_end', { agent, tool, id, ...(isError ? { isError } : {}) }, payload.session_id)
   }
 
   /** The agent a hook fires in: the main agent, or (with `agent_id`) a

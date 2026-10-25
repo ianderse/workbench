@@ -422,12 +422,12 @@ function writeCliCommand(terminal: TerminalProcess, command: string): void {
 }
 
 /**
- * Claude Code flag that tells it where the project's memory graph is, when the terminal's project
- * has one: Graphify's /graphify skill looks for graphify-out in the working directory, while the
- * graph lives in .workbench/knowledge (the terminal's GRAPHIFY_OUT points there). Left out when the
- * path has characters that would need escaping inside the shell command.
+ * Text telling the session where the project's memory graph is, when the terminal's project has
+ * one: Graphify's /graphify skill looks for graphify-out in the working directory, while the graph
+ * lives in .workbench/knowledge (the terminal's GRAPHIFY_OUT points there). Left out when the path
+ * has characters that would need escaping inside the shell command.
  */
-function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut' | 'shellKind'>): string {
+function graphifyHintText(terminal: Pick<TerminalProcess, 'graphifyOut' | 'shellKind'>): string {
   // In a WSL window, the path inside WSL
   const out = windowPath(terminal, terminal.graphifyOut);
   const shellKind = shellKindOf(terminal);
@@ -438,7 +438,7 @@ function graphifyHintFlag(terminal: Pick<TerminalProcess, 'graphifyOut' | 'shell
     `The Graphify knowledge graph of this project is in ${out} (GRAPHIFY_OUT points there), not in graphify-out ` +
     `under the working directory. For /graphify questions about the code, run graphify query, explain, path or ` +
     `affected with --graph ${graph}, and do not rebuild the graph.`;
-  return ` --append-system-prompt ${quoteFlagText(text, shellKind)}`;
+  return text;
 }
 
 /**
@@ -452,13 +452,15 @@ function quoteFlagText(text: string, shellKind: ShellKind): string {
 }
 
 /**
- * Claude Code flag telling an agent window's session to save what it learns about the project, when
- * the project's self-improve switch is on. The project's own `.claude/MEMORY.md` carries the same
- * text for sessions started outside the app; this covers the window Workbench launches.
+ * The one `--append-system-prompt` flag of an agent window: Claude Code keeps only the last such
+ * flag, so the Graphify hint and the self-improve instruction (save what it learns about the
+ * project, when the project's switch is on; its `.claude/MEMORY.md` carries the same text for
+ * sessions started outside the app) go in together.
  */
-function selfImproveFlag(terminal: Pick<TerminalProcess, 'selfImprove' | 'shellKind'>): string {
-  if (!terminal.selfImprove) return '';
-  return ` --append-system-prompt ${quoteFlagText(SELF_IMPROVE_NUDGE_ONE_LINE, shellKindOf(terminal))}`;
+function appendSystemPromptFlag(terminal: Pick<TerminalProcess, 'graphifyOut' | 'selfImprove' | 'shellKind'>): string {
+  const texts = [graphifyHintText(terminal), terminal.selfImprove ? SELF_IMPROVE_NUDGE_ONE_LINE : ''].filter(Boolean);
+  if (texts.length === 0) return '';
+  return ` --append-system-prompt ${quoteFlagText(texts.join(' '), shellKindOf(terminal))}`;
 }
 
 /**
@@ -668,8 +670,8 @@ function buildClaudeExtraFlags(
   const flags =
     `${resumeSessionId ? buildResumeSessionFlag(resumeSessionId) : ''}` +
     `${!resumeSessionId && newSessionId ? buildNewSessionFlag(newSessionId) : ''}` +
-    `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}` +
-    `${selfImproveFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
+    `${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${appendSystemPromptFlag(terminal)}` +
+    `${claudeThemeFlag(shellKindOf(terminal))}`;
   return flags || undefined;
 }
 
@@ -1596,7 +1598,7 @@ export function invokeClaude(
   // Compute extra flags for the new session and YOLO mode
   const extraFlags =
     `${buildNewSessionFlag(newSessionId)}${dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}` +
-    `${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
+    `${appendSystemPromptFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
 
   // Track terminal state for cleanup on error
   const wasClaudeMode = terminal.isCLIMode;
@@ -1708,7 +1710,7 @@ export function resumeClaude(
     const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
 
     // Preserve YOLO mode flag from terminal's stored state
-    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
+    const extraFlags = `${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${appendSystemPromptFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
 
     // Go to the project directory, then pick up its latest Claude session
     const cdCommand = buildCdCommand(windowPath(terminal, terminal.projectPath || terminal.cwd), shellKindOf(terminal));
@@ -1959,7 +1961,7 @@ export async function resumeClaudeAsync(
 
     // The session flag, then YOLO mode (preserved from the terminal's stored state), the Graphify
     // hint and the theme matching the app's
-    const extraFlags = `${resumed.flag}${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${graphifyHintFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
+    const extraFlags = `${resumed.flag}${terminal.dangerouslySkipPermissions ? YOLO_MODE_FLAG : ''}${appendSystemPromptFlag(terminal)}${claudeThemeFlag(shellKindOf(terminal))}`;
 
     // Go to the project directory, then pick the window's own session up again
     const cdCommand = buildCdCommand(windowPath(terminal, terminal.projectPath || terminal.cwd), shellKindOf(terminal));
