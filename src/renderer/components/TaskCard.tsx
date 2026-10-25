@@ -32,6 +32,11 @@ import { StartOverDialog } from './StartOverDialog';
 // catches a task left In Progress or AI Review without a run (e.g. the app quit mid-run),
 // checked when the card mounts and then every 60 seconds.
 const STUCK_CHECK_INTERVAL_MS = 60_000;
+/**
+ * While a card shows Stuck, look again often: the app resumes stuck tasks a few seconds after it
+ * starts, and a resumed task keeps its status, so nothing else tells the card it runs again
+ */
+const STUCK_RECHECK_MS = 3_000;
 
 // Icon-only buttons, like the settings dialog's (muted icon, nav hover background)
 const ICON_BUTTON_CLASS = 'h-8 w-8 rounded-lg p-0 text-muted-foreground hover:bg-nav-hover hover:text-foreground';
@@ -221,14 +226,14 @@ export const TaskCard = memo(function TaskCard({
     };
     // Check right away (a run stopped by quitting the app is stuck as soon as the app starts)
     checkStuck();
-    stuckIntervalRef.current = setInterval(checkStuck, STUCK_CHECK_INTERVAL_MS);
+    stuckIntervalRef.current = setInterval(checkStuck, isStuck ? STUCK_RECHECK_MS : STUCK_CHECK_INTERVAL_MS);
 
     return () => {
       if (stuckIntervalRef.current) {
         clearInterval(stuckIntervalRef.current);
       }
     };
-  }, [task.id, isActive]);
+  }, [task.id, isActive, isStuck]);
 
   const handleStartStop = async (e: React.MouseEvent) => {
     e.stopPropagation();

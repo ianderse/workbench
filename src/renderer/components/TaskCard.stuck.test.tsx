@@ -18,14 +18,16 @@ vi.mock('react-i18next', () => ({
   initReactI18next: { type: '3rdParty', init: () => undefined },
 }));
 
+let running = false;
 const recoverStuckTask = vi.fn(async () => ({ success: true, data: { taskId: 't1', recovered: true, newStatus: 'in_progress' } }));
 
 beforeEach(() => {
+  running = false;
   recoverStuckTask.mockClear();
   // Every other electronAPI call the card makes answers "nothing"
   (window as unknown as { electronAPI: unknown }).electronAPI = new Proxy(
     {
-      checkTaskRunning: async () => ({ success: true, data: false }),
+      checkTaskRunning: async () => ({ success: true, data: running }),
       recoverStuckTask,
     } as Record<string, unknown>,
     { get: (target, key: string) => target[key] ?? (async () => ({ success: true, data: null })) }
@@ -77,4 +79,14 @@ describe('a stuck task card', () => {
 
     await waitFor(() => expect(recoverStuckTask).toHaveBeenCalledWith('t1', { autoRestart: false }, 'p1'));
   });
+
+  it('clears Stuck within seconds once the app resumes the task on its own', async () => {
+    const task = stuckTask(run([{ name: 'implement', startedAt: '2026-10-25T03:47:01Z' }]));
+    render(<TaskCard task={task} onClick={() => undefined} />);
+    await screen.findByRole('button', { name: 'actions.resume' });
+
+    // The app's startup resume brings the run back; the task keeps its in-progress status
+    running = true;
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'actions.resume' })).not.toBeInTheDocument(), { timeout: 5000 });
+  }, 10_000);
 });

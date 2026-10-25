@@ -129,10 +129,12 @@ export function useTaskDetail({ task }: UseTaskDetailOptions) {
     };
     // Check right away (a run stopped by quitting the app is stuck as soon as the app starts)
     checkStuck();
-    const intervalId = setInterval(checkStuck, 60_000);
+    // While stuck, look again often: the app resumes stuck tasks shortly after it starts, and a
+    // resumed task keeps its status, so nothing else tells the dialog it runs again
+    const intervalId = setInterval(checkStuck, isStuck ? 3_000 : 60_000);
 
     return () => clearInterval(intervalId);
-  }, [task.id, isActiveTask]);
+  }, [task.id, isActiveTask, isStuck]);
 
   // Check for uncommitted worktree changes when delete dialog opens
   useEffect(() => {
