@@ -96,6 +96,7 @@ import { OMP_READ_ONLY_TOOLS, ompMaxRetries, ompRoleForJob, resolveOmpSelection,
 import { getOmpRoles } from '../agent-backend/omp-roles';
 import { buildOmpMemoryPrompt } from '../self-improve/nudge';
 import { startOmpProcess } from '../agent-backend/omp-process';
+import { taskUsage } from '../usage/usage-record';
 import { isOmpNotice, isOmpProgress, isOmpTodos } from '../agent-backend/omp-translate';
 import { StreamProgress } from '../agent-backend/stream-progress';
 import { classifyOmpFailure, ompRetryDelayMs } from '../agent-backend/omp-retry';
@@ -1145,6 +1146,7 @@ no notes came with the request, so review the change against the task with fresh
       env,
       input: params.input,
       abortSignal: this.abortController.signal,
+      usage: taskUsage(this.config.specDir, params.name, this.config.specId, this.config.projectId),
       onMessage: (message) => {
         const signal = this.handleMessage(message, params.logPhase);
         if (signal === 'rate_limit' && !rateLimit) rateLimit = { message: 'Claude usage limit reached' };
@@ -1259,6 +1261,7 @@ no notes came with the request, so review the change against the task with fresh
         maxTimeMinutes: omp.maxPhaseMinutes,
         emitProgress: true,
         abortSignal: this.abortController.signal,
+        usage: taskUsage(this.config.specDir, params.name, this.config.specId, this.config.projectId),
         onMessage: (message) => {
           if (isOmpProgress(message)) {
             // A long reply shows nothing else: a throttled line keeps the log (and the card's activity) alive
@@ -1389,6 +1392,7 @@ no notes came with the request, so review the change against the task with fresh
         backend: this.config.backend,
         jsonSchema: REVIEW_SCHEMA,
         cwd,
+        usage: { job: 'review', taskId: this.config.specId, projectId: this.config.projectId, projectPath: path.dirname(path.dirname(path.dirname(this.config.specDir))) },
         tools: READ_ONLY_TOOLS,
         // Local models are slow; one-shot OMP runs get five times this
         timeoutMs: 20 * 60 * 1000,

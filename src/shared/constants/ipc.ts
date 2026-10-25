@@ -66,6 +66,9 @@ export const IPC_CHANNELS = {
   TASK_ERROR: 'task:error',
   TASK_LOG: 'task:log',
   TASK_STATUS_CHANGE: 'task:statusChange',
+  USAGE_GET: 'usage:get',  // A project's token usage summary (cached): (projectId)
+  USAGE_REFRESH: 'usage:refresh',  // Read the usage ledger again: (projectId)
+  USAGE_REBUILD: 'usage:rebuild',  // Import the tasks' earlier sessions again: (projectId)
   QUEUE_PROPOSALS_LIST: 'queueGrooming:list',  // Pending queue proposals of a project
   QUEUE_PROPOSAL_APPLY: 'queueGrooming:apply',
   QUEUE_PROPOSAL_DISMISS: 'queueGrooming:dismiss',

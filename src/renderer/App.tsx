@@ -14,6 +14,7 @@ import {
 } from './components/ui/dialog';
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { MemoryGraph } from './components/memory/MemoryGraph';
+import { UsagePage } from './components/usage/UsagePage';
 import { useMemoryGraphStore } from './stores/memory-graph-store';
 import { KanbanBoard } from './components/KanbanBoard';
 import { TaskDetailModal } from './components/task-detail/TaskDetailModal';
@@ -742,6 +743,15 @@ export function App() {
                 )}
                 {activeView === 'memory' && (activeProjectId || selectedProjectId) && (
                   <MemoryGraph projectId={activeProjectId || selectedProjectId!} />
+                )}
+                {activeView === 'usage' && (activeProjectId || selectedProjectId) && (
+                  <UsagePage
+                    projectId={activeProjectId || selectedProjectId!}
+                    onOpenTask={(taskId) => {
+                      const task = tasks.find((candidate) => candidate.id === taskId || candidate.specId === taskId);
+                      if (task) setSelectedTask(task);
+                    }}
+                  />
                 )}
               </>
             ) : (

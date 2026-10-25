@@ -9,6 +9,7 @@
 
 import type { ChildProcess } from 'child_process';
 import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
+import { recordClaudeUsage, type UsageContext } from '../usage/usage-record';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from './stream-types';
 
 export interface ClaudeProcessOptions {
@@ -28,6 +29,8 @@ export interface ClaudeProcessOptions {
   abortSignal?: AbortSignal;
   /** Kill the process after this many milliseconds */
   timeoutMs?: number;
+  /** Where to book the run's tokens (the project's usage ledger); unset = not recorded */
+  usage?: UsageContext;
 }
 
 interface ClaudeProcessResult {
@@ -59,6 +62,7 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
     stdio: 'pipe',
   });
 
+  const startedMs = Date.now();
   let aborted = false;
   let timedOut = false;
   const stop = () => {
@@ -122,6 +126,7 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
       options.abortSignal?.removeEventListener('abort', onAbort);
       if (stdoutBuffer.trim()) handleLine(stdoutBuffer);
       stdoutBuffer = '';
+      recordClaudeUsage(options.usage, result, startedMs);
       resolve({ exitCode, signal, result, stderr, aborted, timedOut });
     };
     child.on('error', (error) => {

@@ -117,6 +117,7 @@ function defaultDeps(): GroomingDeps {
         effort: 'medium',
         jsonSchema: input.jsonSchema,
         cwd: input.cwd,
+        usage: { job: 'grooming' },
         tools: READ_ONLY_TOOLS,
         maxTurns: 30,
         profileId: input.profileId,

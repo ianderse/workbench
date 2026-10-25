@@ -6,6 +6,7 @@
  * one-shot Claude Code run (no tools). The model picks the commit type from the diff.
  */
 
+import path from 'path';
 import { loadClaudeRunInfo } from '../../claude-code/task-runner';
 import { runClaudeText } from '../../claude-code/run-text';
 import type { ClaudeEffort } from '../../../shared/types/claude-code';
@@ -116,6 +117,7 @@ export async function generateCommitMessage(config: CommitMessageConfig): Promis
       model: config.model ?? 'haiku',
       effort: config.effort ?? 'low',
       timeoutMs: COMMIT_MESSAGE_TIMEOUT_MS,
+      usage: config.specDir ? { job: 'commit', projectPath: path.dirname(path.dirname(path.dirname(config.specDir))), taskId: config.specName } : undefined,
     });
     const text = result.text.trim();
     if (text) return text;

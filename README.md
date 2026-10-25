@@ -36,6 +36,9 @@ This fork ([ianderse/workbench](https://github.com/ianderse/workbench), branch `
 - Autonomous mode (per project): tasks that pass AI review merge on their own into `workbench/auto` (or `main`), get pushed, and unblock the tasks waiting on them. You still review merged tasks and move them to Done, with Revert and Merge into main actions (`c610f26`)
 - Tickets can split themselves: when planning finds a ticket far too large, or implementing leaves work out on purpose (a `## Deferred` list), the agent moves that scope into 1 to 4 new tickets at the top of the Queue, chained after the original. Tickets that waited on the original now wait for the last piece. The setting "Split large tickets" (Off, Propose, Auto) is per project; Propose pauses the task after planning until you apply or dismiss the split, Auto applies it with an undo entry in Queue updates
 
+**Insight**
+- Usage page (sidebar): per-project token usage from a new `.workbench/usage.jsonl` ledger. Total tokens split into input, output and cache, local versus cloud share with the cloud bill you didn't pay (local tokens priced as Sonnet 5.5 at list rates), by model with tokens per second, by job, top tasks, the last 30 days and a few fun facts. Every OMP and Claude Code run is recorded per model, and "Rebuild from history" imports what earlier tasks spent from their session files
+
 **Fixes**
 - Workbench's own commits never include `node_modules`, virtual environments or root build output, even without a `.gitignore` (`19b90a1`)
 

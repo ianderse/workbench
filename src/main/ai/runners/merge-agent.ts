@@ -111,6 +111,7 @@ export const runMergeAgent: MergeAgentFn = async (input) => {
     model: input.model ?? 'opus',
     effort: input.effort ?? 'medium',
     cwd: input.worktreePath,
+    usage: { job: 'merge' },
     tools: ['Read', 'Glob', 'Grep', 'Edit', 'Write', 'Bash'],
     allowedTools: ['Edit', 'Write', 'Bash'],
     jsonSchema: MERGE_AGENT_SCHEMA,

@@ -194,6 +194,7 @@ You can inspect the changes with \`git diff ${config.baseBranch}...HEAD\` or by 
       model: config.model ?? 'sonnet',
       effort: config.effort ?? 'low',
       cwd: config.worktreePath,
+      usage: { job: 'pr' },
       tools: [...READ_ONLY_TOOLS, 'Bash'],
       allowedTools: ['Bash(git diff *)', 'Bash(git log *)', 'Bash(git show *)'],
       jsonSchema: PR_TEXT_SCHEMA,

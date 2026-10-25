@@ -1,0 +1,92 @@
+{
+  "title": "Usage",
+  "subtitle": "Tokens spent in {{project}}",
+  "actions": {
+    "refresh": "Refresh",
+    "refreshing": "Refreshing",
+    "rebuild": "Rebuild from history",
+    "rebuilding": "Rebuilding"
+  },
+  "updated": "Updated {{time}}",
+  "loading": "Reading the usage ledger",
+  "error": "Could not read usage: {{error}}",
+  "empty": {
+    "title": "No usage recorded yet",
+    "description": "Every model run from now on is counted here. Rebuild from history to import what earlier tasks spent."
+  },
+  "hero": {
+    "tokens": "tokens",
+    "cost": "Reported cost {{cost}}",
+    "noCost": "No cost reported",
+    "requests": "{{count}} model runs"
+  },
+  "kinds": {
+    "input": "Input",
+    "output": "Output",
+    "cacheRead": "Cache read",
+    "cacheWrite": "Cache write"
+  },
+  "locality": {
+    "title": "Local and cloud",
+    "local": "Local",
+    "cloud": "Cloud",
+    "share": "{{percent}}% of tokens ran locally",
+    "avoided": "Cloud bill you didn't pay: {{cost}}",
+    "pricedAs": "Local tokens priced as {{model}} at list rates",
+    "none": "No local tokens yet"
+  },
+  "byModel": {
+    "title": "By model",
+    "tokensPerSecond": "{{rate}} tok/s",
+    "local": "local",
+    "cloud": "cloud"
+  },
+  "byJob": {
+    "title": "By job"
+  },
+  "jobs": {
+    "triage": "Triage",
+    "plan": "Plan",
+    "implement": "Implement",
+    "validate": "Validate",
+    "revise": "Revise",
+    "review": "AI review",
+    "breakdown": "Breakdown",
+    "grooming": "Queue grooming",
+    "title": "Titles",
+    "commit": "Commit messages",
+    "pr": "Pull requests",
+    "merge": "Merge help",
+    "insights": "Claude chat",
+    "advisor": "Advisor",
+    "other": "Other"
+  },
+  "tasks": {
+    "title": "Top tasks",
+    "task": "Task",
+    "tokens": "Tokens",
+    "cost": "Cost",
+    "rounds": "Review rounds",
+    "untitled": "Task {{id}}",
+    "open": "Open task {{title}}"
+  },
+  "days": {
+    "title": "Last 30 days",
+    "label": "Tokens per day over the last 30 days",
+    "empty": "Nothing spent in the last 30 days",
+    "bar": "{{day}}: {{tokens}} tokens"
+  },
+  "facts": {
+    "title": "Fun facts",
+    "chattiest": "Chattiest model",
+    "chattiestValue": "{{model}}, {{ratio}} output per input token",
+    "fastest": "Fastest model",
+    "fastestValue": "{{model}}, {{rate}} tok/s",
+    "priciest": "Most expensive task",
+    "biggest": "Biggest task",
+    "taskValue": "{{title}}, {{value}}",
+    "retries": "Retries and fallbacks",
+    "retriesValue": "{{fallbacks}} fallback runs, {{failures}} failed requests",
+    "none": "Not enough data yet"
+  }
+}

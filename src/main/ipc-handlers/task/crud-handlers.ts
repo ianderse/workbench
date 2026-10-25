@@ -24,9 +24,10 @@ import { taskQueue } from '../../services/task-queue';
 async function generateTitleWithFallback(
   description: string,
   handler: string,
+  projectPath?: string,
 ): Promise<string> {
   try {
-    const generatedTitle = await titleGenerator.generateTitle(description);
+    const generatedTitle = await titleGenerator.generateTitle(description, projectPath);
     if (generatedTitle) {
       console.warn(`[${handler}] Generated title:`, generatedTitle);
       return generatedTitle;
@@ -103,7 +104,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       let finalTitle = title;
       if (!title || !title.trim()) {
         console.warn('[TASK_CREATE] Title is empty, generating with Claude AI...');
-        finalTitle = await generateTitleWithFallback(description, 'TASK_CREATE');
+        finalTitle = await generateTitleWithFallback(description, 'TASK_CREATE', project.path);
       }
 
       // Generate a unique spec ID based on existing specs
@@ -376,7 +377,7 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
         if (updates.title !== undefined && !updates.title.trim()) {
           const descriptionToUse = updates.description ?? task.description;
           console.warn('[TASK_UPDATE] Title is empty, generating with Claude AI...');
-          finalTitle = await generateTitleWithFallback(descriptionToUse, 'TASK_UPDATE');
+          finalTitle = await generateTitleWithFallback(descriptionToUse, 'TASK_UPDATE', project.path);
         }
 
         // Update implementation_plan.json

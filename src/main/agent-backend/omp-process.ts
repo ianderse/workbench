@@ -27,6 +27,7 @@ import { resolveOmpCommand } from './omp-command';
 import { getOmpRoles } from './omp-roles';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
+import { recordOmpUsage, type UsageContext } from '../usage/usage-record';
 
 type OmpProcessOutcome = Awaited<ClaudeProcessHandle['done']>;
 
@@ -67,6 +68,8 @@ export interface OmpRunOptions {
   onStderr?: (chunk: string) => void;
   abortSignal?: AbortSignal;
   timeoutMs?: number;
+  /** Where to book the run's tokens (the project's usage ledger); unset = not recorded */
+  usage?: UsageContext;
 }
 
 function extensionFor(mediaType: string): string {
@@ -230,6 +233,8 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
           result = translator.finalize({ exitCode, stderr, aborted, timedOut });
           if (result && !holdResult) forward(result);
         }
+        // Every process books its own tokens (a JSON repair run is a second one), also when it failed
+        recordOmpUsage(options.usage, translator.usage, { sessionId: translator.sessionId });
         resolve({ outcome: { exitCode, signal, stderr, aborted, timedOut }, result, text: translator.lastText, sessionId: translator.sessionId });
       };
       child.on('error', (error) => {

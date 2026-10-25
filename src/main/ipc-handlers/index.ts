@@ -22,6 +22,7 @@ import { registerGraphifyHandlers } from './graphify-handlers';
 import { registerAgentBackendHandlers } from './agent-backend-handlers';
 import { registerSelfImproveHandlers } from './self-improve-handlers';
 import { registerQueueGroomingHandlers } from './queue-grooming-handlers';
+import { registerUsageHandlers } from './usage-handlers';
 import { registerAutonomousHandlers } from './autonomous-handlers';
 import { registerProjectIndexHandlers } from './project-index-handlers';
 import { registerLiveAgentHandlers } from './live-agent-handlers';
@@ -91,6 +92,7 @@ export function setupIpcHandlers(
   registerSelfImproveHandlers();
   // Updates to queued tickets after a merge (notes, proposals)
   registerQueueGroomingHandlers(getMainWindow);
+  registerUsageHandlers();
   registerAutonomousHandlers(getMainWindow);
   registerProjectIndexHandlers();
 

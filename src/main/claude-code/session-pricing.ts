@@ -94,3 +94,27 @@ export function requestCostUsd(model: string | undefined, usage: RequestUsage | 
     1_000_000
   );
 }
+
+/** The model "what it would have cost" figures are priced as (Usage page) */
+export const REFERENCE_PRICING_MODEL = { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' } as const;
+
+/** Tokens of any backend, to be priced at a Claude model's list rates */
+export interface TokenCounts {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/**
+ * What these tokens cost at a Claude model's list prices (five minute cache for writes); 0 for a
+ * model with no published price. Used to say what local tokens would have cost in the cloud.
+ */
+export function tokensCostUsd(model: string, tokens: TokenCounts): number {
+  return requestCostUsd(model, {
+    input_tokens: tokens.input,
+    output_tokens: tokens.output,
+    cache_read_input_tokens: tokens.cacheRead,
+    cache_creation_input_tokens: tokens.cacheWrite,
+  });
+}

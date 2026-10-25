@@ -541,7 +541,7 @@ export function registerWorktreeHandlers(
         emitProgress('analyzing', 0, 'Starting merge engine');
 
         // AI conflict resolution runs through Claude Code
-        const aiResolverFn = createMergeResolverFn('sonnet', 'low');
+        const aiResolverFn = createMergeResolverFn('sonnet', 'low', project.path);
 
         // Create the merge orchestrator
         const storageDir = path.join(project.path, project.autoBuildPath || '.workbench');

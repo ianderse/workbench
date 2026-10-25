@@ -110,6 +110,39 @@ export interface ClaudeResultMessage {
   permission_denials?: unknown[];
   /** OMP: the failed model replies of the run, `fallback` for those of a model OMP switched to */
   omp_errors?: Array<{ text: string; model?: string; fallback: boolean }>;
+  /** Claude Code: tokens per model of the run (keys are model ids) */
+  modelUsage?: Record<string, ClaudeModelUsage>;
+  /** OMP: tokens per provider and model of the run */
+  omp_usage?: OmpModelUsage[];
+}
+
+/** `modelUsage` entry of a Claude Code result */
+export interface ClaudeModelUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  costUSD?: number;
+}
+
+/** What one OMP run spent on one model (summed over its replies) */
+export interface OmpModelUsage {
+  provider?: string;
+  model: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number;
+  /** Time spent in replies, from the replies' own `duration` */
+  durationMs: number;
+  requests: number;
+  failures: number;
+  /** The model was an OMP fallback, not the one the run started on */
+  fallback: boolean;
+  /** Timestamps (ms) of the first and last reply */
+  msFrom?: number;
+  msTo?: number;
 }
 
 interface ClaudeOtherMessage {

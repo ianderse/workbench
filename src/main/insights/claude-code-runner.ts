@@ -27,6 +27,7 @@ import { appLog } from '../app-logger';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
 import { startOmpProcess } from '../agent-backend/omp-process';
+import { projectUsage } from '../usage/usage-record';
 import { isOmpNotice, isOmpTextDelta } from '../agent-backend/omp-translate';
 import { INSIGHTS_ERROR_CODES, formatInsightsError } from '../../shared/constants/insights';
 import { CLAUDE_EFFORTS, CLAUDE_MODEL_ALIASES } from '../../shared/types/claude-code';
@@ -375,6 +376,7 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
         env,
         // Document blocks (PDFs) are valid Anthropic content even though the shared type omits them
         input: buildMessageContent(buildConversationPrompt(message, history), attachments) as ClaudeUserContentBlock[],
+        usage: projectUsage(projectDir, 'insights'),
         onMessage: (event) => {
           if (taskTools?.type === 'stdio') noteBridgeFailure(event);
           handleInsightsEvent(event, state, onStream);
@@ -458,6 +460,7 @@ async function runInsightsWithOmp(
     appendSystemPrompt: buildSystemPrompt(projectDir, { taskTools: false }),
     emitDeltas: true,
     abortSignal,
+    usage: projectUsage(projectDir, 'insights'),
     onMessage: (event: ClaudeStreamMessage) => {
       if (isOmpTextDelta(event)) {
         streamedInMessage += event.text.length;

@@ -152,6 +152,7 @@ async function run(projectPath: string, profileId?: string): Promise<ProjectInde
     model: triageModel,
     effort: EFFORT,
     cwd: projectPath,
+    usage: { job: 'other' },
     // `/init` is a command, so the prompt has to keep its slash
     slashCommands: !omp,
     tools: [...READ_ONLY_TOOLS, 'Write', 'Edit', 'Bash'],

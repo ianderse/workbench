@@ -12,7 +12,8 @@
     "insights": "Claude",
     "insightsChat": "Chat",
     "projects": "Projects",
-    "memory": "Graph"
+    "memory": "Graph",
+    "usage": "Usage"
   },
   "actions": {
     "settings": "Settings",

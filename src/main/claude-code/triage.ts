@@ -199,6 +199,7 @@ export async function triageTask(input: TriageInput): Promise<{ triage: TaskTria
     effort: 'low',
     jsonSchema: buildSchema(allowedModels),
     cwd: input.cwd,
+    usage: { job: 'triage' },
     tools: READ_ONLY_TOOLS,
     maxTurns: 12,
     timeoutMs: 3 * 60 * 1000,

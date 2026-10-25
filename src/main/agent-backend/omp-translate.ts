@@ -21,7 +21,7 @@
  * - `agent_end`: `messages` (the messages of this run)
  */
 
-import type { ClaudeResultMessage, ClaudeStreamMessage } from '../claude-code/stream-types';
+import type { ClaudeResultMessage, ClaudeStreamMessage, OmpModelUsage } from '../claude-code/stream-types';
 
 /** Custom message: streaming text of the assistant (only with `emitDeltas`) */
 export interface OmpTextDeltaMessage {
@@ -258,6 +258,8 @@ export interface OmpTranslator {
   readonly lastText: string;
   /** Every failed assistant message so far, oldest first, with the model that failed */
   readonly errors: ReadonlyArray<OmpModelError>;
+  /** Tokens spent so far, per provider and model (a run can span models: fallback, advisor) */
+  readonly usage: ReadonlyArray<OmpModelUsage>;
 }
 
 /** A failed model reply; `fallback` when OMP had switched to a fallback model by then */
@@ -282,6 +284,34 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
   let workerModel: string | undefined;
   let fallbackTarget: string | undefined;
   const errors: OmpModelError[] = [];
+  const usageByModel = new Map<string, OmpModelUsage>();
+
+  const num = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
+  const bookUsage = (message: Json, replyModel: string | undefined, fallback: boolean) => {
+    const usage = asRecord(message.usage);
+    if (!usage || !replyModel) return;
+    const provider = asString(message.provider);
+    const modelId = asString(message.model) ?? replyModel;
+    const row = usageByModel.get(replyModel) ?? {
+      ...(provider ? { provider } : {}), model: modelId, input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+      costUsd: 0, durationMs: 0, requests: 0, failures: 0, fallback: false,
+    };
+    row.input += num(usage.input);
+    row.output += num(usage.output);
+    row.cacheRead += num(usage.cacheRead);
+    row.cacheWrite += num(usage.cacheWrite);
+    row.costUsd += num(asRecord(usage.cost)?.total);
+    row.durationMs += num(message.duration);
+    row.requests += 1;
+    if (message.stopReason === 'error') row.failures += 1;
+    if (fallback) row.fallback = true;
+    const at = num(message.timestamp);
+    if (at) {
+      row.msFrom = row.msFrom === undefined ? at : Math.min(row.msFrom, at);
+      row.msTo = row.msTo === undefined ? at : Math.max(row.msTo, at);
+    }
+    usageByModel.set(replyModel, row);
+  };
 
   const buildResult = (extra?: { error?: string }): ClaudeResultMessage => {
     const stopReason = asString(lastAssistant?.stopReason);
@@ -294,6 +324,7 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
       is_error: failed,
       result: lastText,
       omp_errors: errors.map((e) => ({ ...e })),
+      omp_usage: [...usageByModel.values()].map((row) => ({ ...row })),
       total_cost_usd: totalCost,
       duration_ms: Date.now() - startedAt,
       num_turns: turns,
@@ -338,6 +369,7 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
       }
     }
     lastText = texts.join('\n').trim();
+    bookUsage(message, replyModel, !!replyModel && (replyModel === fallbackTarget || (!!workerModel && replyModel !== workerModel)));
     const error = message.stopReason === 'error' ? asString(message.errorMessage) || 'OMP request failed' : undefined;
     if (error) {
       const fallback = !!replyModel && (replyModel === fallbackTarget || (!!workerModel && replyModel !== workerModel));
@@ -380,6 +412,7 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
     get sessionId() { return sessionId; },
     get lastText() { return lastText; },
     get errors() { return errors; },
+    get usage() { return [...usageByModel.values()].map((row) => ({ ...row })); },
 
     translate(event: unknown): ClaudeStreamMessage[] {
       const e = asRecord(event);

@@ -25,6 +25,8 @@ export interface MergeResolverConfig {
   /** Reasoning effort (defaults to 'low') */
   effort?: ClaudeEffort;
   abortSignal?: AbortSignal;
+  /** Project the tokens are booked to (Usage page) */
+  projectPath?: string;
 }
 
 /** Result of a merge resolution */
@@ -57,7 +59,7 @@ function stripCodeFence(text: string): string {
 export async function resolveMergeConflict(
   config: MergeResolverConfig,
 ): Promise<MergeResolverResult> {
-  const { systemPrompt, userPrompt, model = 'sonnet', effort = 'low', abortSignal } = config;
+  const { systemPrompt, userPrompt, model = 'sonnet', effort = 'low', abortSignal, projectPath } = config;
 
   try {
     const result = await runClaudeText({
@@ -67,6 +69,7 @@ export async function resolveMergeConflict(
       effort,
       timeoutMs: RESOLVE_TIMEOUT_MS,
       abortSignal,
+      usage: projectPath ? { job: 'merge', projectPath } : undefined,
     });
     const text = stripCodeFence(result.text.trim());
     if (text) return { success: true, text };
@@ -87,9 +90,10 @@ export async function resolveMergeConflict(
 export function createMergeResolverFn(
   model = 'sonnet',
   effort: ClaudeEffort = 'low',
+  projectPath?: string,
 ): MergeResolverCallFn {
   return async (system: string, user: string): Promise<string> => {
-    const result = await resolveMergeConflict({ systemPrompt: system, userPrompt: user, model, effort });
+    const result = await resolveMergeConflict({ systemPrompt: system, userPrompt: user, model, effort, projectPath });
     return result.text;
   };
 }

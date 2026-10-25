@@ -151,6 +151,7 @@ export async function breakDownTask(input: BreakDownInput): Promise<TaskBreakdow
     effort: 'medium',
     jsonSchema: BREAKDOWN_SCHEMA,
     cwd: input.projectPath,
+    usage: { job: 'breakdown' },
     tools: READ_ONLY_TOOLS,
     maxTurns: 30,
     // Local models are slow; OMP multiplies this

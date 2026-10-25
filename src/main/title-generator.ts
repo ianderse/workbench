@@ -39,7 +39,7 @@ class TitleGenerator extends EventEmitter {
    * @param description - The task description to generate a title from
    * @returns Promise resolving to the generated title or null on failure
    */
-  async generateTitle(description: string): Promise<string | null> {
+  async generateTitle(description: string, projectPath?: string): Promise<string | null> {
     const prompt = this.createTitlePrompt(description);
 
     debug('Generating title for description:', description.substring(0, 100) + '...');
@@ -50,6 +50,7 @@ class TitleGenerator extends EventEmitter {
         systemPrompt: SYSTEM_PROMPT,
         model: 'haiku',
         timeoutMs: 60_000,
+        usage: projectPath ? { job: 'title', projectPath } : undefined,
       });
 
       const raw = result.text.trim();

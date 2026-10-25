@@ -17,6 +17,8 @@ import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import { ompToolsFromClaude } from '../agent-backend/omp-args';
 import type { OmpRole } from '../agent-backend/omp-args';
 import { startOmpProcess } from '../agent-backend/omp-process';
+import { projectUsage, type UsageContext } from '../usage/usage-record';
+import type { UsageJob } from '../../shared/types/usage';
 
 /** Built-in tools for read-only exploration of a project */
 export const READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'] as const;
@@ -48,6 +50,25 @@ export interface RunClaudeTextOptions {
   profileId?: string;
   /** Backend for this call (default: the app-wide backend); tasks pass their own */
   backend?: AgentBackendKind;
+  /**
+   * What the call is for, so its tokens go to the project's usage ledger. `projectPath` defaults to
+   * `cwd` (a task worktree resolves to its project); without a project nothing is recorded.
+   */
+  usage?: { job: UsageJob; projectPath?: string; projectId?: string; taskId?: string };
+}
+
+/** The project directory a path belongs to: a task worktree (`<project>/.workbench/worktrees/...`) resolves to its project */
+function projectRootOf(dir: string): string {
+  const match = /^(.*?)[\\/]\.workbench[\\/]worktrees(?:[\\/]|$)/.exec(dir);
+  return match ? match[1] : dir;
+}
+
+function usageContext(options: RunClaudeTextOptions): UsageContext | undefined {
+  const projectPath = options.usage?.projectPath ?? (options.cwd ? projectRootOf(options.cwd) : undefined);
+  return projectUsage(projectPath, options.usage?.job ?? 'other', {
+    projectId: options.usage?.projectId,
+    taskId: options.usage?.taskId,
+  });
 }
 
 export interface RunClaudeTextResult {
@@ -101,6 +122,7 @@ export async function runClaudeText(options: RunClaudeTextOptions): Promise<RunC
     input: options.prompt,
     abortSignal: options.abortSignal,
     timeoutMs: options.timeoutMs ?? 5 * 60 * 1000,
+    usage: usageContext(options),
   });
   return collectResult(await handle.done, 'Claude Code');
 }
@@ -156,6 +178,7 @@ async function runOmpText(options: RunClaudeTextOptions, settings: OmpBackendSet
     oneShot: true,
     abortSignal: options.abortSignal,
     timeoutMs: (options.timeoutMs ?? 5 * 60 * 1000) * OMP_TIMEOUT_FACTOR,
+    usage: usageContext(options),
   });
   return collectResult(await handle.done, 'OMP');
 }

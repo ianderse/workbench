@@ -137,6 +137,7 @@ async function run(projectPath: string, profileId?: string): Promise<SelfImprove
       jsonSchema: schema as unknown as Record<string, unknown>,
       profileId,
       cwd: projectPath,
+      usage: { job: 'other' },
     });
     const drafts = (result.structured as { memories?: MemoryDraft[] } | undefined)?.memories ?? [];
     if (drafts.length > 0) written = await writeMemories(projectPath, drafts.slice(0, MAX_MEMORIES - existing.length));

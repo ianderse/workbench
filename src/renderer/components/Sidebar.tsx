@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  Gauge,
   Plus,
   PanelLeft,
   Sparkles
@@ -23,7 +24,7 @@ import { GitSetupModal } from './GitSetupModal';
 import { UsageIndicator } from './UsageIndicator';
 import type { GitStatus } from '../../shared/types';
 
-export type SidebarView = 'projects' | 'kanban' | 'terminals' | 'insights' | 'memory';
+export type SidebarView = 'projects' | 'kanban' | 'terminals' | 'insights' | 'memory' | 'usage';
 
 interface SidebarProps {
   onSettingsClick: () => void;
@@ -45,6 +46,7 @@ const navItems: NavItem[] = [
   { id: 'insights', labelKey: 'navigation:items.insights', icon: InsightsIcon },
   // Only shown when the project has a memory graph (.workbench/knowledge)
   { id: 'memory', labelKey: 'navigation:items.memory', icon: GraphIcon },
+  { id: 'usage', labelKey: 'navigation:items.usage', icon: Gauge },
 ];
 
 export function Sidebar({

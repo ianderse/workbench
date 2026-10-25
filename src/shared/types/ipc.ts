@@ -516,6 +516,14 @@ export interface ElectronAPI {
   undoContextNote: (projectId: string, taskId: string, noteId: string) => Promise<IPCResult>;
   onQueueProposalsChanged: (callback: (projectId: string) => void) => () => void;
 
+  // Usage page (token usage of a project)
+  /** The summary the main process holds (computes it once when there is none) */
+  getUsageSummary: (projectId: string) => Promise<IPCResult<import('./usage').UsageSummaryResult>>;
+  /** Read the ledger again */
+  refreshUsageSummary: (projectId: string) => Promise<IPCResult<import('./usage').UsageSummaryResult>>;
+  /** Import the tasks' earlier sessions again, then read the ledger */
+  rebuildUsageFromHistory: (projectId: string) => Promise<IPCResult<import('./usage').UsageSummaryResult>>;
+
   // Autonomous mode
   getAutonomousStatus: (projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousStatus | null>>;
   mergeIntegrationIntoBase: (projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousMergeIntoBaseResult>>;
