@@ -8,6 +8,12 @@ vi.mock('../../app-logger', () => ({ appLog: { warn: vi.fn(), error: vi.fn(), in
 vi.mock('../../claude-profile-manager', () => ({
   getClaudeProfileManager: () => ({ getProfileConfigDirs: () => [] }),
 }));
+// Only the test's own config dir: the real default (~/.claude) would make every call walk the
+// machine's whole transcript history, slow enough under a full run to hit the test timeout, and
+// its contents could change what is found
+vi.mock('../../claude-profile/profile-config-dirs', () => ({
+  claudeConfigDirs: () => (process.env.CLAUDE_CONFIG_DIR ? [process.env.CLAUDE_CONFIG_DIR] : []),
+}));
 
 let tmp: string;
 let project: string;
