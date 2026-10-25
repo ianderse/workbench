@@ -24,6 +24,8 @@ import {
   CLAUDE_EFFORTS,
   CLAUDE_MODEL_ALIASES,
   DEFAULT_CLAUDE_CODE_TASK_SETTINGS,
+  MAX_AI_REVIEW_ROUNDS,
+  MIN_AI_REVIEW_ROUNDS,
   type ClaudeCodeTaskSettings as TaskSettings,
   type ClaudeEffort,
   type ClaudeModelAlias,
@@ -44,6 +46,11 @@ interface ClaudeCodeTaskSettingsProps {
 const FALLBACK_OPTIONS = ['none', 'sonnet', 'haiku', 'opus'] as const;
 
 /** Task execution, permissions, agent windows and limits sections of the Agents page */
+const AI_REVIEW_ROUND_OPTIONS = Array.from(
+  { length: MAX_AI_REVIEW_ROUNDS - MIN_AI_REVIEW_ROUNDS + 1 },
+  (_, i) => MIN_AI_REVIEW_ROUNDS + i
+);
+
 export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCodeTaskSettingsProps) {
   const { t } = useTranslation('settings');
   const isOmp = useIsOmpBackend();
@@ -191,6 +198,27 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
               onCheckedChange={(validation) => update({ validation })}
               aria-label={t('claudeCode.execution.validation')}
             />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t('claudeCode.execution.aiReviewRounds')}
+            description={t('claudeCode.execution.aiReviewRoundsDescription')}
+            htmlFor="claude-code-ai-review-rounds"
+          >
+            <Select
+              value={String(current.aiReviewRounds)}
+              onValueChange={(v) => update({ aiReviewRounds: Number(v) })}
+              disabled={!current.validation}
+            >
+              <SelectTrigger id="claude-code-ai-review-rounds" className="h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {AI_REVIEW_ROUND_OPTIONS.map((rounds) => (
+                  <SelectItem key={rounds} value={String(rounds)}>{rounds}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </SettingsRow>
 
           {/* --fallback-model is a Claude Code flag; OMP has no equivalent */}

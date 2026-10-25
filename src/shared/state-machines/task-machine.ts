@@ -98,6 +98,9 @@ export const taskMachine = createMachine(
       // session, so a failed validation goes straight to human review.
       qa_review: {
         on: {
+          // AI review loop: a review that finds open problems sends the task back to fix them
+          // (In Progress), and QA_STARTED from coding brings it back for the next review
+          CODING_STARTED: 'coding',
           QA_FAILED: { target: 'human_review', actions: 'setReviewReasonQaRejected' },
           QA_PASSED: { target: 'human_review', actions: 'setReviewReasonCompleted' },
           QA_MAX_ITERATIONS: { target: 'error', actions: 'setReviewReasonErrors' },

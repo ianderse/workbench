@@ -43,6 +43,15 @@
     "qaIssues": "QA issues",
     "stopped": "Stopped"
   },
+  "aiReviewFailed": {
+    "title_one": "Failed AI review after {{count}} round",
+    "title_other": "Failed AI review after {{count}} rounds",
+    "cardLabel_one": "Failed AI review ({{count}} round)",
+    "cardLabel_other": "Failed AI review ({{count}} rounds)",
+    "openFindings": "Still open",
+    "failingChecks": "Failing checks",
+    "progress": "Progress by round"
+  },
   "tooltips": {
     "archiveTask": "Archive task",
     "archiveAllDone": "Archive all done tasks",

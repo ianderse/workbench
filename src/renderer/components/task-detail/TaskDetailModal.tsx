@@ -54,6 +54,7 @@ import { PreviousRuns } from './PreviousRuns';
 import { isTaskSessionActive } from '../../../shared/utils/claude-run';
 import { TaskAttachments } from './TaskAttachments';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
+import { AIReviewFailedPanel } from './task-review/AIReviewFailedPanel';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
 import { MergePRDialog } from './task-review/MergePRDialog';
 import { LocalMergeDialog } from './task-review/LocalMergeDialog';
@@ -365,6 +366,9 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
             <div className="flex-1 min-h-0 overflow-hidden">
                   <div className="h-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                     <div className="px-6 pb-6 pt-2 space-y-5 overflow-x-hidden max-w-full">
+                      {/* Human Review after the last AI review round still failed: why, and how the rounds went */}
+                      {task.status === 'human_review' && <AIReviewFailedPanel claudeRun={task.claudeRun} />}
+
                       {/* Metadata */}
                       <TaskMetadata
                         task={task}

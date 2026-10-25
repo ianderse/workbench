@@ -241,7 +241,7 @@ describe('ClaudeTaskRun', () => {
       { messages: [result('s7', { structured_output: { status: 'failed', summary: 'still broken', checks: [], findings: [{ severity: 'major', description: 'bug', fixed: false }] } })] },
     );
     const events: string[] = [];
-    const outcome = await makeRun({ mode: 'revise', feedback: 'Rename it' }, { onTaskEvent: (type: string) => events.push(type) }).run();
+    const outcome = await makeRun({ mode: 'revise', feedback: 'Rename it', settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, aiReviewRounds: 1 } }, { onTaskEvent: (type: string) => events.push(type) }).run();
     expect(outcome.status).toBe('completed');
     expect(events).toContain('QA_FAILED');
     const reviseInput = (spawned[2].input as Array<{ text?: string }>)[0].text;
@@ -251,6 +251,86 @@ describe('ClaudeTaskRun', () => {
     expect(triageMock).toHaveBeenCalledTimes(2);
     expect(triageMock.mock.calls[1][0].description).toContain('Rename it');
     expect(loadClaudeRunInfo(specDir)!.phases.slice(-3).map((p) => p.name)).toEqual(['triage', 'revise', 'validate']);
+  });
+
+  describe('AI review loop', () => {
+    const failing = (s: string, findings: Array<Record<string, unknown>>, status = 'partial') =>
+      ({ messages: [result(s, { structured_output: { status, summary: 'Needs work. The parser is wrong.', checks: [], findings } })] });
+    const passing = (s: string) =>
+      ({ messages: [result(s, { structured_output: { status: 'passed', summary: 'ok', checks: [], findings: [] } })] });
+    const finding = (description: string, extra: Record<string, unknown> = {}) =>
+      ({ severity: 'major', description, fixed: false, file: 'src/a.ts', line: 4, ...extra });
+
+    it('sends the task back to fix open findings, then passes', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push(
+        { messages: [result('l1')] },
+        failing('l1', [finding('Off by one')]),
+        { messages: [result('l1', { result: 'Fixed' })] },
+        passing('l1'),
+      );
+      const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+      const outcome = await makeRun({}, { onTaskEvent: (type: string, payload: Record<string, unknown>) => events.push({ type, payload }) }).run();
+      expect(outcome.status).toBe('completed');
+      expect(events.map((e) => e.type)).toEqual(['CODING_STARTED', 'QA_STARTED', 'CODING_STARTED', 'QA_STARTED', 'QA_PASSED']);
+      expect(events[1].payload).toEqual({ iteration: 1, maxIterations: 3 });
+      expect(events[3].payload).toEqual({ iteration: 2, maxIterations: 3 });
+      expect(events[4].payload).toMatchObject({ iteration: 2, maxIterations: 3 });
+      const fixInput = (spawned[2].input as Array<{ text?: string }>)[0].text;
+      expect(fixInput).toContain('Off by one');
+      expect(fixInput).toContain('src/a.ts:4');
+      expect(spawned[2].args).toContain('--resume');
+      const info = loadClaudeRunInfo(specDir)!;
+      expect(info.phases.map((p) => p.name)).toEqual(['triage', 'implement', 'validate', 'revise', 'validate']);
+      expect(info.reviewRounds?.map((r) => [r.round, r.openFindings.length, r.fixedCount])).toEqual([[1, 1, 0], [2, 0, 1]]);
+      expect(info.reviewVerdict).toEqual({ status: 'passed', rounds: 2, maxRounds: 3 });
+    });
+
+    it('fails with a summary when every round still has open findings', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push(
+        { messages: [result('l2')] },
+        failing('l2', [finding('A'), finding('B', { line: 9 })]),
+        { messages: [result('l2')] },
+        failing('l2', [finding('A')]),
+        { messages: [result('l2')] },
+        failing('l2', [finding('A')], 'failed'),
+      );
+      const events: Array<{ type: string; payload: Record<string, unknown> }> = [];
+      await makeRun({}, { onTaskEvent: (type: string, payload: Record<string, unknown>) => events.push({ type, payload }) }).run();
+      expect(spawned).toHaveLength(6);
+      const last = events[events.length - 1];
+      expect(last.type).toBe('QA_FAILED');
+      expect(last.payload).toMatchObject({ iteration: 3, maxIterations: 3, issueCount: 1 });
+      expect((last.payload.issues as string[]).join('\n')).toContain('major src/a.ts:4: A');
+      const verdict = loadClaudeRunInfo(specDir)!.reviewVerdict!;
+      expect(verdict.status).toBe('failed');
+      expect(verdict.failure?.reason).toBe('Needs work. The parser is wrong.');
+      expect(verdict.failure?.roundLines).toEqual([
+        'Round 1: 2 blocker/major found, 2 still open',
+        'Round 2: fixed 1, 1 still open',
+        'Round 3: fixed 0, 1 still open',
+      ]);
+    });
+
+    it('does not loop for minor-only findings', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('l3')] }, failing('l3', [finding('Typo', { severity: 'minor' })]));
+      const events: string[] = [];
+      await makeRun({}, { onTaskEvent: (type: string) => events.push(type) }).run();
+      expect(events).toEqual(['CODING_STARTED', 'QA_STARTED', 'QA_PASSED']);
+      expect(spawned).toHaveLength(2);
+
+    });
+
+    it('keeps the single pass with one round', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('l4')] }, failing('l4', [finding('Bug')]));
+      const one: string[] = [];
+      await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, aiReviewRounds: 1 } }, { onTaskEvent: (type: string) => one.push(type) }).run();
+      // Single pass: a partial report passes as it did before the loop
+      expect(one).toEqual(['CODING_STARTED', 'QA_STARTED', 'QA_PASSED']);
+    });
   });
 
   it('points the revision at the images when the reviewer asked for the changes in screenshots alone', async () => {

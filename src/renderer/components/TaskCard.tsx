@@ -59,6 +59,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.description === nextTask.description &&
     prevTask.updatedAt === nextTask.updatedAt &&
     prevTask.reviewReason === nextTask.reviewReason &&
+    prevTask.claudeRun?.reviewVerdict?.status === nextTask.claudeRun?.reviewVerdict?.status &&
+    prevTask.claudeRun?.reviewVerdict?.rounds === nextTask.claudeRun?.reviewVerdict?.rounds &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
@@ -235,6 +237,10 @@ export const TaskCard = memo(function TaskCard({
   };
 
   const isArchived = !!task.metadata?.archivedAt;
+  // Human Review after every AI review round failed (a number, so the memoized card compares it cheaply)
+  const failedReviewRounds = task.status === 'human_review' && task.claudeRun?.reviewVerdict?.status === 'failed'
+    ? task.claudeRun.reviewVerdict.rounds
+    : 0;
   // Stable references from the store; the label is derived here
   const agentBackendSettings = useSettingsStore((state) => state.settings.agentBackend);
   const pinnedLabel = pinnedModelLabel(task.metadata?.agentOverride, agentBackendSettings?.kind ?? 'claude', agentBackendSettings?.omp?.models);
@@ -275,6 +281,11 @@ export const TaskCard = memo(function TaskCard({
         {sanitizedDescription && (
           <p className="mt-1.5 text-sm text-(--nav-label-color) line-clamp-2 wrap-anywhere">
             {sanitizedDescription}
+          </p>
+        )}
+        {failedReviewRounds > 0 && (
+          <p className="mt-1.5 text-xs font-medium text-destructive">
+            {t('aiReviewFailed.cardLabel', { count: failedReviewRounds })}
           </p>
         )}
         {waitsFor && (

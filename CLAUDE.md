@@ -169,6 +169,10 @@ workbench/
     without a worktree it uses `--permission-mode auto`) and the triage model/effort.
   - `validate`: same session runs checks, reviews the diff with fresh eyes (`/code-review` or a subagent), commits,
     returns a structured `ValidationReport`. `revise` mode applies "request changes" feedback, then validates again.
+    AI review loop (`aiReviewRounds`, default 3, `shared/utils/ai-review-loop.ts`): a report with status `failed`, an open
+    blocker/major finding or a failing check sends the task back (`revise` in the same session, In Progress), then it is
+    reviewed again; rounds and the verdict go to `ClaudeRunInfo.reviewRounds/reviewVerdict` and a failed verdict shows as a
+    panel in Human Review.
   - State in `<specDir>/claude_run.json` (`ClaudeRunInfo`: session id, triage, plan, phases with cost, `system/init`
     info, subagents, validation) so stopped / rate-limited runs continue; logs in `task_logs.json`. Claude Code's
     task list (TaskCreate/TaskUpdate, enabled with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`) is mirrored as the task's subtasks.

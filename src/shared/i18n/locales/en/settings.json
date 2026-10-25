@@ -586,6 +586,8 @@
       },
       "validation": "Validation",
       "validationDescription": "Run the project's checks and a fresh review of the changes before handing a task to you",
+      "aiReviewRounds": "AI review rounds",
+      "aiReviewRoundsDescription": "How many times AI review can send a task back to fix its findings before it goes to human review",
       "fallbackModel": "Fallback model",
       "fallbackModelDescription": "Model Claude Code switches to when the chosen one is overloaded",
       "fallbackNone": "None"

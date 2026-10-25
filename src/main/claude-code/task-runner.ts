@@ -49,6 +49,11 @@ import {
   type ClaudeToolResultBlock,
   type ClaudeUserContentBlock,
 } from './stream-types';
+import {
+  DEFAULT_CLAUDE_CODE_TASK_SETTINGS,
+  MAX_AI_REVIEW_ROUNDS,
+  MIN_AI_REVIEW_ROUNDS,
+} from '../../shared/types/claude-code';
 import type {
   ClaudeCodeTaskSettings,
   ClaudeEffort,
@@ -58,8 +63,16 @@ import type {
   ClaudeRunPhase,
   ClaudeRunPhaseName,
   TaskTriage,
+  ReviewRound,
   ValidationReport,
 } from '../../shared/types/claude-code';
+import {
+  buildFixFeedback,
+  buildReviewFailureSummary,
+  compareWithPreviousRound,
+  evaluateReviewGate,
+  summaryToIssues,
+} from '../../shared/utils/ai-review-loop';
 import type { McpConnectorSettings } from '../../shared/types/settings';
 import type { ExecutionPhase } from '../../shared/constants/phase-protocol';
 import type { ImageAttachment, SubtaskStatus, TaskLogPhase } from '../../shared/types/task';
@@ -231,6 +244,8 @@ const VALIDATION_SCHEMA = {
           severity: { type: 'string', enum: ['critical', 'major', 'minor'] },
           description: { type: 'string' },
           fixed: { type: 'boolean' },
+          file: { type: 'string' },
+          line: { type: 'integer' },
         },
         required: ['severity', 'description', 'fixed'],
       },
@@ -373,6 +388,8 @@ export class ClaudeTaskRun {
   private saveTimer: NodeJS.Timeout | null = null;
   /** Fresh-context review (OMP) for the validate prompt; set by `runOmpReview` */
   private reviewSection: string | undefined;
+  /** The AI review loop's current round (and the findings a fix round is sent to fix) */
+  private loop: { round: number; max: number; feedback?: string } | undefined;
 
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
     this.runFile = path.join(config.specDir, CLAUDE_RUN_FILE);
@@ -426,7 +443,7 @@ export class ClaudeTaskRun {
       const revised = await this.runSessionPhase('revise');
       if (revised) return revised;
       if (settings.validation) {
-        const validated = await this.runSessionPhase('validate');
+        const validated = await this.runReviewLoop();
         if (validated) return validated;
       }
       return this.finish();
@@ -460,8 +477,9 @@ export class ClaudeTaskRun {
     }
 
     // 4. Validate
-    if (settings.validation && !this.hasCompleted('validate')) {
-      const validated = await this.runSessionPhase('validate');
+    // (a fix round stopped midway leaves no report, so the review starts again)
+    if (settings.validation && (!this.hasCompleted('validate') || !this.info.validation)) {
+      const validated = await this.runReviewLoop();
       if (validated) return validated;
     }
 
@@ -583,12 +601,18 @@ export class ClaudeTaskRun {
 
     const resumeSessionId = this.info.sessionId;
     const continuing = name === 'implement' && this.info.phases.some((p) => p.name === 'implement');
+    const roundNote = this.loop && this.loop.max > 1 ? ` (round ${this.loop.round}/${this.loop.max})` : '';
     const label = {
       plan: 'Planning',
       implement: continuing ? 'Continuing implementation' : 'Implementing',
-      validate: 'Validating',
-      revise: 'Applying requested changes',
+      validate: roundNote ? `AI review${roundNote}` : 'Validating',
+      revise: this.loop?.feedback ? `Fixing review findings${roundNote}` : 'Applying requested changes',
     }[name];
+    // A new piece of work starts a new review loop: the old rounds and verdict no longer apply
+    if (name === 'implement' || (name === 'revise' && !this.loop)) {
+      this.info.reviewRounds = undefined;
+      this.info.reviewVerdict = undefined;
+    }
 
     if (name === 'plan') {
       this.emitProgress('planning', 0.15, label);
@@ -598,7 +622,7 @@ export class ClaudeTaskRun {
       this.emitProgress('coding', 0.2, label);
       this.log.startPhase('coding', `${label} (${this.modelLabel(model, effort, role)})`);
     } else {
-      this.callbacks.onTaskEvent?.('QA_STARTED', { iteration: 1, maxIterations: 1 });
+      this.callbacks.onTaskEvent?.('QA_STARTED', { iteration: this.loop?.round ?? 1, maxIterations: this.loop?.max ?? 1 });
       this.emitProgress('qa_review', 0.85, label);
       this.log.startPhase('validation', `${label} (${this.modelLabel(model, effort, role)})`);
     }
@@ -690,17 +714,81 @@ export class ClaudeTaskRun {
   private async finish(): Promise<TaskRunOutcome> {
     await this.commitLeftovers();
     const validation = this.info.validation;
+    const verdict = this.info.reviewVerdict;
     this.emitProgress('complete', 1, 'Ready for review');
-    if (validation?.status === 'failed') {
+    const failed = verdict ? verdict.status === 'failed' : validation?.status === 'failed';
+    if (failed) {
+      const unfixed = (validation?.findings ?? []).filter((f) => !f.fixed);
       this.callbacks.onTaskEvent?.('QA_FAILED', {
-        iteration: 1,
-        issueCount: validation.findings.filter((f) => !f.fixed).length || 1,
-        issues: validation.findings.filter((f) => !f.fixed).map((f) => f.description),
+        iteration: verdict?.rounds ?? 1,
+        maxIterations: verdict?.maxRounds ?? 1,
+        issueCount: verdict?.failure?.openFindings.length || unfixed.length || 1,
+        issues: verdict?.failure ? summaryToIssues(verdict.failure) : unfixed.map((f) => f.description),
       });
     } else {
-      this.callbacks.onTaskEvent?.('QA_PASSED', { iteration: 1, testsRun: {} });
+      this.callbacks.onTaskEvent?.('QA_PASSED', { iteration: verdict?.rounds ?? 1, maxIterations: verdict?.maxRounds ?? 1, testsRun: {} });
     }
     return { status: 'completed', validation };
+  }
+
+  /** Reviews a task gets: the setting (1 to 5) while validation is on */
+  private reviewRoundsAllowed(): number {
+    const configured = Math.round(Number(this.config.settings.aiReviewRounds));
+    if (!Number.isFinite(configured)) return DEFAULT_CLAUDE_CODE_TASK_SETTINGS.aiReviewRounds;
+    return Math.min(MAX_AI_REVIEW_ROUNDS, Math.max(MIN_AI_REVIEW_ROUNDS, configured));
+  }
+
+  /**
+   * AI review loop: review (validate); when the report fails the gate, send the task back to fix
+   * the open findings in the same session (revise) and review again, up to the allowed number of
+   * reviews. With one round it is the single pass of old. Records every round and the verdict.
+   */
+  private async runReviewLoop(): Promise<TaskRunOutcome | null> {
+    const max = this.reviewRoundsAllowed();
+    const rounds: ReviewRound[] = [];
+    this.info.reviewRounds = rounds;
+    this.info.reviewVerdict = undefined;
+    let previousOpen: ReviewRound['openFindings'] | undefined;
+    try {
+      for (let round = 1; ; round++) {
+        this.loop = { round, max };
+        const startedAt = new Date().toISOString();
+        const stopped = await this.runSessionPhase('validate');
+        if (stopped) return stopped;
+        const report = this.info.validation ?? normalizeValidation(undefined);
+        const gate = evaluateReviewGate(report);
+        const counts = compareWithPreviousRound(previousOpen, gate);
+        rounds.push({
+          round,
+          status: report.status,
+          summary: report.summary,
+          openFindings: gate.openFindings,
+          failingChecks: gate.failingChecks.map((c) => c.name),
+          fixedCount: counts.fixedCount,
+          newCount: counts.newCount,
+          startedAt,
+          endedAt: new Date().toISOString(),
+        });
+        previousOpen = gate.openFindings;
+        // One round keeps today's rule: only a failed status counts as rejected
+        const passes = max === 1 ? report.status !== 'failed' : gate.passes;
+        if (passes || round >= max) {
+          this.info.reviewVerdict = passes
+            ? { status: 'passed', rounds: round, maxRounds: max }
+            : { status: 'failed', rounds: round, maxRounds: max, failure: buildReviewFailureSummary(rounds, report) };
+          this.saveInfo();
+          if (!passes) this.emitLog(`Still failing AI review after ${round} ${round === 1 ? 'round' : 'rounds'}`);
+          return null;
+        }
+        this.emitLog(`AI review round ${round}/${max}: ${gate.openFindings.length} blocker or major finding(s) and ${gate.failingChecks.length} failing check(s) open, sending the task back to fix them`);
+        this.saveInfo();
+        this.loop = { round: round + 1, max, feedback: buildFixFeedback(gate, report) };
+        const fixed = await this.runSessionPhase('revise');
+        if (fixed) return fixed;
+      }
+    } finally {
+      this.loop = undefined;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -720,7 +808,7 @@ export class ClaudeTaskRun {
     // Like the Claude chat: images as images, PDFs as documents, text files inlined
     const taskBlocks = buildAttachmentBlocks(this.readAttachments(resume ? [] : this.config.attachments));
     const feedbackBlocks = buildAttachmentBlocks(
-      this.readAttachments(name === 'revise' || !resume ? this.config.feedbackAttachments ?? [] : [])
+      this.readAttachments((name === 'revise' && !this.loop?.feedback) || !resume ? this.config.feedbackAttachments ?? [] : [])
     );
     const feedbackImages = feedbackBlocks.filter((block) => block.type === 'image').length;
 
@@ -756,7 +844,7 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
         }
         break;
       case 'validate':
-        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.validate}
+        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.validate}${this.loop && this.loop.round > 1 ? `\n(This is AI review round ${this.loop.round} of ${this.loop.max}: the earlier findings were sent back for fixing. Review the whole change again from scratch, do not assume they are resolved.)` : ''}
 1. Run ${verificationHint(triage)}. Fix failures your change caused.
 2. ${this.reviewSection && this.config.backend === 'omp'
   ? this.reviewSection
@@ -766,6 +854,17 @@ Then return the report: status "passed" when the change works and the checks pas
         break;
       case 'revise': {
         const opening = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.revise}`;
+        if (this.loop?.feedback) {
+          // A fix round of the AI review loop: the reviewer's open findings are the feedback
+          text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}The AI review found problems that are still open:
+
+<findings>
+${this.loop.feedback}
+</findings>
+
+Fix them (skip any that are mistaken, and say why in your final message), verify with ${verificationHint(triage)}, and commit the result.`;
+          break;
+        }
         const requested = reviewerFeedback(this.config, feedbackImages);
         // Nothing to apply when the reviewer sent the request back empty: saying so and asking for
         // another look is the only honest instruction left, where "apply them" would point at air
@@ -1127,7 +1226,7 @@ no notes came with the request, so review the change against the task with fresh
     const reviewTriage = this.info.triage;
     const reviewModel = reviewTriage?.pinned?.model ? reviewTriage.model : 'opus';
     const reviewEffort: ClaudeEffort = reviewTriage?.pinned?.effort ? reviewTriage.effort : 'high';
-    this.noteLog('validation', `Reviewing the change with a fresh context (${this.modelLabel(reviewModel, reviewEffort, ompRoleForJob('review'))})`);
+    this.noteLog('validation', `Reviewing the change with a fresh context${this.loop && this.loop.max > 1 ? ` (round ${this.loop.round}/${this.loop.max})` : ''} (${this.modelLabel(reviewModel, reviewEffort, ompRoleForJob('review'))})`);
     const phase = this.beginPhase('review', { model: reviewModel, effort: reviewEffort });
     const started = Date.now();
     try {

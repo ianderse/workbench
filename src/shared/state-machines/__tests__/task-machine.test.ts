@@ -104,6 +104,28 @@ describe('taskMachine', () => {
       expect(snapshot.context.reviewReason).toBe('completed');
     });
 
+    it('AI review loop: qa_review → coding (fix round) → qa_review → human_review', () => {
+      const actor = createActor(taskMachine);
+      actor.start();
+      const send = (event: TaskEvent) => { actor.send(event); return actor.getSnapshot().value; };
+      expect(send({ type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Implementing' })).toBe('coding');
+      expect(send({ type: 'QA_STARTED', iteration: 1, maxIterations: 3 })).toBe('qa_review');
+      expect(send({ type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Fixing review findings (round 2/3)' })).toBe('coding');
+      expect(send({ type: 'QA_STARTED', iteration: 2, maxIterations: 3 })).toBe('qa_review');
+      expect(send({ type: 'QA_FAILED', iteration: 2, issueCount: 1, issues: ['x'] })).toBe('human_review');
+      expect(actor.getSnapshot().context.reviewReason).toBe('qa_rejected');
+      actor.stop();
+    });
+
+    it('stops during a fix round into human review as stopped', () => {
+      const snapshot = runEvents([
+        { type: 'CODING_STARTED', subtaskId: '', subtaskDescription: 'Fixing' },
+        { type: 'USER_STOPPED' }
+      ], 'qa_review');
+      expect(snapshot.value).toBe('human_review');
+      expect(snapshot.context.reviewReason).toBe('stopped');
+    });
+
     it('goes to error when triage fails with CODING_FAILED during planning', () => {
       const snapshot = runEvents([
         { type: 'PLANNING_STARTED' },

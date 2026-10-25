@@ -35,6 +35,12 @@ export interface ClaudeCodeTaskSettings {
   planning: PlanningPolicy;
   /** Run checks and a fresh-context review of the diff after implementing */
   validation: boolean;
+  /**
+   * How many AI review rounds a task gets (1 to 5, default 3): after a review that finds open
+   * blocker or major findings, the task is sent back to fix them and reviewed again, up to this
+   * many reviews in total. 1 = a single pass. Ignored while `validation` is off.
+   */
+  aiReviewRounds: number;
   /** Let triage pick Fable for the hardest tasks (Fable may bill to usage credits) */
   allowFable: boolean;
   /** Fallback model chain when the chosen model is overloaded (`--fallback-model`) */
@@ -48,6 +54,7 @@ export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
   triageModel: 'sonnet',
   planning: 'auto',
   validation: true,
+  aiReviewRounds: 3,
   allowFable: false,
 };
 
@@ -122,10 +129,62 @@ interface ValidationCheck {
   details?: string;
 }
 
-interface ValidationFinding {
+export interface ValidationFinding {
   severity: 'critical' | 'major' | 'minor';
   description: string;
   fixed: boolean;
+  file?: string;
+  line?: number;
+}
+
+export const MIN_AI_REVIEW_ROUNDS = 1;
+export const MAX_AI_REVIEW_ROUNDS = 5;
+
+/** A finding that was still open after a review round (severity normalised: critical = blocker) */
+export interface ReviewRoundFinding {
+  severity: 'blocker' | 'major' | 'minor';
+  description: string;
+  file?: string;
+  line?: number;
+}
+
+/** One AI review round of the review loop */
+export interface ReviewRound {
+  /** 1 = the first review */
+  round: number;
+  status: ValidationReport['status'];
+  summary: string;
+  /** Blocker and major findings still open after this round's review */
+  openFindings: ReviewRoundFinding[];
+  /** Names of the checks that failed in this round */
+  failingChecks: string[];
+  /** Blocker and major findings resolved since the round before (round 1: fixed during the review) */
+  fixedCount: number;
+  /** Open findings that were not open in the round before */
+  newCount: number;
+  startedAt: string;
+  endedAt: string;
+}
+
+/** Why a task still fails AI review after its last round, for the person who takes over */
+export interface ReviewFailureSummary {
+  /** One to three sentences from the last report */
+  reason: string;
+  openFindings: ReviewRoundFinding[];
+  failingChecks: string[];
+  /** One line per round ("Round 2: fixed 3, 1 still open") */
+  roundLines: string[];
+}
+
+/** The final verdict of the AI review loop */
+export interface ReviewVerdict {
+  status: 'passed' | 'failed';
+  /** Rounds that ran */
+  rounds: number;
+  /** Rounds allowed (the setting when the run started) */
+  maxRounds: number;
+  /** Present when status is failed */
+  failure?: ReviewFailureSummary;
 }
 
 /** Structured result of the validation step */
@@ -165,6 +224,10 @@ export interface ClaudeRunInfo {
   phases: ClaudeRunPhase[];
   init?: ClaudeRunInit;
   validation?: ValidationReport;
+  /** Every AI review round of the latest review loop */
+  reviewRounds?: ReviewRound[];
+  /** Final verdict of the latest review loop */
+  reviewVerdict?: ReviewVerdict;
   /** Final summary Claude wrote for the user */
   summary?: string;
   subagents: ClaudeRunSubagent[];
