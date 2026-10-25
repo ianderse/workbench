@@ -8,7 +8,7 @@ import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 
-import { HookServer, type SessionOwner } from './lib/hook-server'
+import { HookServer, type SessionOwner, type WindowSession } from './lib/hook-server'
 import { AgentEvent, SessionInfo, WatchedSession } from './lib/protocol'
 import { TranscriptParser, isActivityLine } from './lib/transcript-parser'
 import { readCompleteLines, readNewFileLines, foldPathCase } from './lib/fs-utils'
@@ -1060,6 +1060,9 @@ interface RelayOptions {
    *  `projects` dir of session transcripts */
   claudeDirs: string[]
   send: SendFn
+  /** The Claude Code in an agent window runs this session now (see HookServer.onWindowSession);
+   *  never called for a session known to be another's background session */
+  windowSession?: (session: WindowSession) => void
   /** The WSL distribution Claude Code runs in, when it runs in one */
   wsl?: WslPathOptions | null
 }
@@ -1090,6 +1093,12 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
 
   hookServer.onEvent(handleHookEvent)
   hookServer.onOwner(handleSessionOwner)
+  hookServer.onWindowSession((session) => {
+    // A background session inherits the environment, and so the terminal id, of the window that
+    // opened it, but the window still runs the session that opened it
+    if (sessions.get(session.sessionId)?.attachedTo !== undefined || backgroundSessionParents.has(session.sessionId)) return
+    options.windowSession?.({ ...session, ...(session.cwd ? { cwd: hostDir(session.cwd) } : {}) })
+  })
 
   const workspaces = new Map<string, Workspace>()
 

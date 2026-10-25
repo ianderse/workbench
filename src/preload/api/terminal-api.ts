@@ -80,6 +80,7 @@ export interface TerminalAPI {
   onTerminalClaudeBusy: (callback: (id: string, isBusy: boolean) => void) => () => void;
   onTerminalClaudeExit: (callback: (id: string) => void) => () => void;
   onTerminalPendingResume: (callback: (id: string) => void) => () => void;
+  onTerminalClaudeSessionChange: (callback: (id: string, sessionId: string) => void) => () => void;
 
   // Claude Profile Management
   getClaudeProfiles: () => Promise<IPCResult<ClaudeProfileSettings>>;
@@ -345,6 +346,22 @@ export const createTerminalAPI = (): TerminalAPI => ({
     ipcRenderer.on(IPC_CHANNELS.TERMINAL_PENDING_RESUME, handler);
     return () => {
       ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_PENDING_RESUME, handler);
+    };
+  },
+
+  onTerminalClaudeSessionChange: (
+    callback: (id: string, sessionId: string) => void
+  ): (() => void) => {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      id: string,
+      sessionId: string
+    ): void => {
+      callback(id, sessionId);
+    };
+    ipcRenderer.on(IPC_CHANNELS.TERMINAL_CLAUDE_SESSION_CHANGE, handler);
+    return () => {
+      ipcRenderer.removeListener(IPC_CHANNELS.TERMINAL_CLAUDE_SESSION_CHANGE, handler);
     };
   },
 

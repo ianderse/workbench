@@ -271,6 +271,8 @@ export interface ElectronAPI {
   onTerminalClaudeExit: (callback: (id: string) => void) => () => void;
   /** Listen for pending Claude resume notifications (resumed once the window is shown) */
   onTerminalPendingResume: (callback: (id: string) => void) => () => void;
+  /** Listen for the Claude Code session an agent window runs now (its own /resume, /clear, claude --resume) */
+  onTerminalClaudeSessionChange: (callback: (id: string, sessionId: string) => void) => () => void;
   /** Listen for OAuth code input requests (manual OAuth flow) */
   onTerminalOAuthCodeNeeded: (callback: (info: {
     terminalId: string;

@@ -14,6 +14,8 @@ export type RelayWorkerMessage =
   /** One message (JSON, as agent-flow's SSE stream sends it) for these clients */
   | { type: 'message'; clientIds: string[]; data: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
+  /** The Claude Code in an agent window (`terminalId`) runs this session now, in `cwd` (a host path) */
+  | { type: 'window-session'; terminalId: string; sessionId: string; cwd?: string }
   | { type: 'stopped' };
 
 /** The worker's workerData */

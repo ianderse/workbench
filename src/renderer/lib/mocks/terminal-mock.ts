@@ -95,6 +95,7 @@ export const terminalMock = {
   onTerminalClaudeBusy: () => () => {},
   onTerminalClaudeExit: () => () => {},
   onTerminalPendingResume: () => () => {},
+  onTerminalClaudeSessionChange: () => () => {},
   onTerminalOAuthCodeNeeded: () => () => {},
 
   // OAuth code submission

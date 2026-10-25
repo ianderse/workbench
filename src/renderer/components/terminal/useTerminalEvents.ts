@@ -128,6 +128,17 @@ export function useTerminalEvents({
     return cleanup;
   }, [terminalId]);
 
+  // The Claude Code session the window runs now: the header's Session and Task menus follow it
+  useEffect(() => {
+    const cleanup = window.electronAPI.onTerminalClaudeSessionChange((id, sessionId) => {
+      if (id === terminalId) {
+        useTerminalStore.getState().updateTerminal(terminalId, { claudeSessionId: sessionId });
+      }
+    });
+
+    return cleanup;
+  }, [terminalId]);
+
   // Handle pending Claude resume notification (resumed once its window is shown)
   useEffect(() => {
     const cleanup = window.electronAPI.onTerminalPendingResume((id) => {

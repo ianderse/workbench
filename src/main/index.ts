@@ -47,6 +47,10 @@ import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
 import { liveAgentRelay } from './live-agent/live-agent-relay';
 import { syncLiveAgentAtStartup } from './live-agent/live-agent-projects';
+import { createWindowSessionTracker } from './terminal/window-session';
+import { recordWindowSession } from './terminal/cli-integration-handler';
+import { listOtherWorktrees } from './ipc-handlers/terminal/worktree-handlers';
+import { claudeConfigDirs } from './claude-profile/profile-config-dirs';
 import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
 import { initializeClaudeProfileManager, getClaudeProfileManager } from './claude-profile-manager';
@@ -677,6 +681,18 @@ app.whenReady().then(async () => {
 
   // Events go to every project window; dialogs and lookups use the window in use
   setRendererWindowsProvider(() => getAllWindows());
+
+  // An agent window's header (its worktree, session and task) follows the session its Claude Code
+  // turns to by itself (/resume, /clear, claude --resume), as the Live agent's hooks report it
+  const windows = terminalManager;
+  liveAgentRelay.onWindowSession(createWindowSessionTracker({
+    getTerminal: (id) => windows.getTerminal(id),
+    setWorktreeConfig: (id, config) => windows.setWorktreeConfig(id, config),
+    send: (channel, ...args) => safeSendToRenderer(getFocusedWindow, channel, ...args),
+    recordSession: (terminal, sessionId, cwd) => recordWindowSession(terminal, sessionId, cwd),
+    listOtherWorktrees,
+    claudeConfigDirs: () => claudeConfigDirs(),
+  }));
 
   // Setup IPC handlers
   setupIpcHandlers(agentManager, terminalManager, () => getFocusedWindow(), {

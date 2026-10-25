@@ -21,6 +21,7 @@ import { getWslInfo } from '../platform/shell-runtime';
 import { createRelayWorker } from './create-relay-worker';
 import { getTerminalWriteTime } from './terminal-activity';
 import type { RelayWorkerMessage, RelayWorkerRequest } from './relay-worker-protocol';
+import type { WindowSessionReport } from '../terminal/window-session';
 
 /** How long the worker gets to clean up (discovery files, hook server, watchers) before it is terminated */
 const STOP_TIMEOUT_MS = 2000;
@@ -111,6 +112,18 @@ export class LiveAgentRelay {
   private sessionWindows = new Map<string, string>();
   /** The window a session's hooks report, which Claude Code's shared daemon makes unreliable */
   private reportedWindows = new Map<string, string>();
+  /** Told which session each agent window's Claude Code turns to (see terminal/window-session.ts) */
+  private windowSessionListener: ((report: WindowSessionReport) => void) | null = null;
+
+  /**
+   * Follow the sessions agent windows' Claude Code turns to. Kept apart from the graphs' windowOf:
+   * that guesses a window for sessions whose hooks may name the wrong one, while this is only
+   * about the Claude Code each window runs itself, whose hooks name it rightly (the background
+   * sessions that inherit a window's environment are left out there).
+   */
+  onWindowSession(listener: (report: WindowSessionReport) => void): void {
+    this.windowSessionListener = listener;
+  }
 
   getStatus(): LiveAgentStatus {
     return this.status;
@@ -329,6 +342,13 @@ export class LiveAgentRelay {
         }
         break;
       }
+      case 'window-session':
+        try {
+          this.windowSessionListener?.({ terminalId: message.terminalId, sessionId: message.sessionId, cwd: message.cwd });
+        } catch (error) {
+          appLog.warn('[LiveAgent] Could not follow an agent window\'s session:', error);
+        }
+        break;
       case 'log':
         if (message.level === 'error') appLog.error(message.message);
         else if (message.level === 'warn') appLog.warn(message.message);
