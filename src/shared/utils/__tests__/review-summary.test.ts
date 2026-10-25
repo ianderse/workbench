@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  REVIEW_SUMMARY_SYSTEM_PROMPT,
   buildReviewSummaryPrompt,
   cleanSummaryText,
   extractPlanGoal,
@@ -109,5 +110,24 @@ describe('panel display decisions', () => {
 
   it('counts the change stats', () => {
     expect(changeStatsLine({ files: [1, 2], additions: 3, deletions: 4 })).toEqual({ files: 2, additions: 3, deletions: 4, commits: 0 });
+  });
+});
+
+describe('workflow status in needs-attention', () => {
+  it('drops bullets about merging or branches, which the app shows itself (seen live on an auto-merged task)', () => {
+    const summary = normalizeReviewSummary({
+      headline: 'The game now has its foundation.',
+      whatChanged: ['Scenarios are defined as validated data.'],
+      verified: 'All tests pass.',
+      needsAttention: [
+        'The work sits on a separate branch and was intentionally not merged.',
+        'One assumption: a two-week delay between uses is a fixture default.',
+      ],
+    });
+    expect(summary?.needsAttention).toEqual(['One assumption: a two-week delay between uses is a fixture default.']);
+  });
+
+  it('tells the model not to report workflow state', () => {
+    expect(REVIEW_SUMMARY_SYSTEM_PROMPT).toContain('Never describe where the work stands in the workflow');
   });
 });

@@ -45,6 +45,7 @@ Rules:
 - Never use file paths, folder names, function or variable names, commit hashes, branch names or backticks. At most one short technical noun per bullet, and only when it is essential.
 - Do not use em dashes or en dashes. Use commas, colons or full stops.
 - Never invent facts. Use only what the inputs say. If the inputs do not say how it was checked, say so in "verified".
+- Never describe where the work stands in the workflow: whether it is merged, on a branch, committed, pushed, awaiting review or done. The app shows that, and it may change after you write. Instructions in the ticket about branches or merging are not results to report.
 - Do not repeat the same point in two fields.`;
 
 export interface ReviewSummaryInput {
@@ -176,6 +177,9 @@ function bullets(value: unknown, max: number): string[] {
 }
 
 /** The model's structured answer as a `ReviewSummary`, or null when it has no usable headline or bullets */
+/** Workflow state the summary must not report (the model sometimes repeats the ticket's branch rules) */
+const WORKFLOW_STATUS = /\b(merged|not merged|merging|merge (?:to|into)|separate branch|feature branch|on a branch|pushed|awaiting (?:your )?review|human review|pull request)\b/i;
+
 export function normalizeReviewSummary(raw: unknown, generatedAt: string = new Date().toISOString()): ReviewSummary | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
@@ -183,7 +187,10 @@ export function normalizeReviewSummary(raw: unknown, generatedAt: string = new D
   const whatChanged = bullets(r.whatChanged, MAX_CHANGED);
   if (!headline || whatChanged.length === 0) return null;
   const verified = typeof r.verified === 'string' ? limit(cleanSummaryText(r.verified), MAX_VERIFIED) : '';
-  return { headline, whatChanged, verified, needsAttention: bullets(r.needsAttention, MAX_ATTENTION), generatedAt };
+  // A bullet about where the work stands (merged, on a branch, pushed, awaiting review) is written
+  // before the app decides that and would mislead: the panel shows the real state instead
+  const needsAttention = bullets(r.needsAttention, MAX_ATTENTION).filter((b) => !WORKFLOW_STATUS.test(b));
+  return { headline, whatChanged, verified, needsAttention, generatedAt };
 }
 
 /** Parse the model's reply: structured output, else JSON in its text (possibly fenced) */
