@@ -21,6 +21,10 @@ export interface BaseBranchChoice {
   isLocalBranch: (branch: string) => boolean;
 }
 
+function isSameBranch(a: string, b: string): boolean {
+  return a.replace(/^origin\//, '') === b.replace(/^origin\//, '');
+}
+
 /** The start branch of a new branch, with "project default" turned into the branch it stands for */
 export function resolveNewBranchFrom(from: string, projectDefaultBranch: string): string {
   return from === PROJECT_DEFAULT_BRANCH ? projectDefaultBranch : from;
@@ -37,13 +41,15 @@ export function buildBaseBranchMetadata(choice: BaseBranchChoice): Partial<TaskM
     const name = choice.newBranchName.trim();
     const from = resolveNewBranchFrom(choice.newBranchFrom, projectDefaultBranch);
     if (!name) return {};
-    return { baseBranch: name, ...(from ? { newBaseBranchFrom: from } : {}), useLocalBranch: true };
+    return { baseBranch: name, baseBranchChosen: true, ...(from ? { newBaseBranchFrom: from } : {}), useLocalBranch: true };
   }
   const metadata: Partial<TaskMetadata> = {};
   if (baseBranch === PROJECT_DEFAULT_BRANCH) {
     if (projectDefaultBranch) metadata.baseBranch = projectDefaultBranch;
   } else if (baseBranch) {
     metadata.baseBranch = baseBranch;
+    // Picking the default branch by name is no choice: autonomous mode only honours a different branch
+    if (!isSameBranch(baseBranch, projectDefaultBranch)) metadata.baseBranchChosen = true;
     // Set when the user picks a local branch: it keeps gitignored files (.env, configs) by not switching to origin
     if (choice.isLocalBranch(baseBranch)) metadata.useLocalBranch = true;
   }

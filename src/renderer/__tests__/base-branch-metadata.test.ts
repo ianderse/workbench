@@ -18,24 +18,30 @@ describe('buildBaseBranchMetadata', () => {
     expect(buildBaseBranchMetadata({ ...base, baseBranch: PROJECT_DEFAULT_BRANCH })).toEqual({ baseBranch: 'main' });
   });
 
+  it('does not flag the project default picked by its name', () => {
+    expect(buildBaseBranchMetadata({ ...base, baseBranch: 'main' })).not.toHaveProperty('baseBranchChosen');
+    expect(buildBaseBranchMetadata({ ...base, baseBranch: 'origin/main' })).not.toHaveProperty('baseBranchChosen');
+  });
+
   it('marks a chosen local branch as local', () => {
     expect(buildBaseBranchMetadata({ ...base, baseBranch: 'develop' })).toEqual({
       baseBranch: 'develop',
+      baseBranchChosen: true,
       useLocalBranch: true,
     });
-    expect(buildBaseBranchMetadata({ ...base, baseBranch: 'origin/release' })).toEqual({ baseBranch: 'origin/release' });
+    expect(buildBaseBranchMetadata({ ...base, baseBranch: 'origin/release' })).toEqual({ baseBranch: 'origin/release', baseBranchChosen: true });
   });
 
   it('stores a new branch with the project default as its start by default', () => {
     expect(
       buildBaseBranchMetadata({ ...base, baseBranch: NEW_BASE_BRANCH, newBranchName: '  feature/login ' }),
-    ).toEqual({ baseBranch: 'feature/login', newBaseBranchFrom: 'main', useLocalBranch: true });
+    ).toEqual({ baseBranch: 'feature/login', baseBranchChosen: true, newBaseBranchFrom: 'main', useLocalBranch: true });
   });
 
   it('stores the chosen start branch of a new branch', () => {
     expect(
       buildBaseBranchMetadata({ ...base, baseBranch: NEW_BASE_BRANCH, newBranchName: 'hotfix', newBranchFrom: 'develop' }),
-    ).toEqual({ baseBranch: 'hotfix', newBaseBranchFrom: 'develop', useLocalBranch: true });
+    ).toEqual({ baseBranch: 'hotfix', baseBranchChosen: true, newBaseBranchFrom: 'develop', useLocalBranch: true });
   });
 });
 

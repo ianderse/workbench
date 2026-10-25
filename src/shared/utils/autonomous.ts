@@ -44,6 +44,33 @@ export function getAutonomousTargetBranch(config: AutonomousConfig, baseBranch: 
   return config.target === 'integration' ? config.integrationBranch : baseBranch || undefined;
 }
 
+/** A branch name without the `origin/` prefix */
+function localName(branch: string): string {
+  return branch.replace(/^origin\//, '');
+}
+
+/**
+ * The base branch the user chose for a task that autonomous mode leaves alone, or undefined when the
+ * task follows the autonomous target. Explicit means: autonomous mode is on, the task has a worktree,
+ * `metadata.baseBranchChosen` is set (the dialogs set it for any branch but "Project default"; tasks
+ * without it keep following the target) and the branch is neither the project's default branch nor
+ * the integration branch. Such a task is cut from that branch and auto-merged into it.
+ * `defaultBranches` are the project's default branch names that are known where this is called.
+ */
+export function getExplicitBaseBranch(
+  config: AutonomousConfig,
+  task: Pick<Task, 'metadata'>,
+  defaultBranches: ReadonlyArray<string | undefined> = [],
+): string | undefined {
+  if (!config.enabled) return undefined;
+  const metadata = task.metadata;
+  if (!metadata?.baseBranchChosen || metadata.useWorktree === false) return undefined;
+  const branch = metadata.baseBranch ? localName(metadata.baseBranch) : '';
+  if (!branch || branch === '__project_default__' || branch === config.integrationBranch) return undefined;
+  if (defaultBranches.some((d) => d && localName(d) === branch)) return undefined;
+  return branch;
+}
+
 export interface AutoMergeCandidate {
   /** Board status and review reason when the task entered Human Review */
   status: Task['status'];
@@ -94,7 +121,23 @@ export function isDependencySatisfied(dep: Pick<Task, 'status' | 'metadata'>, de
   if (!dependentTarget) return false;
   const merged = activeAutoMerge(dep);
   if (!merged) return false;
-  return dependentTarget === ANY_TARGET_BRANCH || merged.branch === dependentTarget;
+  if (dependentTarget === ANY_TARGET_BRANCH) {
+    // The dependent follows the shared target (main / integration branch). A dependency on a branch of
+    // its own was merged into that branch, not into the shared target, so it is still pending
+    return !dep.metadata?.baseBranchChosen;
+  }
+  return merged.branch === dependentTarget;
+}
+
+/**
+ * The target to check dependencies against when the project's settings are not at hand (the
+ * board): the dependent's own chosen branch, else any shared target
+ */
+export function dependentTargetHint(task: Pick<Task, 'metadata'>): string {
+  const metadata = task.metadata;
+  return metadata?.baseBranchChosen && metadata.baseBranch && metadata.useWorktree !== false
+    ? localName(metadata.baseBranch)
+    : ANY_TARGET_BRANCH;
 }
 
 /** Tasks that were auto-merged and depend on `task`, directly or through other tasks */

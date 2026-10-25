@@ -36,7 +36,7 @@ import { resolveBaseBranch, resolveDefaultBaseBranch } from '../utils/base-branc
 import { resolveAutonomousConfig } from '../../shared/utils/autonomous';
 import { canTaskSplit, resolveSelfSplit } from '../../shared/utils/task-split';
 import { ensureNewBaseBranch } from '../utils/new-base-branch';
-import { prepareAutonomousBase } from '../autonomous/autonomous-service';
+import { prepareAutonomousBase, resolveExplicitBaseBranch } from '../autonomous/autonomous-service';
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 import { buildTaskBriefing } from '../task-briefing';
@@ -442,8 +442,11 @@ export class AgentManager extends EventEmitter {
     // Autonomous mode with an integration branch: new tasks branch from that branch (created from the
     // base branch when first needed) so they see what earlier tasks merged into it
     const autonomous = resolveAutonomousConfig(project.settings);
+    // A base branch the user chose for the task (not the project default) wins over that: the task is cut
+    // from it and auto-merged into it
+    const explicitBaseBranch = autonomous.enabled ? await resolveExplicitBaseBranch(project, task) : undefined;
     const integrationBranch =
-      autonomous.enabled && autonomous.target === 'integration' && task.metadata?.useWorktree !== false
+      autonomous.enabled && autonomous.target === 'integration' && task.metadata?.useWorktree !== false && !explicitBaseBranch
         ? autonomous.integrationBranch
         : undefined;
     const chosenBaseBranch = integrationBranch || task.metadata?.baseBranch || project.settings?.mainBranch;

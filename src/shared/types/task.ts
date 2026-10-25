@@ -249,6 +249,12 @@ export interface TaskMetadata {
   baseBranch?: string;  // Override base branch for this task's worktree
   /** With a new `baseBranch`: the branch to create it from. Created when the first task starts, skipped once it exists */
   newBaseBranchFrom?: string;
+  /**
+   * Set when the user picked a base branch other than the project's default (or made a new one). With
+   * autonomous mode on, such a task is based on and auto-merged into that branch instead of the
+   * integration branch / main. Unset on older tasks and on "Project default": they follow the target
+   */
+  baseBranchChosen?: boolean;
   prUrl?: string;  // GitHub PR URL if task has been submitted as a PR
   prState?: PullRequestState;  // The PR's last known state (set when created or merged, read once from GitHub otherwise)
   useWorktree?: boolean;  // If false, use direct mode (no worktree isolation) - default is true for safety

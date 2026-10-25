@@ -8,7 +8,9 @@ import {
   DEFAULT_AUTONOMOUS_BRANCH,
   activeAutoMerge,
   decideAutoMerge,
+  dependentTargetHint,
   findAutoMergedDependents,
+  getExplicitBaseBranch,
   getAutonomousTargetBranch,
   isDependencySatisfied,
   resolveAutonomousConfig,
@@ -187,5 +189,56 @@ describe('review reason transitions (state machine)', () => {
     resumed.send({ type: 'AUTO_MERGED' });
     resumed.send({ type: 'USER_RESUMED' });
     expect(resumed.getSnapshot().value).toBe('coding');
+  });
+});
+
+describe('getExplicitBaseBranch', () => {
+  const chosen = (baseBranch: string, extra: Task['metadata'] = {}) => makeTask('t', 'queue', { baseBranch, baseBranchChosen: true, ...extra });
+
+  it('honours a chosen branch that is not the project default or the integration branch', () => {
+    expect(getExplicitBaseBranch(on, chosen('feature/x'), ['main'])).toBe('feature/x');
+    expect(getExplicitBaseBranch(on, chosen('origin/feature/x'), ['main'])).toBe('feature/x');
+  });
+
+  it('ignores the project default, the integration branch and unflagged tasks', () => {
+    expect(getExplicitBaseBranch(on, chosen('main'), ['main'])).toBeUndefined();
+    expect(getExplicitBaseBranch(on, chosen('origin/main'), [undefined, 'main'])).toBeUndefined();
+    expect(getExplicitBaseBranch(on, chosen('workbench/auto'), ['main'])).toBeUndefined();
+    // Old tasks (no flag) keep following the target even when they name a branch
+    expect(getExplicitBaseBranch(on, makeTask('t', 'queue', { baseBranch: 'feature/x' }), ['main'])).toBeUndefined();
+    expect(getExplicitBaseBranch(on, makeTask('t', 'queue', {}), ['main'])).toBeUndefined();
+  });
+
+  it('applies in both targets, but not while autonomous mode is off or without a worktree', () => {
+    const toMain = resolveAutonomousConfig({ autonomous: true, autonomousTarget: 'main' });
+    expect(getExplicitBaseBranch(toMain, chosen('feature/x'), ['main'])).toBe('feature/x');
+    expect(getExplicitBaseBranch(resolveAutonomousConfig({ autonomous: false }), chosen('feature/x'), ['main'])).toBeUndefined();
+    expect(getExplicitBaseBranch(on, chosen('feature/x', { useWorktree: false }), ['main'])).toBeUndefined();
+  });
+});
+
+describe('dependencies across a chosen base branch', () => {
+  const intoFeature = makeTask('a', 'human_review', { baseBranch: 'feature/x', baseBranchChosen: true, ...merged('feature/x') });
+  const intoMain = makeTask('a', 'human_review', merged('main'));
+
+  it('a dependency merged into a feature branch satisfies dependents on that branch only', () => {
+    expect(isDependencySatisfied(intoFeature, 'feature/x')).toBe(true);
+    expect(isDependencySatisfied(intoFeature, 'main')).toBe(false);
+    expect(isDependencySatisfied(intoFeature, 'workbench/auto')).toBe(false);
+    // Dependents that follow the shared target (hint ANY) are not released by it
+    expect(isDependencySatisfied(intoFeature, ANY_TARGET_BRANCH)).toBe(false);
+    expect(isDependencySatisfied(intoMain, ANY_TARGET_BRANCH)).toBe(true);
+  });
+
+  it('the dependent hint is its chosen branch, else any shared target', () => {
+    expect(dependentTargetHint(makeTask('b', 'queue', { baseBranch: 'feature/x', baseBranchChosen: true }))).toBe('feature/x');
+    expect(dependentTargetHint(makeTask('b', 'queue', { baseBranch: 'main' }))).toBe(ANY_TARGET_BRANCH);
+  });
+
+  it('the queue gate releases a dependent on the same feature branch', () => {
+    const onFeature = makeTask('b', 'queue', { dependsOnTaskIds: ['a'], baseBranch: 'feature/x', baseBranchChosen: true });
+    expect(getUnmetDependencyIds(onFeature, [onFeature, intoFeature], 'feature/x')).toEqual([]);
+    const onMain = makeTask('c', 'queue', { dependsOnTaskIds: ['a'] });
+    expect(getUnmetDependencyIds(onMain, [onMain, intoFeature], ANY_TARGET_BRANCH)).toEqual(['a']);
   });
 });

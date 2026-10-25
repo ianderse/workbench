@@ -33,6 +33,8 @@ export function inheritedMetadata(metadata: TaskMetadata | undefined): Partial<T
   if (metadata?.agentOverride) inherited.agentOverride = metadata.agentOverride;
   if (metadata?.mcpConnectors) inherited.mcpConnectors = metadata.mcpConnectors;
   if (metadata?.baseBranch) inherited.baseBranch = metadata.baseBranch;
+  // The branch is a choice the piece keeps (autonomous mode bases and merges it there too); the branch exists by now
+  if (metadata?.baseBranchChosen) inherited.baseBranchChosen = true;
   if (metadata?.useLocalBranch !== undefined) inherited.useLocalBranch = metadata.useLocalBranch;
   if (metadata?.pushNewBranches !== undefined) inherited.pushNewBranches = metadata.pushNewBranches;
   if (metadata?.useWorktree !== undefined) inherited.useWorktree = metadata.useWorktree;

@@ -227,8 +227,8 @@ stores `baseBranch = <name>` plus `newBaseBranchFrom = <start branch>` (`task-fo
 validated by `shared/utils/git-ref-name.ts`). `AgentManager.buildRunConfig` calls `ensureNewBaseBranch()`
 (`main/utils/new-base-branch.ts`, async `git()`) right before the worktree is created: a no-op when the branch exists
 (several tasks may share one), else `git branch --no-track <name> <from>`, pushed when the task's push-new-branches is on;
-a failure fails the start (appLog plus the task's recoverable error). With autonomous integration on, explicit base
-branches never override the integration branch (it is created from the task's base branch), and that holds for a new one.
+a failure fails the start (appLog plus the task's recoverable error). The dialogs also set `metadata.baseBranchChosen`
+when the picked branch is not the project's default (a new branch always); autonomous mode reads it, see "Autonomous mode".
 
 ### Task Directory
 
@@ -342,7 +342,17 @@ detached worktree, then the branch is moved by `merge --ff-only` where it is che
   into the task branch (merge agent resolves conflicts; otherwise `metadata.autoMergeBlocked`, task stays in Human
   Review). The commit goes to `metadata.autoMerge = { sha, branch, at }`, the target is pushed, the machine enters
   `auto_merged` (Human Review, reason `auto_merged`), the queue runs and grooming applies structural changes.
-- The queue gate counts a dependency auto-merged into the dependent's target as satisfied (`isDependencySatisfied`).
+- A task with an explicit base branch (`getExplicitBaseBranch()`: autonomous on, worktree, `metadata.baseBranchChosen`, and
+  a branch that is neither the project default nor the integration branch) ignores the target: it is cut from that branch
+  (`AgentManager.buildRunConfig`, a new branch is created first) and auto-merged into it (`runAutoMerge`: pulled into the
+  task branch, `--no-ff`, pushed when `autonomousPush`, `autoMerge.branch` = that branch). Tasks without the flag (older
+  ones, "Project default") follow the target as before. Resync (`takesInMerge`) matches such a task by its base branch only;
+  split pieces, "Fix:" tasks and other follow-ups inherit `baseBranch`/`baseBranchChosen`. The "Merge into main" banner is
+  only about the integration branch and does not include feature branches.
+- The queue gate counts a dependency auto-merged into the dependent's target as satisfied (`isDependencySatisfied`). The
+  target is the dependent's explicit branch, else the shared target; a dependency merged into a feature branch
+  (`baseBranchChosen`) does not release dependents that follow the shared target, and a dependency merged into main does
+  not release dependents on a feature branch (they wait for Done).
 - Done from `auto_merged` only cleans up the worktree. Request changes creates a `Fix: <title>` task at the top of the
   Queue (the old worktree is behind the target). Revert (`git revert -m 1`) and "Merge into main" (board banner) also use
   temporary worktrees. Undo of automatic queue changes is in the Queue updates panel.

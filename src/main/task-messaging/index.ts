@@ -13,7 +13,7 @@ import { configureTaskMessaging } from './broker';
 import { TaskNotices } from './notices';
 import { isBranchMergedInto } from './merge-sync';
 import { taskResync } from '../task-resync';
-import { resolveAutonomousConfig } from '../../shared/utils/autonomous';
+import { getExplicitBaseBranch, resolveAutonomousConfig } from '../../shared/utils/autonomous';
 
 export { deliverToTask } from './broker';
 
@@ -42,6 +42,8 @@ export function registerTaskMessaging(options: { isRunning?: (taskId: string, pr
     // (the same rule as the run config in AgentManager; with target `main` the task's own base already matches)
     autonomousTarget: (project, task) => {
       const config = resolveAutonomousConfig(project.settings);
+      // A task on a base branch the user chose is based on that branch only (takesInMerge matches its base)
+      if (getExplicitBaseBranch(config, task, [project.settings?.mainBranch])) return undefined;
       return config.enabled && config.target === 'integration' && task.metadata?.useWorktree !== false
         ? config.integrationBranch
         : undefined;

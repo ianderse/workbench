@@ -21,6 +21,7 @@ import type {
 import { getSpecsDir } from '../../shared/constants';
 import {
   ANY_TARGET_BRANCH,
+  getExplicitBaseBranch,
   activeAutoMerge,
   decideAutoMerge,
   findAutoMergedDependents,
@@ -75,6 +76,8 @@ function explicitBaseBranch(project: Project, task: Pick<Task, 'metadata'>): str
 export function getAutonomousTargetSync(project: Project | undefined, task: Pick<Task, 'metadata'>): string | undefined {
   if (!project) return undefined;
   const config = resolveAutonomousConfig(project.settings);
+  const explicit = getExplicitBaseBranch(config, task, [project.settings?.mainBranch]);
+  if (explicit) return explicit;
   return getAutonomousTargetBranch(config, explicitBaseBranch(project, task) ?? ANY_TARGET_BRANCH);
 }
 
@@ -83,10 +86,24 @@ export async function resolveProjectBaseBranch(project: Project, task?: Pick<Tas
   return (task ? explicitBaseBranch(project, task) : project.settings?.mainBranch) || (await resolveDefaultBaseBranch(project.path));
 }
 
+/**
+ * The base branch the user chose for this task that overrides the autonomous target (see
+ * `getExplicitBaseBranch`), checked against the repository's real default branch. Undefined when
+ * the task follows the target.
+ */
+export async function resolveExplicitBaseBranch(project: Project, task: Pick<Task, 'metadata'>): Promise<string | undefined> {
+  const config = resolveAutonomousConfig(project.settings);
+  if (!getExplicitBaseBranch(config, task)) return undefined;
+  const detected = await resolveDefaultBaseBranch(project.path).catch(() => undefined);
+  return getExplicitBaseBranch(config, task, [project.settings?.mainBranch, detected]);
+}
+
 /** The branch tasks of this project start from and merge into (undefined while autonomous mode is off) */
 export async function resolveAutonomousTarget(project: Project, task?: Pick<Task, 'metadata'>): Promise<string | undefined> {
   const config = resolveAutonomousConfig(project.settings);
   if (!config.enabled) return undefined;
+  const explicit = task ? await resolveExplicitBaseBranch(project, task) : undefined;
+  if (explicit) return explicit;
   if (config.target === 'integration') return config.integrationBranch;
   return resolveProjectBaseBranch(project, task);
 }
@@ -98,6 +115,7 @@ export async function resolveAutonomousTarget(project: Project, task?: Pick<Task
 export async function prepareAutonomousBase(project: Project, task: Pick<Task, 'metadata'>): Promise<string | undefined> {
   const config = resolveAutonomousConfig(project.settings);
   if (!config.enabled || config.target !== 'integration') return undefined;
+  if (await resolveExplicitBaseBranch(project, task)) return undefined;
   const base = await resolveProjectBaseBranch(project, task);
   const { created } = await ensureIntegrationBranch(project.path, config.integrationBranch, base);
   if (created) appLog.info(`[Autonomous] Created ${config.integrationBranch} from ${base} in ${project.path}`);
@@ -233,7 +251,11 @@ async function runAutoMerge(project: Project, task: Task, deps: AutoMergeDeps): 
 
   let targetBranch: string;
   try {
-    if (config.target === 'integration') {
+    // A branch the user chose for this task wins over the integration branch / main: merge into it
+    const explicit = await resolveExplicitBaseBranch(project, task);
+    if (explicit) {
+      targetBranch = explicit;
+    } else if (config.target === 'integration') {
       const base = await resolveProjectBaseBranch(project, task);
       await ensureIntegrationBranch(project.path, config.integrationBranch, base);
       targetBranch = config.integrationBranch;
@@ -441,7 +463,14 @@ export async function createFollowUpTask(
       project.id,
       `Fix: ${task.title}`,
       description,
-      { sourceType: 'manual', ...(images?.length ? { attachedImages: images } : {}) }
+      {
+        sourceType: 'manual',
+        // Same base branch as the original, so a Fix on a feature branch starts from (and merges into) it
+        ...(task.metadata?.baseBranch ? { baseBranch: task.metadata.baseBranch } : {}),
+        ...(task.metadata?.baseBranchChosen ? { baseBranchChosen: true } : {}),
+        ...(task.metadata?.useLocalBranch !== undefined ? { useLocalBranch: task.metadata.useLocalBranch } : {}),
+        ...(images?.length ? { attachedImages: images } : {}),
+      }
     );
     if (!created?.success || !created.data) return { success: false, error: created?.error || 'Could not create the follow-up task' };
     const taskId = created.data.id;

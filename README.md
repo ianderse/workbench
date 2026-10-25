@@ -21,6 +21,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 - Autonomous mode now resyncs the other open tasks when it auto-merges a task into its target branch (integration branch or main), not only when a task reaches Done; an auto-merged task moving to Done later does not trigger it again
 - "Started" notices only go to running tasks, are dropped when that task is no longer running by the time they are read, and are not repeated while an unread one waits (a resume no longer re-announces); the queue-grooming note also reaches dependents the queue started at the moment of the merge, as a message instead of a description edit
 
+**Autonomous mode and base branches**
+- A base branch picked in the task dialog (any branch but "Project default", including a new one) now wins in autonomous mode: the task is cut from it and auto-merged into it (pulled in first, `--no-ff`, pushed when autonomous push is on) instead of the integration branch or main; split pieces and "Fix:" follow-ups keep it, and dependents only count a dependency merged into their own branch. Older tasks keep following the autonomous target
+
 **Stopped and interrupted tickets**
 - A ticket that was stopped or whose run ended early no longer reads as finished in Human Review: the card says "Stopped before it finished" or "Interrupted before it finished", the task header shows a Stopped or Interrupted label, and "What was done" is titled as partial work before it was stopped or interrupted
 

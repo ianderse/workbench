@@ -3,7 +3,7 @@
  * and uses the same satisfied rules as the task queue.
  */
 import type { Task } from '../types';
-import { ANY_TARGET_BRANCH, isDependencySatisfied } from './autonomous';
+import { dependentTargetHint, isDependencySatisfied } from './autonomous';
 import { taskNumber } from './queue-grooming';
 
 /** done/merged: finished (merged automatically counts); archived: set aside; missing: no such task */
@@ -33,7 +33,7 @@ export function resolveTaskDependencies(tasks: readonly Task[], task: Task, auto
     let state: TaskDependencyState;
     if (dep.metadata?.archivedAt) state = 'archived';
     else if (dep.status === 'done') state = 'done';
-    else if (isDependencySatisfied(dep, autonomous ? ANY_TARGET_BRANCH : undefined)) state = 'merged';
+    else if (isDependencySatisfied(dep, autonomous ? dependentTargetHint(task) : undefined)) state = 'merged';
     else state = 'waiting';
     result.push({ ref, number: taskNumber(dep.id), title: dep.title, state });
   }
