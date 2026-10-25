@@ -27,7 +27,9 @@ import {
   buildFollowUpDescription,
   buildFollowUpNoteBlock,
   buildFollowUpPrompt,
+  isFollowUpRunRecent,
   isFollowUpTicketsEnabled,
+  needsFollowUpCatchUp,
   isOpenForFollowUp,
   normalizeFollowUpResult,
 } from '../shared/utils/follow-up-tickets';
@@ -111,6 +113,32 @@ export function isFollowUpReviewState(task: Pick<Task, 'status' | 'reviewReason'
   return task.status === 'human_review' && (task.reviewReason === 'completed' || task.reviewReason === 'auto_merged');
 }
 
+/**
+ * Startup catch-up: a task that entered Human Review just before the app quit never got its
+ * follow-ups (the hook only fires on the state event). Handles each candidate (see
+ * `needsFollowUpCatchUp`) one after the other; `createFollowUpTickets` writes the review summary
+ * itself when the run has none, and the 7-day window keeps old projects from being backfilled.
+ */
+export async function catchUpFollowUpTickets(
+  projects: Project[],
+  getTasks: (projectId: string) => Task[],
+  validation: boolean,
+  deps: FollowUpDeps = defaultDeps(),
+  now = Date.now()
+): Promise<number> {
+  let handled = 0;
+  for (const project of projects) {
+    if (!isFollowUpTicketsEnabled(project.settings)) continue;
+    for (const task of getTasks(project.id)) {
+      if (!needsFollowUpCatchUp(task, validation, now)) continue;
+      appLog.info(`[FollowUps] ${task.specId}: reached Human Review without follow-ups, catching up`);
+      handled++;
+      await createFollowUpTickets(project.id, task.id, deps);
+    }
+  }
+  return handled;
+}
+
 export interface FollowUpOutcome {
   created: Array<{ taskId: string; action: 'queue' | 'planning' }>;
   coveredCount: number;
@@ -118,7 +146,7 @@ export interface FollowUpOutcome {
 
 /**
  * Create the follow-up tickets of a task that reached Human Review. Handles each task once
- * (`metadata.followUpsCreatedAt`), skips Spec review tickets, and only runs when the project
+ * (`metadata.followUpsStartedAt` / `followUpsCreatedAt`), skips Spec review tickets, and only runs when the project
  * setting `followUpTickets` is not off. Resolves to what it did, or null when it did nothing.
  * Never throws.
  */
@@ -152,6 +180,7 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
     !isFollowUpReviewState(source) ||
     source.metadata?.specReview ||
     source.metadata?.followUpsCreatedAt ||
+    isFollowUpRunRecent(source.metadata) ||
     source.metadata?.archivedAt
   ) {
     return null;
@@ -160,11 +189,15 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
   const summary = await deps.getReviewSummary(project, source);
   if (!summary) return null;
 
-  // Handled once, whatever the model says: recorded before the model call so a restart or a second
-  // entry to Human Review does not repeat it
+  // Two-phase marker: `followUpsStartedAt` before the model call keeps a second entry to Human Review
+  // (or the startup catch-up) from repeating it; `followUpsCreatedAt` is written once the tickets exist,
+  // so a restart during the call leaves the task retryable (after FOLLOW_UP_STARTED_TTL_MS)
   const items = summary.needsAttention.map((item) => item.trim()).filter(Boolean);
-  await deps.updateTask(projectId, source.id, { metadata: { followUpsCreatedAt: new Date().toISOString() } });
-  if (items.length === 0) return { created: [], coveredCount: 0 };
+  if (items.length === 0) {
+    await deps.updateTask(projectId, source.id, { metadata: { followUpsCreatedAt: new Date().toISOString() } });
+    return { created: [], coveredCount: 0 };
+  }
+  await deps.updateTask(projectId, source.id, { metadata: { followUpsStartedAt: new Date().toISOString() } });
 
   const open = deps.getTasks(projectId).filter((t) => t.id !== source.id && !t.metadata?.archivedAt && isOpenForFollowUp(t.status));
   const alreadySplitOff = (await deps.getAlreadySplitOff?.(project, source)) ?? [];
@@ -196,7 +229,10 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
     noteableTicketIds: new Set(freshOpen.filter((t) => isGroomableStatus(t.status)).map((t) => t.id)),
     sourceIsFollowUp: !!source.metadata?.followUpFrom,
   });
-  if (result.tickets.length === 0 && result.covered.length === 0) return { created: [], coveredCount: 0 };
+  if (result.tickets.length === 0 && result.covered.length === 0) {
+    await deps.updateTask(projectId, source.id, { metadata: { followUpsCreatedAt: new Date().toISOString() } });
+    return { created: [], coveredCount: 0 };
+  }
 
   const created: FollowUpOutcome['created'] = [];
   const queued: string[] = [];
@@ -233,7 +269,9 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
     }
   }
 
-  if (created.length > 0) await deps.updateTask(projectId, source.id, { metadata: { followUpTickets: created } });
+  await deps.updateTask(projectId, source.id, {
+    metadata: { followUpsCreatedAt: new Date().toISOString(), ...(created.length > 0 ? { followUpTickets: created } : {}) },
+  });
   deps.changed(projectId);
   appLog.info(`[FollowUps] ${source.id}: ${created.length} ticket(s) created, ${result.covered.length} covered`);
   return { created, coveredCount: result.covered.length };

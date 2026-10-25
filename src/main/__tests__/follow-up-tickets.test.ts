@@ -8,7 +8,7 @@ import type { ReviewSummary } from '../../shared/types/claude-code';
 vi.mock('../app-logger', () => ({ appLog: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 vi.mock('../project-store', () => ({ projectStore: {} }));
 
-import { createFollowUpTickets, type FollowUpDeps } from '../follow-up-tickets';
+import { catchUpFollowUpTickets, createFollowUpTickets, type FollowUpDeps } from '../follow-up-tickets';
 
 let project: Project;
 let tasks: Task[];
@@ -209,5 +209,86 @@ describe('createFollowUpTickets', () => {
       throw new Error('boom');
     };
     await expect(createFollowUpTickets('p1', '014-feature', deps)).resolves.toBeNull();
+  });
+});
+
+describe('follow-up marker and startup catch-up', () => {
+  const NOW = Date.parse('2026-10-25T12:00:00Z');
+  const ago = (ms: number) => new Date(NOW - ms).toISOString();
+  const HOUR = 3_600_000;
+  const DAY = 24 * HOUR;
+
+  /** A finished run that entered Human Review `entered` ms before NOW */
+  function reviewTask(id: string, entered: number, extra: Partial<Task> = {}, metadata: TaskMetadata = {}): Task {
+    return makeTask(
+      id,
+      'human_review',
+      {
+        reviewReason: 'auto_merged',
+        claudeRun: { phases: [{ name: 'validate', startedAt: ago(entered + 60_000), endedAt: ago(entered) }] } as unknown as Task['claudeRun'],
+        ...extra,
+      },
+      metadata
+    );
+  }
+  const catchUp = (deps = makeDeps()) => catchUpFollowUpTickets([project], () => tasks, true, deps, NOW);
+
+  it('creates the follow-ups of a task that reached Human Review before a restart', async () => {
+    modelAnswer = answer(queueItem);
+    tasks = [reviewTask('018-missed', 60_000, {}, { autoMerge: { sha: 'x', branch: 'main', at: ago(30_000) } })];
+    expect(await catchUp()).toBe(1);
+    expect(modelPrompts).toHaveLength(1);
+    expect(tasks[0].metadata?.followUpsCreatedAt).toBeTruthy();
+    expect(tasks.filter((t) => t.metadata?.followUpFrom)).toHaveLength(1);
+  });
+
+  it('skips done, old, archived, spec-review, unfinished and already handled tasks', async () => {
+    modelAnswer = answer(queueItem);
+    tasks = [
+      reviewTask('001-done', HOUR, { status: 'done' }),
+      reviewTask('002-old', 8 * DAY),
+      reviewTask('003-archived', HOUR, {}, { archivedAt: ago(HOUR) }),
+      reviewTask('004-spec', HOUR, {}, { specReview: { taskId: 'x' } as unknown as TaskMetadata['specReview'] }),
+      reviewTask('005-handled', HOUR, {}, { followUpsCreatedAt: ago(HOUR) }),
+      reviewTask('006-unfinished', HOUR, { claudeRun: { phases: [{ name: 'implement', startedAt: ago(HOUR) }] } as unknown as Task['claudeRun'] }),
+      reviewTask('007-stopped', HOUR, { reviewReason: 'stopped' }),
+      reviewTask('008-running', HOUR, {}, { followUpsStartedAt: ago(60_000) }),
+    ];
+    expect(await catchUp()).toBe(0);
+    expect(modelPrompts).toHaveLength(0);
+  });
+
+  it('skips projects with the setting off', async () => {
+    project.settings = { followUpTickets: false } as Project['settings'];
+    tasks = [reviewTask('018-missed', HOUR)];
+    expect(await catchUp()).toBe(0);
+  });
+
+  it('retries after an interrupted run, once the started marker is old', async () => {
+    modelAnswer = answer(queueItem);
+    const deps = makeDeps();
+    // First run: the model call dies (the app quit); only the started marker is left
+    const failing: FollowUpDeps = { ...deps, runModel: async () => { throw new Error('app quit'); } };
+    tasks = [reviewTask('018-missed', HOUR)];
+    await createFollowUpTickets('p1', '018-missed', failing);
+    expect(tasks[0].metadata?.followUpsStartedAt).toBeTruthy();
+    expect(tasks[0].metadata?.followUpsCreatedAt).toBeUndefined();
+    // Right away it counts as running: no retry
+    expect(await createFollowUpTickets('p1', '018-missed', deps)).toBeNull();
+    // A restart later: the marker is old, the catch-up retries
+    tasks[0].metadata = { ...tasks[0].metadata, followUpsStartedAt: ago(20 * 60_000) };
+    expect(await catchUp(deps)).toBe(1);
+    expect(tasks[0].metadata?.followUpsCreatedAt).toBeTruthy();
+    expect(tasks.filter((t) => t.metadata?.followUpFrom)).toHaveLength(1);
+  });
+
+  it('creates no duplicates when the state hook and the catch-up race', async () => {
+    modelAnswer = answer(queueItem);
+    const deps = makeDeps();
+    tasks = [reviewTask('018-missed', HOUR)];
+    await Promise.all([createFollowUpTickets('p1', '018-missed', deps), catchUp(deps)]);
+    await catchUp(deps);
+    expect(modelPrompts).toHaveLength(1);
+    expect(tasks.filter((t) => t.metadata?.followUpFrom)).toHaveLength(1);
   });
 });

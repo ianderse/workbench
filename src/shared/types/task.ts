@@ -272,6 +272,8 @@ export interface TaskMetadata {
   followUpFrom?: TaskFollowUpRef;
   /** Set on a needs-decision ticket once the person answered it */
   decision?: TaskDecision;
+  /** Set on the reviewed task before the follow-up model call (ISO time); a run that never finished is retried after 15 minutes */
+  followUpsStartedAt?: string;
   /** Set on the reviewed task once its follow-ups were handled (ISO time); it is only handled once */
   followUpsCreatedAt?: string;
   /** The tickets its review created, for the line in the Human Review panel */

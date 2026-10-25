@@ -11,8 +11,11 @@ import { projectStore } from '../project-store';
 import { safeSendToRenderer } from './utils';
 import { taskHooks } from '../task-hooks';
 import { taskQueue } from '../services/task-queue';
+import { readSettingsFile } from '../settings-utils';
+import { resolveClaudeCodeTaskSettings } from '../claude-code/settings';
+import type { ClaudeCodeTaskSettings } from '../../shared/types/claude-code';
 import { appLog } from '../app-logger';
-import { createFollowUpTickets } from '../follow-up-tickets';
+import { catchUpFollowUpTickets, createFollowUpTickets } from '../follow-up-tickets';
 import { decideTicket, suggestDecision } from '../decision-tickets';
 import type { DecisionAction } from '../../shared/utils/decision-tickets';
 import {
@@ -23,6 +26,9 @@ import {
   listQueueProposals,
   undoContextNote,
 } from '../queue-grooming';
+
+/** After startup, after the stuck-task resume (8 s) and the autonomous merge check (10 s) */
+const FOLLOW_UP_CATCH_UP_DELAY_MS = 20_000;
 
 export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow | null): void {
   configureQueueGrooming((projectId) => {
@@ -47,6 +53,16 @@ export function registerQueueGroomingHandlers(getMainWindow: () => BrowserWindow
     if (status !== 'human_review') return;
     void createFollowUpTickets(project.id, task.id);
   });
+
+  // The hook only fires on the state event: a task that entered Human Review just before the app quit
+  // never got its follow-ups. Catch up once the app has settled (after the stuck-task resume at 8 s
+  // and the autonomous merge check at 10 s)
+  setTimeout(() => {
+    const validation = resolveClaudeCodeTaskSettings((readSettingsFile() as { claudeCodeTasks?: Partial<ClaudeCodeTaskSettings> } | undefined)?.claudeCodeTasks).validation;
+    void catchUpFollowUpTickets(projectStore.getProjects(), (id) => projectStore.getTasks(id), validation).catch((error) => {
+      appLog.warn('[FollowUps] Startup catch-up failed:', error);
+    });
+  }, FOLLOW_UP_CATCH_UP_DELAY_MS).unref?.();
 
   handleIpc(IPC_CHANNELS.QUEUE_PROPOSALS_LIST, async (_, projectId: string): Promise<IPCResult<QueueProposal[]>> => {
     try {

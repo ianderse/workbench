@@ -13,7 +13,9 @@
  * here touches the disk or a process; `main/follow-up-tickets.ts` applies the result.
  */
 import type { ProjectSettings } from '../types/project';
+import type { Task } from '../types/task';
 import { isGroomableStatus, taskNumber } from './queue-grooming';
+import { isRunFinished } from './task-resume';
 
 /** New tickets one reviewed task can create */
 export const MAX_FOLLOW_UP_TICKETS = 4;
@@ -30,6 +32,39 @@ export type FollowUpAction = 'none' | 'covered' | 'queue' | 'planning';
 /** Whether the project creates follow-up tickets (default on) */
 export function isFollowUpTicketsEnabled(settings: Pick<ProjectSettings, 'followUpTickets'> | undefined): boolean {
   return settings?.followUpTickets !== false;
+}
+
+/** A started run that never finished blocks a retry this long (it may still be running in another session) */
+export const FOLLOW_UP_STARTED_TTL_MS = 15 * 60_000;
+/** The startup catch-up only looks at tasks that entered Human Review this recently */
+export const FOLLOW_UP_CATCH_UP_WINDOW_MS = 7 * 24 * 3_600_000;
+
+/** Whether a follow-up run for this task started recently and has not finished (`followUpsStartedAt` without `followUpsCreatedAt`) */
+export function isFollowUpRunRecent(metadata: Task['metadata'], now = Date.now()): boolean {
+  const started = metadata?.followUpsStartedAt ? Date.parse(metadata.followUpsStartedAt) : NaN;
+  return Number.isFinite(started) && now - started < FOLLOW_UP_STARTED_TTL_MS;
+}
+
+/** When the task entered Human Review: the later of the last run phase's end and the auto-merge time */
+export function humanReviewEnteredAt(task: Pick<Task, 'claudeRun' | 'metadata'>): number | null {
+  const times = [task.claudeRun?.phases.at(-1)?.endedAt, task.metadata?.autoMerge?.at]
+    .map((t) => (t ? Date.parse(t) : NaN))
+    .filter((t) => Number.isFinite(t));
+  return times.length > 0 ? Math.max(...times) : null;
+}
+
+/**
+ * Whether the startup catch-up should create the follow-ups of this task: completed / auto-merged in
+ * Human Review, not archived, not Spec review, not handled and not being handled, its run finished,
+ * and in Human Review for less than a week.
+ */
+export function needsFollowUpCatchUp(task: Task, validation: boolean, now = Date.now()): boolean {
+  if (task.status !== 'human_review' || (task.reviewReason !== 'completed' && task.reviewReason !== 'auto_merged')) return false;
+  const m = task.metadata;
+  if (m?.archivedAt || m?.specReview || m?.followUpsCreatedAt || isFollowUpRunRecent(m, now)) return false;
+  if (!isRunFinished(task.claudeRun, validation)) return false;
+  const entered = humanReviewEnteredAt(task);
+  return entered !== null && now - entered <= FOLLOW_UP_CATCH_UP_WINDOW_MS;
 }
 
 export const FOLLOW_UP_SCHEMA: Record<string, unknown> = {
