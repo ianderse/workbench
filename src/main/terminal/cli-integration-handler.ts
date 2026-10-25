@@ -43,6 +43,7 @@ import type {
 import { getClaudeGlobalConfigPath, isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { lastAgentSession, readAgentSessions, recordAgentSession, recordAgentSessionAsync } from '../agent-session-store';
 import { getSessionFilePath, migrateSession } from '../claude-profile/session-utils';
+import { runTool } from '../platform/runtime-exec';
 import { findSessionTranscript, latestTranscript } from '../claude-code/session-spending';
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
 import { appLog } from '../app-logger';
@@ -533,6 +534,8 @@ function trackAgentWindowSession(
 interface ResumedSession {
   /** The flag that picks the session up: ` --resume <id>`, or ` --continue` when none is known */
   flag: string;
+  /** The session `flag` resumes by id (none for ` --continue`) */
+  sessionId?: string;
   /**
    * The config dir the session's transcript was found in, when one was. Claude Code looks for a
    * session under the account it runs with, so the window has to run with this one or `--resume`
@@ -622,8 +625,12 @@ async function resumeOwnSessionFlag(
       // `configDirs` is for: the other one's copy is the one a swap left behind.
       if (ownCwd) {
         for (const configDir of configDirs) {
-          if (await holdsSessionTranscript(configDir, ownCwd, own.sessionId)) {
-            return { flag: buildResumeSessionFlag(own.sessionId), configDir };
+          // A transcript with no conversation in it can't be resumed: like a missing one
+          if (
+            (await holdsSessionTranscript(configDir, ownCwd, own.sessionId))
+            && (await hasConversation(getSessionFilePath(configDir, ownCwd, own.sessionId)))
+          ) {
+            return { flag: buildResumeSessionFlag(own.sessionId), sessionId: own.sessionId, configDir };
           }
         }
       }
@@ -635,7 +642,8 @@ async function resumeOwnSessionFlag(
       // the window has to run on.
       for (const configDir of configDirs) {
         const transcript = await findSessionTranscript(own.sessionId, [configDir]);
-        if (transcript) return { flag: buildResumeSessionFlag(own.sessionId), configDir };
+        if (!transcript || !(await hasConversation(transcript.file))) continue;
+        return { flag: buildResumeSessionFlag(own.sessionId), sessionId: own.sessionId, configDir };
       }
     }
 
@@ -647,13 +655,57 @@ async function resumeOwnSessionFlag(
         .map((session) => session.sessionId)
     );
     const cwd = terminal.projectPath || terminal.cwd;
-    const latest = await latestTranscript(claudeConfigDirs([own?.configDir]), toRuntimePath(cwd), taken);
+    const searchDirs = claudeConfigDirs([own?.configDir]);
+    let latest = await latestTranscript(searchDirs, toRuntimePath(cwd), taken);
+    // A transcript with nothing but a title can't be resumed: the next newest one, a few at most
+    for (let skipped = 0; latest && skipped < 10 && !(await hasConversation(latest.file)); skipped++) {
+      taken.add(latest.sessionId);
+      latest = await latestTranscript(searchDirs, toRuntimePath(cwd), taken);
+    }
     if (!latest || !isValidClaudeSessionId(latest.sessionId)) return continueLatest;
     trackAgentWindowSession(terminal, latest.sessionId, latest.configDir, cwd);
-    return { flag: buildResumeSessionFlag(latest.sessionId), configDir: latest.configDir };
+    return { flag: buildResumeSessionFlag(latest.sessionId), sessionId: latest.sessionId, configDir: latest.configDir };
   } catch (error) {
     appLog.warn('[ClaudeIntegration] Could not look up the window\'s own session:', error);
     return continueLatest;
+  }
+}
+
+/**
+ * Whether a transcript holds a conversation. Claude Code also writes transcripts with nothing but a
+ * session title and name, which `--resume` refuses ("No conversation found"): Claude Code exits at
+ * once and the exit marker closes the window, so such a session counts as gone. Unreadable counts
+ * as holding one, so the resume runs.
+ */
+async function hasConversation(transcriptPath: string): Promise<boolean> {
+  try {
+    const text = await fsPromises.readFile(transcriptPath, 'utf-8');
+    return text.includes('"type":"user"') || text.includes('"type":"assistant"');
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Stop a session Claude Code runs as a background session, so the window can resume it. Claude Code
+ * refuses to resume a session that is running in the background ("That session is running in the
+ * background"); it exits at once and the exit marker closes the window. Stopping keeps the
+ * conversation. Any failure is only logged: the resume then reports what is wrong itself.
+ */
+async function releaseBackgroundSession(
+  sessionId: string,
+  claudeCmd: string,
+  claudeEnv: NodeJS.ProcessEnv
+): Promise<void> {
+  try {
+    const { stdout } = await runTool('claude', ['agents', '--json'], { command: claudeCmd, env: claudeEnv, encoding: 'utf-8', timeout: 15000 });
+    const sessions = JSON.parse(String(stdout)) as Array<{ id?: string; sessionId?: string; kind?: string }>;
+    const background = sessions.find((session) => session.sessionId === sessionId && session.kind === 'background');
+    if (!background) return;
+    appLog.info(`[ClaudeIntegration] Stopping background session ${sessionId} so the window can resume it`);
+    await runTool('claude', ['stop', background.id || sessionId], { command: claudeCmd, env: claudeEnv, encoding: 'utf-8', timeout: 30000 });
+  } catch (error) {
+    appLog.warn('[ClaudeIntegration] Could not check for a background session before resuming:', error);
   }
 }
 
@@ -1958,6 +2010,7 @@ export async function resumeClaudeAsync(
 
     // The session to pick up, and the account whose transcripts hold it
     const resumed = await resumeOwnSessionFlag(terminal);
+    if (resumed.sessionId) await releaseBackgroundSession(resumed.sessionId, claudeCmd, claudeEnv);
 
     // The session flag, then YOLO mode (preserved from the terminal's stored state), the Graphify
     // hint and the theme matching the app's
