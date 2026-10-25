@@ -39,8 +39,12 @@ import type { TerminalProcess } from './types';
 export interface WindowSessionReport {
   terminalId: string;
   sessionId: string;
-  /** Where the session runs (a host path) */
+  /** Claude Code's working directory when the hook ran (a host path) */
   cwd?: string;
+  /** The hook that reported it: the session starting, or a prompt given in it */
+  event?: 'SessionStart' | 'UserPromptSubmit';
+  /** How the session started (`startup`, `resume`, `clear`, `compact`), on SessionStart */
+  source?: string;
 }
 
 export interface WindowSessionDeps {
@@ -55,10 +59,17 @@ export interface WindowSessionDeps {
   listOtherWorktrees: (projectPath: string) => Promise<OtherWorktreeInfo[]>;
   /** Claude Code config dirs, each with its process registry under `sessions/` */
   claudeConfigDirs: () => string[];
+  /** Wait between looks at the registry (tests wait for nothing) */
+  wait?: (ms: number) => Promise<void>;
 }
 
 /** Sessions found to be background sessions, remembered so their every hook isn't looked up again */
 const MAX_IGNORED_SESSIONS = 200;
+
+/** How often, and how far apart, the registry is looked at for a session that has to be listed
+ *  there: a new process writes its entry as it starts, a moment after its first hook can fire */
+const REGISTRY_ATTEMPTS = 3;
+const REGISTRY_WAIT_MS = 500;
 
 /** What Claude Code's process registry says about a session */
 type RegistryKind = 'interactive' | 'other' | 'unlisted';
@@ -214,11 +225,30 @@ export function createWindowSessionTracker(deps: WindowSessionDeps): (report: Wi
     if (ignored.size > MAX_IGNORED_SESSIONS) ignored.delete(ignored.values().next().value!);
   };
 
-  const handle = async ({ terminalId, sessionId, cwd }: WindowSessionReport): Promise<void> => {
-    if ((await sessionRegistryKind(sessionId, deps.claudeConfigDirs())) === 'other') {
+  const wait = deps.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+
+  const handle = async (report: WindowSessionReport): Promise<void> => {
+    const { terminalId, sessionId } = report;
+    const started = report.event === 'SessionStart';
+    // The window's Claude Code turning to a session in place (`/resume`, `/clear`, compaction) says
+    // so as it starts it: that is trusted unless the registry has the session as another
+    // process's. A session a new process starts (`startup`), or one only a prompt reports, may as
+    // well be a `claude -p` the agent ran in the window, which inherits the window's id too and
+    // never runs in a terminal: only one the registry lists as a terminal's own is taken then
+    const inPlace = started && report.source !== undefined && report.source !== 'startup';
+    let kind = await sessionRegistryKind(sessionId, deps.claudeConfigDirs());
+    for (let attempt = 1; !inPlace && kind === 'unlisted' && attempt < REGISTRY_ATTEMPTS; attempt++) {
+      await wait(REGISTRY_WAIT_MS);
+      kind = await sessionRegistryKind(sessionId, deps.claudeConfigDirs());
+    }
+    if (kind === 'other') {
       ignore(sessionId);
       return;
     }
+    if (!inPlace && kind !== 'interactive') return;
+    // Where the session runs is where it started. A prompt's directory is wherever the agent last
+    // moved its shell to (`cd` in its Bash tool), which says nothing about the session
+    const cwd = started ? report.cwd : undefined;
     const terminal = deps.getTerminal(terminalId);
     if (!terminal?.projectPath) return;
     const projectPath = terminal.projectPath;
@@ -248,7 +278,8 @@ export function createWindowSessionTracker(deps: WindowSessionDeps): (report: Wi
 
   return (report) => {
     if (!report.terminalId || !report.sessionId || ignored.has(report.sessionId)) return Promise.resolve();
-    const key = `${report.sessionId}\0${report.cwd ?? ''}`;
+    // A prompt's directory counts for nothing (see above), so only a start's tells two reports apart
+    const key = `${report.sessionId}\0${report.event === 'SessionStart' ? report.cwd ?? '' : ''}`;
     if (lastReport.get(report.terminalId) === key) return Promise.resolve();
     lastReport.set(report.terminalId, key);
 

@@ -344,7 +344,10 @@ export class LiveAgentRelay {
       }
       case 'window-session':
         try {
-          this.windowSessionListener?.({ terminalId: message.terminalId, sessionId: message.sessionId, cwd: message.cwd });
+          this.windowSessionListener?.({
+            terminalId: message.terminalId, sessionId: message.sessionId, cwd: message.cwd,
+            event: message.event, source: message.source,
+          });
         } catch (error) {
           appLog.warn('[LiveAgent] Could not follow an agent window\'s session:', error);
         }

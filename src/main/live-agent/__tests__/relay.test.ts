@@ -126,9 +126,10 @@ describe('relay', () => {
     await hook({ hook_event_name: 'UserPromptSubmit', agent_id: 'abc', workbench_terminal_id: 'terminal-1' });
     await hook({ hook_event_name: 'SessionStart', source: 'startup' });
 
+    // With the hook that said so, and how the session started: what the main process weighs it by
     expect(windowSessions).toEqual([
-      { sessionId: SESSION_ID, terminalId: 'terminal-1', cwd: workspace },
-      { sessionId: SESSION_ID, terminalId: 'terminal-1', cwd: workspace },
+      { sessionId: SESSION_ID, terminalId: 'terminal-1', cwd: workspace, event: 'SessionStart', source: 'resume' },
+      { sessionId: SESSION_ID, terminalId: 'terminal-1', cwd: workspace, event: 'UserPromptSubmit' },
     ]);
   });
 

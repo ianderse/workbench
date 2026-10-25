@@ -15,7 +15,11 @@ export type RelayWorkerMessage =
   | { type: 'message'; clientIds: string[]; data: string }
   | { type: 'log'; level: 'info' | 'warn' | 'error'; message: string }
   /** The Claude Code in an agent window (`terminalId`) runs this session now, in `cwd` (a host path) */
-  | { type: 'window-session'; terminalId: string; sessionId: string; cwd?: string }
+  | {
+      type: 'window-session'; terminalId: string; sessionId: string; cwd?: string
+      /** The hook that said so, and how the session started (see HookServer.onWindowSession) */
+      event: 'SessionStart' | 'UserPromptSubmit'; source?: string
+    }
   | { type: 'stopped' };
 
 /** The worker's workerData */

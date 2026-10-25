@@ -61,10 +61,15 @@ export function SessionSelector({ terminalId, labelClassName }: SessionSelectorP
     if (isOpen) readSessions();
   }, [isOpen, readSessions]);
 
-  // Read again when the window's Claude Code turns to another session, so the trigger names that
-  // one straight away (the main process has recorded it as the window's own by then)
+  // Read again when the window's Claude Code turns to another session while the selector is shown,
+  // so the trigger names that one straight away (the main process has recorded it as the window's
+  // own by then). Not on mounting: the header remounts with every view switch and grid preview, and
+  // what is shown on opening is read when the menu opens (CLAUDE.md: no fetching on open)
+  const followedSessionRef = useRef(runningSessionId);
   useEffect(() => {
-    if (runningSessionId) readSessions();
+    if (!runningSessionId || runningSessionId === followedSessionRef.current) return;
+    followedSessionRef.current = runningSessionId;
+    readSessions();
   }, [runningSessionId, readSessions]);
 
   // A read still going when the selector unmounts lands nowhere

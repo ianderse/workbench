@@ -45,6 +45,8 @@ interface HookPayload {
   workbench_terminal_id?: string
   // Where the session runs (a host path: the hook script translates WSL paths)
   cwd?: string
+  // How a session started (SessionStart only): startup, resume, clear or compact
+  source?: string
   [key: string]: unknown
 }
 
@@ -57,6 +59,10 @@ export interface SessionOwner {
 /** The session the Claude Code in an agent window runs now, and where it runs */
 export interface WindowSession extends SessionOwner {
   cwd?: string
+  /** Which hook said so: a session starting (where it runs is where it starts) or a prompt */
+  event: 'SessionStart' | 'UserPromptSubmit'
+  /** How a session started (`startup`, `resume`, `clear`, `compact`), when it did */
+  source?: string
 }
 
 export class HookServer implements TypedDisposable {
@@ -141,7 +147,9 @@ export class HookServer implements TypedDisposable {
         this._onWindowSession.fire({
           sessionId: payload.session_id,
           terminalId,
+          event: payload.hook_event_name,
           ...(typeof payload.cwd === 'string' && payload.cwd ? { cwd: payload.cwd } : {}),
+          ...(typeof payload.source === 'string' && payload.source ? { source: payload.source } : {}),
         })
       }
     }
