@@ -19,8 +19,6 @@ describe('relay', () => {
   let transcript: string;
   let relay: Relay;
   const sent: Array<{ clientIds: string[]; message: { type: string; [key: string]: unknown } }> = [];
-  /** The sessions agent windows' Claude Code turned to, as the relay reported them */
-  const windowSessions: Array<{ terminalId: string; sessionId: string; cwd?: string }> = [];
   /** The agent events sent to the clients so far */
   const events = () => sent
     .filter((entry) => entry.message.type === 'agent-event')
@@ -31,7 +29,6 @@ describe('relay', () => {
 
   beforeEach(async () => {
     sent.length = 0;
-    windowSessions.length = 0;
     root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'live-agent-relay-')));
     workspace = path.join(root, 'project');
     otherDir = path.join(root, 'other');
@@ -48,7 +45,6 @@ describe('relay', () => {
     relay = await createRelay({
       claudeDirs: [claudeDir],
       send: (clientIds, data) => sent.push({ clientIds, message: JSON.parse(data) }),
-      windowSession: (session) => windowSessions.push(session),
     });
   });
 
@@ -107,30 +103,6 @@ describe('relay', () => {
     relay.subscribe('window-c', workspace, flowDir);
     const list = sent.find((entry) => entry.message.type === 'session-list');
     expect(list?.message.sessions).toEqual([expect.objectContaining({ id: SESSION_ID, owner: 'terminal-1' })]);
-  });
-
-  it('reports the session an agent window\'s Claude Code turns to, and where it runs', async () => {
-    relay.subscribe('window-a', workspace, flowDir);
-    const { port } = JSON.parse(fs.readFileSync(path.join(flowDir, discoveryFiles()[0]), 'utf-8'));
-    const hook = (body: Record<string, unknown>) => fetch(`http://127.0.0.1:${port}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: SESSION_ID, cwd: workspace, ...body }),
-    });
-
-    await hook({ hook_event_name: 'SessionStart', source: 'resume', workbench_terminal_id: 'terminal-1' });
-    await hook({ hook_event_name: 'UserPromptSubmit', workbench_terminal_id: 'terminal-1' });
-    // Not from the window's own Claude Code turning to a session: a tool call, a sub-agent's hook,
-    // and a session started outside any agent window
-    await hook({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: 'toolu_1', workbench_terminal_id: 'terminal-1' });
-    await hook({ hook_event_name: 'UserPromptSubmit', agent_id: 'abc', workbench_terminal_id: 'terminal-1' });
-    await hook({ hook_event_name: 'SessionStart', source: 'startup' });
-
-    // With the hook that said so, and how the session started: what the main process weighs it by
-    expect(windowSessions).toEqual([
-      { sessionId: SESSION_ID, terminalId: 'terminal-1', cwd: workspace, event: 'SessionStart', source: 'resume' },
-      { sessionId: SESSION_ID, terminalId: 'terminal-1', cwd: workspace, event: 'UserPromptSubmit' },
-    ]);
   });
 
   it('draws a background agent the session started (/subtask) and completes it on its report', async () => {

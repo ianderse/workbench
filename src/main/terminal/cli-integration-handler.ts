@@ -2130,32 +2130,19 @@ export async function openWindowSession(
     return;
   }
   // While Claude Code exits, the session is recorded as the window's own and its command worked
-  // out, so the resume is typed the moment the previous session has ended. It is recorded where
-  // the window resumes sessions, which is where it was listed
-  if (terminal.projectPath) await recordWindowSession(terminal, sessionId, terminal.projectPath);
+  // out, so the resume is typed the moment the previous session has ended
+  if (terminal.projectPath) {
+    const { configDir } = await windowSessionAccount(terminal);
+    await recordAgentSession(terminal.projectPath, {
+      sessionId,
+      configDir: resolveSessionConfigDir(configDir),
+      // Where the window resumes sessions, which is where it was listed
+      cwd: terminal.projectPath || terminal.cwd,
+      terminalId: terminal.id,
+      startedAt: new Date().toISOString(),
+    });
+  }
   await resumeClaudeAsync(terminal, getWindow, { until: exited });
-}
-
-/**
- * Record a session as an agent window's own: the one the window shows in its header and resumes
- * when it is restored. It is kept on the window's account (`windowSessionAccount`), since a session
- * loads only under the account that holds its transcript. `cwd` is where it runs, which names its
- * transcript's folder.
- */
-export async function recordWindowSession(
-  terminal: Pick<TerminalProcess, 'id' | 'projectPath'>,
-  sessionId: string,
-  cwd: string
-): Promise<void> {
-  if (!terminal.projectPath) return;
-  const { configDir } = await windowSessionAccount(terminal);
-  await recordAgentSession(terminal.projectPath, {
-    sessionId,
-    configDir: resolveSessionConfigDir(configDir),
-    cwd,
-    terminalId: terminal.id,
-    startedAt: new Date().toISOString(),
-  });
 }
 
 /**

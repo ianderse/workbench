@@ -20,8 +20,7 @@ const log = createLogger('HookServer')
  * its turn (Stop, or StopFailure when an API error such as a rate limit ends it),
  * the session ending (SessionEnd), and a backstop completion for sub-agents
  * (SubagentStop, and StopFailure inside one). Every hook also says which agent
- * window its session runs in; SessionStart and UserPromptSubmit only say that,
- * and that the window's Claude Code runs that session now (onWindowSession).
+ * window its session runs in (SessionStart and UserPromptSubmit only say that).
  *
  * It listens on an OS-assigned port, advertised to the hook script through the
  * discovery file. Events are emitted without a timestamp; the relay stamps them
@@ -43,10 +42,6 @@ interface HookPayload {
   notification_type?: string
   // The agent window the session runs in (added by the hook script)
   workbench_terminal_id?: string
-  // Where the session runs (a host path: the hook script translates WSL paths)
-  cwd?: string
-  // How a session started (SessionStart only): startup, resume, clear or compact
-  source?: string
   [key: string]: unknown
 }
 
@@ -56,28 +51,15 @@ export interface SessionOwner {
   terminalId: string
 }
 
-/** The session the Claude Code in an agent window runs now, and where it runs */
-export interface WindowSession extends SessionOwner {
-  cwd?: string
-  /** Which hook said so: a session starting (where it runs is where it starts) or a prompt */
-  event: 'SessionStart' | 'UserPromptSubmit'
-  /** How a session started (`startup`, `resume`, `clear`, `compact`), when it did */
-  source?: string
-}
-
 export class HookServer implements TypedDisposable {
   private server: http.Server | null = null
 
   private readonly _onEvent = new TypedEventEmitter<AgentEvent>()
   private readonly _onOwner = new TypedEventEmitter<SessionOwner>()
-  private readonly _onWindowSession = new TypedEventEmitter<WindowSession>()
 
   readonly onEvent = this._onEvent.event
   /** A hook said which agent window its session runs in (every hook says it) */
   readonly onOwner = this._onOwner.event
-  /** The Claude Code in an agent window started a session (at startup, `/resume`, `/clear`) or
-   *  was given a prompt in one: what the window's header shows follows it */
-  readonly onWindowSession = this._onWindowSession.event
 
   async start(): Promise<number> {
     return new Promise((resolve, reject) => {
@@ -141,17 +123,6 @@ export class HookServer implements TypedDisposable {
     const terminalId = payload.workbench_terminal_id
     if (typeof terminalId === 'string' && terminalId) {
       this._onOwner.fire({ sessionId: payload.session_id, terminalId })
-      // Only these two come from the window's own Claude Code turning to a session: the others
-      // fire inside sub-agents and forks too, and say nothing a prompt doesn't
-      if ((payload.hook_event_name === 'SessionStart' || payload.hook_event_name === 'UserPromptSubmit') && !payload.agent_id) {
-        this._onWindowSession.fire({
-          sessionId: payload.session_id,
-          terminalId,
-          event: payload.hook_event_name,
-          ...(typeof payload.cwd === 'string' && payload.cwd ? { cwd: payload.cwd } : {}),
-          ...(typeof payload.source === 'string' && payload.source ? { source: payload.source } : {}),
-        })
-      }
     }
     switch (payload.hook_event_name) {
       case 'PreToolUse':
@@ -255,6 +226,5 @@ export class HookServer implements TypedDisposable {
     }
     this._onEvent.dispose()
     this._onOwner.dispose()
-    this._onWindowSession.dispose()
   }
 }

@@ -210,23 +210,6 @@ export function buildTaskWorktreeConfig(request: TaskSessionRequest, terminalId:
   };
 }
 
-/**
- * The task an agent window is linked to once its Claude Code runs `sessionId`: the task whose
- * session it is; none when the linked task has a session of its own and this isn't it; or
- * `undefined` to leave the link as it is (a task with no session yet is linked for its context,
- * whatever the window runs).
- */
-export function taskForWindowSession(
-  tasks: Array<Pick<Task, 'id' | 'claudeRun'>>,
-  associatedTaskId: string | undefined,
-  sessionId: string
-): { taskId: string | undefined } | undefined {
-  const owner = tasks.find((task) => task.claudeRun?.sessionId === sessionId);
-  if (owner) return owner.id === associatedTaskId ? undefined : { taskId: owner.id };
-  const associated = associatedTaskId ? tasks.find((task) => task.id === associatedTaskId) : undefined;
-  return associated?.claudeRun?.sessionId ? { taskId: undefined } : undefined;
-}
-
 /** Ask the app to show the Agents page of a project (e.g. after opening a task's session) */
 interface AgentsViewRequest {
   projectPath: string;
@@ -253,7 +236,6 @@ export interface Terminal {
   displayOrder?: number;  // Display order for tab persistence (lower = further left)
   cliNamedOnce?: boolean;  // Whether this Claude terminal has been auto-named based on initial message (prevents repeated naming)
   loading?: TerminalLoadingKind;  // Starting (a shell, or Claude Code): the window shows a spinner until it is ready
-  claudeSessionId?: string;  // The Claude Code session the window runs now, as its hooks report it (followed by the header)
 }
 
 /** Each loading window's fallback timer (see setTerminalLoading) */

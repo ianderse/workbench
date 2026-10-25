@@ -950,7 +950,7 @@ async function listTerminalWorktrees(projectPath: string): Promise<TerminalWorkt
  * - .workbench/worktrees/tasks/*
  * - .workbench/worktrees/pr/*
  */
-export async function listOtherWorktrees(projectPath: string): Promise<OtherWorktreeInfo[]> {
+async function listOtherWorktrees(projectPath: string): Promise<OtherWorktreeInfo[]> {
   // Validate projectPath against registered projects
   if (!isValidProjectPath(projectPath)) {
     debugError('[TerminalWorktree] Invalid project path for listing other worktrees:', projectPath);

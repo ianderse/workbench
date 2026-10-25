@@ -8,7 +8,6 @@ import {
   buildPendingTaskSession,
   buildTaskWorktreeConfig,
   getTaskSessionRequest,
-  taskForWindowSession,
   useTerminalStore,
   type PendingTaskSession
 } from '../stores/terminal-store';
@@ -612,34 +611,6 @@ export const Terminal = forwardRef<TerminalHandle, TerminalProps>(function Termi
     // Sync to main process so title persists across hot reloads
     window.electronAPI.setTerminalTitle(id, 'Claude');
   }, [id, setAssociatedTask, updateTerminal]);
-
-  // Claude Code in the window turned to another session by itself (/resume, /clear, claude --resume):
-  // the Task menu shows the task whose session it is, or drops a task whose session it left. The
-  // session already runs here, so nothing is opened or resumed. Only a change of session counts, not
-  // a remount or the tasks changing: a task picked from the menu is linked before its session starts
-  const tasksRef = useRef(tasks);
-  useEffect(() => {
-    tasksRef.current = tasks;
-  }, [tasks]);
-  const followedSessionRef = useRef(terminal?.claudeSessionId);
-  const runningSessionId = terminal?.claudeSessionId;
-  useEffect(() => {
-    if (!runningSessionId || runningSessionId === followedSessionRef.current) return;
-    followedSessionRef.current = runningSessionId;
-    const linked = useTerminalStore.getState().getTerminal(id)?.associatedTaskId;
-    const next = taskForWindowSession(tasksRef.current, linked, runningSessionId);
-    if (!next) return;
-    if (!next.taskId) {
-      handleClearTask();
-      return;
-    }
-    setAssociatedTask(id, next.taskId);
-    const task = tasksRef.current.find((t) => t.id === next.taskId);
-    if (task) {
-      updateTerminal(id, { title: task.title });
-      window.electronAPI.setTerminalTitle(id, task.title);
-    }
-  }, [id, runningSessionId, handleClearTask, setAssociatedTask, updateTerminal]);
 
   // Worktree handlers
   const handleCreateWorktree = useCallback(() => {

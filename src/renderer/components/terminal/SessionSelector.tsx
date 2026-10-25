@@ -16,8 +16,7 @@ interface SessionSelectorProps {
  * The agent window's Claude Code session: "New session" ends the open one and starts a new one, and
  * the list is what `/resume` offers in the window's folder (each session's title, its id under it).
  * Picking one ends the open session and resumes that one in the window. Listed when the menu opens,
- * as `/resume` reads them when it runs, and when the window's Claude Code turns to another session
- * by itself (`/resume`, `/clear`), so the trigger follows it.
+ * as `/resume` reads them when it runs.
  */
 export function SessionSelector({ terminalId, labelClassName }: SessionSelectorProps) {
   const { t } = useTranslation(['terminal']);
@@ -34,48 +33,28 @@ export function SessionSelector({ terminalId, labelClassName }: SessionSelectorP
 
   // The open session's title for the trigger, once the list has been read
   const current = sessions.find((session) => session.current);
-  // The session the window's Claude Code runs now, when it turned to another one by itself
-  const runningSessionId = useTerminalStore((state) => state.terminals.find((terminal) => terminal.id === terminalId)?.claudeSessionId);
 
-  // Only the latest read lands (the menu opening and the session changing can overlap)
-  const readRef = useRef(0);
-  const readSessions = useCallback(() => {
-    const read = ++readRef.current;
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
     setIsLoading(true);
     setError(null);
     window.electronAPI.listClaudeSessions(terminalId)
       .then((result) => {
-        if (read !== readRef.current) return;
+        if (cancelled) return;
         if (result.success) setSessions(result.data ?? []);
         else setError(result.error ?? t('terminal:session.loadFailed'));
       })
       .catch(() => {
-        if (read === readRef.current) setError(t('terminal:session.loadFailed'));
+        if (!cancelled) setError(t('terminal:session.loadFailed'));
       })
       .finally(() => {
-        if (read === readRef.current) setIsLoading(false);
+        if (!cancelled) setIsLoading(false);
       });
-  }, [terminalId, t]);
-
-  useEffect(() => {
-    if (isOpen) readSessions();
-  }, [isOpen, readSessions]);
-
-  // Read again when the window's Claude Code turns to another session while the selector is shown,
-  // so the trigger names that one straight away (the main process has recorded it as the window's
-  // own by then). Not on mounting: the header remounts with every view switch and grid preview, and
-  // what is shown on opening is read when the menu opens (CLAUDE.md: no fetching on open)
-  const followedSessionRef = useRef(runningSessionId);
-  useEffect(() => {
-    if (!runningSessionId || runningSessionId === followedSessionRef.current) return;
-    followedSessionRef.current = runningSessionId;
-    readSessions();
-  }, [runningSessionId, readSessions]);
-
-  // A read still going when the selector unmounts lands nowhere
-  useEffect(() => () => {
-    readRef.current++;
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, terminalId, t]);
 
   const filtered = useMemo(() => {
     const query = searchQuery.toLowerCase().trim();

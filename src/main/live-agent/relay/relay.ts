@@ -8,7 +8,7 @@ import * as crypto from 'crypto'
 import * as fs from 'fs'
 import * as path from 'path'
 
-import { HookServer, type SessionOwner, type WindowSession } from './lib/hook-server'
+import { HookServer, type SessionOwner } from './lib/hook-server'
 import { AgentEvent, SessionInfo, WatchedSession } from './lib/protocol'
 import { TranscriptParser, isActivityLine } from './lib/transcript-parser'
 import { readCompleteLines, readNewFileLines, foldPathCase } from './lib/fs-utils'
@@ -727,8 +727,6 @@ interface RelayOptions {
   send: SendFn
   /** The WSL distribution Claude Code runs in, when it runs in one */
   wsl?: WslPathOptions | null
-  /** The Claude Code in an agent window runs this session now (see HookServer.onWindowSession) */
-  windowSession?: (session: WindowSession) => void
 }
 
 const encodeProjectDir = (dir: string) => dir.replace(/[^a-zA-Z0-9]/g, '-')
@@ -757,9 +755,6 @@ export async function createRelay(options: RelayOptions): Promise<Relay> {
 
   hookServer.onEvent(handleHookEvent)
   hookServer.onOwner(handleSessionOwner)
-  hookServer.onWindowSession((session) => {
-    options.windowSession?.({ ...session, ...(session.cwd ? { cwd: hostDir(session.cwd) } : {}) })
-  })
 
   const workspaces = new Map<string, Workspace>()
 

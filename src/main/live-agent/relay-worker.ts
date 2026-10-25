@@ -39,8 +39,6 @@ if (port) {
         createRelay({
           claudeDirs: request.claudeDirs,
           send: (clientIds, data) => post({ type: 'message', clientIds, data }),
-          windowSession: ({ terminalId, sessionId, cwd, event, source }) =>
-            post({ type: 'window-session', terminalId, sessionId, cwd, event, source }),
           wsl: (workerData as RelayWorkerData | undefined)?.wsl ?? null,
         }).then((created) => {
           if (stopping) {

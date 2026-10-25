@@ -115,7 +115,6 @@ export const IPC_CHANNELS = {
   TERMINAL_EXIT: 'terminal:exit',
   TERMINAL_TITLE_CHANGE: 'terminal:titleChange',
   TERMINAL_WORKTREE_CONFIG_CHANGE: 'terminal:worktreeConfigChange',  // Worktree config restored/changed (for sync on recovery)
-  TERMINAL_CLAUDE_SESSION_CHANGE: 'terminal:claudeSessionChange',  // The Claude Code session an agent window runs now (its own /resume, /clear, claude --resume)
   TERMINAL_PENDING_RESUME: 'terminal:pendingResume',  // Terminal has a Claude Code session to resume (resumed once its window is shown)
   TERMINAL_RATE_LIMIT: 'terminal:rateLimit',  // Claude Code rate limit detected
   TERMINAL_OAUTH_TOKEN: 'terminal:oauthToken',  // OAuth token captured from setup-token output
