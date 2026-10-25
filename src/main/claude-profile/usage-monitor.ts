@@ -21,6 +21,7 @@ import { reactiveTokenRefresh, ensureValidToken } from './token-refresh';
 import { isProfileRateLimited } from './rate-limit-manager';
 import { getOperationRegistry } from './operation-registry';
 import { usesClaudeSubscription } from './profile-utils';
+import { isOmpBackend } from '../agent-backend/settings';
 
 // Re-export for backward compatibility
 export type { ApiProvider };
@@ -938,6 +939,9 @@ export class UsageMonitor extends EventEmitter {
     if (this.isChecking) {
       return; // Prevent concurrent checks
     }
+    // OMP runs local models: Claude usage drives nothing then, and polling it only spends the
+    // account's limited usage-endpoint quota (429s). Checks resume when Claude Code is selected
+    if (isOmpBackend()) return;
 
     this.isChecking = true;
     let profileId: string | undefined;
