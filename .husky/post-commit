@@ -18,5 +18,6 @@ if [ -n "$(git branch -r --contains HEAD 2>/dev/null)" ]; then
   exit 0
 fi
 
-git add -- package.json package-lock.json
+git add -- package.json
+[ -f package-lock.json ] && git add -- package-lock.json
 WORKBENCH_SKIP_VERSION_BUMP=1 git commit --amend --no-edit --no-verify --quiet
