@@ -11,6 +11,9 @@
  *     `.workbench/queue-proposals.json` until the user applies or dismisses them. With
  *     `autoApplyStructural` (a future autonomous mode) they are applied at once, each with an undo entry.
  *
+ * Running tasks that depend on the merged one (the queue starts them as the merge lands) miss
+ * that, so they get the note only, as a Workbench message through the task messaging broker.
+ *
  * Entry point: `groomQueueAfterMerge()`. It never throws and never blocks the merge flow.
  * The model answer is validated by `normalizeGroomingResult()` (shared/utils/queue-grooming.ts).
  * All effects on tasks go through `GroomingDeps`, so tests can run the whole flow without Electron.
@@ -84,6 +87,10 @@ export interface GroomingDeps {
   queueTasks?(projectId: string, taskIds: string[]): Promise<void>;
   archive(projectId: string, taskIds: string[]): void;
   unarchive(projectId: string, taskIds: string[]): void;
+  /** Whether task messaging is on; running dependents get their note only through it */
+  messagingEnabled?(): boolean | Promise<boolean>;
+  /** Message a running task as Workbench (steered into a live run, else its inbox) */
+  messageTask?(projectId: string, task: Task, text: string): Promise<void>;
   /** Tasks or proposals changed: refresh the board */
   changed(projectId: string): void;
   settleMs?: number;
@@ -166,6 +173,14 @@ function defaultDeps(): GroomingDeps {
       const { taskQueueOrder } = await import('./services/task-queue-order');
       taskQueueOrder.set(projectId, [...ids, ...taskQueueOrder.get(projectId).filter((id) => !ids.includes(id))]);
     },
+    async messagingEnabled() {
+      return (await import('./task-messaging')).isTaskMessagingEnabled();
+    },
+    async messageTask(projectId, task, text) {
+      const { deliverToTask } = await import('./task-messaging/broker');
+      const outcome = await deliverToTask(projectId, task, { kind: 'workbench' }, text);
+      if (outcome.status === 'refused') throw new Error(outcome.detail);
+    },
     archive: (projectId, ids) => {
       projectStore.archiveTasks(projectId, ids);
     },
@@ -246,7 +261,22 @@ Rules:
 - "obsolete": the ticket's whole outcome already exists after the merge, or can no longer apply. Give the evidence in "reason". When only part is done, use a note instead.
 - "duplicate": two tickets ask for the same outcome. taskId is the one to archive, duplicateOf the one to keep. Never mark a ticket a duplicate of a ticket that is also archived.
 - newTasks: follow-up work the merge left open (open review findings, deferred items) that no existing ticket covers. dependsOn lists ids of existing tasks the new card must wait for (usually none or the merged task is already done, so leave it out). Write a standalone description with acceptance criteria. Titles are short, in sentence case, with no trailing period.
+- Tickets in column "In progress" already run: they only get a "note" (their agent reads it as a message), never obsolete or duplicate. Say what changed that the agent must know now, or leave it out.
 - Be conservative: no update is better than a wrong one. At most one update per ticket. Use only task ids from the lists below. Never mention tasks that are not listed.`;
+
+/** Statuses of a ticket whose agent is working on it */
+const RUNNING_STATUSES = new Set<Task['status']>(['in_progress', 'ai_review']);
+
+/** Running tasks that wait for the merged one (by task id or spec id): they get notes as messages */
+function runningDependents(tasks: readonly Task[], merged: Task): Task[] {
+  return tasks.filter(
+    (t) =>
+      t.id !== merged.id &&
+      RUNNING_STATUSES.has(t.status) &&
+      !t.metadata?.archivedAt &&
+      (t.metadata?.dependsOnTaskIds ?? []).some((dep) => dep === merged.id || dep === merged.specId)
+  );
+}
 
 const GROOMING_SCHEMA: Record<string, unknown> = {
   type: 'object',
@@ -329,10 +359,10 @@ export function buildGroomingPrompt(merged: Task, files: readonly string[], cand
   const tickets = candidates
     .map((task) => {
       const deps = task.metadata?.dependsOnTaskIds?.length ? ` depends_on="${task.metadata.dependsOnTaskIds.join(',')}"` : '';
-      return `<ticket id="${task.id}" column="${task.status === 'queue' ? 'Queue' : 'Planning'}"${deps} title="${task.title.replace(/"/g, "'")}">\n${clip(task.description, MAX_DESCRIPTION_CHARS)}\n</ticket>`;
+      return `<ticket id="${task.id}" column="${task.status === 'queue' ? 'Queue' : task.status === 'backlog' ? 'Planning' : 'In progress'}"${deps} title="${task.title.replace(/"/g, "'")}">\n${clip(task.description, MAX_DESCRIPTION_CHARS)}\n</ticket>`;
     })
     .join('\n');
-  return `${mergedBlock}\n\nTickets waiting in Planning or the Queue:\n${tickets}`;
+  return `${mergedBlock}\n\nTickets waiting in Planning or the Queue, or already running because they depend on the merged task:\n${tickets}`;
 }
 
 // =============================================================================
@@ -383,7 +413,14 @@ async function groomNow(projectId: string, mergedTaskId: string, options: GroomO
   const tasks = deps.getTasks(projectId);
   const merged = tasks.find((t) => t.id === mergedTaskId);
   if (!merged) return;
-  const candidates = tasks.filter((t) => t.id !== mergedTaskId && isGroomableStatus(t.status) && !t.metadata?.archivedAt);
+  // The queue starts dependents the moment the merge lands, so they are already running: they get
+  // their note as a message (only when task messaging is on)
+  const messaging = !!deps.messageTask && (await (deps.messagingEnabled?.() ?? true));
+  const running = messaging ? runningDependents(tasks, merged) : [];
+  const candidates = [
+    ...tasks.filter((t) => t.id !== mergedTaskId && isGroomableStatus(t.status) && !t.metadata?.archivedAt),
+    ...running,
+  ];
   if (candidates.length === 0) return;
 
   let files: string[] = [];
@@ -404,14 +441,22 @@ async function groomNow(projectId: string, mergedTaskId: string, options: GroomO
   await withStateLock(projectId, async () => {
     // The model took a while: tasks may have started or moved. Validate against the tasks as they are now
     const fresh = deps.getTasks(projectId);
-    const result = normalizeGroomingResult(raw, fresh.map(toGroomTask), mergedTaskId);
+    const freshMerged = fresh.find((t) => t.id === mergedTaskId) ?? merged;
+    const noteOnly = new Set(messaging ? runningDependents(fresh, freshMerged).map((t) => t.id) : []);
+    const result = normalizeGroomingResult(raw, fresh.map(toGroomTask), mergedTaskId, noteOnly);
     if (result.updates.length === 0 && result.newTasks.length === 0) return;
 
     const byId = new Map(fresh.map((t) => [t.id, t]));
     for (const update of result.updates) {
       try {
         if (update.kind === 'note') {
-          await addContextNote(deps, projectId, byId.get(update.taskId)!, mergedTaskId, update.note);
+          const target = byId.get(update.taskId)!;
+          if (noteOnly.has(target.id)) {
+            // Rewriting a running ticket's description would not reach its agent: message it
+            await deps.messageTask!(projectId, target, `Task ${merged.id} "${merged.title.replace(/"/g, "'")}", which your ticket depends on, was merged. ${update.note}`);
+            continue;
+          }
+          await addContextNote(deps, projectId, target, mergedTaskId, update.note);
           continue;
         }
         await addProposal(deps, project, {

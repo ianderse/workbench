@@ -25,6 +25,17 @@ export interface TaskMessage {
    */
   status: 'queued' | 'sent' | 'read';
   readAt?: string;
+  /**
+   * What a Workbench notice is about, so it can be dropped once it is out of date (a "started"
+   * notice for a task that has finished since). Absent on older inbox files and on other messages.
+   */
+  about?: MessageAbout;
+}
+
+/** The task event a notice announces */
+export interface MessageAbout {
+  specId: string;
+  event: 'started';
 }
 
 /** What happened to a message, in plain words for the sender */

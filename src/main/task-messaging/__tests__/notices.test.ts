@@ -40,14 +40,14 @@ afterEach(() => {
 });
 
 describe('TaskNotices', () => {
-  it('tells the other active and queued tasks that a task started, once per start', async () => {
+  it('tells the other running tasks (not queued or finished ones) that a task started, once per start', async () => {
     await notices.onState({ project, task: tasks[0], status: 'queue' });
     await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'planning' });
     await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'coding' });
     await notices.flush();
 
     expect(await texts('002-b')).toEqual([expect.stringMatching(/^Task 001-a "T001" \(session wb-[a-z0-9]{6}-001-a\) started\.$/)]);
-    expect(await texts('003-c')).toHaveLength(1);
+    expect(await texts('003-c')).toEqual([]);
     expect(await texts('001-a')).toEqual([]);
     expect(await texts('004-d')).toEqual([]);
   });
@@ -70,14 +70,43 @@ describe('TaskNotices', () => {
     expect(theirs[0]).toContain('Task 001-a');
   });
 
-  it('batches several notices for one target into one message', async () => {
+  it('batches overlap notices for one target into one message and sends started notices on their own', async () => {
+    changelog([{ at: '2026-10-01T00:00:00Z', task: '002-b', event: 'state', status: 'in_progress', files: ['src/a.ts', 'src/b.ts'] }]);
     await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'planning' });
-    await notices.onState({ project, task: tasks[2], status: 'queue' });
-    tasks[2].status = 'in_progress';
-    await notices.onState({ project, task: tasks[2], status: 'in_progress', state: 'planning' });
+    notices.onFilesEdited({ project, task: tasks[0], files: ['src/a.ts'] });
+    notices.onFilesEdited({ project, task: tasks[0], files: ['src/b.ts'] });
     await notices.flush();
-    const [batch] = await texts('002-b');
-    expect(batch).toMatch(/^Updates on parallel tasks:\n- Task 001-a .* started\.\n- Task 003-c .* started\.$/);
+    const theirs = await texts('002-b');
+    expect(theirs).toHaveLength(2);
+    expect(theirs.filter((t) => t.endsWith('started.'))).toHaveLength(1);
+    expect(theirs.filter((t) => t.includes('also change'))).toHaveLength(1);
+  });
+
+  it('drops a started notice once that task is no longer running when the notice is delivered', async () => {
+    await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'planning' });
+    tasks[0].status = 'human_review';
+    await notices.flush();
+    expect(await texts('002-b')).toEqual([]);
+
+    // One that was queued earlier is dropped (and counts as read) when the task reads its inbox
+    tasks[0].status = 'in_progress';
+    await notices.onState({ project, task: tasks[0], status: 'queue' });
+    await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'planning' });
+    await notices.flush();
+    tasks[0].status = 'done';
+    expect(await texts('002-b')).toEqual([]);
+    expect(await takeInbox('p1', '002-b')).toEqual([]);
+  });
+
+  it('does not announce the same start again while the first notice is unread (a resume)', async () => {
+    await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'planning' });
+    await notices.flush();
+    // The app restarted: a new instance sees the resumed task start again
+    notices.stop();
+    notices = new TaskNotices({ batchMs: 60_000, editBatchMs: 60_000, isMerged: async () => true });
+    await notices.onState({ project, task: tasks[0], status: 'in_progress', state: 'planning' });
+    await notices.flush();
+    expect(await texts('002-b')).toHaveLength(1);
   });
 
   it('tells overlapping active tasks when a task finished, with its summary', async () => {

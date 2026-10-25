@@ -6,7 +6,9 @@
  * other without asking. Driven by the task hooks (`state`, `files-edited`) and the project's task
  * changelog (which files each task changes):
  *
- * - a task started                      -> the other active tasks
+ * - a task started                      -> the other running tasks (queued ones get the briefing and
+ *                                          the parallel tasks section when they start); dropped when it
+ *                                          is no longer running once read, one unread notice per task
  * - two tasks change the same files     -> both (once per pair and file)
  * - a task finished (Human Review)      -> active tasks that change the same files, with its
  *                                          summary and its "Decisions/API changes" line
@@ -24,11 +26,14 @@ import { taskSessionName } from '../../shared/utils/task-messaging';
 import { taskHooks, type TaskHookEvents } from '../task-hooks';
 import { foldTaskChangelog, getTaskChangelogPath, readTaskChangelog, type TaskChangelogTask } from '../task-changelog';
 import { deliverToTask, getTaskMessagingEnv, taskSpecDir } from './broker';
+import type { MessageAbout } from './types';
 import { MergeSync, announcesMergeOnDone, hasTaskMerge, recordTaskMerge, takeTaskMerge, type MergeSyncOptions, type TaskMergeInfo } from './merge-sync';
 import { isStoppedByUser } from '../task-resync/user-stop';
 
 /** Tasks that get notices: running, reviewed by AI, or waiting in the queue (their inbox) */
 const RECIPIENT_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_review']);
+/** Tasks that hear a task started: running ones only, as queued ones get the briefing when they start */
+const RUNNING_STATUSES = new Set<TaskStatus>(['in_progress', 'ai_review']);
 /** Tasks whose changes are not merged yet */
 const UNMERGED_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_review', 'human_review', 'pr_created', 'error']);
 const MAX_FILES_LISTED = 10;
@@ -103,7 +108,14 @@ export class TaskNotices {
   private readonly pendingEdits = new Map<string, { project: Project; files: Map<string, Set<string>>; timer: ReturnType<typeof setTimeout> }>();
   /** `<project>\0<a>\0<b>\0<file>` (a < b): overlaps already announced */
   private readonly announcedOverlaps = new Set<string>();
-  private readonly batches = new Map<string, { projectId: string; specId: string; lines: string[]; timer: ReturnType<typeof setTimeout> }>();
+  private readonly batches = new Map<string, {
+    projectId: string;
+    specId: string;
+    lines: string[];
+    /** "started" notices by task, sent on their own so each can be dropped or deduplicated */
+    started: Map<string, string>;
+    timer: ReturnType<typeof setTimeout>;
+  }>();
   private readonly unsubscribe: Array<() => void> = [];
   private readonly mergeSync: MergeSync;
 
@@ -168,8 +180,8 @@ export class TaskNotices {
     if (status === 'in_progress') {
       const fresh = previous === 'backlog' || previous === 'queue' || (previous === undefined && (!state || state === 'planning'));
       if (!fresh || !this.enabled()) return;
-      for (const other of this.recipients(project.id, task.specId)) {
-        this.queueNotice(project.id, other.specId, `${describe(project.id, task)} started.`);
+      for (const other of this.recipients(project.id, task.specId, RUNNING_STATUSES)) {
+        this.queueNotice(project.id, other.specId, `${describe(project.id, task)} started.`, { specId: task.specId, event: 'started' });
       }
       return;
     }
@@ -309,14 +321,15 @@ export class TaskNotices {
   // Batches
   // ---------------------------------------------------------------------------
 
-  private queueNotice(projectId: string, specId: string, line: string): void {
+  private queueNotice(projectId: string, specId: string, line: string, about?: MessageAbout): void {
     const target = key(projectId, specId);
     let batch = this.batches.get(target);
     if (!batch) {
-      batch = { projectId, specId, lines: [], timer: setTimeout(() => void this.sendBatch(target), this.batchMs) };
+      batch = { projectId, specId, lines: [], started: new Map(), timer: setTimeout(() => void this.sendBatch(target), this.batchMs) };
       this.batches.set(target, batch);
     }
-    if (!batch.lines.includes(line)) batch.lines.push(line);
+    if (about) batch.started.set(about.specId, line);
+    else if (!batch.lines.includes(line)) batch.lines.push(line);
   }
 
   private async sendBatch(target: string): Promise<void> {
@@ -326,7 +339,13 @@ export class TaskNotices {
     this.batches.delete(target);
     const env = getTaskMessagingEnv();
     const task = env?.getTasks(batch.projectId).find((t) => t.specId === batch.specId);
-    if (!task || batch.lines.length === 0) return;
+    if (!task) return;
+    // Each "started" notice goes alone: deliverToTask drops it when that task no longer runs or
+    // when an unread one about it already waits
+    for (const [subject, line] of batch.started) {
+      await deliverToTask(batch.projectId, task, { kind: 'workbench' }, line, { specId: subject, event: 'started' });
+    }
+    if (batch.lines.length === 0) return;
     const text = batch.lines.length === 1
       ? batch.lines[0]
       : `Updates on parallel tasks:\n${batch.lines.map((line) => `- ${line}`).join('\n')}`;
@@ -338,10 +357,10 @@ export class TaskNotices {
   // ---------------------------------------------------------------------------
 
   /** Other tasks of the project that get notices now */
-  private recipients(projectId: string, specId: string): Task[] {
+  private recipients(projectId: string, specId: string, statuses: ReadonlySet<TaskStatus> = RECIPIENT_STATUSES): Task[] {
     const env = getTaskMessagingEnv();
     return (env?.getTasks(projectId) ?? []).filter(
-      (t) => t.specId !== specId && RECIPIENT_STATUSES.has(t.status) && !t.metadata?.archivedAt
+      (t) => t.specId !== specId && statuses.has(t.status) && !t.metadata?.archivedAt
     );
   }
 

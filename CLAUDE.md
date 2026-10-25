@@ -231,7 +231,7 @@ Parallel tasks message each other through Workbench (`src/main/task-messaging/`:
 local MCP; Settings > Agents > Task messaging) and, when a task is merged, every other task on that base branch that lacks
 the merge goes back to In Progress to take it in (`src/main/task-resync/`, `ClaudeTaskRun` phase `resync`, request in
 `resync_request.json`). Messaging reaches OMP tasks too: the tools come from a per-run extension file (`task-messaging/omp-extension.ts`, `omp -e`) and live messages are steered into the running step through `omp --mode rpc` (`agent-backend/omp-rpc.ts`, setting `omp.liveMessages`; `-p` fallback keeps messages in the inbox for the next step);
-resync runs on either backend. See `docs/upstream-sync/2026-10-25.md` for how it was merged with this fork's features.
+resync runs on either backend. "Started" notices go to running tasks only and carry `TaskMessage.about`, so they are dropped once that task is no longer running and are not queued twice while an unread one waits. See `docs/upstream-sync/2026-10-25.md` for how it was merged with this fork's features.
 
 ### Stale tickets (briefing and queue grooming)
 
@@ -246,7 +246,7 @@ Tickets are written before the code exists, so later ones go stale as earlier ta
   `groomQueueAfterMerge(projectId, taskId, { autoApplyStructural: false })` (`src/main/queue-grooming.ts`). One background,
   read-only `runClaudeText` call (OMP role `plan`) compares the merged task with the tickets in Planning and the Queue.
   Notes are applied at once (appended to the description and kept in `metadata.contextNotes`, shown on the card and undoable
-  in the task dialog). Obsolete, duplicate and new-task answers become proposals in `.workbench/queue-proposals.json`,
+  in the task dialog; running tasks that depend on the merged one get the note as a Workbench message instead, when task messaging is on). Obsolete, duplicate and new-task answers become proposals in `.workbench/queue-proposals.json`,
   shown in the "Queue updates" panel on the board (`QueueUpdatesPanel`); with `autoApplyStructural` they apply at once and
   leave an undo entry. The project setting `groomQueueAfterMerge` (default on) turns it off. The answer is validated by
   `normalizeGroomingResult()` (`shared/utils/queue-grooming.ts`).

@@ -14,6 +14,7 @@ import {
   notePeerMessage,
   registerLiveRun,
   resetTaskMessagingForTests,
+  deliverToTask,
   takeInbox,
   taskSpecDir,
 } from '../broker';
@@ -198,5 +199,42 @@ describe('OMP targets (no live run, no stdin)', () => {
     expect(await takeInbox('p1', '002-live')).toHaveLength(1);
     await markInboxRead('p1', '002-live', [outcome.messageId!]);
     expect(await takeInbox('p1', '002-live')).toEqual([]);
+  });
+});
+
+describe('started notices', () => {
+  const wb = { kind: 'workbench' as const };
+  const about = { specId: '003-queued', event: 'started' as const };
+
+  it('drops a started notice whose task is no longer running from the inbox, keeping other messages', async () => {
+    tasks[2].status = 'in_progress';
+    await deliverToTask('p1', tasks[1], wb, 'Task 003 started.', about);
+    await deliverToTask('p1', tasks[1], wb, 'Something else.');
+    tasks[2].status = 'human_review';
+
+    expect((await takeInbox('p1', '002-live')).map((m) => m.text)).toEqual(['Something else.']);
+    expect((await readInbox(taskSpecDir(project, '002-live'))).find((m) => m.about)?.status).toBe('read');
+  });
+
+  it('refuses a started notice about a task that is not running', async () => {
+    const outcome = await deliverToTask('p1', tasks[1], wb, 'Task 004 started.', { specId: '004-review', event: 'started' });
+    expect(outcome.status).toBe('refused');
+    expect(await takeInbox('p1', '002-live')).toEqual([]);
+  });
+
+  it('keeps one unread started notice per task, and announces again once it was read', async () => {
+    tasks[2].status = 'in_progress';
+    await deliverToTask('p1', tasks[1], wb, 'Task 003 started.', about);
+    await deliverToTask('p1', tasks[1], wb, 'Task 003 started.', about);
+    const [first, ...rest] = await takeInbox('p1', '002-live');
+    expect(rest).toEqual([]);
+    await markInboxRead('p1', '002-live', [first.id]);
+    await deliverToTask('p1', tasks[1], wb, 'Task 003 started.', about);
+    expect(await takeInbox('p1', '002-live')).toHaveLength(1);
+  });
+
+  it('never treats messages without `about` (older inbox files) as out of date', async () => {
+    await deliverToTask('p1', tasks[1], wb, 'Task 009 started.');
+    expect(await takeInbox('p1', '002-live')).toHaveLength(1);
   });
 });

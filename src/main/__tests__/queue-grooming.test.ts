@@ -163,6 +163,86 @@ describe('groomQueueAfterMerge', () => {
     expect((await readQueueProposals(project)).proposals).toEqual([]);
   });
 
+  describe('running dependents', () => {
+    let sent: Array<{ taskId: string; text: string }>;
+    const withMessaging = (enabled = true): GroomingDeps => {
+      const deps = makeDeps();
+      deps.messagingEnabled = () => enabled;
+      deps.messageTask = async (_projectId, task, text) => {
+        sent.push({ taskId: task.id, text });
+      };
+      return deps;
+    };
+
+    beforeEach(() => {
+      sent = [];
+      // The queue started 002 the moment 001 merged
+      tasks.find((t) => t.id === '002-map')!.status = 'in_progress';
+    });
+
+    it('sends the note to a running dependent as a message and leaves its description alone', async () => {
+      modelAnswer = { updates: [{ taskId: '002-map', kind: 'note', note: 'Use createRng(seed)', reason: 'merged' }], newTasks: [] };
+      await groomQueueAfterMerge('p1', '001-prng', { autoApplyStructural: false }, withMessaging());
+
+      expect(modelCalls[0].prompt).toContain('<ticket id="002-map" column="In progress"');
+      // Running tickets that do not depend on the merged task are still left out
+      expect(modelCalls[0].prompt).not.toContain('<ticket id="005-ui"');
+      expect(sent).toHaveLength(1);
+      expect(sent[0].taskId).toBe('002-map');
+      expect(sent[0].text).toContain('Use createRng(seed)');
+      expect(sent[0].text).toContain('001-prng');
+      const map = tasks.find((t) => t.id === '002-map')!;
+      expect(map.description).toBe('Description of 002-map');
+      expect(map.metadata?.contextNotes).toBeUndefined();
+    });
+
+    it('never archives or flags a running dependent, only notes it', async () => {
+      modelAnswer = { updates: [{ taskId: '002-map', kind: 'obsolete', reason: 'covered' }], newTasks: [] };
+      await groomQueueAfterMerge('p1', '001-prng', { autoApplyStructural: true }, withMessaging());
+      expect(sent).toEqual([]);
+      expect(tasks.find((t) => t.id === '002-map')!.metadata?.archivedAt).toBeUndefined();
+      expect((await readQueueProposals(project)).proposals).toEqual([]);
+    });
+
+    it('skips running dependents when task messaging is off', async () => {
+      modelAnswer = { updates: [{ taskId: '002-map', kind: 'note', note: 'x', reason: 'y' }], newTasks: [] };
+      await groomQueueAfterMerge('p1', '001-prng', { autoApplyStructural: false }, withMessaging(false));
+      expect(modelCalls[0].prompt).not.toContain('<ticket id="002-map"');
+      expect(sent).toEqual([]);
+    });
+
+    it('still notes queued tickets by description while running ones get a message', async () => {
+      tasks.find((t) => t.id === '004-loot')!.metadata = { dependsOnTaskIds: ['001-prng'] };
+      modelAnswer = {
+        updates: [
+          { taskId: '002-map', kind: 'note', note: 'For the running one', reason: 'y' },
+          { taskId: '004-loot', kind: 'note', note: 'For the queued one', reason: 'y' },
+        ],
+        newTasks: [],
+      };
+      await groomQueueAfterMerge('p1', '001-prng', { autoApplyStructural: false }, withMessaging());
+      expect(sent.map((m) => m.taskId)).toEqual(['002-map']);
+      expect(tasks.find((t) => t.id === '004-loot')!.description).toContain('For the queued one');
+    });
+
+    it('logs and carries on when the message cannot be delivered', async () => {
+      tasks.find((t) => t.id === '004-loot')!.metadata = { dependsOnTaskIds: ['001-prng'] };
+      modelAnswer = {
+        updates: [
+          { taskId: '002-map', kind: 'note', note: 'A', reason: 'y' },
+          { taskId: '004-loot', kind: 'note', note: 'B', reason: 'y' },
+        ],
+        newTasks: [],
+      };
+      const deps = withMessaging();
+      deps.messageTask = async () => {
+        throw new Error('not sent');
+      };
+      await groomQueueAfterMerge('p1', '001-prng', { autoApplyStructural: false }, deps);
+      expect(tasks.find((t) => t.id === '004-loot')!.description).toContain('B');
+    });
+  });
+
   it('stores obsolete, duplicate and new task proposals without applying them', async () => {
     modelAnswer = {
       updates: [

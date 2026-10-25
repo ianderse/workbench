@@ -81,14 +81,21 @@ export function dependsTransitively(tasks: readonly GroomTask[], from: string, t
 
 /**
  * Clean up the model's answer. Unknown task ids are dropped; only tickets in Planning or the
- * Queue (not archived, never the merged task) can be updated; each ticket gets one update;
+ * Queue (not archived, never the merged task) can be updated, and running tickets in `noteOnlyIds` get notes only; each ticket gets one update;
  * a ticket is never a duplicate of a ticket that is itself being removed; new cards only wait for
  * existing tasks that stay (so their dependencies cannot form a cycle).
  */
-export function normalizeGroomingResult(raw: unknown, tasks: readonly GroomTask[], mergedTaskId: string): GroomingResult {
+export function normalizeGroomingResult(
+  raw: unknown,
+  tasks: readonly GroomTask[],
+  mergedTaskId: string,
+  /** Running tickets that may get a note (never an obsolete or duplicate update) */
+  noteOnlyIds: ReadonlySet<string> = new Set()
+): GroomingResult {
   const live = tasks.filter((t) => !t.archived);
   const liveIds = new Set(live.map((t) => t.id));
   const groomable = new Set(live.filter((t) => isGroomableStatus(t.status) && t.id !== mergedTaskId).map((t) => t.id));
+  const noteOnly = new Set([...noteOnlyIds].filter((id) => liveIds.has(id) && id !== mergedTaskId && !groomable.has(id)));
 
   const record = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
   const rawUpdates = Array.isArray(record.updates) ? record.updates : [];
@@ -106,7 +113,8 @@ export function normalizeGroomingResult(raw: unknown, tasks: readonly GroomTask[
     if (!item || typeof item !== 'object') continue;
     const r = item as Record<string, unknown>;
     const taskId = typeof r.taskId === 'string' ? r.taskId.trim() : '';
-    if (!groomable.has(taskId) || touched.has(taskId)) continue;
+    if (!(groomable.has(taskId) || noteOnly.has(taskId)) || touched.has(taskId)) continue;
+    if (noteOnly.has(taskId) && r.kind !== 'note') continue;
     const reason = cleanText(r.reason, MAX_REASON_CHARS);
     if (r.kind === 'note') {
       const note = cleanText(r.note, MAX_NOTE_CHARS);

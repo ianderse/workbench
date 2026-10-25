@@ -25,12 +25,14 @@ import { getSpecsDir } from '../../shared/constants/config';
 import { parseSessionName, projectKey, taskSessionName } from '../../shared/utils/task-messaging';
 import { taskStatusLabel as statusLabel } from '../task-changelog';
 import { readInbox, updateInbox } from './inbox';
-import type { DeliveryOutcome, MessageSender, TaskMessage } from './types';
+import type { DeliveryOutcome, MessageAbout, MessageSender, TaskMessage } from './types';
 
 /** Longest message a task may send */
 export const MAX_MESSAGE_LENGTH = 8000;
 /** Native peer message ids seen recently, so a late tracked send is not requeued */
 const MAX_SEEN_PEER_IDS = 500;
+/** Statuses in which a task's "started" notice is still true */
+const ACTIVE_STATUSES = new Set<Task['status']>(['in_progress', 'ai_review']);
 
 // =============================================================================
 // Environment
@@ -125,7 +127,9 @@ async function flushQueued(projectId: string, specId: string, entry: LiveRun, in
   let pending: TaskMessage[] = [];
   await updateInbox(specDir, (messages) => {
     if (liveRuns.get(key) !== entry) return;
-    pending = messages.filter((m) => m.status === 'queued' && !inPrompt.has(m.id));
+    const queued = messages.filter((m) => m.status === 'queued' && !inPrompt.has(m.id));
+    dropStaleNotices(projectId, queued);
+    pending = queued.filter((m) => m.status === 'queued');
     for (const message of pending) message.status = 'sent';
   });
   if (pending.length === 0) return;
@@ -142,8 +146,8 @@ async function flushQueued(projectId: string, specId: string, entry: LiveRun, in
 // Messages
 // =============================================================================
 
-function newMessage(from: MessageSender, text: string, status: TaskMessage['status'], at = new Date().toISOString()): TaskMessage {
-  return { id: `wbm-${randomBytes(6).toString('hex')}`, at, from, text, status };
+function newMessage(from: MessageSender, text: string, status: TaskMessage['status'], at = new Date().toISOString(), about?: MessageAbout): TaskMessage {
+  return { id: `wbm-${randomBytes(6).toString('hex')}`, at, from, text, status, ...(about ? { about } : {}) };
 }
 
 function quote(title: string | undefined): string {
@@ -174,6 +178,16 @@ ${messages.map(formatMessage).join('\n\n')}
 }
 
 export { statusLabel };
+
+/**
+ * Whether a notice is out of date: a "started" notice whose task is no longer running (it
+ * finished, was merged or archived, or is gone). Messages without `about` never are.
+ */
+export function isStaleNotice(projectId: string, about: MessageAbout | undefined): boolean {
+  if (!about || about.event !== 'started' || !env) return false;
+  const subject = env.getTasks(projectId).find((t) => t.specId === about.specId);
+  return !subject || !!subject.metadata?.archivedAt || !ACTIVE_STATUSES.has(subject.status);
+}
 
 /** Why a task can't get messages any more, or undefined when it can */
 function refusal(task: Task): string | undefined {
@@ -222,23 +236,36 @@ export async function deliver(projectId: string, target: string, from: MessageSe
 }
 
 /** Deliver to a resolved task (no self check: Workbench may write to any task) */
-export async function deliverToTask(projectId: string, task: Task, from: MessageSender, text: string): Promise<DeliveryOutcome> {
+export async function deliverToTask(
+  projectId: string,
+  task: Task,
+  from: MessageSender,
+  text: string,
+  /** What the message announces: it is dropped when out of date or when the same one waits unread */
+  about?: MessageAbout,
+): Promise<DeliveryOutcome> {
   const refused = refusal(task);
   if (refused) return { status: 'refused', detail: `not sent: ${refused}. Its changes no longer need coordinating` };
   const project = env?.getProject(projectId);
   if (!project) return { status: 'refused', detail: 'not sent: the project is not open in Workbench' };
   const specDir = taskSpecDir(project, task.specId);
+  if (about) {
+    if (isStaleNotice(projectId, about)) return { status: 'refused', detail: `not sent: ${about.specId} is no longer running` };
+    // A resume announces the same start again: the earlier notice, still unread, says it
+    const waiting = (await readInbox(specDir)).some((m) => m.status !== 'read' && m.about?.specId === about.specId && m.about.event === about.event);
+    if (waiting) return { status: 'queued', detail: `queued: the same notice about ${about.specId} already waits unread` };
+  }
   const live = liveRuns.get(runKey(projectId, task.specId));
 
   if (live) {
-    const message = newMessage(from, text, 'sent');
+    const message = newMessage(from, text, 'sent', undefined, about);
     // Queued before the write, so the read receipt's update lands after it
     const saved = updateInbox(specDir, (messages) => {
       messages.push(message);
     });
     if (live.send(formatMessage(message), message.id) !== false) {
       await saved;
-      return { status: 'delivered', detail: `delivered: ${task.specId}${quote(task.title)} is running and reads it at its next step`, messageId: message.id };
+      return { status: 'delivered', detail: `delivered: ${task.specId}${quote(task.title)} is running and reads it at its next turn`, messageId: message.id };
     }
     await saved;
     await updateInbox(specDir, (messages) => {
@@ -248,7 +275,7 @@ export async function deliverToTask(projectId: string, task: Task, from: Message
     return { status: 'queued', detail: `queued: ${task.specId}${quote(task.title)} is between steps; it reads this when its next step starts`, messageId: message.id };
   }
 
-  const message = newMessage(from, text, 'queued');
+  const message = newMessage(from, text, 'queued', undefined, about);
   await updateInbox(specDir, (messages) => {
     messages.push(message);
   });
@@ -276,7 +303,22 @@ export async function takeInbox(projectId: string, specId: string): Promise<Task
   const specDir = specDirOf(projectId, specId);
   if (!specDir) return [];
   const live = isTaskLive(projectId, specId);
-  return (await readInbox(specDir)).filter((m) => m.status === 'queued' || (m.status === 'sent' && !live));
+  const waiting = (await readInbox(specDir)).filter((m) => m.status === 'queued' || (m.status === 'sent' && !live));
+  const stale = new Set(waiting.filter((m) => isStaleNotice(projectId, m.about)).map((m) => m.id));
+  if (stale.size === 0) return waiting;
+  // Out-of-date notices are never shown: they count as read
+  await markInboxRead(projectId, specId, [...stale]);
+  return waiting.filter((m) => !stale.has(m.id));
+}
+
+/** Mark the out-of-date notices among `messages` read in place (they are not delivered) */
+function dropStaleNotices(projectId: string, messages: TaskMessage[]): void {
+  const at = new Date().toISOString();
+  for (const message of messages) {
+    if (!isStaleNotice(projectId, message.about)) continue;
+    message.status = 'read';
+    message.readAt = at;
+  }
 }
 
 /** Mark inbox messages read (the session read the prompt or stdin message carrying them) */

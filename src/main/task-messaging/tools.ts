@@ -82,7 +82,7 @@ export const TASK_RUN_TOOLS: TaskRunTool[] = [
     name: 'message_task',
     description:
       'Send a short message to another task of this project. Workbench delivers it whatever state the task is in: ' +
-      'a running task reads it at its next step, a task between steps or not started reads it when it next runs. Use it when your change affects ' +
+      'a running task reads it at its next turn, a task between steps or not started reads it when it next runs. Use it when your change affects ' +
       "files, APIs or schemas the other task works with, when you are blocked on something it will settle, or to answer a question it sent you. " +
       'Returns what happened: delivered, queued or not sent (and why).',
     inputSchema: {
