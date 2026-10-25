@@ -10,9 +10,7 @@ import type { AgentManager } from '../agent/agent-manager';
 import { projectStore } from '../project-store';
 import { terminalNameGenerator } from '../terminal-name-generator';
 import { readSettingsFileAsync } from '../settings-utils';
-import { debugLog, } from '../../shared/utils/debug-logger';
-import { migrateSession } from '../claude-profile/session-utils';
-import { findMostRecentClaudeSession } from '../terminal/session-handler';
+import { appLog } from '../app-logger';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
 import { isValidConfigDir } from '../utils/config-path-validator';
 import { getToolInfoAsync } from '../cli-tool-manager';
@@ -343,81 +341,14 @@ export function registerTerminalHandlers(
 
         const newProfile = profileManager.getProfile(profileId);
 
-        // If the profile actually changed, restart Claude in active terminals
-        // This ensures existing Claude sessions use the new profile's OAuth token
-        const profileChanged = previousProfileId !== profileId;
-
-        if (profileChanged) {
-          // Get all terminal info for profile change
-          const terminals = terminalManager.getTerminalsForProfileChange();
-          debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Terminals for profile change:', terminals.length);
-
-          // Determine config directories for session migration
-          // All profiles now have their own configDir (no special case for default)
-          const sourceConfigDir = previousProfile.configDir;
-          const targetConfigDir = newProfile?.configDir;
-
-          // Build terminal refresh info for frontend
-          const terminalsNeedingRefresh: Array<{
-            id: string;
-            sessionMigrated?: boolean;
-            isCLIMode?: boolean;
-            dangerouslySkipPermissions?: boolean;
-          }> = [];
-
-          // Process each terminal
-          for (const terminal of terminals) {
-            debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Processing terminal:', {
-              id: terminal.id,
-              isCLIMode: terminal.isCLIMode,
-              cwd: terminal.cwd
+        // Agent windows running Claude Code continue their own session on the new account, in
+        // place: same shell, id and place in the grid. Plain terminals are left as they are. Each
+        // window ends Claude Code first (up to a few seconds), so this runs after the reply
+        if (previousProfileId !== profileId) {
+          for (const terminal of terminalManager.getTerminalsForProfileChange()) {
+            terminalManager.moveAgentWindowToAccount(terminal.id, profileId, newProfile?.configDir).catch((error) => {
+              appLog.warn('[terminal-handlers] Could not move an agent window to the new account:', error);
             });
-
-            let sessionMigrated = false;
-
-            // If Claude is running, copy the project's latest session (the one `claude --continue`
-            // picks up) to the new profile, so the recreated terminal continues it there
-            const projectDir = terminal.projectPath || terminal.cwd;
-            const latestSessionId = terminal.isCLIMode && sourceConfigDir
-              ? findMostRecentClaudeSession(projectDir, sourceConfigDir)
-              : null;
-            if (latestSessionId && sourceConfigDir && targetConfigDir) {
-              debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Migrating latest session:', {
-                sessionId: latestSessionId,
-                from: sourceConfigDir,
-                to: targetConfigDir
-              });
-
-              const migrationResult = await migrateSession(
-                sourceConfigDir,
-                targetConfigDir,
-                projectDir,
-                latestSessionId
-              );
-
-              sessionMigrated = migrationResult.success;
-              debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Session migration result:', migrationResult);
-            }
-
-            // All terminals need refresh (PTY env vars can't be updated)
-            terminalsNeedingRefresh.push({
-              id: terminal.id,
-              sessionMigrated,
-              isCLIMode: terminal.isCLIMode,
-              dangerouslySkipPermissions: terminal.dangerouslySkipPermissions
-            });
-          }
-
-          debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Terminals needing refresh:', terminalsNeedingRefresh);
-
-          // Notify every project window that its terminals need to be refreshed
-          // Frontend will destroy and recreate terminals with new profile env vars
-          if (safeSendToRenderer(getMainWindow, IPC_CHANNELS.TERMINAL_PROFILE_CHANGED, {
-            previousProfileId,
-            newProfileId: profileId,
-            terminals: terminalsNeedingRefresh
-          })) {
-            debugLog('[terminal-handlers:CLAUDE_PROFILE_SET_ACTIVE] Sent TERMINAL_PROFILE_CHANGED event to frontend');
           }
         }
 

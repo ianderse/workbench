@@ -41,8 +41,8 @@ import type {
   OAuthTokenEvent
 } from './types';
 import { getClaudeGlobalConfigPath, isDefaultClaudeConfigDir } from '../claude-profile/config-dir-paths';
-import { lastAgentSession, readAgentSessions, recordAgentSessionAsync } from '../agent-session-store';
-import { getSessionFilePath } from '../claude-profile/session-utils';
+import { lastAgentSession, readAgentSessions, recordAgentSession, recordAgentSessionAsync } from '../agent-session-store';
+import { getSessionFilePath, migrateSession } from '../claude-profile/session-utils';
 import { findSessionTranscript, latestTranscript } from '../claude-code/session-spending';
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
 import { appLog } from '../app-logger';
@@ -2009,6 +2009,51 @@ export async function resumeClaudeAsync(
 }
 
 /**
+ * Move an agent window to another Claude account, in place: Claude Code ends, the window's own
+ * session is copied to the account's config dir and recorded there, and the window resumes it on
+ * that account. The window keeps its shell, its id and its place in the grid. Recreating it instead
+ * gave it a new id, under which its own session could not be found, so it resumed another
+ * conversation on the old account, or closed when that session was still running.
+ */
+export async function moveAgentWindowToAccount(
+  terminal: TerminalProcess,
+  targetConfigDir: string | undefined,
+  getWindow: WindowGetter
+): Promise<void> {
+  const own = terminal.projectPath ? await lastAgentSession(terminal.projectPath, terminal.id) : undefined;
+
+  // The transcript is complete, and the session free to resume, once Claude Code has exited
+  await exitClaudeForRestart(terminal);
+
+  if (own && targetConfigDir && terminal.projectPath) {
+    const paths = isClaudeHomeInWsl() ? path.win32 : path;
+    const target = paths.resolve(expandClaudeHome(targetConfigDir));
+    const ownCwd = own.cwd ? toRuntimePath(own.cwd) : undefined;
+    // The account whose dir holds the session now, searched the way a resume searches
+    let source: string | undefined;
+    for (const configDir of sessionSearchDirs(own.configDir)) {
+      const holds = ownCwd
+        ? await holdsSessionTranscript(configDir, ownCwd, own.sessionId)
+        : !!(await findSessionTranscript(own.sessionId, [configDir]));
+      if (holds) {
+        source = configDir;
+        break;
+      }
+    }
+    const migrated = source === target
+      || (source !== undefined && (await migrateSession(source, target, own.cwd || terminal.cwd, own.sessionId)).success);
+    if (migrated) {
+      // Recorded under the new account, so the resume below looks there first and runs on it
+      await recordAgentSession(terminal.projectPath, { ...own, configDir: resolveSessionConfigDir(targetConfigDir), terminalId: terminal.id });
+    } else {
+      appLog.warn(`[ClaudeIntegration] Could not move session ${own.sessionId} of window ${terminal.id} to the new account`);
+    }
+  }
+
+  await resumeClaudeAsync(terminal, getWindow);
+}
+
+/**
  * Configuration for waiting for Claude to exit
  */
 interface WaitForExitConfig {
@@ -2106,6 +2151,27 @@ async function waitForClaudeExit(
 }
 
 /**
+ * End Claude Code in a window for a restart the app makes itself: Ctrl+C, then `/exit`, then wait
+ * for the shell prompt. The CLI exit marker that follows keeps the window open (cliRestarting), and
+ * the session is no longer running when the window picks it up again.
+ */
+async function exitClaudeForRestart(terminal: TerminalProcess): Promise<void> {
+  terminal.cliRestarting = true;
+  // Ctrl+C interrupts whatever Claude Code is doing, then /exit ends it
+  PtyManager.writeToPty(terminal, '\x03');
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  PtyManager.writeToPty(terminal, '/exit\r');
+
+  const exitResult = await waitForClaudeExit(terminal, { timeout: 5000, pollInterval: 100 });
+  // Going on regardless: the alternative would leave the window stuck
+  if (exitResult.timedOut) {
+    appLog.warn('[ClaudeIntegration] Timed out waiting for Claude Code to exit in window', terminal.id);
+  } else if (!exitResult.success) {
+    appLog.warn('[ClaudeIntegration] Claude Code did not exit cleanly in window', terminal.id, exitResult.error);
+  }
+}
+
+/**
  * Switch terminal to a different Claude profile
  */
 export async function switchClaudeProfile(
@@ -2151,45 +2217,8 @@ export async function switchClaudeProfile(
   debugLog('[ClaudeIntegration:switchClaudeProfile] Switching to Claude profile:', profile.name);
 
   if (terminal.isCLIMode) {
-    console.warn('[ClaudeIntegration:switchClaudeProfile] Sending exit commands (Ctrl+C, /exit)');
-    debugLog('[ClaudeIntegration:switchClaudeProfile] Terminal is in Claude mode, sending exit commands');
-
-    // The CLI's exit marker that follows is the app's own restart: keep the window open
-    terminal.cliRestarting = true;
-
-    // Send Ctrl+C to interrupt any ongoing operation
-    debugLog('[ClaudeIntegration:switchClaudeProfile] Sending Ctrl+C (\\x03)');
-    // Use PtyManager.writeToPty for safer write with error handling
-    PtyManager.writeToPty(terminal, '\x03');
-
-    // Wait briefly for Ctrl+C to take effect before sending /exit
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    // Send /exit command
-    debugLog('[ClaudeIntegration:switchClaudeProfile] Sending /exit command');
-    // Use PtyManager.writeToPty for safer write with error handling
-    PtyManager.writeToPty(terminal, '/exit\r');
-
-    // Wait for Claude to actually exit by monitoring for shell prompt
-    const exitResult = await waitForClaudeExit(terminal, { timeout: 5000, pollInterval: 100 });
-
-    if (exitResult.timedOut) {
-      console.warn('[ClaudeIntegration:switchClaudeProfile] Timed out waiting for Claude to exit, proceeding with caution');
-      debugLog('[ClaudeIntegration:switchClaudeProfile] Exit timeout - terminal may be in inconsistent state');
-
-      // Even on timeout, we'll try to proceed but log the warning
-      // The alternative would be to abort, but that could leave users stuck
-      // If this becomes a problem, we could add retry logic or abort option
-    } else if (!exitResult.success) {
-      console.error('[ClaudeIntegration:switchClaudeProfile] Failed to exit Claude:', exitResult.error);
-      debugError('[ClaudeIntegration:switchClaudeProfile] Exit failed:', exitResult.error);
-      // Continue anyway - the /exit command was sent
-    } else {
-      console.warn('[ClaudeIntegration:switchClaudeProfile] Claude exited successfully');
-      debugLog('[ClaudeIntegration:switchClaudeProfile] Claude exited, ready to switch profile');
-    }
+    await exitClaudeForRestart(terminal);
   } else {
-    console.warn('[ClaudeIntegration:switchClaudeProfile] NOT in Claude mode, skipping exit commands');
     debugLog('[ClaudeIntegration:switchClaudeProfile] Terminal NOT in Claude mode, skipping exit commands');
   }
 
