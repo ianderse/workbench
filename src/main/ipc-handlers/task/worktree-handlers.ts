@@ -402,9 +402,9 @@ export function registerWorktreeHandlers(
    * fallback for a caller that cannot name a project.
    */
   /**
-   * Files a task changed with +/- counts, for the "What was done" panel. From the task's worktree
-   * (against its base branch, uncommitted work included), or, once an automatic merge removed the
-   * worktree, from the recorded merge commit. null when neither exists.
+   * Files a task changed with +/- counts, for the "What was done" panel. From the recorded merge
+   * commit of an automatic merge, otherwise from the task's worktree (against its base branch,
+   * uncommitted work included). null when neither exists.
    */
   handleIpc(
     IPC_CHANNELS.TASK_CHANGE_SUMMARY,
@@ -418,16 +418,9 @@ export function registerWorktreeHandlers(
         let commitCount: number | undefined;
         let source: TaskChangeSummary['source'];
 
-        if (worktreePath) {
-          const baseBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
-          const [diff, count] = await Promise.all([
-            git(['diff', '--numstat', baseBranch], { cwd: worktreePath, encoding: 'utf-8' }),
-            git(['rev-list', '--count', `${baseBranch}..HEAD`], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null),
-          ]);
-          files = parseNumstat(diff.stdout);
-          commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
-          source = 'worktree';
-        } else if (task.metadata?.autoMerge?.sha) {
+        // An auto-merged task's branch is already in its base branch, so diffing the worktree against
+        // the base shows nothing: its merge commit holds what it changed (worktree or not)
+        if (task.metadata?.autoMerge?.sha) {
           const sha = task.metadata.autoMerge.sha;
           const [diff, count] = await Promise.all([
             git(['diff', '--numstat', `${sha}^1`, sha], { cwd: project.path, encoding: 'utf-8' }),
@@ -436,6 +429,15 @@ export function registerWorktreeHandlers(
           files = parseNumstat(diff.stdout);
           commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
           source = 'merge';
+        } else if (worktreePath) {
+          const baseBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+          const [diff, count] = await Promise.all([
+            git(['diff', '--numstat', baseBranch], { cwd: worktreePath, encoding: 'utf-8' }),
+            git(['rev-list', '--count', `${baseBranch}..HEAD`], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null),
+          ]);
+          files = parseNumstat(diff.stdout);
+          commitCount = count ? parseInt(count.stdout.trim(), 10) || 0 : undefined;
+          source = 'worktree';
         } else {
           return { success: true, data: null };
         }
