@@ -52,6 +52,7 @@ import {
 import type {
   ClaudeCodeTaskSettings,
   ClaudeEffort,
+  ClaudeModelAlias,
   ClaudeRunInfo,
   ClaudeRuntime,
   ClaudeRunPhase,
@@ -68,7 +69,7 @@ import { appLog } from '../app-logger';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import type { AgentOverride } from '../../shared/types/task';
-import { OMP_READ_ONLY_TOOLS } from '../agent-backend/omp-args';
+import { OMP_READ_ONLY_TOOLS, ompModelFor, modelAliasOf } from '../agent-backend/omp-args';
 import { buildOmpMemoryPrompt } from '../self-improve/nudge';
 import { startOmpProcess } from '../agent-backend/omp-process';
 import { isOmpNotice, isOmpProgress, isOmpTodos } from '../agent-backend/omp-translate';
@@ -85,6 +86,8 @@ import {
 } from './review-diff';
 
 export const CLAUDE_RUN_FILE = 'claude_run.json';
+/** Workbench's size names for the tier aliases (Settings > Agents) */
+const OMP_SIZE_NAMES: Record<ClaudeModelAlias, string> = { haiku: 'Small', sonnet: 'Standard', opus: 'Large', fable: 'Largest' };
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 /** Other attachments (PDFs, text files; text is also truncated when inlined) */
 const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
@@ -468,6 +471,18 @@ export class ClaudeTaskRun {
   // Steps
   // ---------------------------------------------------------------------------
 
+  /**
+   * Model and effort for a step's log line. Under OMP the tier alias and effort mean nothing on
+   * their own ("opus" is the Large size, effort becomes a thinking level), so name what runs.
+   */
+  private modelLabel(model: string, effort: ClaudeEffort): string {
+    if (this.config.backend !== 'omp') return `${model}, ${effort}`;
+    const { omp } = getAgentBackendSettings();
+    const alias = modelAliasOf(model);
+    const size = alias ? `${OMP_SIZE_NAMES[alias]} size: ` : '';
+    return `${size}${ompModelFor(model, omp) ?? 'OMP default model'}, thinking ${omp.thinking[effort]}`;
+  }
+
   /** Name of the task's backend, for log lines */
   private backendName(): string {
     return this.config.backend === 'omp' ? 'OMP' : 'Claude Code';
@@ -569,15 +584,15 @@ export class ClaudeTaskRun {
 
     if (name === 'plan') {
       this.emitProgress('planning', 0.15, label);
-      this.log.startPhase('planning', `${label} (${model}, ${effort})`);
+      this.log.startPhase('planning', `${label} (${this.modelLabel(model, effort)})`);
     } else if (name === 'implement' || name === 'revise') {
       this.callbacks.onTaskEvent?.('CODING_STARTED', { subtaskId: '', subtaskDescription: label });
       this.emitProgress('coding', 0.2, label);
-      this.log.startPhase('coding', `${label} (${model}, ${effort})`);
+      this.log.startPhase('coding', `${label} (${this.modelLabel(model, effort)})`);
     } else {
       this.callbacks.onTaskEvent?.('QA_STARTED', { iteration: 1, maxIterations: 1 });
       this.emitProgress('qa_review', 0.85, label);
-      this.log.startPhase('validation', `${label} (${model}, ${effort})`);
+      this.log.startPhase('validation', `${label} (${this.modelLabel(model, effort)})`);
     }
 
     // OMP: Workbench runs the fresh-context review itself, before the session validates
