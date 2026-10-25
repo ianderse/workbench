@@ -48,6 +48,15 @@
     "detached": "(detached)",
     "remotePushFailed": "Remote Tracking Not Set Up"
   },
+  "session": {
+    "label": "Session",
+    "new": "New session",
+    "searchPlaceholder": "Search sessions",
+    "noResults": "No sessions",
+    "untitled": "Untitled session",
+    "current": "Open",
+    "loadFailed": "Could not list the sessions"
+  },
   "grid": {
     "emptyTitle": "Agents",
     "emptyDescription": "Run Claude agents side by side, each in its own terminal.",

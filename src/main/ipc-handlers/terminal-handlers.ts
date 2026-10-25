@@ -2,7 +2,7 @@ import { ipcMain } from 'electron';
 import path from 'path';
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
-import type { IPCResult, TerminalCreateOptions, TerminalTaskSessionOptions, ClaudeProfile, ClaudeProfileSettings, ClaudeUsageSnapshot, AllProfilesUsage } from '../../shared/types';
+import type { ClaudeSessionItem, IPCResult, TerminalCreateOptions, TerminalTaskSessionOptions, ClaudeProfile, ClaudeProfileSettings, ClaudeUsageSnapshot, AllProfilesUsage } from '../../shared/types';
 import { getClaudeProfileManager } from '../claude-profile-manager';
 import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { TerminalManager } from '../terminal-manager';
@@ -321,6 +321,35 @@ export function registerTerminalHandlers(
           success: false,
           error: error instanceof Error ? error.message : 'Failed to rename Claude profile'
         };
+      }
+    }
+  );
+
+  // The Claude Code sessions an agent window can open, as `/resume` lists them there
+  ipcMain.handle(
+    IPC_CHANNELS.TERMINAL_LIST_CLAUDE_SESSIONS,
+    async (_, id: string): Promise<IPCResult<ClaudeSessionItem[]>> => {
+      try {
+        return { success: true, data: await terminalManager.listClaudeSessions(id) };
+      } catch (error) {
+        appLog.warn('[terminal-handlers] Could not list the window\'s Claude Code sessions:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Could not list the sessions' };
+      }
+    }
+  );
+
+  // End an agent window's session and open another one there (null: a new session)
+  ipcMain.handle(
+    IPC_CHANNELS.TERMINAL_OPEN_CLAUDE_SESSION,
+    async (_, id: string, sessionId: string | null): Promise<IPCResult> => {
+      try {
+        // A new session runs in YOLO mode when the app's setting says so, as "New agent" does
+        const settings = await readSettingsFileAsync();
+        await terminalManager.openClaudeSession(id, sessionId, settings?.dangerouslySkipPermissions === true);
+        return { success: true };
+      } catch (error) {
+        appLog.warn('[terminal-handlers] Could not open a Claude Code session in the window:', error);
+        return { success: false, error: error instanceof Error ? error.message : 'Could not open the session' };
       }
     }
   );

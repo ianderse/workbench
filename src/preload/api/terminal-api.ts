@@ -47,6 +47,8 @@ export interface TerminalAPI {
   ) => Promise<IPCResult<import('../../shared/types').TerminalRestoreResult>>;
   clearTerminalSessions: (projectPath: string) => Promise<IPCResult>;
   resumeClaudeInTerminal: (id: string, options?: { dangerouslySkipPermissions?: boolean }) => void;
+  listClaudeSessions: (id: string) => Promise<IPCResult<import('../../shared/types').ClaudeSessionItem[]>>;
+  openClaudeSession: (id: string, sessionId: string | null) => Promise<IPCResult>;
   activateDeferredClaudeResume: (id: string) => void;
   checkTerminalPtyAlive: (terminalId: string) => Promise<IPCResult<{ alive: boolean }>>;
   updateTerminalDisplayOrders: (
@@ -155,6 +157,12 @@ export const createTerminalAPI = (): TerminalAPI => ({
 
   resumeClaudeInTerminal: (id: string, options?: { dangerouslySkipPermissions?: boolean }): void =>
     ipcRenderer.send(IPC_CHANNELS.TERMINAL_RESUME_CLAUDE, id, options),
+
+  listClaudeSessions: (id: string): Promise<IPCResult<import('../../shared/types').ClaudeSessionItem[]>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_LIST_CLAUDE_SESSIONS, id),
+
+  openClaudeSession: (id: string, sessionId: string | null): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TERMINAL_OPEN_CLAUDE_SESSION, id, sessionId),
 
   activateDeferredClaudeResume: (id: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TERMINAL_ACTIVATE_DEFERRED_RESUME, id),

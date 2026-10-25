@@ -3,7 +3,7 @@
  * Main orchestrator for terminal lifecycle, Claude integration, and profile management
  */
 
-import type { TerminalCreateOptions } from '../../shared/types';
+import type { ClaudeSessionItem, TerminalCreateOptions } from '../../shared/types';
 import type { TerminalSession } from '../terminal-session-store';
 
 // Internal modules
@@ -292,6 +292,19 @@ export class TerminalManager {
     }
 
     await ClaudeIntegration.resumeClaudeAsync(terminal, this.getWindow);
+  }
+
+  /** The Claude Code sessions an agent window can open (what `/resume` lists there) */
+  async listClaudeSessions(id: string): Promise<ClaudeSessionItem[]> {
+    const terminal = this.terminals.get(id);
+    return terminal ? ClaudeIntegration.listWindowSessions(terminal) : [];
+  }
+
+  /** End an agent window's Claude Code session and open another one, or a new one (null) */
+  async openClaudeSession(id: string, sessionId: string | null, dangerouslySkipPermissions?: boolean): Promise<void> {
+    const terminal = this.terminals.get(id);
+    if (!terminal) throw new Error('Terminal not found');
+    await ClaudeIntegration.openWindowSession(terminal, sessionId, this.getWindow, dangerouslySkipPermissions);
   }
 
   /**
