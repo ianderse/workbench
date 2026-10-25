@@ -21,6 +21,7 @@ This fork ([ianderse/workbench](https://github.com/ianderse/workbench), branch `
 - Claude usage polling pauses while OMP is selected (`0a3f233`)
 
 **Reliability on slow or busy local servers**
+- One ticket can use several model-server slots: independent parts run as parallel OMP subagents, capped by "Subagents per task" (default 3) (`d6059b9`)
 - Longer time limits for OMP one-off calls (`7d28e5f`)
 - Temporary failures (stalled streams, connection resets, 5xx, 429, "model is busy") are retried on the local model with growing waits (30s up to 10m, 5 retries by default). OMP's own fallback to other models stays off until those retries fail, and only if "Allow fallback models" is on (`c5836d4`, `e73570c`, `7c689d8`)
 - "Model is writing… ~N tokens" progress lines during long replies (`c5836d4`)
