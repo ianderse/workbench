@@ -31,7 +31,7 @@ import {
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { useSettingsStore } from '../../stores/settings-store';
-import { canResumeTask, isRunFinished } from '../../../shared/utils/task-resume';
+import { canResumeTask, isRunFinished, reviewInterruption } from '../../../shared/utils/task-resume';
 import { StartOverDialog } from '../StartOverDialog';
 import { pinnedModelLabel } from '../../../shared/utils/agent-override-labels';
 import {
@@ -338,6 +338,10 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       {state.isStuck ? (
                         <Badge variant="outline" className="text-xs border-current bg-warning/10 text-warning">
                           {t('tasks:detailHeader.stuck')}
+                        </Badge>
+                      ) : reviewInterruption(task, validationOn) ? (
+                        <Badge variant="outline" className="text-xs border-current bg-warning/10 text-warning">
+                          {t(`tasks:detailHeader.${reviewInterruption(task, validationOn)}`)}
                         </Badge>
                       ) : state.isIncomplete ? (
                         <Badge variant="outline" className="text-xs border-current bg-warning/10 text-warning">

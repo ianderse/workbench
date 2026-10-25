@@ -47,3 +47,18 @@ export function stuckTaskStartupAction(
   if (task.status !== 'in_progress' && task.status !== 'ai_review') return null;
   return isRunFinished(run, validation) ? 'review' : 'resume';
 }
+
+/**
+ * Why a task in Human Review did not finish: `stopped` (the user pressed Stop) or `interrupted`
+ * (the run died or ended early without a finished last step). Null for a finished run and for
+ * reviews with their own label (auto-merged, split proposed, errors).
+ */
+export function reviewInterruption(task: Task, validation = true): 'stopped' | 'interrupted' | null {
+  if (task.status !== 'human_review') return null;
+  if (task.reviewReason === 'stopped') return 'stopped';
+  if (task.reviewReason === 'auto_merged' || task.reviewReason === 'split_proposed' || task.reviewReason === 'errors') return null;
+  if (task.claudeRun?.phases.length && !isRunFinished(task.claudeRun, validation)) return 'interrupted';
+  // Same rule as the task store's isIncompleteHumanReview: no reason and no subtask completed
+  if (!task.reviewReason && !task.subtasks?.some((s) => s.status === 'completed')) return 'interrupted';
+  return null;
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { canResumeTask, isRunFinished, stuckTaskStartupAction } from '../task-resume';
+import { canResumeTask, isRunFinished, reviewInterruption, stuckTaskStartupAction } from '../task-resume';
 import type { Task } from '../../types/task';
 import type { ClaudeRunInfo, ClaudeRunPhase } from '../../types/claude-code';
 
@@ -64,5 +64,48 @@ describe('stuckTaskStartupAction', () => {
     expect(stuckTaskStartupAction({ status: 'in_progress', metadata: { archivedAt: 'x' } } as never, unfinished, false)).toBeNull();
     expect(stuckTaskStartupAction({ status: 'queue', metadata: {} } as never, unfinished, false)).toBeNull();
     expect(stuckTaskStartupAction({ status: 'human_review', metadata: {} } as never, unfinished, false)).toBeNull();
+  });
+});
+
+describe('reviewInterruption', () => {
+  const review = (fields: Partial<Task>) => task({ status: 'human_review', subtasks: [{ status: 'completed' }] as Task['subtasks'], ...fields });
+  const doneRun = run(phase('implement', { endedAt: 'x' }), phase('validate', { endedAt: 'x' }));
+
+  it('names a stopped task', () => {
+    expect(reviewInterruption(review({ reviewReason: 'stopped', claudeRun: stoppedImplement }))).toBe('stopped');
+  });
+
+  it('names a run that ended on an unfinished step', () => {
+    expect(reviewInterruption(review({ reviewReason: 'completed', claudeRun: run(phase('implement', { endedAt: 'x' })) }))).toBe('interrupted');
+  });
+
+  it('names a run whose last step failed', () => {
+    expect(reviewInterruption(review({ claudeRun: stoppedImplement }))).toBe('interrupted');
+  });
+
+  it('names a run whose last step never ended', () => {
+    expect(reviewInterruption(review({ claudeRun: run(phase('implement')) }))).toBe('interrupted');
+  });
+
+  it('names a review with no reason and no completed subtask', () => {
+    expect(reviewInterruption(task({ status: 'human_review', subtasks: [] }))).toBe('interrupted');
+  });
+
+  it('is null for a finished run', () => {
+    expect(reviewInterruption(review({ reviewReason: 'completed', claudeRun: doneRun }))).toBeNull();
+  });
+
+  it('respects validation being off', () => {
+    expect(reviewInterruption(review({ claudeRun: run(phase('implement', { endedAt: 'x' })) }), false)).toBeNull();
+  });
+
+  it('is null for auto-merged, split and error reviews', () => {
+    for (const reviewReason of ['auto_merged', 'split_proposed', 'errors'] as const) {
+      expect(reviewInterruption(review({ reviewReason, claudeRun: stoppedImplement }))).toBeNull();
+    }
+  });
+
+  it('is null outside Human Review', () => {
+    expect(reviewInterruption(task({ status: 'in_progress', claudeRun: stoppedImplement }))).toBeNull();
   });
 });

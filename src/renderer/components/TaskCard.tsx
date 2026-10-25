@@ -25,7 +25,7 @@ import { useProjectStore } from '../stores/project-store';
 import { activeAutoMerge } from '../../shared/utils/autonomous';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import { pinnedModelLabel } from '../../shared/utils/agent-override-labels';
-import { canResumeTask, isRunFinished } from '../../shared/utils/task-resume';
+import { canResumeTask, isRunFinished, reviewInterruption } from '../../shared/utils/task-resume';
 import { StartOverDialog } from './StartOverDialog';
 
 // Stuck detection interval (ms). XState handles normal process exits (PROCESS_EXITED); this
@@ -76,6 +76,8 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.claudeRun?.reviewVerdict?.rounds === nextTask.claudeRun?.reviewVerdict?.rounds &&
     prevTask.executionProgress?.phase === nextTask.executionProgress?.phase &&
     canResumeTask(prevTask) === canResumeTask(nextTask) &&
+    reviewInterruption(prevTask) === reviewInterruption(nextTask) &&
+    reviewInterruption(prevTask, false) === reviewInterruption(nextTask, false) &&
     prevTask.executionProgress?.syncingWith === nextTask.executionProgress?.syncingWith &&
     prevTask.metadata?.archivedAt === nextTask.metadata?.archivedAt &&
     prevTask.metadata?.prUrl === nextTask.metadata?.prUrl &&
@@ -133,6 +135,8 @@ export const TaskCard = memo(function TaskCard({
   const isIncomplete = isIncompleteHumanReview(task);
   // Stopped or failed with an unfinished step: Resume continues the same worktree and session
   const validationOn = useSettingsStore((state) => state.settings.claudeCodeTasks?.validation) !== false;
+  // A string (or null), so the memoized card compares it cheaply
+  const interruption = reviewInterruption(task, validationOn);
   const canResume = !isStuck && !isIncomplete && canResumeTask(task, validationOn);
   // A stuck task (the app quit mid-run) continues its unfinished run; a finished one just moves on
   const stuckRunFinished = isStuck && isRunFinished(task.claudeRun, validationOn);
@@ -355,6 +359,9 @@ export const TaskCard = memo(function TaskCard({
         )}
         {splitCount > 0 && (
           <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1">{t('queueGrooming.splitCardLabel', { count: splitCount })}</p>
+        )}
+        {interruption && (
+          <p className="mt-1.5 text-xs font-medium text-warning">{t(`reviewInterruption.${interruption}`)}</p>
         )}
         {task.status === 'human_review' && task.reviewReason === 'split_proposed' && (
           <p className="mt-1.5 text-xs font-medium text-warning line-clamp-2">{t('queueGrooming.splitPendingCardLabel')}</p>

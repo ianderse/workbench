@@ -4,6 +4,8 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../../ui/button';
 import { MarkdownContent } from '../../ui/markdown-content';
 import { cn } from '../../../lib/utils';
+import { useSettingsStore } from '../../../stores/settings-store';
+import { reviewInterruption } from '../../../../shared/utils/task-resume';
 import { readRefreshCache, writeRefreshCache } from '../../../lib/refresh-cache';
 import { formatCostUsd, formatDurationMs } from '../../../../shared/utils/claude-run';
 import { formatFindingLocation } from '../../../../shared/utils/ai-review-loop';
@@ -78,7 +80,13 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
   const { t } = useTranslation('tasks');
   const work = useMemo(() => buildWorkSummary(task.claudeRun), [task.claudeRun]);
   const changes = useTaskChanges(task);
-  const partial = task.reviewReason === 'stopped';
+  const validationOn = useSettingsStore((s) => s.settings.claudeCodeTasks?.validation) !== false;
+  const interruption = reviewInterruption(task, validationOn);
+  const title = interruption === 'stopped'
+    ? t('workSummary.titleStopped')
+    : interruption === 'interrupted'
+      ? t('workSummary.titleInterrupted')
+      : t('workSummary.title');
   const [expanded, setExpanded] = useState(false);
   const [overflows, setOverflows] = useState(false);
   const [findingsOpen, setFindingsOpen] = useState(false);
@@ -167,10 +175,10 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
   return (
     <section
       role="region"
-      aria-label={t(partial ? 'workSummary.titlePartial' : 'workSummary.title')}
+      aria-label={title}
       className="rounded-lg border border-border bg-card/60 p-4"
     >
-      <h3 className="text-sm font-medium text-foreground">{t(partial ? 'workSummary.titlePartial' : 'workSummary.title')}</h3>
+      <h3 className="text-sm font-medium text-foreground">{title}</h3>
 
       {task.claudeRun?.reviewSummary && (
         <div className="mt-2 space-y-3">

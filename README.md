@@ -20,6 +20,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 - One merge helper: autonomous auto-merge, PR merges, local merges and resync without a session all bring the target branch into the task branch through `mergeTargetIntoBranch`, with conflicts resolved by the merge agent on the task's own backend (a task pinned to Claude Code or OMP uses that, not the app-wide one)
 - Autonomous mode now resyncs the other open tasks when it auto-merges a task into its target branch (integration branch or main), not only when a task reaches Done; an auto-merged task moving to Done later does not trigger it again
 
+**Stopped and interrupted tickets**
+- A ticket that was stopped or whose run ended early no longer reads as finished in Human Review: the card says "Stopped before it finished" or "Interrupted before it finished", the task header shows a Stopped or Interrupted label, and "What was done" is titled as partial work before it was stopped or interrupted
+
 **Ticket dependencies**
 - Queued and backlog cards name what they wait for by ticket number ("Waits for #003 Title"), and the task detail lists every ticket it relies on with its state (done, merged, archived, waiting, not found).
 

@@ -59,7 +59,8 @@
   },
   "workSummary": {
     "title": "What was done",
-    "titlePartial": "What was done so far (partial)",
+    "titleStopped": "What was done before it was stopped (partial)",
+    "titleInterrupted": "What was done before it was interrupted (partial)",
     "showMore": "Show more",
     "showLess": "Show less",
     "noSummary": "The agent did not write a summary",
@@ -547,7 +548,13 @@
   "detailHeader": {
     "stuck": "Stuck",
     "incomplete": "Incomplete",
-    "failed": "Failed"
+    "failed": "Failed",
+    "stopped": "Stopped",
+    "interrupted": "Interrupted"
+  },
+  "reviewInterruption": {
+    "stopped": "Stopped before it finished",
+    "interrupted": "Interrupted before it finished"
   },
   "claudeRun": {
     "modelEffort": "{{model}} · {{effort}}",
