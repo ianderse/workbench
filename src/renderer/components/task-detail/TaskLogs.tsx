@@ -150,16 +150,18 @@ export function TaskLogs({
       <CollapsibleContent>
         <div className="space-y-1 py-2">
           {items.length > 0 ? (
-            items.map((item) =>
+            // The position is part of the key: several tool calls of one reply share its timestamp
+            // and tool name (OMP batches calls), and the log only grows, so positions are stable
+            items.map((item, index) =>
               item.kind === 'tool' ? (
                 <ToolCallRow
-                  key={`${(item.start ?? item.end)!.timestamp}-tool-${(item.start ?? item.end)!.tool_name}`}
+                  key={`${index}-${(item.start ?? item.end)!.timestamp}-tool-${(item.start ?? item.end)!.tool_name}`}
                   start={item.start}
                   end={item.end}
                   isRunning={!!item.running}
                 />
               ) : (
-                <LogEntry key={`${item.entry.timestamp}-${item.entry.type}-${item.entry.content}`} entry={item.entry} />
+                <LogEntry key={`${index}-${item.entry.timestamp}-${item.entry.type}`} entry={item.entry} />
               )
             )
           ) : (
