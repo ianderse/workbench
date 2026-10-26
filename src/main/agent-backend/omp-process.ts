@@ -570,6 +570,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       oneShot: options.oneShot,
       advisorMode: advisor.mode,
       advisorOverlayFile: setup.advisorOverlayFile,
+      foregroundOverlayFile: setup.foregroundOverlayFile,
       extensionPaths: options.extensions,
       transport: 'rpc',
     })

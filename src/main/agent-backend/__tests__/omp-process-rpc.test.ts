@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm, writeFile } from 'fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -50,6 +50,11 @@ describe('omp rpc framing', () => {
 /** A stand-in for `omp`: speaks the RPC protocol with `--mode rpc`, prints json events with `-p` */
 const FAKE_OMP = `#!/usr/bin/env node
 const mode = process.env.FAKE_MODE || 'ok';
+if (process.env.FAKE_ARGV_OUT) {
+  const argv = process.argv.slice(2);
+  const configs = argv.flatMap((a, i) => (argv[i - 1] === '--config' ? [require('fs').readFileSync(a, 'utf-8')] : []));
+  require('fs').writeFileSync(process.env.FAKE_ARGV_OUT, JSON.stringify({ argv, configs }));
+}
 const rpc = process.argv.includes('rpc');
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -180,6 +185,15 @@ describe('startOmpProcess with live messages', () => {
     return { messages, read, promise };
   };
   const text = (messages: ClaudeStreamMessage[]) => (messages.find((m) => m.type === 'result') as { result?: string } | undefined)?.result;
+
+  it('turns background bash off in the RPC run too', async () => {
+    const argvFile = path.join(dir, 'argv.json');
+    const { promise } = run('rpc-ok', { env: { FAKE_MODE: 'rpc-ok', FAKE_ARGV_OUT: argvFile } });
+    await (await promise).done;
+    const seen = JSON.parse(await readFile(argvFile, 'utf-8')) as { argv: string[]; configs: string[] };
+    expect(seen.argv).toContain('rpc');
+    expect(seen.configs).toContain(OMP_FOREGROUND_OVERLAY);
+  });
 
   it('steers a message into the running step, reports it read and ends the process', async () => {
     const { messages, read, promise } = run('rpc-ok');
