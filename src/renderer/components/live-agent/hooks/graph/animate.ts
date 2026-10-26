@@ -8,6 +8,13 @@ import {
   ANIM_SPEED,
 } from '../../lib/canvas-constants'
 
+/** How long a sub-agent is drawn working with nothing from it yet. One that
+ *  starts slowly (a fork takes the whole conversation along) has said
+ *  something by then; one that hasn't (e.g. a dead one found again on
+ *  re-attach, which the relay only finishes once it has long gone quiet) falls
+ *  back to idle instead of pulsing on */
+export const SUBAGENT_START_QUIET_S = 120
+
 interface AnimateOptions {
   useMockData: boolean
   mockScenarioLength: number
@@ -51,6 +58,27 @@ function animateAgents(agents: GraphState['agents'], deltaTime: number, newTime:
     }
   }
   return newAgents
+}
+
+/** Sub-agents still quiet SUBAGENT_START_QUIET_S after they spawned go idle */
+function settleQuietSubagents(
+  agents: GraphState['agents'],
+  quiet: GraphState['quietSubagents'],
+  time: number,
+): { agents: GraphState['agents']; quietSubagents: GraphState['quietSubagents'] } {
+  let newAgents = agents
+  let newQuiet = quiet
+  for (const [id, since] of quiet) {
+    if (time - since < SUBAGENT_START_QUIET_S) continue
+    if (newQuiet === quiet) newQuiet = new Map(quiet)
+    newQuiet.delete(id)
+    const agent = newAgents.get(id)
+    if (agent?.state === 'thinking') {
+      if (newAgents === agents) newAgents = new Map(agents)
+      newAgents.set(id, { ...agent, state: 'idle' })
+    }
+  }
+  return { agents: newAgents, quietSubagents: newQuiet }
 }
 
 function animateToolCalls(toolCalls: GraphState['toolCalls'], deltaTime: number, newTime: number): GraphState['toolCalls'] {
@@ -113,14 +141,15 @@ function cleanupFaded(
 }
 
 export function computeNextFrame(deltaTime: number, newTime: number, currentState: GraphState, options: AnimateOptions): GraphState {
-  const newAgentsRaw = animateAgents(currentState.agents, deltaTime, newTime)
+  const settled = settleQuietSubagents(currentState.agents, currentState.quietSubagents, newTime)
+  const newAgentsRaw = animateAgents(settled.agents, deltaTime, newTime)
   const newToolCallsRaw = animateToolCalls(currentState.toolCalls, deltaTime, newTime)
 
   const { agents: newAgents, toolCalls: newToolCalls, edges: filteredEdges } =
     cleanupFaded(newAgentsRaw, newToolCallsRaw, currentState.edges, currentState.agents, currentState.toolCalls, newTime)
 
   const next: GraphState = {
-    ...currentState, currentTime: newTime,
+    ...currentState, currentTime: newTime, quietSubagents: settled.quietSubagents,
     agents: newAgents, toolCalls: newToolCalls, edges: filteredEdges,
   }
 

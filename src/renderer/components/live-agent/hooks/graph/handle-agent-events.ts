@@ -39,6 +39,7 @@ function widestGapAngle(name: string, parent: Agent, state: MutableEventState): 
 
 export function handleAgentSpawn(
   payload: Record<string, unknown>,
+  eventTime: number,
   state: MutableEventState,
 ): void {
   const name = asString(payload.name)
@@ -82,7 +83,8 @@ export function handleAgentSpawn(
     // A sub-agent is launched with work to do, so it is working from the start: drawn idle until
     // its first message, it sat there looking idle for as long as it took to start, which for a
     // fork (it takes the whole conversation along) is a good while. The main agent starts out
-    // waiting for a prompt
+    // waiting for a prompt. One that does nothing (e.g. a dead one found again on re-attach)
+    // falls back to idle after a while (see animate.ts)
     id: name, state: isMain ? 'idle' : 'thinking',
     parentId: parentId || null,
     x, y,
@@ -91,6 +93,7 @@ export function handleAgentSpawn(
     opacity: 0,
   }
   state.agents.set(name, agent)
+  if (!isMain) state.quietSubagents.set(name, eventTime)
 
   if (parentId) {
     state.edges.push({ from: parentId, to: name, type: 'parent-child' })
