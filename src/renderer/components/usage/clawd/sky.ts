@@ -55,10 +55,38 @@ const CLOUD_SNOW = hex('#FF94A3B8');
 /** The shaded underside of a cloud */
 const CLOUD_SHADE = hex('#FF64748B');
 
-/** December to February */
+/** Time zones south of the equator; most have no summer time to tell them apart by */
+const SOUTH_ZONES = /^(Australia|Antarctica)\/|^America\/(Argentina\/|Buenos_Aires|Sao_Paulo|Santiago|Punta_Arenas|Montevideo|Asuncion|La_Paz|Lima|Cuiaba|Campo_Grande|Porto_Velho|Rio_Branco|Bahia|Maceio|Recife|Araguaina|Fortaleza|Belem|Noronha)$|^Africa\/(Johannesburg|Maputo|Harare|Lusaka|Windhoek|Gaborone|Maseru|Mbabane|Blantyre|Lubumbashi|Luanda|Dar_es_Salaam|Kinshasa|Kigali|Bujumbura)$|^Indian\/(Antananarivo|Mauritius|Reunion|Mayotte|Comoro)$|^Pacific\/(Auckland|Chatham|Fiji|Tongatapu|Apia|Noumea|Efate|Port_Moresby|Tahiti|Rarotonga|Pago_Pago|Easter|Norfolk|Guadalcanal)$|^Asia\/(Jakarta|Makassar|Jayapura|Dili)$/;
+
+function zoneName(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+  } catch {
+    return '';
+  }
+}
+
+/** South of the equator: by the time zone's name, or by summer time falling in January */
+export function isSouthern(now: Date): boolean {
+  if (SOUTH_ZONES.test(zoneName())) return true;
+  const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
+  const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
+  return jan < jul;
+}
+
+/**
+ * The month (1-12) as the seasons go in the north: south of the equator the seasons are half a
+ * year apart, so January there is July here.
+ */
+export function seasonMonth(now: Date): number {
+  const m = now.getMonth();
+  return (isSouthern(now) ? (m + 6) % 12 : m) + 1;
+}
+
+/** December to February in the north, June to August in the south */
 export function isWinter(now: Date): boolean {
-  const month = now.getMonth();
-  return month === 11 || month <= 1;
+  const month = seasonMonth(now);
+  return month === 12 || month <= 2;
 }
 
 /** What falls from the sky, picked by the 5-hour limit */
@@ -109,13 +137,13 @@ export function usageWeather(percent: number | null, now: Date): Weather {
 
 /**
  * Where we roughly are, from the time zone alone (no location is asked for): a mid latitude in
- * whichever hemisphere has summer time in July, and a longitude that puts the sun highest at
- * 12:30 standard time - most zones keep their clocks a little ahead of the sun.
+ * the zone's hemisphere, and a longitude that puts the sun highest at 12:30 standard time - most
+ * zones keep their clocks a little ahead of the sun.
  */
 function homePlace(now: Date): { lat: number; lon: number } {
   const jan = new Date(now.getFullYear(), 0, 1).getTimezoneOffset();
   const jul = new Date(now.getFullYear(), 6, 1).getTimezoneOffset();
-  return { lat: jan < jul ? -35 : 45, lon: -Math.max(jan, jul) / 4 - 7.5 };
+  return { lat: isSouthern(now) ? -35 : 45, lon: -Math.max(jan, jul) / 4 - 7.5 };
 }
 
 /** Sunrise and sunset (NOAA formulas), local minutes from midnight */
@@ -142,7 +170,7 @@ const MOON_MONTH = 29.530588853;
 
 /**
  * Days since the new moon, from how far the Moon is from the Sun along the ecliptic with the
- * main periodic terms (good to about an hour).
+ * main periodic terms (good to well under an hour).
  */
 export function moonAge(now: Date): number {
   const d = (now.getTime() - Date.UTC(2000, 0, 1, 12)) / 864e5;
@@ -152,8 +180,9 @@ export function moonAge(now: Date): number {
   const lm = 218.316 + 13.176396 * d;
   const mm = (134.963 + 13.064993 * d) * rad;
   const dd = (lm - (280.46 + 0.9856474 * d)) * rad;
-  const moon = lm + 6.289 * Math.sin(mm) - 1.274 * Math.sin(2 * dd - mm) + 0.658 * Math.sin(2 * dd)
-    - 0.186 * Math.sin(g) - 0.059 * Math.sin(2 * dd - 2 * mm) - 0.057 * Math.sin(2 * dd - mm - g);
+  const moon = lm + 6.289 * Math.sin(mm) + 1.274 * Math.sin(2 * dd - mm) + 0.658 * Math.sin(2 * dd)
+    + 0.214 * Math.sin(2 * mm) - 0.186 * Math.sin(g) + 0.059 * Math.sin(2 * dd - 2 * mm)
+    + 0.057 * Math.sin(2 * dd - mm - g);
   const e = (((moon - sun) % 360) + 360) % 360;
   return (e / 360) * MOON_MONTH;
 }
@@ -167,7 +196,7 @@ export function moonLitPath(now: Date, cx: number, cy: number, r: number): strin
   const k = Math.cos(th);
   // Waxing is lit on the right, waning on the left; the southern hemisphere sees it mirrored
   let side = th < Math.PI ? 1 : -1;
-  if (homePlace(now).lat < 0) side = -side;
+  if (isSouthern(now)) side = -side;
   // Where the terminator bulges: toward the lit side for a crescent, away from it past half
   const rx = Math.abs(k) * r;
   const termRight = side * k > 0;

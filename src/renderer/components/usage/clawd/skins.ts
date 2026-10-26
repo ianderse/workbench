@@ -9,7 +9,7 @@
  * Colours are CSS hex or the widget's #AARRGGBB.
  */
 
-import { isWinter, sunTimes } from './sky';
+import { isWinter, seasonMonth, sunTimes } from './sky';
 import { CLAWD_BODY, CLAWD_EYE } from './sprite';
 
 export interface SkinLayer {
@@ -78,9 +78,12 @@ export interface SkinMoment {
   percent: number | null;
 }
 
-/** Month m (1-12) falls in from..to, wrapping round the new year */
+/**
+ * The season's month (1-12, as in the north) falls in from..to, wrapping round the new year;
+ * south of the equator the months are half a year apart
+ */
 function inMonths(now: Date, from: number, to: number): boolean {
-  const m = now.getMonth() + 1;
+  const m = seasonMonth(now);
   return from <= to ? m >= from && m <= to : m >= from || m <= to;
 }
 
