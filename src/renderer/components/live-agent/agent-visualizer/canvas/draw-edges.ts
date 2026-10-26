@@ -190,13 +190,12 @@ export function drawEdges(
   if (drawn.length === 0) return
 
   // The nodes an edge can pass under: every one shown, with how far out its
-  // outline can reach (its bulges, and as far as it is stretched)
+  // outline can reach (see coverReach)
   const covers: Cover[] = []
   for (const [id, motion] of motions) {
     const node = agents.get(id) ?? toolCalls.get(id)
     if (!node || node.opacity < MIN_VISIBLE_OPACITY) continue
-    const r = motion.radius * motion.scale
-    covers.push({ motion, r, reach: r * (1 + Math.abs(motion.stretch)) * COVER_REACH, opacity: Math.min(node.opacity, 1) })
+    covers.push({ motion, r: motion.radius * motion.scale, reach: coverReach(motion), opacity: Math.min(node.opacity, 1) })
   }
   const outline = (cover: Cover) =>
     drawJellyShape(ctx, cover.motion.x, cover.motion.y, cover.r, cover.motion.sides, cover.motion.rotation, cover.motion, time)
@@ -243,6 +242,15 @@ interface Cover {
 
 /** How far past its radius a node's outline can bulge, at most (its wobble and dents) */
 const COVER_REACH = 1.3
+
+/** How far from its center a node's outline can reach this frame: its bulges,
+ *  the goo necks it draws out toward the nodes it is gooed to (each `length`
+ *  radii, see JellyReach), and as far as it is stretched */
+export function coverReach(motion: NodeMotion): number {
+  let necks = 0
+  for (const reach of motion.reaches) necks += reach.length
+  return motion.radius * motion.scale * (COVER_REACH + necks) * (1 + Math.abs(motion.stretch))
+}
 
 /** Half the side of the square a node is cut out of: far past anything on screen */
 const OUTSIDE = 1e6
