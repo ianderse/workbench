@@ -66,6 +66,11 @@ export interface ProjectSettings {
    * `default` = triage's model implements following the design spec
    */
   uiImplementer?: 'design' | 'default';
+  /**
+   * When a running task takes in its base branch after other tasks were merged into it: `validate`
+   * (default) merges it once right before validation, `immediately` tells the agent to merge at once
+   */
+  mergeBaseDuring?: 'validate' | 'immediately';
   /** Review a spec when all its tickets are done (default on) */
   specReview?: boolean;
   /**

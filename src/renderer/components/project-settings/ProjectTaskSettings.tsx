@@ -9,6 +9,7 @@ import { DEFAULT_AUTONOMOUS_BRANCH, resolveAutonomousConfig } from '../../../sha
 import { resolveSelfSplit } from '../../../shared/utils/task-split';
 import { resolveProjectPriority } from '../../../shared/utils/project-priority';
 import { resolveUiImplementer } from '../../../shared/utils/ui-work';
+import { resolveMergeBaseDuring } from '../../../shared/utils/merge-base-timing';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
 import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
@@ -171,6 +172,21 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
             ]}
             onValueChange={(value) => setSettings({ ...settings, uiImplementer: value })}
             ariaLabel={t('projectPages.tasks.uiImplementer')}
+          />
+        </SettingsRow>
+
+        <SettingsRow
+          label={t('projectPages.tasks.mergeBaseDuring')}
+          description={t('projectPages.tasks.mergeBaseDuringDescription')}
+        >
+          <SegmentedControl
+            value={resolveMergeBaseDuring(settings)}
+            options={[
+              { value: 'validate', label: t('projectPages.tasks.mergeBaseDuringValidate') },
+              { value: 'immediately', label: t('projectPages.tasks.mergeBaseDuringImmediately') },
+            ]}
+            onValueChange={(value) => setSettings({ ...settings, mergeBaseDuring: value })}
+            ariaLabel={t('projectPages.tasks.mergeBaseDuring')}
           />
         </SettingsRow>
 

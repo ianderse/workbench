@@ -673,6 +673,7 @@ describe('ClaudeTaskRun', () => {
       await makeRun({ changelogPath, settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
       const prompt = argValue(spawned[0].args, '--append-system-prompt') ?? '';
       expect(prompt).toContain('## Parallel tasks');
+      expect(prompt).toContain('While working, run the tests that cover what you changed; run the full suite once before you commit, not after every edit.');
       expect(prompt).toContain(changelogPath);
       expect(prompt).toContain('"Other", In Progress (coding): `src/shared.ts`');
     } finally {

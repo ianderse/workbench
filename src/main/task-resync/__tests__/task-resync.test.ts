@@ -189,6 +189,29 @@ describe('TaskResync', () => {
     expect(calls).toEqual(['start 002-b']);
   });
 
+  it('does not send a task that passed AI review back to validate again for a merge that landed during the review (merge before validation)', async () => {
+    const b = pending('002-b');
+    const c = pending('003-c');
+    commitFile(root, 'c.txt', 'from a\n', 'a merged');
+    requestFor('002-b');
+    requestFor('003-c');
+    const verdict = (status: string) => JSON.stringify({ phases: [], reviewVerdict: { status, rounds: 1, maxRounds: 3 } });
+    writeFileSync(path.join(specDirOf('002-b'), 'claude_run.json'), verdict('passed'));
+    writeFileSync(path.join(specDirOf('003-c'), 'claude_run.json'), verdict('failed'));
+    taskHooks.emit('state', { project, task: b, status: 'human_review' });
+    taskHooks.emit('state', { project, task: c, status: 'human_review' });
+    await untilCalled();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(calls).toEqual(['start 003-c']);
+
+    // With the old behavior the passed task is brought back too
+    calls.length = 0;
+    project.settings = { ...project.settings, mergeBaseDuring: 'immediately' };
+    taskHooks.emit('state', { project, task: b, status: 'human_review' });
+    await untilCalled();
+    expect(calls).toEqual(['start 002-b']);
+  });
+
   it('picks up requests left from before a restart, but not of a task the user stopped', async () => {
     pending('002-b');
     pending('003-c');

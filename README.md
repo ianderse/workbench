@@ -29,6 +29,11 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 
 - Follow-up and decision tickets that go to the Queue are now also dependencies of the tickets that waited for their source task, so a ticket like "Write the validation report" no longer starts while the follow-up work from its predecessors' reviews is still running (tickets waiting for a decision never block)
 
+**Parallel tasks**
+- A running task is no longer told to merge `main` every time another task is merged (111 notices and 55 conflict resolutions across 86 tickets): the notice is informational (what was merged, which files) and says Workbench merges the base branch into the task's branch once, right before validation, through the existing resync step. A task that already passed AI review is not sent back to validate again for a merge that landed during the review. New project setting Settings > Project > Tasks > "Take in merged tasks" (Before validation, default; Immediately keeps the old behavior)
+- Changelog lists, notices, briefings and resync requests no longer show OMP pseudo paths such as `agent:/IntCli040`, `conflict:/1` and `conflict:/*`: only real repo-relative files are recorded, and old entries are filtered when read
+- Implement and revise prompts (Claude Code and OMP) now say to run the tests that cover the change while working and the full suite once before committing, not after every edit
+
 **Notifications**
 - Notifications for the autonomous workflow: task merged (auto-merge or merge to Done, once per task), decision needed (one per new decision ticket, batched into one when several are created together), needs attention (blocked auto-merge, interrupted run that could not be resumed, task left in error) and all work done in a project ("N merged, M waiting for review or decision", after the queue, In Progress and AI review stay empty for a few seconds, never at app start)
 - Clicking a notification focuses the window and opens that task, or the project board for "all work done" and grouped decisions
