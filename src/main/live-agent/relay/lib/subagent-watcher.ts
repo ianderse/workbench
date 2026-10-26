@@ -12,7 +12,7 @@ import * as path from 'path'
 import { AgentEvent, SubagentLaunch, SubagentState, WatchedSession, spawnSubagentNode, subagentDedupFor } from './protocol'
 import { SESSION_ID_DISPLAY, SUBAGENT_META_WAIT_MS, SUBAGENT_LAUNCH_WAIT_MS, INACTIVITY_TIMEOUT_MS, HIDDEN_TOOLS } from './constants'
 import { readCompleteLines, readNewFileLines } from './fs-utils'
-import { TranscriptParser, isConversationEntry, launchedInBackground, taskNotificationLaunchId } from './transcript-parser'
+import { TranscriptParser, isConversationEntry, launchShape, launchedInBackground, taskNotificationLaunchId } from './transcript-parser'
 import { createLogger } from './logger'
 
 const log = createLogger('SubagentWatcher')
@@ -196,7 +196,7 @@ function startWatchingSubagentFile(
               pending.delete(block.tool_use_id)
               const nested = session.launches.get(block.tool_use_id)
               if (nested && !nested.finished) {
-                if (launchedInBackground(entry.toolUseResult, block)) nested.background = true
+                if (launchedInBackground(entry.toolUseResult, block, () => launchShape(session, block.tool_use_id!))) nested.background = true
                 else finishNested(block.tool_use_id, nested)
               }
             }

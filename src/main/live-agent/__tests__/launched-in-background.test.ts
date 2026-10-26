@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { launchedInBackground } from '../relay/lib/transcript-parser';
 
 const answer = (text: string) => ({ type: 'tool_result', content: [{ type: 'text', text }] });
@@ -17,5 +17,17 @@ describe('launchedInBackground', () => {
     expect(launchedInBackground([{ type: 'text', text: 'x' }], launch)).toBe(true);
     expect(launchedInBackground({ agentId: 'a1' }, launch)).toBe(true);
     expect(launchedInBackground({ agentId: 'a1' }, answer('Done: all checks pass'))).toBe(false);
+  });
+
+  it("goes by the launched agent's .meta.json before the answer's wording", () => {
+    // A sub-agent's transcript has no toolUseResult: the requestShape decides, whatever the answer says
+    expect(launchedInBackground(undefined, answer('Agent started in the background'), () => 'background')).toBe(true);
+    expect(launchedInBackground(undefined, launch, () => 'foreground')).toBe(false);
+    // Not written yet: the wording is all there is
+    expect(launchedInBackground(undefined, launch, () => undefined)).toBe(true);
+    // A toolUseResult that says how it ran never needs the .meta.json
+    const shape = vi.fn(() => 'background' as const);
+    expect(launchedInBackground({ status: 'completed' }, launch, shape)).toBe(false);
+    expect(shape).not.toHaveBeenCalled();
   });
 });

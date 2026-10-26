@@ -3,8 +3,10 @@
  * delegate, keeping the parsing logic decoupled from file-watching concerns.
  */
 
+import * as fs from 'fs'
+import * as path from 'path'
 import {
-  AgentEvent, PendingToolCall, WatchedSession,
+  AgentEvent, LaunchShape, PendingToolCall, WatchedSession,
   TranscriptEntry, ToolUseBlock, ToolResultBlock,
   spawnSubagentNode, subagentDedupFor,
 } from './protocol'
@@ -67,31 +69,50 @@ function isAsyncLaunch(toolUseResult: unknown): boolean {
 }
 
 
-/** The answer the Agent tool gives a background launch. A sub-agent's own transcript often records
- *  the result with nothing else (the session's transcript also has its toolUseResult, see
- *  isAsyncLaunch), so the answer is how a launch made from inside a sub-agent is told apart */
+/** The answer the Agent tool gives a background launch: the last thing to go by, where neither the
+ *  result nor the launched agent's .meta.json says how it ran (see launchedInBackground) */
 const ASYNC_LAUNCH_ANSWER = 'Async agent launched successfully'
-
-/** The text a tool result carries */
-function toolResultText(block: unknown): string {
-  const content = isRecord(block) ? block.content : undefined
-  if (typeof content === 'string') return content
-  if (!Array.isArray(content)) return ''
-  return content.map((part) => (isRecord(part) && typeof part.text === 'string' ? part.text : '')).join('')
-}
 
 /**
  * Whether an Agent/Task call's result says the agent goes on in the background: then it has only
  * started, and what ends it is its <task-notification>. Taken for its end instead, a background
  * agent a sub-agent launches (the reviewers /code-review's fork sends out) was drawn finished the
- * moment it was launched, and went on working unseen. The answer is only read where no
- * toolUseResult says which it is: a foreground agent's report that happens to start with it is its
- * end, while a result of some other shape still counts its launch answer.
+ * moment it was launched, and went on working unseen. In order of trust: the result's
+ * toolUseResult, which a sub-agent's own transcript leaves out; the `requestShape` in the launched
+ * agent's .meta.json (`shape`, read only when needed); and the answer's wording, for a launch
+ * whose .meta.json isn't written yet.
  */
-export function launchedInBackground(toolUseResult: unknown, block: unknown): boolean {
+export function launchedInBackground(toolUseResult: unknown, block: unknown, shape?: () => LaunchShape | undefined): boolean {
   if (isAsyncLaunch(toolUseResult)) return true
   if (saysHowItRan(toolUseResult)) return false
-  return toolResultText(block).trimStart().startsWith(ASYNC_LAUNCH_ANSWER)
+  const recorded = shape?.()
+  if (recorded) return recorded === 'background'
+  const content = isRecord(block) ? block.content : undefined
+  return (typeof content === 'string' || Array.isArray(content))
+    && userContentText(content as TranscriptEntry['message']['content']).startsWith(ASYNC_LAUNCH_ANSWER)
+}
+
+/**
+ * How the Agent/Task call `toolUseId` ran, by the `requestShape` its sub-agent's .meta.json records
+ * (matched by its `toolUseId`), or undefined while that isn't written. Each .meta.json is read once
+ * it parses, and only when a result needs it.
+ */
+export function launchShape(session: WatchedSession, toolUseId: string): LaunchShape | undefined {
+  const known = session.launchShapes.get(toolUseId)
+  if (known) return known
+  let files: string[]
+  try { files = fs.readdirSync(session.subagentsDir) } catch { return undefined }
+  for (const file of files) {
+    if (!file.endsWith('.meta.json') || session.readLaunchMetas.has(file)) continue
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(session.subagentsDir, file), 'utf-8')) as Record<string, unknown>
+      session.readLaunchMetas.add(file)
+      if (typeof meta.toolUseId === 'string' && (meta.requestShape === 'background' || meta.requestShape === 'foreground')) {
+        session.launchShapes.set(meta.toolUseId, meta.requestShape)
+      }
+    } catch { /* not written yet, or partially: read again next time */ }
+  }
+  return session.launchShapes.get(toolUseId)
 }
 
 /** A toolUseResult that states how the agent ran (its status, or whether it went to the background) */
@@ -440,7 +461,7 @@ export class TranscriptParser {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const launch = session.launches.get(block.tool_use_id)
-      if (launchedInBackground(toolUseResult, block)) {
+      if (launchedInBackground(toolUseResult, block, () => launchShape(session, block.tool_use_id))) {
         // Background launch: the subagent keeps running. It finishes when its
         // <task-notification> arrives (see handleTaskNotification).
         if (launch) launch.background = true
@@ -632,7 +653,7 @@ export class TranscriptParser {
               const resultBlock = block as ToolResultBlock
               const launch = session.launches.get(resultBlock.tool_use_id)
               if (launch) {
-                if (launchedInBackground(entry.toolUseResult, resultBlock)) launch.background = true
+                if (launchedInBackground(entry.toolUseResult, resultBlock, () => launchShape(session, resultBlock.tool_use_id))) launch.background = true
                 else launch.finished = true
               }
               session.pendingToolCalls.delete(resultBlock.tool_use_id)
