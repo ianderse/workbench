@@ -98,4 +98,7 @@ export const BEAM = {
   nodeGap: 4,
   /** Length over which an edge fades in from each end (world units) */
   endFade: 24,
+  /** How strongly the part of an edge that passes under another node is drawn
+   *  (a share of its full strength, see drawEdges) */
+  underNode: 0.15,
 } as const

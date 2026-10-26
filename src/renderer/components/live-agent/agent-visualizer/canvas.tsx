@@ -262,7 +262,7 @@ export function AgentCanvas({ graphRef, viewKey, sessionKey, historyQueuedRef, s
       ctx.translate(transform.x, transform.y)
       ctx.scale(transform.scale, transform.scale)
 
-      drawEdges(ctx, edges, agents, toolCalls, awaiting, motions, deltaTime)
+      drawEdges(ctx, edges, agents, toolCalls, awaiting, motions, deltaTime, timeRef.current)
       drawToolCalls(ctx, toolCalls, motions, timeRef.current)
       drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, motions, timeRef.current, suspendedRef.current, replaying)
       drawEffects(ctx, effectsRef.current)
