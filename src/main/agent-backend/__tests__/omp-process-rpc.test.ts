@@ -292,7 +292,8 @@ describe('startOmpProcess with live messages', () => {
     // A message taken while the RPC process was starting goes back to the inbox with the unread ones
     if (early) expect(outcome.unread).toEqual([{ id: 'wbm-test3', text: 'early message' }]);
     expect(handle.send('after the fallback')).toBe(false);
-  });
+    // Ending the RPC process and starting the print-mode one is two process launches (through cmd.exe and node on Windows)
+  }, 30_000);
 
   it.each(['rpc-slow-start', 'rpc-compact'])('does not fall back when agent_start is slow after the prompt was accepted (%s)', async (mode) => {
     const { messages, promise } = run(mode);
