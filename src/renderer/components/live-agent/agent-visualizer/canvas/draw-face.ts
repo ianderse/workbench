@@ -35,8 +35,6 @@ type Expression =
   | 'upset'    // a tool failed: frowning, a shake
   | 'watch'    // waiting on sub-agents: following the newest one
   | 'happy'    // just finished its turn: a short laugh
-  | 'awkward'  // uneven eyes looking around, sneaking glances back (kept, but
-               // the resting cycle below goes straight to whistling)
   | 'bored'    // bored: flat lids over round eyes, sinking, still looking about
   | 'whistle'  // nothing to do: eyes closed happy, notes out of its mouth
   | 'sleepy'   // bored long enough: lids sinking, catching itself over and over
@@ -82,10 +80,12 @@ export interface FaceState {
   openUntil: number
   /** The color it is drawn in on the way to its state's own (see
    *  displayedColor), when that was last moved along, and how long it is still
-   *  being eased for (only the moment after work has woken it) */
+   *  being eased for, toward which color (only the moment after work has woken
+   *  it, toward that work's) */
   rgb: [number, number, number] | null
   rgbTime: number
   colorEaseUntil: number
+  colorEaseTo: string
   /** Which of the three Z sizes comes next, and when */
   zStep: number
   nextZ: number
@@ -160,6 +160,7 @@ function newFace(time: number): FaceState {
     rgb: null,
     rgbTime: time,
     colorEaseUntil: 0,
+    colorEaseTo: '',
     zStep: 0,
     nextZ: 0,
     expression: 'waiting',
@@ -245,12 +246,6 @@ function gazeFor(face: FaceState, agent: Agent, agents: Map<string, Agent>, tool
     }
     case 'upset':
       return { x: 0, y: 0.15 }
-    case 'awkward': {
-      // Looking away and down, with a quick glance back now and then (and away again)
-      const cycle = t % 3.4
-      const glance = cycle > 2.6 && cycle < 3.05
-      return glance ? { x: 0.15, y: 0 } : { x: -0.75, y: 0.4 }
-    }
     case 'bored':
       // Off to one side, waiting for something interesting to turn up there.
       // It holds that way until the next blink takes it to the next station
@@ -314,17 +309,6 @@ function targetPose(face: FaceState, gaze: { x: number; y: number }, t: number):
         pose.sy = 0.5
         pose.y -= 0.07
         pose.tilt = side * 0.13
-        break
-      case 'awkward':
-        // Uneven: one eye squeezed and tilted, the other a bit higher
-        if (side === -1) {
-          pose.sy = 0.8
-          pose.tilt = 0.14
-          pose.y += 0.02
-        } else {
-          pose.tilt = -0.06
-          pose.y -= 0.03
-        }
         break
       case 'bored': {
         // Wide and short under a flat lid (the shape itself is drawn from
@@ -481,14 +465,6 @@ function advanceRest(face: FaceState, time: number) {
   if (time >= face.openUntil) startClosing(face, face.closeSide === -1 ? 1 : -1, time)
 }
 
-/** What the resting cycle is showing right now */
-const RESTING_FACE: Record<Rest, Expression> = {
-  whistle: 'whistle',
-  bored: 'bored',
-  sleepy: 'sleepy',
-  asleep: 'asleep',
-}
-
 /**
  * What the face shows: what the agent is doing, or, with nothing to do, the
  * resting cycle above, which a last happy moment comes before. Work that
@@ -527,7 +503,8 @@ function expressionFor(agent: Agent, displayed: AgentState, waitingOnSubagents: 
   // nothing to do caught every session that came back to life a beat later
   if (time - face.idleSince < FACE.restLead) return 'waiting'
   advanceRest(face, time)
-  return RESTING_FACE[face.rest]
+  // Each part of the cycle is the expression of the same name
+  return face.rest
 }
 
 /** How much a note coming out opens the pucker, `t` seconds after it left: it
@@ -606,15 +583,22 @@ function channels(hex: string): [number, number, number] {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
 
+/** How far apart the eased colors are, per channel (see displayedColor) */
+const COLOR_STEP = 6
+
 const hex2 = (v: number) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')
 
 /**
  * The color to draw the main agent in: its state's own, and for the moment
  * after work has woken it, eased on the way there — the one change the node
  * makes something of, since it is coming round rather than carrying on. Every
- * other change is its new color at once, as for any other node. The glow and
- * the ring take it from here too, so the node turns over with the face rather
- * than around it.
+ * other change is its new color at once, as for any other node, and so is one
+ * that comes along while the wake is still easing. The glow and the ring take it
+ * from here too, so the node turns over with the face rather than around it.
+ *
+ * The eased color moves in steps of COLOR_STEP per channel, too small to see:
+ * the glow's sprite is cached by color, and a new color every frame built a
+ * new sprite every frame of the ease.
  */
 export function displayedColor(faces: Map<string, FaceState>, id: string, state: AgentState, time: number): string {
   const target = getStateColor(state)
@@ -631,8 +615,12 @@ export function displayedColor(faces: Map<string, FaceState>, id: string, state:
   // work's color arriving while the face is still resting is the wake itself.
   // Any other change it sleeps through (a finished agent coming back idle) is cut
   const differs = Math.abs(face.rgb[0] - to[0]) + Math.abs(face.rgb[1] - to[1]) + Math.abs(face.rgb[2] - to[2]) > 2
-  if (differs && WORKING.has(state) && RESTING_DEEP.has(face.expression)) face.colorEaseUntil = time + FACE.colorEaseWindow
-  if (time >= face.colorEaseUntil) {
+  if (differs && WORKING.has(state) && RESTING_DEEP.has(face.expression)) {
+    face.colorEaseUntil = time + FACE.colorEaseWindow
+    face.colorEaseTo = target
+  }
+  if (time >= face.colorEaseUntil || target !== face.colorEaseTo) {
+    face.colorEaseUntil = 0
     face.rgb = to
     face.rgbTime = time
     return target
@@ -645,7 +633,8 @@ export function displayedColor(faces: Map<string, FaceState>, id: string, state:
     face.rgb[1] + (to[1] - face.rgb[1]) * k,
     face.rgb[2] + (to[2] - face.rgb[2]) * k,
   ]
-  return `#${hex2(face.rgb[0])}${hex2(face.rgb[1])}${hex2(face.rgb[2])}`
+  const step = (v: number) => hex2(Math.round(v / COLOR_STEP) * COLOR_STEP)
+  return `#${step(face.rgb[0])}${step(face.rgb[1])}${step(face.rgb[2])}`
 }
 
 /**
@@ -709,7 +698,7 @@ export function drawFace(
   const boredTarget = !saved && (expression === 'bored' || expression === 'sleepy' || expression === 'asleep') ? 1 : 0
   face.boredShape += (boredTarget - face.boredShape) * (1 - Math.exp(-dt * (saved ? FACE.wakeEase : FACE.boredShapeSpeed)))
   const motionTarget = expression === 'upset' || expression === 'happy' || expression === 'ask'
-    || expression === 'awkward' || expression === 'bored' || expression === 'whistle'
+    || expression === 'bored' || expression === 'whistle'
     || expression === 'sleepy' || expression === 'asleep' ? 1 : 0
   face.motion += (motionTarget - face.motion) * (1 - Math.exp(-dt * FACE.motionEase))
 
@@ -777,7 +766,6 @@ export function drawFace(
   if (expression === 'upset') shakeX = Math.sin(t * 38) * (0.045 * Math.exp(-t * 1.6) + 0.006)
   else if (expression === 'happy') bobY = -Math.abs(Math.sin(t * 11)) * 0.05
   else if (expression === 'ask') bobY = Math.sin(t * 2.6) * 0.025
-  else if (expression === 'awkward') shakeX = Math.sin(t * 1.9) * 0.025 // a nervous shuffle
   else if (expression === 'bored') bobY = Math.sin(t * 0.8) * 0.022 // a slow sigh
   else if (expression === 'sleepy') {
     // The head goes down with the lids and comes back up with them; the shiver

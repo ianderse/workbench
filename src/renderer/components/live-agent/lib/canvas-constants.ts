@@ -143,14 +143,16 @@ export const FACE = {
    *  only gives way to the next once what it is playing has finished: this
    *  many blows (whistlesMin, plus up to whistlesRange more) and then this
    *  many sulks, each a turn of the bored lids sinking and catching */
+  whistlesMin: 3,
+  /** More blows than whistlesMin, at most (see whistlesMin) */
+  whistlesRange: 2,
+  /** Sulks it sits through, and up to how many more (see whistlesMin) */
+  sulksMin: 2,
+  sulksRange: 1,
   /** A moment of simply being awake before any of it starts, so that work a
    *  beat behind (a graph rebuilt around a new prompt comes back with a face
    *  that has never seen it busy) is never caught mid-blow */
   restLead: 2.5,
-  whistlesMin: 3,
-  whistlesRange: 2,
-  sulksMin: 2,
-  sulksRange: 1,
   /** Falling asleep: the lids take this long to come down, it catches itself
    *  this many times (and holds itself open that long each time before the
    *  next, slower side takes it), and the close after the last save is the one
