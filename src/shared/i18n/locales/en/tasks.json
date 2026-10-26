@@ -316,6 +316,7 @@
     "cardLabel": "Spec review",
     "cardRound": "Spec review, review {{round}} of {{max}}",
     "complete": "Spec complete",
+    "unverified": "Tests were not observed; run them or rerun the review",
     "nextReview": "Next review after {{tickets}}",
     "lastReview": "Last review: open gaps were left for you",
     "gapsCreated": "{{gaps}} gaps found, {{created}} tickets created",

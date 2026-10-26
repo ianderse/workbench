@@ -489,6 +489,11 @@ export function createOmpTranslator(options: OmpTranslatorOptions = {}): OmpTran
             error: asString(e.errorMessage) ?? 'request failed',
           }];
         }
+        case 'agent_start':
+          // A second run in the same process (omp injects a finished background job's result as a follow-up run):
+          // its agent_end gives the final result
+          resultEmitted = false;
+          return [];
         case 'agent_end': {
           if (resultEmitted) return [];
           // Messages the stream missed (a run that ended before message_end) still count

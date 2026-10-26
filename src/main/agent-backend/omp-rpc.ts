@@ -60,6 +60,23 @@
  *    silent for a long time before `agent_start` is given up (hang guard, no -p fallback: print mode would compact
  *    again and lose the live messages).
  *
+ * Background jobs (verified 2026-10-25, omp 18.12.6, local model)
+ *  - The bash tool has an `async: true` argument, and in RPC mode commands running longer than 60 s are backgrounded
+ *    on their own (`bash.autoBackground.*`, default on for rpc). The tool result says "Backgrounded as job bg_1
+ *    (killed once it has run 300s in total ...); its output is injected into the conversation as a follow-up ...";
+ *    `details.async = {state:"running", jobId, type:"bash"}`. The model then ends its turn: `agent_end`, then
+ *    `prompt_result {status:"completed", sessionSettled:false}` (NOT settled), and no `session_settled`.
+ *  - `get_state` reports `hasPendingAsyncWork: true` (and `isSettled: false`, `isStreaming: false`) while the job runs.
+ *    There are no job start/finish events of their own; two `tool_execution_update` events mark the delivery.
+ *  - When the job finishes omp injects `message_start/end {role:"custom", customType:"async-result",
+ *    content:"<system-notice>Background job bg_1 has completed ... output ...</system-notice>"}` and starts a NEW
+ *    run: `agent_start` ... `agent_end`, then `session_settled`. `get_state` is then `hasPendingAsyncWork:false,
+ *    isSettled:true`. So closing stdin after a fixed time after `agent_end` kills the job (the production bug);
+ *    Workbench asks `get_state` after every `agent_end` and keeps the process open while work is pending.
+ *  - Print mode (`omp -p`): the process exits right after the first `agent_end` (4.7 s in the probe) and the job
+ *    is lost. `--config` with `async.enabled: false` (plus `bash.autoBackground.enabled: false`) removes the `async`
+ *    argument from the bash tool, so commands run in the foreground (`OMP_FOREGROUND_OVERLAY` in omp-args.ts).
+ *
  * Not verified: protocol v2 framing (we stay on v1), `images` on prompt (attachments use print mode).
  */
 
@@ -103,9 +120,10 @@ export function parseRpcLine(line: string): RpcLine | undefined {
 }
 
 export const RPC_STATE_ID = 'wb-state';
+export const RPC_PENDING_ID = 'wb-pending';
 export const RPC_PROMPT_ID = 'wb-prompt';
 
-export const rpcGetState = () => encodeRpcCommand({ id: RPC_STATE_ID, type: 'get_state' });
+export const rpcGetState = (id: string = RPC_STATE_ID) => encodeRpcCommand({ id, type: 'get_state' });
 export const rpcPrompt = (message: string) => encodeRpcCommand({ id: RPC_PROMPT_ID, type: 'prompt', message });
 export const rpcSteer = (id: string, message: string) => encodeRpcCommand({ id: `steer-${id}`, type: 'steer', message });
 
@@ -151,4 +169,9 @@ export function isWorkingEvent(event: Record<string, unknown>): boolean {
 export function sessionIdOf(data: unknown): string | undefined {
   const id = (data as { sessionId?: unknown } | undefined)?.sessionId;
   return typeof id === 'string' && id ? id : undefined;
+}
+
+/** `get_state` data: true while a background job (async bash) of the session has not finished */
+export function hasPendingAsyncWork(data: unknown): boolean {
+  return (data as { hasPendingAsyncWork?: unknown } | undefined)?.hasPendingAsyncWork === true;
 }

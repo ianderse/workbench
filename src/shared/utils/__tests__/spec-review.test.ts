@@ -73,10 +73,26 @@ describe('normalizeSpecReview', () => {
   });
 
   it('is complete when no valid gap is left, whatever the model claimed', () => {
-    const dropped = normalizeSpecReview({ complete: false, summary: 's', sections: [], gaps: [gap({ evidence: '' })] })!;
+    const dropped = normalizeSpecReview({ complete: false, checksObserved: true, summary: 's', sections: [], gaps: [gap({ evidence: '' })] })!;
     expect(dropped.complete).toBe(true);
-    const claimed = normalizeSpecReview({ complete: true, summary: 's', sections: [], gaps: [gap()] })!;
+    const claimed = normalizeSpecReview({ complete: true, checksObserved: true, summary: 's', sections: [], gaps: [gap()] })!;
     expect(claimed.complete).toBe(false);
+  });
+
+  it('is not complete unless the checks were observed, and says so', () => {
+    const missing = normalizeSpecReview({ complete: true, summary: 'All done.', sections: [], gaps: [] })!;
+    expect(missing.complete).toBe(false);
+    expect(missing.checksObserved).toBe(false);
+    expect(missing.summary).toBe('All done. Tests were not observed; run them or rerun the review.');
+    const no = normalizeSpecReview({ complete: true, checksObserved: false, summary: 's', sections: [], gaps: [] })!;
+    expect(no.complete).toBe(false);
+    const seen = normalizeSpecReview({ complete: true, checksObserved: true, summary: 's', sections: [], gaps: [] })!;
+    expect(seen).toMatchObject({ complete: true, checksObserved: true });
+    expect(seen.summary).toBe('s');
+    // Gaps found without seeing the checks still become gaps
+    const gaps = normalizeSpecReview({ complete: false, checksObserved: false, summary: 's', sections: [], gaps: [gap()] })!;
+    expect(gaps.gaps).toHaveLength(1);
+    expect(gaps.summary).toBe('s');
   });
 
   it('keeps gap and open ticket dependencies, drops unknown and self ones, breaks cycles', () => {
@@ -109,7 +125,11 @@ describe('normalizeSpecReview', () => {
 describe('planReviewOutcome', () => {
   const withGaps = { gaps: [{}] } as never;
   it('completes when there are no gaps', () => {
-    expect(planReviewOutcome({ gaps: [] }, 0, 2)).toEqual({ kind: 'complete', status: 'complete' });
+    expect(planReviewOutcome({ gaps: [], checksObserved: true }, 0, 2)).toEqual({ kind: 'complete', status: 'complete' });
+  });
+  it('is unverified, without a new round, when no gap is left but the checks were not observed', () => {
+    expect(planReviewOutcome({ gaps: [], checksObserved: false }, 0, 2)).toEqual({ kind: 'unverified', status: 'unverified' });
+    expect(planReviewOutcome({ gaps: [], checksObserved: false }, 2, 2)).toEqual({ kind: 'unverified', status: 'unverified' });
   });
   it('creates gap tickets while below the cap, then leaves the gaps open', () => {
     expect(planReviewOutcome(withGaps, 0, 2)).toEqual({ kind: 'create_gaps', status: 'building', nextRound: 1 });
@@ -137,6 +157,7 @@ describe('deriveSpecReviewNext', () => {
   });
   it('says complete without gaps and gaps_open when no tickets were created', () => {
     expect(deriveSpecReviewNext(tasks, ref, 0)).toEqual({ kind: 'complete' });
+    expect(deriveSpecReviewNext(tasks, ref, 0, false)).toEqual({ kind: 'unverified' });
     expect(deriveSpecReviewNext([], ref, 2)).toEqual({ kind: 'gaps_open' });
   });
   it('says nothing when the report is unknown or every ticket is already in review', () => {

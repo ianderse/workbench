@@ -27,12 +27,12 @@ import type { ClaudeProcessHandle } from '../claude-code/process';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from '../claude-code/stream-types';
 import type { ClaudeEffort } from '../../shared/types/claude-code';
 import { ompSubagentsPerTask, type OmpBackendSettings } from '../../shared/types/agent-backend';
-import { buildOmpAdvisorOverlay, buildOmpArgs, resolveOmpAdvisor, resolveOmpSelection, type OmpRole } from './omp-args';
+import { buildOmpAdvisorOverlay, buildOmpArgs, OMP_FOREGROUND_OVERLAY, OMP_FOREGROUND_RULE, resolveOmpAdvisor, resolveOmpSelection, type OmpRole } from './omp-args';
 import { resolveOmpCommand } from './omp-command';
 import { getOmpRoles } from './omp-roles';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
-import { isSessionSettled, isWorkingEvent, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
+import { hasPendingAsyncWork, isSessionSettled, isWorkingEvent, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PENDING_ID, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
 import { recordOmpUsage, type UsageContext } from '../usage/usage-record';
 
 type OmpProcessOutcome = Awaited<ClaudeProcessHandle['done']>;
@@ -85,7 +85,7 @@ export interface OmpRunOptions {
    */
   live?: { onInputRead?: (id: string, text: string) => void };
   /** Tests: override the RPC start-up waits (ms) */
-  rpcWaitsMs?: { ready?: number; start?: number; settle?: number; state?: number; hang?: number };
+  rpcWaitsMs?: { ready?: number; start?: number; settle?: number; state?: number; hang?: number; poll?: number };
   /** Names the run in log lines (spec id and phase); default: the working directory's name */
   label?: string;
 }
@@ -127,6 +127,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     systemPromptFile?: string;
     appendSystemPromptFile?: string;
     advisorOverlayFile?: string;
+    foregroundOverlayFile?: string;
   };
   // One-shot utility calls never use the advisor; the setting applies to the other runs
   const advisor = resolveOmpAdvisor(options.settings, options.oneShot);
@@ -149,9 +150,18 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       await writeFile(systemPromptFile, options.systemPrompt, 'utf-8');
     }
     let appendSystemPromptFile: string | undefined;
-    if (options.appendSystemPrompt) {
+    // Runs with the bash tool get the foreground rule (a background job's result may never arrive)
+    const usesBash = options.tools === 'all' || options.tools.includes('bash');
+    const appendText = [options.appendSystemPrompt, usesBash ? OMP_FOREGROUND_RULE : undefined].filter(Boolean).join('\n\n');
+    if (appendText) {
       appendSystemPromptFile = path.join(tempDir, 'append-system-prompt.md');
-      await writeFile(appendSystemPromptFile, options.appendSystemPrompt, 'utf-8');
+      await writeFile(appendSystemPromptFile, appendText, 'utf-8');
+    }
+    // Print mode ends the process with the agent, so bash must not run jobs in the background there
+    let foregroundOverlayFile: string | undefined;
+    if (usesBash) {
+      foregroundOverlayFile = path.join(tempDir, 'foreground-overlay.yml');
+      await writeFile(foregroundOverlayFile, OMP_FOREGROUND_OVERLAY, 'utf-8');
     }
     let advisorOverlayFile: string | undefined;
     const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.allowFallback === true, ompSubagentsPerTask(options.settings));
@@ -161,6 +171,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     }
     setup = {
       advisorOverlayFile,
+      foregroundOverlayFile,
       text: options.jsonSchema ? `${text}\n\n${buildStructuredInstruction(options.jsonSchema)}` : text,
       attachmentPaths,
       systemPromptFile,
@@ -213,7 +224,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     return messageId;
   };
   const label = options.label ?? path.basename(options.cwd);
-  const waits = { ready: 20_000, start: 30_000, settle: 8_000, state: 5_000, hang: 10 * 60_000, ...(options.rpcWaitsMs ?? {}) };
+  const waits = { ready: 20_000, start: 30_000, settle: 8_000, state: 5_000, hang: 10 * 60_000, poll: 30_000, ...(options.rpcWaitsMs ?? {}) };
 
   interface RunOnceResult {
     outcome: Omit<OmpProcessOutcome, 'result'>;
@@ -250,6 +261,11 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       let ended = false; // agent_end seen
       let fallback: string | undefined;
       let stdinClosed = false;
+      let settleTimer: NodeJS.Timeout | undefined;
+      let resultForwarded = false;
+      // RPC: a finished background job starts a second run in the same process; its result is the one that counts,
+      // so the result is passed on when the process ends
+      const holdHere = holdResult || rpc;
       const timers = new Set<NodeJS.Timeout>();
       const after = (ms: number, fn: () => void) => {
         const timer = setTimeout(() => {
@@ -292,7 +308,10 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
           }
           if (message.type === 'result') {
             held = message as ClaudeResultMessage;
-            if (!holdResult) forward(message);
+            if (!holdHere) {
+              resultForwarded = true;
+              forward(message);
+            }
           } else {
             forward(message);
           }
@@ -323,6 +342,38 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         accepted = true;
         clearTimers();
       };
+      /**
+       * After an agent_end: omp keeps a background job's result for a follow-up run (`hasPendingAsyncWork` in
+       * `get_state`, see omp-rpc.ts), so the process stays open while one is pending and is checked again every
+       * `waits.poll`. The step's own timeout and the job's deadline (omp kills it) bound the wait.
+       */
+      const askPending = () => {
+        if (!ended || stdinClosed) return;
+        try {
+          child.stdin?.write(rpcGetState(RPC_PENDING_ID));
+        } catch {
+          // Closed: the process is ending
+        }
+      };
+      let pendingNoted = false;
+      const onPendingState = (pending: boolean) => {
+        if (!ended || stdinClosed) return;
+        if (pending) {
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = undefined;
+          // Messages may still be steered into the session while it waits for the job
+          live.open = true;
+          if (!pendingNoted) {
+            pendingNoted = true;
+            appLog.info(`[OMP] ${label}: waiting for a background job to finish before closing omp`);
+          }
+          after(waits.poll, askPending);
+        } else {
+          live.open = false;
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = after(waits.settle, closeStdin);
+        }
+      };
       const handleRpcLine = (line: string) => {
         const parsed = parseRpcLine(line);
         if (!parsed) return;
@@ -343,6 +394,8 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
             const sessionId = parsed.success ? sessionIdOf(parsed.data) : undefined;
             if (sessionId) emit({ type: 'session', id: sessionId, cwd: options.cwd });
             sendPrompt();
+          } else if (parsed.id === RPC_PENDING_ID) {
+            onPendingState(parsed.success ? hasPendingAsyncWork(parsed.data) : false);
           } else if (parsed.id === RPC_PROMPT_ID && !parsed.success) {
             giveUp(`prompt refused: ${parsed.error ?? 'unknown error'}`);
           } else if (parsed.id === RPC_PROMPT_ID) {
@@ -355,6 +408,14 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         if (promptSent && !started && isWorkingEvent(event)) {
           markAccepted();
           armHangGuard();
+        }
+        if (event.type === 'agent_start' && ended) {
+          // The follow-up run of a finished background job
+          ended = false;
+          pendingNoted = false;
+          if (settleTimer) clearTimeout(settleTimer);
+          settleTimer = undefined;
+          live.open = true;
         }
         if (event.type === 'agent_start') {
           started = true;
@@ -384,7 +445,9 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
           // Nothing more can be injected into this run
           ended = true;
           live.open = false;
-          after(waits.settle, closeStdin);
+          // Pending background work keeps the process open; the answer to get_state decides. No answer: close as before
+          askPending();
+          settleTimer = after(waits.state + waits.settle, closeStdin);
         }
         if (ended && isSessionSettled(event)) closeStdin();
       };
@@ -443,6 +506,8 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
         if (!result) {
           result = translator.finalize({ exitCode, stderr, aborted, timedOut });
           if (result && !holdResult) forward(result);
+        } else if (!holdResult && !resultForwarded) {
+          forward(result);
         }
         // Every process books its own tokens (a JSON repair run is a second one), also when it failed
         recordOmpUsage(options.usage, translator.usage, { sessionId: translator.sessionId });
@@ -482,6 +547,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
     oneShot: options.oneShot,
     advisorMode: advisor.mode,
     advisorOverlayFile: setup.advisorOverlayFile,
+    foregroundOverlayFile: setup.foregroundOverlayFile,
     attachmentPaths: setup.attachmentPaths,
     extensionPaths: options.extensions,
   });

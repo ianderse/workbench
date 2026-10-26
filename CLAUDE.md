@@ -206,7 +206,7 @@ permission modes, worktrees, hooks, skills).
 levels. With OMP no Claude account is required (`checkClaudeCodeAuth` passes), the usage indicator and auth-failure modal are
 hidden, and agent windows launch `omp` (`buildOmpLaunchCommand` in `terminal/cli-integration-handler.ts`). OMP detection
 (`omp --version`, `omp models --json`, cached in the renderer refresh cache) is `ipc-handlers/agent-backend-handlers.ts`;
-the settings UI is `settings/AgentBackendSettings.tsx`.
+the settings UI is `settings/AgentBackendSettings.tsx`. A background bash job (`async: true`, or a command over 60 s in `omp --mode rpc`) ends the agent's turn while omp holds the job's result for a follow-up run, so `omp-process.ts` keeps an RPC session open after `agent_end` while `get_state.hasPendingAsyncWork` is true (bounded by the step timeout), `omp -p` runs get an overlay with `async.enabled: false`, and the system prompt tells the agent to run needed commands in the foreground (`omp-rpc.ts` has the verified event sequence).
 
 A task can pin its own backend, model and effort (`TaskMetadata.agentOverride`, the Model control in the task dialogs, `task-form/TaskAgentPicker.tsx`). `resolveEffectiveAgent()` (`shared/utils/agent-override.ts`) turns it and the app backend into the task's backend; the runner (`TaskRunConfig.backend`), the auth check and one-shot calls (`runClaudeText({ backend })`) use that instead of the global backend, and triage's model/effort are replaced by the pin (`applyAgentOverrideToTriage`).
 
@@ -327,7 +327,7 @@ edit tools are removed (`--disallowedTools`, OMP gets read/grep/glob/bash), the 
 worktree is reset if a commit or change turned up. It ends in Human Review (`completed`); autonomous auto-merge skips it and
 Done cleans its worktree without asking. `applySpecReview()` then drops gaps without spec section and evidence, creates the
 rest as next-round tickets (`round + 1`, queued, with their dependencies) while `round < maxReviewRounds` (default 2), else
-the batch is `gaps_open`; no gaps means `complete`. `SpecReviewPanel` shows the report on the review card.
+the batch is `gaps_open`; no gaps means `complete`. `SpecReviewPanel` shows the report on the review card. The report's `checksObserved` says the project's tests were actually seen; `complete` also needs it, and a review with no gaps but `checksObserved: false` leaves the batch `unverified` (no new round; rerunning the review ticket applies the new report).
 
 ### Autonomous mode (per project)
 

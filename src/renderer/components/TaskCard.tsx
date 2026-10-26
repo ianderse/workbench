@@ -137,7 +137,7 @@ export const TaskCard = memo(function TaskCard({
   const specNext = useTaskStore((s) => {
     const ref = task.metadata?.specReview;
     if (!ref || (task.status !== 'human_review' && task.status !== 'done')) return '';
-    return specReviewNextKey(deriveSpecReviewNext(s.tasks, ref, task.claudeRun?.specReview?.gaps.length));
+    return specReviewNextKey(deriveSpecReviewNext(s.tasks, ref, task.claudeRun?.specReview?.gaps.length, task.claudeRun?.specReview?.checksObserved));
   });
   // Why this queued task waits, one primitive per selector so each returns a stable value
   const heldKind = useQueueHoldStore((s) => (task.status === 'queue' ? (s.holds[task.projectId ?? '']?.kind ?? '') : ''));

@@ -92,7 +92,8 @@ export const SPEC_REVIEW_SCHEMA: Record<string, unknown> = {
   type: 'object',
   additionalProperties: false,
   properties: {
-    complete: { type: 'boolean', description: 'True only when every spec section is done and no gap is left' },
+    complete: { type: 'boolean', description: 'True only when every spec section is done, no gap is left and the checks were observed' },
+    checksObserved: { type: 'boolean', description: "True only when you saw the project's tests (and type check or build) finish in this review and read their results; false when they were not run, did not finish or you only assume the result" },
     summary: { type: 'string', description: 'Two or three sentences for the reviewer' },
     sections: {
       type: 'array',
@@ -125,7 +126,7 @@ export const SPEC_REVIEW_SCHEMA: Record<string, unknown> = {
       },
     },
   },
-  required: ['complete', 'summary', 'sections', 'gaps'],
+  required: ['complete', 'checksObserved', 'summary', 'sections', 'gaps'],
 };
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
@@ -134,7 +135,8 @@ const text = (value: unknown): string => (typeof value === 'string' ? value.trim
  * Clean up the review's answer. A gap needs a title or description, a spec section and evidence;
  * the others are dropped (counted in `droppedGaps`). Gap keys are made unique, unknown and self
  * dependencies dropped (`knownTicketIds`, when given, are the open tickets a gap may also wait for),
- * and cycles broken. The report is complete exactly when no valid gap is left. Returns null when
+ * and cycles broken. The report is complete exactly when no valid gap is left and `checksObserved` is true (an
+ * answer without it is not trusted: no gaps then means unverified, see `planReviewOutcome`). Returns null when
  * the answer holds nothing usable.
  */
 export function normalizeSpecReview(raw: unknown, knownTicketIds?: ReadonlySet<string>): SpecReviewReport | null {
@@ -212,9 +214,12 @@ export function normalizeSpecReview(raw: unknown, knownTicketIds?: ReadonlySet<s
   }
 
   const droppedNote = dropped > 0 ? ` ${dropped} ${dropped === 1 ? 'gap was' : 'gaps were'} left out for missing evidence.` : '';
+  const checksObserved = r.checksObserved === true;
+  const unverifiedNote = gaps.length === 0 && !checksObserved ? ' Tests were not observed; run them or rerun the review.' : '';
   return {
-    complete: gaps.length === 0,
-    summary: `${summary}${droppedNote}`.trim(),
+    complete: gaps.length === 0 && checksObserved,
+    checksObserved,
+    summary: `${summary}${droppedNote}${unverifiedNote}`.trim(),
     sections,
     gaps: sortByDependencies(gaps),
     ...(dropped > 0 ? { droppedGaps: dropped } : {}),
@@ -227,15 +232,17 @@ export function normalizeSpecReview(raw: unknown, knownTicketIds?: ReadonlySet<s
 
 export type ReviewOutcome =
   | { kind: 'complete'; status: SpecBatchStatus }
+  | { kind: 'unverified'; status: SpecBatchStatus }
   | { kind: 'create_gaps'; status: SpecBatchStatus; nextRound: number }
   | { kind: 'gaps_open'; status: SpecBatchStatus };
 
 /**
  * What a finished review of `round` leads to: complete when no gap is left; gap tickets of the next
- * round while `round < maxReviewRounds`; otherwise the batch stays open with its gaps.
+ * round while `round < maxReviewRounds`; otherwise the batch stays open with its gaps. No gaps but checks not
+ * observed leaves the batch `unverified` (no new round: the user runs the tests or reruns the review).
  */
-export function planReviewOutcome(report: Pick<SpecReviewReport, 'gaps'>, round: number, maxReviewRounds: number): ReviewOutcome {
-  if (report.gaps.length === 0) return { kind: 'complete', status: 'complete' };
+export function planReviewOutcome(report: Pick<SpecReviewReport, 'gaps' | 'checksObserved'>, round: number, maxReviewRounds: number): ReviewOutcome {
+  if (report.gaps.length === 0) return report.checksObserved === false ? { kind: 'unverified', status: 'unverified' } : { kind: 'complete', status: 'complete' };
   if (round < maxReviewRounds) return { kind: 'create_gaps', status: 'building', nextRound: round + 1 };
   return { kind: 'gaps_open', status: 'gaps_open' };
 }
@@ -277,6 +284,7 @@ This is review ${round + 1} of at most ${batch.maxReviewRounds + 1}${round >= ba
 export type SpecReviewNext =
   | { kind: 'tickets'; taskIds: string[] }
   | { kind: 'gaps_open' }
+  | { kind: 'unverified' }
   | { kind: 'complete' };
 
 /**
@@ -287,9 +295,10 @@ export type SpecReviewNext =
 export function deriveSpecReviewNext(
   tasks: Array<Pick<Task, 'id' | 'status' | 'metadata'>>,
   ref: { batchId: string; round: number },
-  gapCount: number | undefined
+  gapCount: number | undefined,
+  checksObserved?: boolean
 ): SpecReviewNext | null {
-  if (gapCount === 0) return { kind: 'complete' };
+  if (gapCount === 0) return checksObserved === false ? { kind: 'unverified' } : { kind: 'complete' };
   const next = tasks
     .filter((x) => x.metadata?.specBatch?.id === ref.batchId && x.metadata.specBatch.round === ref.round + 1)
     .sort((a, b) => a.id.localeCompare(b.id));

@@ -25,8 +25,11 @@ export interface TaskSpecReviewRef {
   maxRounds?: number;
 }
 
-/** building: tickets are being built; reviewing: a review ticket exists; complete; gaps_open: gaps remain at the cap */
-export type SpecBatchStatus = 'building' | 'reviewing' | 'complete' | 'gaps_open';
+/**
+ * building: tickets are being built; reviewing: a review ticket exists; complete; gaps_open: gaps remain at the cap;
+ * unverified: no gaps, but the review did not observe the project's checks (run them or rerun the review)
+ */
+export type SpecBatchStatus = 'building' | 'reviewing' | 'complete' | 'gaps_open' | 'unverified';
 
 export interface SpecBatchRound {
   round: number;
@@ -88,7 +91,10 @@ export interface SpecReviewGap {
 
 /** What a Spec review ticket produces (kept in `claude_run.json` as `specReview`) */
 export interface SpecReviewReport {
+  /** True only when no gap is left AND the checks were observed (`checksObserved`) */
   complete: boolean;
+  /** The project's tests / type check results were actually seen in this review (not assumed or never finished) */
+  checksObserved?: boolean;
   summary: string;
   sections: SpecReviewSection[];
   gaps: SpecReviewGap[];

@@ -182,6 +182,16 @@ export function buildOmpAdvisorOverlay(
   return `${advisorPart}${fallbackPart}${taskPart}` || undefined;
 }
 
+/**
+ * Config overlay for print mode (`omp -p`): the process ends with the agent, which kills a background bash job whose
+ * result was to be injected later. With `async.enabled` off the bash tool has no `async` option and long commands are
+ * not auto-backgrounded (verified omp 18.12.6: the `async` argument disappears from the tool).
+ */
+export const OMP_FOREGROUND_OVERLAY = 'async:\n  enabled: false\nbash:\n  autoBackground:\n    enabled: false\n';
+
+/** Appended to the system prompt of every run: a step must not end while a background job it depends on runs */
+export const OMP_FOREGROUND_RULE = 'Run commands whose output you need in the foreground. Do not end your turn while a background job you depend on is still running.';
+
 export interface OmpArgsOptions {
   settings: OmpBackendSettings;
   /** Workbench model tier or Claude model id */
@@ -208,6 +218,8 @@ export interface OmpArgsOptions {
   advisorMode?: OmpAdvisorMode;
   /** Config overlay file made from `buildOmpAdvisorOverlay` (`--config`) */
   advisorOverlayFile?: string;
+  /** Config overlay file made from `OMP_FOREGROUND_OVERLAY` (`--config`): print mode cannot wait for background jobs */
+  foregroundOverlayFile?: string;
   /** Files attached to the message (`@path`) */
   attachmentPaths?: readonly string[];
   /** Extension files loaded for this run (`-e`; they work with `--no-extensions` too) */
@@ -244,6 +256,7 @@ export function buildOmpArgs(options: OmpArgsOptions): string[] {
   for (const extension of options.extensionPaths ?? []) args.push('-e', extension);
   if (options.advisorMode === 'on') args.push('--advisor');
   if (options.advisorOverlayFile) args.push('--config', options.advisorOverlayFile);
+  if (options.foregroundOverlayFile) args.push('--config', options.foregroundOverlayFile);
   if (settings.extraArgs?.length) args.push(...settings.extraArgs);
   if (options.attachmentPaths?.length) args.push(...options.attachmentPaths.map((p) => `@${p}`));
   return args;

@@ -17,6 +17,8 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 ### 2026-10-25
 
 **Spec review**
+- A Spec review is no longer marked complete unless it actually saw the project's tests pass: the report has a `checksObserved` field, and a review with no gaps but no observed checks leaves the batch "unverified" (no new round) with the line "Tests were not observed; run them or rerun the review"; rerunning the same review ticket applies the new report
+- OMP no longer loses background jobs: when the model runs a long command (such as `npm test`) as a background bash job and ends its turn, the live (RPC) session stays open until the job finishes and omp's follow-up run (which delivers the output) ends, instead of closing 8 s after the first answer and killing the job; runs through `omp -p` turn background bash off, and every OMP run with bash gets the rule to run needed commands in the foreground
 - A finished Spec review card and its panel now show what comes next: "Next review after #036, #037" while the follow-up tickets it created are still being built, "Last review: open gaps were left for you" when the round limit was reached, and "Spec complete" when nothing was missing
 - A Spec review waits only for queued or running follow-ups of its batch: tickets in Planning (for example a next slice that a decision only planned) no longer hold it back
 

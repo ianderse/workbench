@@ -164,12 +164,29 @@ describe('after the review', () => {
   it('closes the batch as complete when the spec is complete', async () => {
     await setUpBatch();
     await evaluateSpecBatch('p1', 'b1', makeDeps());
-    finishReview({ complete: true, summary: 'All there', sections: [{ section: '1', status: 'done', evidence: 'x' }], gaps: [] });
+    finishReview({ complete: true, checksObserved: true, summary: 'All there', sections: [{ section: '1', status: 'done', evidence: 'x' }], gaps: [] });
     await applySpecReview('p1', reviewTasks()[0].id, makeDeps());
     const batch = (await readSpecBatches(project)).batches[0];
     expect(batch.status).toBe('complete');
     expect(batch.reviewRounds).toBe(1);
     expect(tasks.filter((t) => t.metadata?.specBatch && !['001-a', '002-b'].includes(t.id))).toHaveLength(0);
+  });
+
+  it('leaves the batch unverified, with no new round, when no gap is left but the checks were not observed, and applies a rerun', async () => {
+    await setUpBatch();
+    await evaluateSpecBatch('p1', 'b1', makeDeps());
+    finishReview({ complete: true, checksObserved: false, summary: 'Looks done', sections: [], gaps: [] });
+    await applySpecReview('p1', reviewTasks()[0].id, makeDeps());
+    let batch = (await readSpecBatches(project)).batches[0];
+    expect(batch.status).toBe('unverified');
+    expect(batch.reviewRounds).toBe(1);
+    expect(tasks.filter((t) => t.metadata?.specBatch?.round === 1)).toHaveLength(0);
+    // The same review ticket reports again, this time with the tests seen
+    finishReview({ complete: true, checksObserved: true, summary: 'Tests pass', sections: [], gaps: [] });
+    await applySpecReview('p1', reviewTasks()[0].id, makeDeps());
+    batch = (await readSpecBatches(project)).batches[0];
+    expect(batch.status).toBe('complete');
+    expect(batch.reviewRounds).toBe(1);
   });
 
   it('creates and queues gap tickets of the next round with their dependencies, and building resumes', async () => {
@@ -238,7 +255,7 @@ describe('after the review', () => {
   it('drops gaps without evidence before creating tickets', async () => {
     await setUpBatch();
     await evaluateSpecBatch('p1', 'b1', makeDeps());
-    finishReview({ complete: false, summary: 's', sections: [], gaps: [gap('g1', { evidence: '' })] });
+    finishReview({ complete: false, checksObserved: true, summary: 's', sections: [], gaps: [gap('g1', { evidence: '' })] });
     await applySpecReview('p1', reviewTasks()[0].id, makeDeps());
     expect((await readSpecBatches(project)).batches[0].status).toBe('complete');
     expect(tasks.filter((t) => t.metadata?.specBatch?.round === 1)).toHaveLength(0);

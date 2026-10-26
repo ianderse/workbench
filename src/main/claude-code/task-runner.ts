@@ -343,7 +343,7 @@ function buildSpecReviewSystemPrompt(config: TaskRunConfig, specDirRelative: str
 - Workbench keeps its own task files in \`${specDirRelative}\`. Don't modify them.`,
     `## Your job: a read-only spec review
 - Check whether the spec is complete as written, by reading the spec and the code. You do not build anything.
-- Do not edit, create or delete project files, do not commit, and do not run version control commands that change anything (commit, checkout, reset, stash, merge, push). Running the project's tests, type check and build is expected; they must not leave changes in tracked files.
+- Do not edit, create or delete project files, do not commit, and do not run version control commands that change anything (commit, checkout, reset, stash, merge, push). Running the project's tests, type check and build is expected; they must not leave changes in tracked files. Run them in the foreground and wait for them to finish (do not end your turn while one still runs); a review whose checks were not observed cannot be complete.
 - Judge each spec section from evidence you saw: files you read, tests you ran, behaviour you observed. Do not assume a section is done because a ticket exists for it.
 - A gap needs the spec section it comes from and concrete evidence (a missing test, observed behaviour that differs from the spec, a missing file). Do not list opinions, style, or ideas beyond the spec. Write each gap's description so a coding agent with no other context can build it: what to build, the spec section to follow, acceptance criteria.
 - Answer with the structured report only.`,
@@ -1247,7 +1247,7 @@ export class ClaudeTaskRun {
     if (specReport) {
       this.info.specReview = specReport;
       this.info.summary = specReport.summary || this.info.summary;
-      const headline = specReport.gaps.length === 0 ? 'Spec complete' : `${specReport.gaps.length} ${specReport.gaps.length === 1 ? 'gap' : 'gaps'} found`;
+      const headline = specReport.gaps.length === 0 ? (specReport.complete ? 'Spec complete' : 'Tests were not observed') : `${specReport.gaps.length} ${specReport.gaps.length === 1 ? 'gap' : 'gaps'} found`;
       this.log.add('validation', 'success', headline, { detail: specReport.summary });
       this.log.endPhase('validation', true, headline);
     } else if (name === 'plan') {
@@ -1581,7 +1581,7 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
       case 'spec_review':
-        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}Review the spec now: read it, inspect the code in this worktree, run the project's tests (and type check or build when it has them), and return the report. Set complete to true only when every section is done and you list no gap. Change nothing and commit nothing.`;
+        text = `${resume ? '' : `${taskBlock(this.config)}\n\n`}Review the spec now: read it, inspect the code in this worktree, run the project's tests (and type check or build when it has them), and return the report. Set checksObserved to true only when you saw the tests (and type check or build) finish and read their results; if a run did not finish, was cut off or you could not run it, set it to false and say so. Set complete to true only when every section is done, you list no gap and checksObserved is true. Change nothing and commit nothing.`;
         break;
       case 'revise': {
         const opening = `${resume ? '' : `${taskBlock(this.config)}\n\n`}${PHASE_PROMPT_OPENINGS.revise}`;

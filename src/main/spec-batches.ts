@@ -308,7 +308,9 @@ async function applyLocked(projectId: string, reviewTaskId: string, deps: SpecBa
   const batch = ensureBatch(file, ref.batchId, tasks, deps);
   if (!batch) return;
   let entry: SpecBatchRound | undefined = batch.rounds.find((r) => r.round === ref.round);
-  if (entry?.processedAt) return;
+  // An unverified review is applied again when the same ticket is rerun and reports once more
+  if (entry?.processedAt && batch.status !== 'unverified') return;
+  const firstApply = !entry?.processedAt;
   if (!entry) {
     entry = { round: ref.round, reviewTaskId: review.id, gapTaskIds: [] };
     batch.rounds.push(entry);
@@ -351,7 +353,7 @@ async function applyLocked(projectId: string, reviewTaskId: string, deps: SpecBa
     batch.round = outcome.nextRound;
   }
   batch.status = outcome.status;
-  batch.reviewRounds += 1;
+  if (firstApply) batch.reviewRounds += 1;
   entry.processedAt = (deps.now?.() ?? new Date()).toISOString();
   await writeSpecBatches(project, file);
   deps.changed(projectId);

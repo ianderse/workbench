@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClaudeStreamMessage } from '../../claude-code/stream-types';
 import { DEFAULT_OMP_BACKEND_SETTINGS, type OmpBackendSettings } from '../../../shared/types/agent-backend';
 import { encodeRpcCommand, isSessionSettled, parseRpcLine, readSteerId, rpcSteer, sessionIdOf, steerText } from '../omp-rpc';
-import { buildOmpArgs } from '../omp-args';
+import { buildOmpArgs, OMP_FOREGROUND_OVERLAY, OMP_FOREGROUND_RULE } from '../omp-args';
 import { startOmpProcess } from '../omp-process';
 
 vi.mock('../omp-roles', () => ({ getOmpRoles: () => undefined }));
@@ -80,13 +80,14 @@ if (!rpc) {
   out({ type: 'ready', protocolVersion: 1 });
   let buf = '';
   let steered = false;
+  let jobPending = false;
   process.stdin.on('data', (c) => {
     buf += c;
     let i;
     while ((i = buf.indexOf('\\n')) !== -1) {
       const cmd = JSON.parse(buf.slice(0, i));
       buf = buf.slice(i + 1);
-      if (cmd.type === 'get_state') out({ id: cmd.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'rpc-session' } });
+      if (cmd.type === 'get_state') out({ id: cmd.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'rpc-session', hasPendingAsyncWork: jobPending } });
       if (cmd.type === 'prompt') {
         if (mode === 'rpc-refuse') {
           out({ id: cmd.id, type: 'response', command: 'prompt', success: false, error: 'busy' });
@@ -119,6 +120,24 @@ if (!rpc) {
   });
   const endRun = (text) => {
     finish(text);
+    if (mode.startsWith('rpc-job')) {
+      // The model backgrounded a bash job and ended its turn: not settled until the job's result was handled
+      out({ type: 'prompt_result', id: 'wb-prompt', status: 'completed', sessionSettled: false });
+      jobPending = true;
+      if (mode === 'rpc-job') {
+        setTimeout(() => {
+          jobPending = false;
+          out({ type: 'agent_start' });
+          out({ type: 'message_end', message: { role: 'custom', customType: 'async-result', content: 'Background job bg_1 has completed' } });
+          finish('tests passed');
+          out({ type: 'session_settled' });
+        }, 1500);
+      } else if (mode === 'rpc-job-lost') {
+        // The job died without a result: only get_state shows it
+        setTimeout(() => { jobPending = false; }, 1000);
+      }
+      return;
+    }
     out({ type: 'prompt_result', id: 'wb-prompt', status: 'completed' });
     out({ type: 'session_settled' });
   };
@@ -195,6 +214,51 @@ describe('startOmpProcess with live messages', () => {
     expect(text(messages)).toBe('final answer');
     expect(outcome.exitCode).toBe(0);
     expect(outcome.result?.is_error).toBe(false);
+  });
+
+  it('keeps the process open past agent_end while a background job is pending and ends with the follow-up run', async () => {
+    const { messages, promise } = run('rpc-job');
+    const handle = await promise;
+    const started = Date.now();
+    const outcome = await handle.done;
+    // The settle wait is 400 ms, the job finishes about 1500 ms after the first agent_end
+    expect(Date.now() - started).toBeGreaterThanOrEqual(1500);
+    expect(text(messages)).toBe('tests passed');
+    expect(messages.filter((m) => m.type === 'result')).toHaveLength(1);
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.result?.is_error).toBe(false);
+  });
+
+  it('accepts live messages while it waits for a background job', async () => {
+    const { promise } = run('rpc-job');
+    const handle = await promise;
+    await new Promise((r) => setTimeout(r, 1000));
+    expect(handle.send('while the job runs', 'wbm-job1')).toBe('wbm-job1');
+    await handle.done;
+  });
+
+  it('settles once the job is gone without a result', async () => {
+    const { messages, promise } = run('rpc-job-lost', { rpcWaitsMs: { ready: 5000, start: 400, settle: 400, state: 400, poll: 200 } });
+    const outcome = await (await promise).done;
+    expect(text(messages)).toBe('final answer');
+    expect(outcome.exitCode).toBe(0);
+    expect(outcome.timedOut).toBe(false);
+  });
+
+  it('is bounded by the step timeout when a job never finishes', async () => {
+    const { promise } = run('rpc-job-forever', { timeoutMs: 3000 });
+    const started = Date.now();
+    const outcome = await (await promise).done;
+    expect(outcome.timedOut).toBe(true);
+    expect(Date.now() - started).toBeLessThan(8000);
+  });
+
+  it('turns background bash off in print mode and adds the foreground rule', async () => {
+    const args = buildOmpArgs({ settings: DEFAULT_OMP_BACKEND_SETTINGS, tools: ['bash'], foregroundOverlayFile: '/o/fg.yml' });
+    expect(args).toContain('--config');
+    expect(args[args.indexOf('--config') + 1]).toBe('/o/fg.yml');
+    expect(OMP_FOREGROUND_OVERLAY).toContain('enabled: false');
+    expect(OMP_FOREGROUND_RULE).toMatch(/foreground/);
   });
 
   it.each(['rpc-exit', 'rpc-silent', 'rpc-garbage'])('falls back to omp -p when the RPC process misbehaves (%s)', async (mode) => {
