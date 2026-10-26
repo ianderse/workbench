@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { SettingsSection } from './SettingsSection';
@@ -35,6 +35,19 @@ export function UsageSimulatorSettings() {
   const sessionPercent = useUsageSimulatorStore((state) => state.sessionPercent);
   const setSessionPercent = useUsageSimulatorStore((state) => state.setSessionPercent);
   const realUsage = useUsageStore((state) => state.usage);
+  // The sidebar's badge feeds the store, but it is not mounted while the sidebar is collapsed:
+  // keep the store fed from here while the preview is on screen
+  useEffect(() => {
+    if (!IS_DEV_BUILD) return;
+    const { setUsage } = useUsageStore.getState();
+    const unsubscribe = window.electronAPI.onUsageUpdated((snapshot) => setUsage(snapshot));
+    if (!useUsageStore.getState().usage) {
+      window.electronAPI.requestUsageUpdate()
+        .then((result) => { if (result.success && result.data) setUsage(result.data); })
+        .catch(() => {});
+    }
+    return unsubscribe;
+  }, []);
 
   const pinned = useMemo(() => simulatedMoment(clock), [clock]);
   const usage = useMemo(() => {

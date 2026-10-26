@@ -31,7 +31,8 @@ export const USAGE_LOADING_TIMEOUT_MS = 20_000;
 
 export function UsageIndicator() {
   const { t } = useTranslation(['common']);
-  const [usage, setUsage] = useState<ClaudeUsageSnapshot | null>(null);
+  // Starts from the last snapshot, so mounting again (the sidebar opening) never blanks the store
+  const [usage, setUsage] = useState<ClaudeUsageSnapshot | null>(() => useUsageStore.getState().usage);
   // Shared, so the usage simulator's preview in Settings shows the same numbers without asking again
   useEffect(() => { useUsageStore.getState().setUsage(usage); }, [usage]);
   const [isLoading, setIsLoading] = useState(true);
