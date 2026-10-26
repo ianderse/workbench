@@ -34,10 +34,12 @@ import { Transform, type Readable, type TransformCallback } from 'stream';
 import { promisify } from 'util';
 import { getToolPathAsync, type CLITool } from '../cli-tool-manager';
 import { getSpawnCommand, shouldUseShell } from '../env-utils';
-import { GRACEFUL_KILL_TIMEOUT_MS, killProcessGracefully, type KillProcessOptions } from './index';
+import { GRACEFUL_KILL_TIMEOUT_MS, isWindows, killProcessGracefully, type KillProcessOptions } from './index';
 import { getWslInfo, isWslRuntime, toRuntimePath, whenShellRuntimeReady } from './shell-runtime';
 import { getWslExePath, type WslProbeResult, type WslProbeTool } from './wsl-detect';
 import { isWslUncPath } from './wsl-paths';
+import { signalGroupsNow, taskkillTree, terminateProcessTree } from './process-tree';
+import { getTaskkillExePath } from '../utils/windows-paths';
 
 const execFileAsync = promisify(execFile);
 
@@ -74,6 +76,14 @@ export interface SpawnToolOptions {
   windowsHide?: boolean;
   /** Executable to run (a path the caller resolved); defaults to the tool's name on PATH. See RunToolOptions.command */
   command?: string;
+  /**
+   * An agent run: the whole process tree is ended with the run, not only the direct child. On macOS/Linux the
+   * process becomes the leader of its own process group (`detached`, stdio stays piped) and killRuntimeProcess
+   * signals the group, then the descendants found in the process table (tools that started their own session);
+   * on Windows (pwsh) it is `taskkill /T /F`; in WSL the Linux process's descendants are signalled too.
+   * Workbench ends every such process when the app quits (killAllProcessTrees / signalProcessGroupsNow).
+   */
+  processGroup?: boolean;
 }
 
 /** One invocation's outcome in a runToolScript batch */
@@ -338,9 +348,17 @@ function trackWslProcess(child: ChildProcess, distro: string): void {
   if (Array.isArray(writable.stdio)) writable.stdio[2] = filter;
 }
 
-/** Send a signal to a Linux process, its process group and its children */
+/**
+ * Send a signal to a Linux process, its process group and all its descendants (found before anything is
+ * signalled, level by level with pgrep -P, so a tool that started its own session is reached too)
+ */
+/** The shell script that signals a Linux process tree */
+export function wslSignalScript(pid: number, signal: 'TERM' | 'KILL'): string {
+  return `all=${pid}; level=${pid}; while [ -n "$level" ]; do next=; for p in $level; do next="$next $(pgrep -P $p 2>/dev/null)"; done; level=$(echo $next); all="$all $level"; done; kill -${signal} -${pid} 2>/dev/null; kill -${signal} $all 2>/dev/null; pkill -${signal} -P ${pid} 2>/dev/null; exit 0`;
+}
+
 function signalWslProcess(distro: string, pid: number, signal: 'TERM' | 'KILL'): Promise<unknown> {
-  const script = `pkill -${signal} -P ${pid} 2>/dev/null; kill -${signal} -${pid} 2>/dev/null; kill -${signal} ${pid} 2>/dev/null; exit 0`;
+  const script = wslSignalScript(pid, signal);
   return execFileAsync(getWslExePath(), ['-d', distro, '--exec', '/bin/sh', '-c', script], {
     windowsHide: true,
     timeout: 15_000,
@@ -553,9 +571,97 @@ export function spawnTool(tool: RuntimeTool, args: string[], options: SpawnToolO
     return child;
   }
 
-  const { command, ...spawnOptions } = options;
+  const { command, processGroup, ...spawnOptions } = options;
   const launch = nativeLaunch(command ?? tool, args);
-  return spawn(launch.file, launch.args, { ...spawnOptions, shell: launch.shell });
+  // A process group of its own (POSIX): `detached` is setsid-like, stdio stays the caller's pipes
+  const grouped = processGroup === true && !isWindows();
+  const child = spawn(launch.file, launch.args, { ...spawnOptions, shell: launch.shell, ...(grouped ? { detached: true } : {}) });
+  if (processGroup) trackTree(child, grouped);
+  return child;
+}
+
+// =============================================================================
+// Process trees of agent runs
+// =============================================================================
+
+/** Agent runs whose whole tree is ended with them: the process and whether it leads a POSIX group */
+const trees = new Map<ChildProcess, { pid: number; group: boolean }>();
+/** Tree terminations under way (waited for when the app quits) */
+const terminations = new Set<Promise<void>>();
+
+function trackTree(child: ChildProcess, group: boolean): void {
+  const pid = child.pid;
+  if (pid === undefined) return;
+  trees.set(child, { pid, group });
+  // The CLI ended by itself: its tools may have left processes in the group; end them
+  child.once('exit', () => {
+    const entry = trees.get(child);
+    if (!entry) return;
+    trees.delete(child);
+    if (group && isGroupAlive(pid)) track(terminateProcessTree(pid, { group: true }));
+    else retainedGroups.delete(pid);
+  });
+  child.once('error', () => trees.delete(child));
+}
+
+/** Groups of exited agent processes that still had members (kept for the app's last SIGKILL) */
+const retainedGroups = new Set<number>();
+
+function isGroupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+function track(termination: Promise<void>): Promise<void> {
+  const settled = termination.catch(() => undefined).finally(() => terminations.delete(settled));
+  terminations.add(settled);
+  return settled;
+}
+
+function endTree(child: ChildProcess, options: KillProcessOptions): void {
+  const entry = trees.get(child);
+  if (!entry) return;
+  trees.delete(child);
+  if (!entry.group) {
+    // Windows: the whole tree at once (the direct child is killed too when taskkill is unavailable)
+    track(taskkillTree(getTaskkillExePath(), entry.pid));
+    killProcessGracefully(child, options);
+    return;
+  }
+  retainedGroups.add(entry.pid);
+  const done = track(terminateProcessTree(entry.pid, { graceMs: options.timeoutMs ?? GRACEFUL_KILL_TIMEOUT_MS, group: true }));
+  void done.then(() => {
+    if (!isGroupAlive(entry.pid)) retainedGroups.delete(entry.pid);
+  });
+}
+
+/**
+ * App quit: end every agent run's tree still running (and finish the terminations under way), waiting at
+ * most `timeoutMs`. Whatever survives is SIGKILLed by signalProcessGroupsNow in will-quit.
+ */
+export async function killAllProcessTrees(timeoutMs = 8000): Promise<void> {
+  for (const child of [...trees.keys()]) {
+    if (child.exitCode !== null || child.signalCode !== null) continue;
+    endTree(child, { timeoutMs: Math.max(1000, Math.min(timeoutMs - 1500, GRACEFUL_KILL_TIMEOUT_MS)) });
+  }
+  if (terminations.size === 0) return;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    Promise.all([...terminations]),
+    new Promise<void>((resolve) => { timer = setTimeout(resolve, timeoutMs); }),
+  ]);
+  if (timer) clearTimeout(timer);
+}
+
+/** Last moments of the app (will-quit, process exit, signals): SIGKILL every agent group, synchronously */
+export function signalProcessGroupsNow(): void {
+  const groups = new Set(retainedGroups);
+  for (const entry of trees.values()) if (entry.group) groups.add(entry.pid);
+  signalGroupsNow(groups, 'SIGKILL');
 }
 
 /**
@@ -564,6 +670,10 @@ export function spawnTool(tool: RuntimeTool, args: string[], options: SpawnToolO
  * grace period; wsl.exe itself is stopped when that doesn't end it.
  */
 export function killRuntimeProcess(child: ChildProcess, options: KillProcessOptions = {}): void {
+  if (trees.has(child)) {
+    endTree(child, options);
+    return;
+  }
   const tracked = wslProcesses.get(child);
   if (tracked) {
     stopWslProcess(child, tracked, options);

@@ -82,6 +82,8 @@ import {
   scheduleWindowSessionSave
 } from './window-session';
 import { migrateProjectDataDirs } from './data-dir-migration';
+import { killAllProcessTrees, signalProcessGroupsNow } from './platform/runtime-exec';
+import { killOrphanedWorktreeProcesses } from './platform/process-tree';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Single instance: launching the installed app again (Start menu, taskbar, shortcut) shows the
@@ -692,6 +694,12 @@ app.whenReady().then(async () => {
   // Initialize agent manager
   agentManager = new AgentManager();
 
+  // Safety net: processes an earlier session's agents left behind (parent 1, working in a task worktree)
+  void killOrphanedWorktreeProcesses(
+    projectStore.getProjects().map((project) => project.path),
+    (message) => appLog.info(message)
+  ).catch((error) => appLog.error('[Orphans] Startup sweep failed:', error));
+
 
   // Initialize terminal manager
   terminalManager = new TerminalManager(() => getFocusedWindow());
@@ -952,6 +960,9 @@ app.on('before-quit', (event) => {
         await agentManager.killAll();
       }
 
+      // Whatever the agents' tools started goes too (process groups; bounded wait)
+      await killAllProcessTrees();
+
       // Kill all terminal processes — waits for PTY exit with bounded timeout
       if (terminalManager) {
         await terminalManager.killAll();
@@ -974,7 +985,19 @@ app.on('before-quit', (event) => {
 app.on('will-quit', () => {
   freezeWindowSession();
   liveAgentRelay.terminateNow();
+  // Agent process groups are detached from the app: none may outlive it
+  signalProcessGroupsNow();
 });
+
+// The same for an exit that skips before-quit/will-quit (a kill by SIGTERM/SIGINT/SIGHUP, the dev restart)
+process.on('exit', signalProcessGroupsNow);
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+  process.once(signal, () => {
+    signalProcessGroupsNow();
+    // Default behaviour of the signal (the app ends) now that the agents are gone
+    process.kill(process.pid, signal);
+  });
+}
 
 // Note: Uncaught exceptions and unhandled rejections are now
 // logged by setupErrorLogging() in app-logger.ts

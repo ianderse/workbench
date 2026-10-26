@@ -541,6 +541,12 @@ start, the session runs natively and the Settings row says why. These modules ar
   whole-argument Windows paths, and pass changed env vars through `WSLENV` (never PATH); in pwsh mode they behave
   as a plain spawn. `getToolPath()` and `getToolInfoAsync()` describe tools (Linux paths in WSL mode), they don't
   run them.
+- **Agent runs end as a whole process tree** — `spawnTool(..., { processGroup: true })` (Claude Code and OMP runs) makes the CLI
+  a process-group leader on macOS/Linux (`detached`, pipes kept), and `killRuntimeProcess` then signals the group and, from a
+  process-table walk (`ps`) taken first, every descendant that left it (`setsid`), SIGKILL after the grace period; Windows uses
+  `taskkill /T /F`, WSL signals all descendants. `before-quit` awaits `killAllProcessTrees()`, `will-quit`/exit/SIGTERM send a
+  last SIGKILL to the groups, and at startup `killOrphanedWorktreeProcesses()` (`platform/process-tree.ts`) ends leftovers of an
+  earlier session (parent 1, cwd inside a project's `.workbench/worktrees/tasks/`). Never use `execSync` for this.
 - **Stored paths stay Windows paths** (projects, worktrees, profile config dirs, the WSL Claude home as
   `\\wsl.localhost\<distro>\home\<user>`); translate only at process boundaries (args, cwd, env, prompt text,
   git output such as `worktree list --porcelain`).

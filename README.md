@@ -16,6 +16,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 
 ### 2026-10-25
 
+**Agent runs**
+- Stopping a task, Start over, a step timeout, a restart or quitting the app now ends everything the agent started (such as the vitest workers of `npm test`), not just Claude Code or OMP itself: agent CLIs run in their own process group on macOS/Linux, `taskkill /T` on Windows, and at startup leftover processes of an earlier session working inside a task worktree are ended and logged
+
 **Spec review**
 - A Spec review is no longer marked complete unless it actually saw the project's tests pass: the report has a `checksObserved` field, and a review with no gaps but no observed checks leaves the batch "unverified" (no new round) with the line "Tests were not observed; run them or rerun the review"; rerunning the same review ticket applies the new report
 - OMP no longer loses background jobs: when the model runs a long command (such as `npm test`) as a background bash job and ends its turn, the live (RPC) session stays open until the job finishes and omp's follow-up run (which delivers the output) ends, instead of closing 8 s after the first answer and killing the job; runs through `omp -p` turn background bash off, and every OMP run with bash gets the rule to run needed commands in the foreground
