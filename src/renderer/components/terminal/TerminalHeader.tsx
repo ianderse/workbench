@@ -8,6 +8,7 @@ import { AgentsIcon, TerminalPromptIcon } from '../icons/app-icons';
 import { TaskSelector } from './TaskSelector';
 import { SessionSelector } from './SessionSelector';
 import { WorktreeSelector } from './WorktreeSelector';
+import { useSettingsStore } from '../../stores/settings-store';
 
 interface TerminalHeaderProps {
   terminalId: string;
@@ -55,6 +56,8 @@ export function TerminalHeader({
   onToggleExpand,
 }: TerminalHeaderProps) {
   const { t } = useTranslation(['terminal', 'common']);
+  // A boolean, so the selector returns a stable value
+  const ompWindows = useSettingsStore((state) => state.settings.agentBackend?.kind === 'omp');
   // Tasks an agent window can pick: those with a Claude Code session to resume (not archived),
   // and backlog tasks (their description is sent to the running session)
   const selectableTasks = tasks.filter(
@@ -98,8 +101,9 @@ export function TerminalHeader({
             labelClassName={terminalCount >= 6 ? 'max-w-20' : terminalCount >= 4 ? 'max-w-28' : 'max-w-40'}
           />
         )}
-        {/* Agent windows: the Claude Code session (new, or one /resume would offer) */}
-        {isCLIMode && (
+        {/* Agent windows: the Claude Code session (new, or one /resume would offer). OMP windows resume
+            OMP's own session, so Claude Code's list does not apply there */}
+        {isCLIMode && !ompWindows && (
           <SessionSelector
             terminalId={terminalId}
             labelClassName={terminalCount >= 6 ? 'max-w-20' : terminalCount >= 4 ? 'max-w-28' : 'max-w-40'}
