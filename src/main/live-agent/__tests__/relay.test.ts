@@ -438,6 +438,53 @@ describe('relay', () => {
     );
   });
 
+  it('draws a nested agent found before its launcher at attach under that launcher', async () => {
+    // The reviewer's file sorts before its fork's, so it is read first: its launch is only recorded
+    // once the fork's file is pre-scanned
+    const agentId = 'a87c2c04160aaa861';
+    const reviewerId = 'a3277609eb4aa278e';
+    fs.mkdirSync(subagentsDir(), { recursive: true });
+    const forkFile = path.join(subagentsDir(), `agent-${agentId}.jsonl`);
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.forked-skill.json`), JSON.stringify({ skillName: 'code-review' }));
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${agentId}.meta.json`), JSON.stringify({ agentType: 'general-purpose', name: 'code-review' }));
+    appendTo(transcript, [
+      toolUse('toolu_review', 'Skill'),
+      toolResult('toolu_review', { success: true, status: 'forked', background: true, agentId }),
+    ]);
+    appendTo(forkFile, [
+      toolUse('toolu_reviewer', 'Agent'),
+      {
+        type: 'user', uuid: 'r-reviewer', isSidechain: true,
+        message: { role: 'user', content: [{
+          type: 'tool_result', tool_use_id: 'toolu_reviewer',
+          content: [{ type: 'text', text: `Async agent launched successfully.\nagentId: ${reviewerId}\nThe agent is working in the background.` }],
+        }] },
+      },
+      // A foreground reviewer that already reported back
+      toolUse('toolu_done', 'Agent'),
+      { type: 'user', uuid: 'r-done', isSidechain: true, message: { role: 'user', content: [{
+        type: 'tool_result', tool_use_id: 'toolu_done', content: [{ type: 'text', text: 'No issues found' }],
+      }] } },
+    ]);
+    // Written for the foreground at request time; its answer says it went to the background
+    fs.writeFileSync(path.join(subagentsDir(), `agent-${reviewerId}.meta.json`), JSON.stringify({ toolUseId: 'toolu_reviewer', requestShape: 'foreground' }));
+    appendTo(path.join(subagentsDir(), `agent-${reviewerId}.jsonl`), [toolUse('toolu_reviewer_read', 'Read')]);
+    fs.writeFileSync(path.join(subagentsDir(), 'agent-a1111111111111111.meta.json'), JSON.stringify({ toolUseId: 'toolu_done', requestShape: 'foreground' }));
+    appendTo(path.join(subagentsDir(), 'agent-a1111111111111111.jsonl'), [toolUse('toolu_done_read', 'Read')]);
+
+    relay.subscribe('window-a', workspace, flowDir);
+    const spawns = events().filter((event) => event.type === 'agent_spawn');
+    expect(spawns).toEqual(expect.arrayContaining([
+      expect.objectContaining({ payload: expect.objectContaining({ name: 'toolu_reviewer', parent: agentId }) }),
+    ]));
+    expect(spawns.some((event) => event.payload.name === 'toolu_reviewer' && event.payload.parent !== agentId)).toBe(false);
+    expect(spawns.some((event) => event.payload.name === 'toolu_done')).toBe(false);
+    expect(events()).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'tool_call_start', payload: expect.objectContaining({ agent: 'toolu_reviewer', id: 'toolu_reviewer_read' }) }),
+    ]));
+    expect(events().some((event) => event.type === 'agent_complete' && event.payload.name === 'toolu_reviewer')).toBe(false);
+  });
+
   it('draws a forked skill\'s background agent (/code-review) and completes it on its report', async () => {
     const agentId = 'aedfe971f6aff305a';
     relay.subscribe('window-a', workspace, flowDir);

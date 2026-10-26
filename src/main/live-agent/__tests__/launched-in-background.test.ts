@@ -23,12 +23,15 @@ describe('launchedInBackground', () => {
     expect(launchedInBackground({ agentId: 'a1' }, answer('Done: all checks pass'))).toBe(false);
   });
 
-  it("goes by the launched agent's .meta.json before the answer's wording", () => {
-    // A sub-agent's transcript has no toolUseResult: the requestShape decides, whatever the answer says
+  it("goes by the launched agent's .meta.json only where the answer does not say it went async", () => {
+    // A sub-agent's transcript has no toolUseResult: an answer that doesn't say is settled by the requestShape
     expect(launchedInBackground(undefined, answer('Agent started in the background'), () => 'background')).toBe(true);
-    expect(launchedInBackground(undefined, launch, () => 'foreground')).toBe(false);
+    expect(launchedInBackground(undefined, answer('Done: all checks pass'), () => 'foreground')).toBe(false);
+    // A foreground launch moved to the background later (Ctrl+B): its .meta.json still says foreground
+    expect(launchedInBackground(undefined, launch, () => 'foreground')).toBe(true);
     // Not written yet: the wording is all there is
     expect(launchedInBackground(undefined, launch, () => undefined)).toBe(true);
+    expect(launchedInBackground(undefined, answer('Done: all checks pass'), () => undefined)).toBe(false);
     // A toolUseResult that says how it ran never needs the .meta.json
     const shape = vi.fn(() => 'background' as const);
     expect(launchedInBackground({ status: 'completed' }, launch, shape)).toBe(false);

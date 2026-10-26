@@ -69,29 +69,32 @@ function isAsyncLaunch(toolUseResult: unknown): boolean {
 }
 
 
-/** The answer the Agent tool gives a background launch: the last thing to go by, where neither the
- *  result nor the launched agent's .meta.json says how it ran (see launchedInBackground) */
+/** The answer the Agent tool gives a background launch, for a result without a toolUseResult
+ *  (see launchedInBackground) */
 const ASYNC_LAUNCH_ANSWER = 'Async agent launched successfully'
 
 /**
  * Whether an Agent/Task call's result says the agent goes on in the background: then it has only
  * started, and what ends it is its <task-notification>. Taken for its end instead, a background
  * agent a sub-agent launches (the reviewers /code-review's fork sends out) was drawn finished the
- * moment it was launched, and went on working unseen. In order of trust: the result's
- * toolUseResult, which a sub-agent's own transcript leaves out; the `requestShape` in the launched
- * agent's .meta.json (`shape`, read only when needed); and the answer's wording, for a launch
- * whose .meta.json isn't written yet. A call that failed launched nothing that will report, even
- * where its .meta.json was already written for the background.
+ * moment it was launched, and went on working unseen. The result itself comes first: its
+ * toolUseResult, which a sub-agent's own transcript leaves out, then the answer's wording. Only a
+ * result that says neither is settled by the `requestShape` in the launched agent's .meta.json
+ * (`shape`, read only when needed): it is written once, when the call is made, so it still says
+ * 'foreground' for an agent Claude Code moved to the background later (Ctrl+B, or on its own).
+ * A call that failed launched nothing that will report, even where its .meta.json was already
+ * written for the background.
  */
 export function launchedInBackground(toolUseResult: unknown, block: unknown, shape?: () => LaunchShape | undefined): boolean {
   if (isRecord(block) && block.is_error === true) return false
   if (isAsyncLaunch(toolUseResult)) return true
   if (saysHowItRan(toolUseResult)) return false
-  const recorded = shape?.()
-  if (recorded) return recorded === 'background'
   const content = isRecord(block) ? block.content : undefined
-  return (typeof content === 'string' || Array.isArray(content))
-    && userContentText(content as TranscriptEntry['message']['content']).startsWith(ASYNC_LAUNCH_ANSWER)
+  const answer = typeof content === 'string' || Array.isArray(content)
+    ? userContentText(content as TranscriptEntry['message']['content'])
+    : ''
+  if (answer.startsWith(ASYNC_LAUNCH_ANSWER)) return true
+  return shape?.() === 'background'
 }
 
 /**
