@@ -155,25 +155,36 @@ export interface UsageNumbers {
   session: number;
   weekly: number;
   fable?: number;
+  /** A pinned moment (the usage simulator's); a new one picks again for that moment */
+  clock?: string | null;
+}
+
+export type SkinPicker = (usage: UsageNumbers, now?: Date) => ClawdSkin;
+
+/**
+ * A skin picker with a memory of its own. A new skin is picked only when the numbers change, so
+ * a failed refresh (no new numbers) leaves him in the one he has. When the 5-hour window resets
+ * (its percentage drops) he puts on the crown.
+ */
+export function createSkinPicker(): SkinPicker {
+  let worn: { key: string; session: number; skin: ClawdSkin } | null = null;
+  return (usage, now = new Date()) => {
+    const key = `${usage.session}|${usage.weekly}|${usage.fable ?? ''}|${usage.clock ?? ''}`;
+    if (worn?.key === key) return worn.skin;
+    const reset = worn != null && usage.session < worn.session;
+    const skin = reset
+      ? SKINS.find((s) => s.id === 'crown') ?? CLASSIC_SKIN
+      : pickSkin(worn?.skin ?? null, { now, percent: usage.session });
+    worn = { key, session: usage.session, skin };
+    return skin;
+  };
 }
 
 /**
- * The skin for a set of usage numbers. A new skin is picked only when the numbers change, so a
- * failed refresh (no new numbers) leaves him in the one he has. When the 5-hour window resets
- * (its percentage drops) he puts on the crown. Kept outside React so the popover closing and
- * opening again does not change it either.
+ * The usage popover's skin. Kept outside React so the popover closing and opening again does
+ * not change it.
  */
-let worn: { key: string; session: number; skin: ClawdSkin } | null = null;
-export function skinForUsage(usage: UsageNumbers, now = new Date()): ClawdSkin {
-  const key = `${usage.session}|${usage.weekly}|${usage.fable ?? ''}`;
-  if (worn?.key === key) return worn.skin;
-  const reset = worn != null && usage.session < worn.session;
-  const skin = reset
-    ? SKINS.find((s) => s.id === 'crown') ?? CLASSIC_SKIN
-    : pickSkin(worn?.skin ?? null, { now, percent: usage.session });
-  worn = { key, session: usage.session, skin };
-  return skin;
-}
+export const skinForUsage = createSkinPicker();
 
 const SKIN_FILES: Record<string, string> = {
   crown: `

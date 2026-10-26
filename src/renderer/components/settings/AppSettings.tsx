@@ -29,6 +29,7 @@ import { ClaudeCodeSettings } from './ClaudeCodeSettings';
 import { GraphifySettings } from './GraphifySettings';
 import { AccountSettings } from './AccountSettings';
 import { ProjectSettingsContent, ProjectSettingsSection } from './ProjectSettingsContent';
+import { UsageSimulatorSettings } from './UsageSimulatorSettings';
 import { ConnectorsSettings } from './ConnectorsSettings';
 import { useProjectStore } from '../../stores/project-store';
 import type { UseProjectSettingsReturn } from '../project-settings/hooks/useProjectSettings';
@@ -236,7 +237,13 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
       case 'connectors':
         return <ConnectorsSettings settings={settings} onSettingsChange={setSettings} />;
       case 'devtools':
-        return <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />;
+        return (
+          <>
+            {/* Development builds only */}
+            <UsageSimulatorSettings />
+            <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />
+          </>
+        );
       case 'updates':
         return (
           <>

@@ -14,7 +14,7 @@ import type { ClaudeUsageSnapshot } from '../../../shared/types/agent';
 import { useTaskStore } from '../../stores/task-store';
 import { ClawdScene, ClawdSky, SCENE_H } from './ClawdScene';
 import { Hearts } from './Hearts';
-import { skinForUsage } from './clawd/skins';
+import { skinForUsage, type SkinPicker } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
 import { getBarColorClass, getColorClass } from './usage-colors';
 
@@ -62,7 +62,22 @@ function UsageRow({ label, percent, resets }: { label: string; percent: number; 
   );
 }
 
-export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
+interface UsageHeroProps {
+  usage: ClaudeUsageSnapshot;
+  /** Clawd only animates while this is on (the popover is open, the preview is on screen) */
+  active: boolean;
+  /** Picks his skin; each view keeps its own so a preview never changes the popover's */
+  pickSkin?: SkinPicker;
+  /** A pinned moment for the sky and the skins (the usage simulator's), or null for now */
+  pinned?: Date | null;
+}
+
+/**
+ * The top of the usage popover: the header with the hearts, and the 5-hour limit, large, with
+ * the sky behind it and Clawd walking alongside. Rendered as siblings, so it sits in the
+ * popover's spacing; the usage simulator in Settings shows it on its own as a preview.
+ */
+export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = null }: UsageHeroProps) {
   const { t } = useTranslation(['common']);
   const [span, setSpan] = useState(0);
   const [pointerX, setPointerX] = useState<number | null>(null);
@@ -77,9 +92,17 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
 
   // A new random skin every time the numbers change; a failed refresh brings no new numbers, so
   // he keeps the one he has. The 5-hour window resetting earns him the crown.
+  // A new pinned moment picks a skin for that moment.
+  const pinnedAt = pinned?.getTime() ?? null;
   const skin = useMemo(
-    () => skinForUsage({ session: usage.sessionPercent, weekly: usage.weeklyPercent, fable: usage.fablePercent }),
-    [usage.sessionPercent, usage.weeklyPercent, usage.fablePercent],
+    () => pickSkin(
+      {
+        session: usage.sessionPercent, weekly: usage.weeklyPercent, fable: usage.fablePercent,
+        clock: pinnedAt == null ? null : String(pinnedAt),
+      },
+      pinnedAt == null ? new Date() : new Date(pinnedAt),
+    ),
+    [pickSkin, usage.sessionPercent, usage.weeklyPercent, usage.fablePercent, pinnedAt],
   );
 
   const { render, pet } = useClawd({
@@ -90,31 +113,14 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
     total: tasks.length,
     span,
     pointerX,
-    active: open,
+    active,
     skin,
-  });
-
-  const compact = useCallback((timestamp?: string) => formatTimeRemaining(timestamp, t, {
-    hoursKey: 'common:usage.compactHours',
-    daysKey: 'common:usage.compactDays',
-  }), [t]);
-
-  const sessionResets = formatTimeRemaining(usage.sessionResetTimestamp, t, {
-    hoursKey: 'common:usage.resetsInLowerHours',
-    daysKey: 'common:usage.resetsInLowerDays',
   });
 
   const sessionPercent = Math.round(usage.sessionPercent);
 
-  // Anthropic's second window is a week, and the design calls it that. Other providers meter a
-  // different span there - z.ai bills a calendar month - so those keep their own name.
-  const weeklyLabel = usage.usageWindows?.weeklyWindowLabel
-    && usage.usageWindows.weeklyWindowLabel !== ANTHROPIC_WEEKLY_WINDOW
-    ? localizeUsageWindowLabel(usage.usageWindows.weeklyWindowLabel, t, 'common:usage.weekAllModels')
-    : t('common:usage.weekAllModels');
-
   return (
-    <div className="space-y-2.5 p-3">
+    <>
       {/* Header: the three hearts are the 5-hour limit left */}
       <div className="flex items-center justify-between gap-2 border-b pb-2">
         <span className="text-xs font-semibold">
@@ -123,11 +129,10 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
         <Hearts fraction={render?.shownFraction ?? null} beat={render?.beat ?? 1} />
       </div>
 
-      {/* The 5-hour limit, large, with the sky behind it and Clawd walking alongside. The bar is
-          the ground he stands on, so the two sit flush with no gap between them. */}
+      {/* The bar is the ground Clawd stands on, so the two sit flush with no gap between them */}
       <div>
         <div className="relative flex items-end gap-2" style={{ height: SCENE_H }}>
-          <ClawdSky percent={usage.sessionPercent} />
+          <ClawdSky percent={usage.sessionPercent} pinned={pinned} />
           {/* Clawd stands on the bar, the number sits a touch above it */}
           <div className="relative mb-1 flex shrink-0 items-start self-end">
             <span className={`text-[2rem] font-light leading-none tabular-nums ${getColorClass(usage.sessionPercent)}`}>
@@ -145,6 +150,33 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
           />
         </div>
       </div>
+    </>
+  );
+}
+
+export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
+  const { t } = useTranslation(['common']);
+
+  const compact = useCallback((timestamp?: string) => formatTimeRemaining(timestamp, t, {
+    hoursKey: 'common:usage.compactHours',
+    daysKey: 'common:usage.compactDays',
+  }), [t]);
+
+  const sessionResets = formatTimeRemaining(usage.sessionResetTimestamp, t, {
+    hoursKey: 'common:usage.resetsInLowerHours',
+    daysKey: 'common:usage.resetsInLowerDays',
+  });
+
+  // Anthropic's second window is a week, and the design calls it that. Other providers meter a
+  // different span there - z.ai bills a calendar month - so those keep their own name.
+  const weeklyLabel = usage.usageWindows?.weeklyWindowLabel
+    && usage.usageWindows.weeklyWindowLabel !== ANTHROPIC_WEEKLY_WINDOW
+    ? localizeUsageWindowLabel(usage.usageWindows.weeklyWindowLabel, t, 'common:usage.weekAllModels')
+    : t('common:usage.weekAllModels');
+
+  return (
+    <div className="space-y-2.5 p-3">
+      <UsageHero usage={usage} active={open} />
       {sessionResets && <div className="text-[11px] text-muted-foreground">{sessionResets}</div>}
 
       <UsageRow

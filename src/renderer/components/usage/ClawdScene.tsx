@@ -6,7 +6,7 @@
  * so it stays crisp at any UI scale.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { HEART_FULL } from './clawd/heart';
 import {
   CLAWD_FX, CLAWD_SAND, MASCOT_H, MASCOT_SINK,
@@ -122,14 +122,17 @@ function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
   return [ref, w];
 }
 
-/** The current time, moved on every minute so the sun and the moon keep travelling */
-function useMinute(): Date {
-  const [now, setNow] = useState(() => new Date());
+/**
+ * The current time, moved on every minute so the sun and the moon keep travelling, or a pinned
+ * moment (the usage simulator's) that holds still
+ */
+function useMinute(pinned: Date | null): Date {
+  const [real, setReal] = useState(() => new Date());
   useEffect(() => {
-    const id = setInterval(() => setNow(new Date()), 60_000);
+    const id = setInterval(() => setReal(new Date()), 60_000);
     return () => clearInterval(id);
   }, []);
-  return now;
+  return pinned ?? real;
 }
 
 /**
@@ -138,9 +141,12 @@ function useMinute(): Date {
  * night, dawn, day and dusk, the sun and the moon on their arc, stars at night - and the 5-hour
  * limit brings the weather: rain from 50%, snow in winter.
  */
-export function ClawdSky({ percent }: { percent: number | null }) {
+export function ClawdSky({ percent, pinned = null }: { percent: number | null; pinned?: Date | null }) {
   const [ref, w] = useWidth();
-  const now = useMinute();
+  const now = useMinute(pinned);
+  // The preview in Settings can show a second sky; each one needs its own gradient and mask ids
+  const uid = useId().replace(/:/g, '');
+  const id = (name: string) => `clawd-${name}-${uid}`;
   const weather = useMemo(() => usageWeather(percent, now), [percent, now]);
   const look = useMemo(() => skyLook(now, weather), [now, weather]);
   // Some clouds are thick enough to hide the sun or the moon; which ones changes each time the
@@ -174,35 +180,35 @@ export function ClawdSky({ percent }: { percent: number | null }) {
           <defs>
             {/* Eased fades on every side, so the sky melts into the popover in either theme
                 instead of ending in an edge */}
-            <linearGradient id="clawd-sky-fade-x" x1="0" x2="1" y1="0" y2="0">
+            <linearGradient id={id('sky-fade-x')} x1="0" x2="1" y1="0" y2="0">
               {FADE_X.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
             </linearGradient>
-            <linearGradient id="clawd-sky-fade-y" x1="0" x2="0" y1="0" y2="1">
+            <linearGradient id={id('sky-fade-y')} x1="0" x2="0" y1="0" y2="1">
               {FADE_Y.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
             </linearGradient>
-            <mask id="clawd-sky-mask-x">
-              <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-fade-x)" />
+            <mask id={id('sky-mask-x')}>
+              <rect x="0" y="0" width={w} height={h} fill={`url(#${id('sky-fade-x')})`} />
             </mask>
-            <mask id="clawd-sky-mask-y">
-              <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-fade-y)" />
+            <mask id={id('sky-mask-y')}>
+              <rect x="0" y="0" width={w} height={h} fill={`url(#${id('sky-fade-y')})`} />
             </mask>
             {/* The sky's own colour for the time of day */}
-            <linearGradient id="clawd-sky-tint" x1="0" x2="0" y1="0" y2="1">
+            <linearGradient id={id('sky-tint')} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0" stopColor={look.top} />
               <stop offset="1" stopColor={look.bottom} />
             </linearGradient>
-            <radialGradient id="clawd-sun-glow">
+            <radialGradient id={id('sun-glow')}>
               <stop offset="0" stopColor={look.sun?.color ?? '#FACC15'} stopOpacity="0.45" />
               <stop offset="1" stopColor={look.sun?.color ?? '#FACC15'} stopOpacity="0" />
             </radialGradient>
-            <radialGradient id="clawd-moon-glow">
+            <radialGradient id={id('moon-glow')}>
               <stop offset="0" stopColor={MOON_LIT} stopOpacity="0.3" />
               <stop offset="1" stopColor={MOON_LIT} stopOpacity="0" />
             </radialGradient>
           </defs>
-          <g mask="url(#clawd-sky-mask-x)">
-            <g mask="url(#clawd-sky-mask-y)">
-              <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-tint)" fillOpacity={0.5} />
+          <g mask={`url(#${id('sky-mask-x')})`}>
+            <g mask={`url(#${id('sky-mask-y')})`}>
+              <rect x="0" y="0" width={w} height={h} fill={`url(#${id('sky-tint')})`} fillOpacity={0.5} />
 
               {/* Stars twinkle at night */}
               {look.stars > 0 && (
@@ -223,7 +229,7 @@ export function ClawdSky({ percent }: { percent: number | null }) {
                   lights it, the rest of the disc a dim slate. True circles, so it reads as a moon. */}
               {look.moon && moonAt && (
                 <g opacity={look.moon.opacity} shapeRendering="geometricPrecision">
-                  <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R * 2.2} fill="url(#clawd-moon-glow)" />
+                  <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R * 2.2} fill={`url(#${id('moon-glow')})`} />
                   <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R} fill="#64748B" opacity={0.45} />
                   <path d={moonLitPath(now, moonAt.cx, moonAt.cy, BODY_R)} fill={MOON_LIT} />
                 </g>
@@ -232,7 +238,7 @@ export function ClawdSky({ percent }: { percent: number | null }) {
               {/* The sun by day, yellow high up and orange near the horizon */}
               {look.sun && sun && (
                 <g opacity={look.sun.opacity} shapeRendering="geometricPrecision">
-                  <circle cx={sun.cx} cy={sun.cy} r={BODY_R * 2.4} fill="url(#clawd-sun-glow)" />
+                  <circle cx={sun.cx} cy={sun.cy} r={BODY_R * 2.4} fill={`url(#${id('sun-glow')})`} />
                   <circle cx={sun.cx} cy={sun.cy} r={BODY_R} fill={look.sun.color} />
                 </g>
               )}

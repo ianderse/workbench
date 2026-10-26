@@ -646,5 +646,13 @@
       "notSignedIn": "No new sign-in was found",
       "failedToStart": "Couldn't open a terminal for Claude Code's sign-in"
     }
+  },
+  "usageSimulator": {
+    "title": "Simulation",
+    "clockLabel": "Date and time",
+    "clockDescription": "The moment the preview shows; empty uses the current time",
+    "percentLabel": "5-hour usage",
+    "percentDescription": "The percentage the preview shows; empty uses the real value",
+    "percentPlaceholder": "Real"
   }
 }
