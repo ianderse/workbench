@@ -67,13 +67,13 @@
     "description": "Merge the branch of \"{{taskTitle}}\" into its base branch",
     "hints": {
       "merge": "The base branch is pulled first when it tracks a remote. git then merges the task branch into it in the project, which has to be on that branch with nothing uncommitted. Nothing is pushed",
-      "conflicts": "If the branches conflict, Claude Code resolves the conflicts in the task's worktree first, keeping the changes of both branches and running the project's checks"
+      "conflicts": "If the branches conflict, {{agentCli}} resolves the conflicts in the task's worktree first, keeping the changes of both branches and running the project's checks"
     },
     "steps": {
       "checking": "Checking the branches",
       "pulling": "Pulling {{upstream}} into {{target}}",
       "checkingConflicts": "Checking for conflicts",
-      "resolving": "Claude Code is resolving the conflicts in {{files}}",
+      "resolving": "{{agentCli}} is resolving the conflicts in {{files}}",
       "verifying": "Checking that no changes were lost",
       "merging": "Merging the task branch"
     },
@@ -81,8 +81,8 @@
       "merged": "{{source}} merged into {{target}}",
       "mergedNoBranch": "The task branch was merged",
       "alreadyMerged": "{{target}} already has every commit of {{source}}",
-      "conflictsResolved_one": "Claude Code resolved the conflicts in {{count}} file",
-      "conflictsResolved_other": "Claude Code resolved the conflicts in {{count}} files"
+      "conflictsResolved_one": "{{agentCli}} resolved the conflicts in {{count}} file",
+      "conflictsResolved_other": "{{agentCli}} resolved the conflicts in {{count}} files"
     },
     "pullNote": {
       "fetchFailed": "Could not pull {{upstream}}, so the local {{target}} was used",
