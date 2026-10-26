@@ -16,6 +16,7 @@ import { ClawdScene, ClawdSky, SCENE_H } from './ClawdScene';
 import { Hearts } from './Hearts';
 import { skinForUsage, type SkinPicker } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
+import { holidayDecor } from './clawd/decor';
 import { getBarColorClass, getColorClass } from './usage-colors';
 
 /** The label the main process sends for Anthropic's second window */
@@ -118,6 +119,8 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
   });
 
   const sessionPercent = Math.round(usage.sessionPercent);
+  // Pumpkins on Halloween, presents over the winter holidays
+  const decor = useMemo(() => holidayDecor(pinnedAt == null ? new Date() : new Date(pinnedAt)), [pinnedAt]);
 
   return (
     <>
@@ -140,7 +143,7 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
             </span>
             <span className="ml-0.5 mt-0.5 text-sm text-muted-foreground">%</span>
           </div>
-          <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} />
+          <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} decor={decor} />
         </div>
 
         <div className={`h-2 ${BAR_TRACK}`}>

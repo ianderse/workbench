@@ -14,6 +14,7 @@ import {
 } from './clawd/sprite';
 import { moonLitPath, seeded, skyBodyPos, skyLook, usageWeather } from './clawd/sky';
 import type { ClawdRender } from './clawd/useClawd';
+import type { DecorPiece } from './clawd/decor';
 
 /** Height of the scene; the mascot stands on its bottom edge */
 export const SCENE_H = 46;
@@ -339,10 +340,12 @@ interface ClawdSceneProps {
   onPointer: (x: number | null) => void;
   /** Petting him */
   onPet: () => void;
+  /** Holiday decorations standing on the ground behind him */
+  decor?: DecorPiece[];
 }
 
 /** The ground Clawd walks on, beside the percentage */
-export function ClawdScene({ render, onSpan, onPointer, onPet }: ClawdSceneProps) {
+export function ClawdScene({ render, onSpan, onPointer, onPet, decor = [] }: ClawdSceneProps) {
   const [ref, w] = useWidth();
 
   useEffect(() => { onSpan(w); }, [w, onSpan]);
@@ -379,6 +382,15 @@ export function ClawdScene({ render, onSpan, onPointer, onPet }: ClawdSceneProps
           className="absolute inset-0 overflow-hidden text-muted-foreground"
           aria-hidden="true"
         >
+          {/* Pumpkins or presents on the ground, behind him so he walks in front of them */}
+          {decor.map((d, i) => (
+            <g key={`decor-${i}`} transform={`translate(${Math.round(d.at * Math.max(0, w - d.w))} ${SCENE_H - d.h})`}>
+              {d.layers.map((layer) => (
+                <Pixels key={layer.color} rects={layer.rects} fill={layer.color} />
+              ))}
+            </g>
+          ))}
+
           {/* Confetti, dust and the heart live in scene coordinates */}
           {render.confetti.map((c, i) => (
             <rect

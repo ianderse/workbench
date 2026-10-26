@@ -74,11 +74,27 @@ export interface Weather {
   storm: boolean;
 }
 
+/** December 20 to January 1 */
+export function isWinterHolidays(now: Date): boolean {
+  const month = now.getMonth();
+  const day = now.getDate();
+  return (month === 11 && day >= 20) || (month === 0 && day === 1);
+}
+
 /**
  * Fair weather under 50% of the 5-hour limit; above it rain that grows heavier as the limit runs
- * out (a thunderstorm from 90%), or snow in winter.
+ * out (a thunderstorm from 90%), or snow in winter. Over the winter holidays it always snows:
+ * a few flakes under the sun or the moon, then a heavy snowfall from 50%.
  */
 export function usageWeather(percent: number | null, now: Date): Weather {
+  if (isWinterHolidays(now)) {
+    if (percent == null || percent < 50) {
+      return { kind: 'snow', cover: 0.3, clouds: 2.5, fall: 5, storm: false };
+    }
+    const heavy = percent >= 90 ? 2 : percent >= 70 ? 1 : 0;
+    const cover = [0.85, 0.9, 0.9][heavy];
+    return { kind: 'snow', cover, clouds: 5 * cover, fall: [14, 18, 22][heavy], storm: false };
+  }
   if (percent == null || percent < 50) {
     return { kind: 'fair', cover: 0, clouds: 1.5, fall: 0, storm: false };
   }

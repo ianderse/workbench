@@ -17,6 +17,16 @@ describe('sky', () => {
     expect(usageWeather(95, OCTOBER).storm).toBe(true);
   });
 
+  it('always snows over the winter holidays, heavily from 50%', () => {
+    const christmas = new Date(2026, 11, 24, 12);
+    expect(usageWeather(null, christmas).kind).toBe('snow');
+    expect(usageWeather(10, christmas)).toMatchObject({ kind: 'snow', storm: false });
+    expect(usageWeather(60, christmas).fall).toBeGreaterThan(usageWeather(10, christmas).fall);
+    expect(usageWeather(60, christmas).fall).toBeGreaterThan(usageWeather(60, JANUARY).fall);
+    // A light snowfall still lets the sun through
+    expect(skyLook(christmas, usageWeather(10, christmas)).sun).not.toBeNull();
+  });
+
   it('snows instead of raining in winter', () => {
     expect(usageWeather(60, JANUARY)).toMatchObject({ kind: 'snow', storm: false });
   });
