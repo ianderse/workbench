@@ -18,6 +18,8 @@ import type { DecorPiece } from './clawd/decor';
 
 /** Height of the scene; the mascot stands on its bottom edge */
 export const SCENE_H = 46;
+/** The highest the bubble's baseline goes, so its 11px glyph stays inside the scene */
+const BUBBLE_MIN_Y = 9;
 
 /** Pixel clouds, two units per pixel, drifting left to right */
 const CLOUD_SHAPES = [
@@ -129,7 +131,7 @@ function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
  * The current time, moved on every minute so the sun and the moon keep travelling, or a pinned
  * moment (the usage simulator's) that holds still
  */
-function useMinute(pinned: Date | null): Date {
+export function useMinute(pinned: Date | null): Date {
   const [real, setReal] = useState(() => new Date());
   useEffect(() => {
     const id = setInterval(() => setReal(new Date()), 60_000);
@@ -285,6 +287,8 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
                   key={i}
                   x={Math.round(d.fx * w)} y={0} width={1} height={3.5}
                   className="clawd-drop" fill="#BFDBFE" opacity={0.75}
+                  // Anti-aliased, so a drop keeps its size while it moves by sub-pixels
+                  shapeRendering="geometricPrecision"
                   style={{
                     animationDuration: `${d.dur}s`,
                     animationDelay: `${d.delay}s`,
@@ -299,6 +303,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
                 <g
                   key={i}
                   className="clawd-flake"
+                  shapeRendering="geometricPrecision"
                   style={{
                     animationDuration: `${f.dur}s`,
                     animationDelay: `${f.delay}s`,
@@ -364,6 +369,13 @@ export function ClawdScene({ render, onSpan, onPointer, onPet, decor = [] }: Cla
   // jumped; everything else is placed from the bottom edge of the scene the same way.
   const mascotTop = render ? SCENE_H - MASCOT_H + MASCOT_SINK - render.lift : 0;
   const fromBottom = (y: number) => SCENE_H - y;
+  // The "!" and the notes float above his hat when he wears one, never across it
+  const hatTop = render
+    ? render.geo.acc.reduce((top, layer) => layer.rects.reduce((t, r) => Math.min(t, r.y), top), Infinity)
+    : Infinity;
+  const bubbleBase = render
+    ? Math.max(BUBBLE_MIN_Y, Math.min(fromBottom(render.bubbleY), mascotTop + hatTop - 1.5))
+    : 0;
 
   return (
     <div
@@ -453,7 +465,7 @@ export function ClawdScene({ render, onSpan, onPointer, onPet, decor = [] }: Cla
           {/* "!" when the window resets, notes while he whistles */}
           {render.bubble && (
             <text
-              x={render.x + 18} y={fromBottom(render.bubbleY)}
+              x={render.x + 18} y={bubbleBase}
               fontSize={11} fontWeight={700} textAnchor="middle" fill={bubbleColor}
             >
               {render.bubble}

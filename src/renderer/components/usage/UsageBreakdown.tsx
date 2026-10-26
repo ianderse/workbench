@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { formatTimeRemaining, localizeUsageWindowLabel } from '../../../shared/utils/format-time';
 import type { ClaudeUsageSnapshot } from '../../../shared/types/agent';
 import { useTaskStore } from '../../stores/task-store';
-import { ClawdScene, ClawdSky, SCENE_H } from './ClawdScene';
+import { ClawdScene, ClawdSky, SCENE_H, useMinute } from './ClawdScene';
 import { Hearts } from './Hearts';
 import { skinForUsage, type SkinPicker } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
@@ -124,7 +124,11 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
 
   const sessionPercent = Math.round(usage.sessionPercent);
   // Pumpkins on Halloween, presents over the winter holidays
-  const decor = useMemo(() => holidayDecor(pinnedAt == null ? new Date() : new Date(pinnedAt)), [pinnedAt]);
+  // (the minute ticks on, so they come and go at midnight with the popover open)
+  const now = useMinute(pinned);
+  const day = now.toDateString();
+  // Worked out again once a day
+  const decor = useMemo(() => holidayDecor(new Date(day)), [day]);
 
   return (
     <>
