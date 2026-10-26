@@ -157,13 +157,20 @@ describe('startOmpProcess with live messages', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'omp-rpc-test-'));
-    fake = path.join(dir, 'omp');
-    await writeFile(fake, FAKE_OMP, 'utf-8');
-    await chmod(fake, 0o755);
+    if (process.platform === 'win32') {
+      // Windows cannot execute a shebang script: a .cmd wrapper (run through a shell, like npm's omp shim) starts it with node
+      await writeFile(path.join(dir, 'omp.js'), FAKE_OMP, 'utf-8');
+      fake = path.join(dir, 'omp.cmd');
+      await writeFile(fake, '@echo off\r\nnode "%~dp0omp.js" %*\r\n', 'utf-8');
+    } else {
+      fake = path.join(dir, 'omp');
+      await writeFile(fake, FAKE_OMP, 'utf-8');
+      await chmod(fake, 0o755);
+    }
   });
   afterEach(async () => {
     delete process.env.FAKE_MODE;
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const run = (mode: string, extra: Partial<Parameters<typeof startOmpProcess>[0]> = {}) => {
