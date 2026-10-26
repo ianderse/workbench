@@ -6,9 +6,9 @@
  * the branch (a commit, an amend, a cherry-pick, a pull):
  * - major: the first number in package.json, never touched here. Raising it is the user's call,
  *   and the `v<major>.0.0` tag of that release is where the counting below starts
- * - minor: the pull requests merged since that tag that this branch has: its own merge commits,
- *   and main's that catching up with main brought in (a merge that only brings this branch up to
- *   date with main is not one of them)
+ * - minor: the pull requests merged into main since that tag that this branch has, whether it was
+ *   cut after them or took them in by catching up with main. A merge made on the branch itself (a
+ *   catch-up, a `git pull` of its own remote) is no pull request
  * - patch: the plain commits this branch has made since the newest of those merges it is built
  *   on, so a merge resets it to 0 (catching up with main does not)
  *
@@ -32,19 +32,6 @@ const packageText = readFileSync(packagePath, 'utf8');
 const current = JSON.parse(packageText).version;
 const major = current.split('.')[0];
 
-// Without the release tag there is nothing to count from: leave the version as it is rather than
-// guess one (a shallow clone, or a major raised before its release was tagged)
-const anchor = `v${major}.0.0`;
-try {
-  execFileSync('git', ['rev-parse', '--verify', `refs/tags/${anchor}`], {
-    cwd: root,
-    stdio: 'ignore',
-  });
-} catch {
-  console.log(`[sync-version] no ${anchor} tag to count from, keeping ${current}`);
-  process.exit(0);
-}
-
 const exists = (ref) => {
   try {
     execFileSync('git', ['rev-parse', '--verify', ref], { cwd: root, stdio: 'ignore' });
@@ -53,45 +40,49 @@ const exists = (ref) => {
     return false;
   }
 };
+
+// Without the release tag there is nothing to count from: leave the version as it is rather than
+// guess one (a shallow clone, or a major raised before its release was tagged)
+const anchor = `v${major}.0.0`;
+if (!exists(`refs/tags/${anchor}`)) {
+  console.log(`[sync-version] no ${anchor} tag to count from, keeping ${current}`);
+  process.exit(0);
+}
+
 /**
- * A merge counts when it brought a pull request in, not when it brought this branch up to date
- * with main: `git merge main` on a branch of your own is no pull request of its own. The two read
- * the same in the history apart from which side main is on, so that is what decides: a merge is
- * this branch catching up when its first parent is off main and its second is on it. Main is its
- * own line (its first parents), not all it reaches: once this branch's pull request is merged,
- * main reaches all of it, and a catch-up made along the way would count after all. A merge is
- * known by its parents, which version.yml keeps when it rewrites a merge commit on main, so the
- * one this branch took in may not be the one main has now.
+ * The merges that count are main's: those on main's own line (its first parents), each the merge
+ * of a pull request. A merge made on a branch (catching up with main, or a `git pull` of its own
+ * remote) is never one, whichever side main is on, so the branch counts the same as the main it
+ * has taken in. A merge is known by its parents, which version.yml keeps when it rewrites a merge
+ * commit on main, so the one this branch took in may not be the one main has now.
  *
- * Whether a commit is on main is worked out from two listings rather than asked of git commit by
- * commit, which ran up to three git processes for every merge on every commit: what the tag
- * reaches is on main (the release was made there), and of what came after, main lists its own.
+ * Worked out from two listings rather than asked of git commit by commit, which ran up to three
+ * git processes for every merge on every commit. Without main to compare with, the merges on this
+ * branch's own line are taken for pull requests.
  */
 const mainRef = ['refs/remotes/origin/main', 'refs/heads/main'].find(exists);
 const parentsOf = new Map(lines(git('rev-list', '--parents', `${anchor}..HEAD`)).map((line) => {
   const [sha, ...parents] = line.split(' ');
   return [sha, parents.join(' ')];
 }));
-const mainLine = mainRef
-  ? lines(git('rev-list', '--first-parent', '--parents', `${anchor}..${mainRef}`)).map((line) => line.split(' '))
-  : [];
-const onMainLine = new Set(mainLine.map(([sha]) => sha));
-const mainMerges = new Set(mainLine.filter((commit) => commit.length > 2).map(([, ...parents]) => parents.join(' ')));
-const onMain = (sha) => !parentsOf.has(sha) || onMainLine.has(sha) || mainMerges.has(parentsOf.get(sha));
-const caughtUpWithMain = ([, first, second]) => !!mainRef && !!second && !onMain(first) && onMain(second);
+const pullRequests = mainRef
+  ? new Set(lines(git('rev-list', '--first-parent', '--merges', '--parents', `${anchor}..${mainRef}`))
+    .map((line) => line.split(' ').slice(1).join(' ')))
+  : null;
 
-// --first-parent: only this branch's own history, so the commits a merge brought in are not
-// counted again as patches after it. What catching up brings in counts all the same: the pull
-// requests main merged meanwhile, each once (by its parents), so a branch is never behind the main
-// it has taken in
 const merges = new Map();
-for (const line of lines(git('rev-list', '--first-parent', '--merges', '--parents', `${anchor}..HEAD`))) {
-  const [sha, ...parents] = line.split(' ');
-  if (!caughtUpWithMain([sha, ...parents])) merges.set(parents.join(' '), sha);
+if (pullRequests) {
+  for (const [sha, parents] of parentsOf) {
+    if (pullRequests.has(parents)) merges.set(parents, sha);
+  }
+} else {
+  for (const line of lines(git('rev-list', '--first-parent', '--merges', '--parents', `${anchor}..HEAD`))) {
+    const [sha, ...parents] = line.split(' ');
+    merges.set(parents.join(' '), sha);
+  }
 }
-for (const [sha, parents] of parentsOf) {
-  if (mainMerges.has(parents) && !merges.has(parents)) merges.set(parents, sha);
-}
+// --first-parent: only this branch's own history, so the commits a merge brought in are not
+// counted again as patches after it
 const patch = lines(git('rev-list', '--first-parent', '--no-merges', 'HEAD', '--not', anchor, ...merges.values())).length;
 const version = `${major}.${merges.size}.${patch}`;
 
