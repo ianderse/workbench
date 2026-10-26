@@ -80,9 +80,11 @@ const ASYNC_LAUNCH_ANSWER = 'Async agent launched successfully'
  * moment it was launched, and went on working unseen. In order of trust: the result's
  * toolUseResult, which a sub-agent's own transcript leaves out; the `requestShape` in the launched
  * agent's .meta.json (`shape`, read only when needed); and the answer's wording, for a launch
- * whose .meta.json isn't written yet.
+ * whose .meta.json isn't written yet. A call that failed launched nothing that will report, even
+ * where its .meta.json was already written for the background.
  */
 export function launchedInBackground(toolUseResult: unknown, block: unknown, shape?: () => LaunchShape | undefined): boolean {
+  if (isRecord(block) && block.is_error === true) return false
   if (isAsyncLaunch(toolUseResult)) return true
   if (saysHowItRan(toolUseResult)) return false
   const recorded = shape?.()
@@ -94,8 +96,8 @@ export function launchedInBackground(toolUseResult: unknown, block: unknown, sha
 
 /**
  * How the Agent/Task call `toolUseId` ran, by the `requestShape` its sub-agent's .meta.json records
- * (matched by its `toolUseId`), or undefined while that isn't written. Each .meta.json is read once
- * it parses, and only when a result needs it.
+ * (matched by its `toolUseId`), or undefined while that isn't written. A .meta.json is read until
+ * it has both, and only when a result needs it.
  */
 export function launchShape(session: WatchedSession, toolUseId: string): LaunchShape | undefined {
   const known = session.launchShapes.get(toolUseId)
@@ -106,9 +108,10 @@ export function launchShape(session: WatchedSession, toolUseId: string): LaunchS
     if (!file.endsWith('.meta.json') || session.readLaunchMetas.has(file)) continue
     try {
       const meta = JSON.parse(fs.readFileSync(path.join(session.subagentsDir, file), 'utf-8')) as Record<string, unknown>
-      session.readLaunchMetas.add(file)
+      // Done with it only once it says both: Claude Code writes a .meta.json more than once
       if (typeof meta.toolUseId === 'string' && (meta.requestShape === 'background' || meta.requestShape === 'foreground')) {
         session.launchShapes.set(meta.toolUseId, meta.requestShape)
+        session.readLaunchMetas.add(file)
       }
     } catch { /* not written yet, or partially: read again next time */ }
   }
