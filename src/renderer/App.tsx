@@ -38,7 +38,6 @@ import { useIpcListeners } from './hooks/useIpc';
 import { closeProjectWindow, openProjectWindow, useProjectWindows } from './hooks/useProjectWindows';
 import { useTitleBarColors } from './hooks/useTitleBarColors';
 import { useGlobalTerminalListeners } from './hooks/useGlobalTerminalListeners';
-import { useTerminalProfileChange } from './hooks/useTerminalProfileChange';
 import { sanitizeColorTheme } from '../shared/constants';
 import { IS_DEV_BUILD, TITLE_BAR_STRIP_HEIGHT } from './lib/title-bar';
 import { DevBuildBar } from './components/DevBuildBar';
@@ -59,8 +58,6 @@ export function App() {
   // This ensures terminal output is captured even when the terminal component is not rendered
   useGlobalTerminalListeners();
 
-  // Handle terminal profile change events (recreate terminals on profile switch)
-  useTerminalProfileChange();
 
   // Stores
   const projects = useProjectStore((state) => state.projects);
