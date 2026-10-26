@@ -57,6 +57,8 @@ function artRects(rows: string[], px: number): Rect[] {
   return out;
 }
 const CLOUD_RECTS = CLOUD_SHAPES.map((rows) => artRects(rows, CLOUD_PX));
+/** A cloud's flat underside (its bottom row), drawn in a shade so it stands out on a pale sky */
+const CLOUD_BASE_Y = CLOUD_SHAPES.map((rows) => (rows.length - 1) * CLOUD_PX);
 const CLOUD_W = CLOUD_SHAPES.map((rows) => rows[0].length * CLOUD_PX);
 
 /** Radius of the sun and the moon */
@@ -208,7 +210,12 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
           </defs>
           <g mask={`url(#${id('sky-mask-x')})`}>
             <g mask={`url(#${id('sky-mask-y')})`}>
-              <rect x="0" y="0" width={w} height={h} fill={`url(#${id('sky-tint')})`} fillOpacity={0.5} />
+              {/* Half strength over the white popover; stronger over the dark one, which would
+                  otherwise dull a day sky into dusk */}
+              <rect
+                x="0" y="0" width={w} height={h} fill={`url(#${id('sky-tint')})`}
+                className="[fill-opacity:0.5] dark:[fill-opacity:0.8]"
+              />
 
               {/* Stars twinkle at night */}
               {look.stars > 0 && (
@@ -257,10 +264,16 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
                   }}
                 >
                   <g transform={`translate(0 ${Math.round(c.top * h)})`}>
-                    <Pixels
-                      rects={CLOUD_RECTS[c.shape]} fill={look.cloud}
-                      opacity={thick[i] ? 1 : weather.kind === 'fair' ? 0.55 : 0.75}
-                    />
+                    <g opacity={thick[i] ? 1 : weather.kind === 'fair' ? 0.85 : 0.75}>
+                      <Pixels
+                        rects={CLOUD_RECTS[c.shape].filter((r) => r.y < CLOUD_BASE_Y[c.shape])}
+                        fill={look.cloud}
+                      />
+                      <Pixels
+                        rects={CLOUD_RECTS[c.shape].filter((r) => r.y >= CLOUD_BASE_Y[c.shape])}
+                        fill={look.cloudShade}
+                      />
+                    </g>
                   </g>
                 </g>
               ))}

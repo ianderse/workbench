@@ -41,7 +41,8 @@ function dim([r, g, b, a]: Rgba, k: number): Rgba {
 const PALETTE: Record<string, { top: Rgba; bottom: Rgba; light: number }> = {
   night: { top: hex('#FF0A1228'), bottom: hex('#FF1C2B52'), light: 0 },
   dawn:  { top: hex('#FF28366A'), bottom: hex('#FFE7946C'), light: 0.5 },
-  day:   { top: hex('#FF3E86D4'), bottom: hex('#FF9CCBF0'), light: 1 },
+  // Saturated, so at half opacity it still reads as a blue sky over a white or a dark popover
+  day:   { top: hex('#FF1F6FD6'), bottom: hex('#FF4FA3EC'), light: 1 },
   dusk:  { top: hex('#FF2A2452'), bottom: hex('#FFD8704E'), light: 0.5 },
 };
 
@@ -51,6 +52,8 @@ const CLOUD_DAY = hex('#FFF1F5F9');
 const CLOUD_NIGHT = hex('#FF475069');
 const CLOUD_RAIN = hex('#FF4B5563');
 const CLOUD_SNOW = hex('#FF94A3B8');
+/** The shaded underside of a cloud */
+const CLOUD_SHADE = hex('#FF64748B');
 
 /** December to February */
 export function isWinter(now: Date): boolean {
@@ -170,6 +173,8 @@ export interface SkyLook {
   stars: number;
   /** Cloud colour: white by day, slate at night, greyer in rain and snow */
   cloud: string;
+  /** The clouds' shaded underside, so a white cloud still stands out on a pale sky */
+  cloudShade: string;
 }
 
 /** How the sky looks at this moment in this weather */
@@ -201,9 +206,11 @@ export function skyLook(now: Date, weather: Weather): SkyLook {
   const mp = ((t - ss + 1440) % 1440) / (sr + 1440 - ss);
 
   const fair = mix(CLOUD_NIGHT, CLOUD_DAY, light);
-  const cloud = css(weather.kind === 'rain' ? mix(fair, CLOUD_RAIN, 0.55)
+  const cloudRgba = weather.kind === 'rain' ? mix(fair, CLOUD_RAIN, 0.55)
     : weather.kind === 'snow' ? mix(fair, CLOUD_SNOW, 0.35)
-    : fair);
+    : fair;
+  const cloud = css(cloudRgba);
+  const cloudShade = css(mix(cloudRgba, CLOUD_SHADE, 0.35));
 
   return {
     light,
@@ -215,6 +222,7 @@ export function skyLook(now: Date, weather: Weather): SkyLook {
     moon: vis > 0 && onArc(mp) ? { p: mp, opacity: vis } : null,
     stars: Math.max(0, (1 - light * 2) * Math.max(0, 1 - weather.cover * 1.4)),
     cloud,
+    cloudShade,
   };
 }
 
