@@ -172,10 +172,11 @@ export function buildOmpAdvisorOverlay(
     const enable = advisor.mode === 'on' ? 'advisor:\n  enabled: true\n' : '';
     advisorPart = `modelRoles:\n  advisor: ${JSON.stringify(advisor.model)}\n${enable}`;
   }
-  // `retry.modelFallback: false` stops OMP switching to the models of `retry.fallbackChains`
-  // (verified against omp 18.11.0: a failing local model then surfaces its own error)
-  // Only the one final attempt of a task phase passes `allowFallback`; every other run stays on its model
-  const fallbackPart = allowFallback ? '' : 'retry:\n  modelFallback: false\n';
+  // Only the one final attempt of a task phase passes `allowFallback`: OMP then switches to the models of
+  // `retry.fallbackChains` after any error. Every other run switches only when its provider reports a usage
+  // limit (`retry.fallbackOn: usage-limit`): retrying a model that is out of quota cannot succeed, while any
+  // other failure (a local model that is busy or down) surfaces its own error and is retried on the same model
+  const fallbackPart = allowFallback ? '' : 'retry:\n  modelFallback: true\n  fallbackOn: usage-limit\n';
   // OMP runs up to 32 subagents at once by default, far more than a local model server can serve;
   // 0 (the agent works alone) still needs a cap of 1 so a stray task call can't fan out
   const taskPart = subagents === undefined ? '' : `task:\n  maxConcurrency: ${Math.max(1, subagents)}\n`;

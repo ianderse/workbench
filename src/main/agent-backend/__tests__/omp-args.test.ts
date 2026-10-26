@@ -69,7 +69,7 @@ describe('omp advisor', () => {
   });
 
   it('caps subagents per run so one task cannot swamp the model server', () => {
-    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, false, 3)).toBe('retry:\n  modelFallback: false\ntask:\n  maxConcurrency: 3\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, false, 3)).toBe('retry:\n  modelFallback: true\n  fallbackOn: usage-limit\ntask:\n  maxConcurrency: 3\n');
     // 0 means the agent works alone, but a stray task call still gets a cap of 1
     expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true, 0)).toBe('task:\n  maxConcurrency: 1\n');
     expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true)).toBeUndefined();
@@ -81,9 +81,9 @@ describe('omp advisor', () => {
     expect(buildOmpAdvisorOverlay({ mode: 'off' }, true)).toBe('advisor:\n  enabled: false\n');
     expect(buildOmpAdvisorOverlay({ mode: 'off', model: 'omlx/big' }, true)).toBe('advisor:\n  enabled: false\n');
     expect(buildOmpAdvisorOverlay({ mode: 'inherit', model: 'omlx/big' }, true)).toBe('modelRoles:\n  advisor: "omlx/big"\n');
-    // Fallback models are off unless the final attempt of a task phase allows them
-    expect(buildOmpAdvisorOverlay({ mode: 'inherit' })).toBe('retry:\n  modelFallback: false\n');
-    expect(buildOmpAdvisorOverlay({ mode: 'off' }, false)).toBe('advisor:\n  enabled: false\n' + 'retry:\n  modelFallback: false\n');
+    // Fallback models are used only on a usage limit, unless the final attempt of a task phase allows them
+    expect(buildOmpAdvisorOverlay({ mode: 'inherit' })).toBe('retry:\n  modelFallback: true\n  fallbackOn: usage-limit\n');
+    expect(buildOmpAdvisorOverlay({ mode: 'off' }, false)).toBe('advisor:\n  enabled: false\n' + 'retry:\n  modelFallback: true\n  fallbackOn: usage-limit\n');
     expect(buildOmpAdvisorOverlay({ mode: 'inherit' }, true)).toBeUndefined();
     expect(buildOmpAdvisorOverlay({ mode: 'off' }, true)).toBe('advisor:\n  enabled: false\n');
     expect(buildOmpAdvisorOverlay({ mode: 'on', model: 'omlx/big' }, true)).toBe('modelRoles:\n  advisor: "omlx/big"\nadvisor:\n  enabled: true\n');
