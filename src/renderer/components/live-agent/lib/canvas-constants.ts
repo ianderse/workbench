@@ -73,7 +73,7 @@ export const CAMERA = {
 // ─── Tool slot placement config ─────────────────────────────────────────────
 
 export const NODE_SLOT = {
-  /** Rings tried outward from the parent; if every slot is taken, the least crowded one is used */
+  /** Rings tried one step apart outward from the parent; past them the steps grow, so a full graph gets longer edges */
   maxRings: 12,
   /** How much further out each ring past the first sits */
   ringIncrement: 25,
