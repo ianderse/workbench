@@ -68,7 +68,7 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
   const [pointerX, setPointerX] = useState<number | null>(null);
 
   // Clawd's mood comes from the app's own tasks: something running means he runs too, a task
-  // waiting on the user makes him hop with a "?", and an empty board sends him to sleep.
+  // waiting on the user makes him hop and wave, and an empty board sends him to sleep.
   const tasks = useTaskStore((state) => state.tasks);
   const { busy, waiting } = useMemo(() => ({
     busy: tasks.filter((task) => task.status === 'in_progress' || task.status === 'ai_review').length,

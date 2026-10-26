@@ -5,7 +5,7 @@
  *
  * Mood, checked top to bottom:
  *   session >= 100%        dead   - belly-up, X eyes
- *   a task awaits the user wait   - wide eyes, hops, yellow "?"
+ *   a task awaits the user wait   - wide eyes, hops and waves
  *   a task is running      work   - runs edge to edge, focused squint
  *   tasks but all settled  idle   - wanders, looks around; dozes after 10 quiet minutes
  *   no tasks               sleep  - burrowed in the sand, only the eyes out, "z"s
@@ -59,7 +59,7 @@ export interface ClawdRender {
   lift: number;
   bubble: string;
   /** Picks the bubble's colour */
-  bubbleKind: 'ask' | 'cheer' | 'note' | '';
+  bubbleKind: 'cheer' | 'note' | '';
   /** How high over the ground the bubble floats, bobbing as it goes */
   bubbleY: number;
   zzz: Particle & { size: number } | null;
@@ -335,7 +335,7 @@ export function useClawd(input: ClawdInput) {
         const p = m.tick % 50;
         if (p < 6) f.feet = p % 2 ? 'left' : 'right';
       } else if (mood === 'wait') {
-        bubble = '?'; bubbleKind = 'ask'; f.eyes = 'wide';
+        f.eyes = 'wide';
         f.look = mouseLook() ?? 0;
         // Jumps and waves: hey, someone is waiting for you.
         const p = m.tick % 40;

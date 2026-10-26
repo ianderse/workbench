@@ -305,8 +305,7 @@ export function ClawdScene({ render, onSpan, onPointer, onPet }: ClawdSceneProps
 
   const handleLeave = useCallback(() => onPointer(null), [onPointer]);
 
-  const bubbleColor = render?.bubbleKind === 'ask' ? '#FBBF24'
-    : render?.bubbleKind === 'cheer' ? '#4ADE80'
+  const bubbleColor = render?.bubbleKind === 'cheer' ? '#4ADE80'
     : '#93C5FD';
 
   // The mascot box sits on the ground, minus the empty lower half-row, plus however far he has
@@ -390,7 +389,7 @@ export function ClawdScene({ render, onSpan, onPointer, onPet }: ClawdSceneProps
             </text>
           )}
 
-          {/* "?" when something waits for you, "!" when the window resets */}
+          {/* "!" when the window resets, notes while he whistles */}
           {render.bubble && (
             <text
               x={render.x + 18} y={fromBottom(render.bubbleY)}
