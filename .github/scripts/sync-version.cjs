@@ -12,9 +12,10 @@
  * - patch: the plain commits this branch has made since the newest of those merges it is built
  *   on, so a merge resets it to 0 (catching up with main does not)
  *
- * The `post-commit` hook runs this and folds the change into the commit that caused it; a merge is
- * made on GitHub, where no hook runs, so .github/workflows/version.yml does the same to the merge
- * commit. Running it on its own only prints the version a clean checkout already has.
+ * The `post-commit` hook runs this and folds the change into the commit that caused it. A merge is
+ * made on GitHub, where no hook runs, so it keeps the version its branch had: the next commit made
+ * on top of it brings the version up to date. Running it on its own prints the version the
+ * checkout should have (and writes it, where that differs).
  *
  * The release workflows take the published version from the release tag, so what is written here
  * is what the app reports in a development or a locally packaged build.
@@ -53,8 +54,9 @@ if (!exists(`refs/tags/${anchor}`)) {
  * The merges that count are main's: those on main's own line (its first parents), each the merge
  * of a pull request. A merge made on a branch (catching up with main, or a `git pull` of its own
  * remote) is never one, whichever side main is on, so the branch counts the same as the main it
- * has taken in. A merge is known by its parents, which version.yml keeps when it rewrites a merge
- * commit on main, so the one this branch took in may not be the one main has now.
+ * has taken in. A merge is known by its parents, which a rewritten merge commit keeps (merges on
+ * main were once rewritten to carry their version), so the one this branch took in may not be
+ * the one main has now.
  *
  * Worked out from two listings rather than asked of git commit by commit, which ran up to three
  * git processes for every merge on every commit. Without main to compare with, the merges on this
@@ -79,8 +81,8 @@ if (mainRef) {
 }
 // --first-parent: only this branch's own history, so the commits a merge brought in are not
 // counted again as patches after it. Only the newest merge needs leaving out: the others are on
-// main's line before it, so behind it (one a branch took in before version.yml rewrote it has
-// the same parents, so the same history), and a sha for every pull request outgrew the command
+// main's line before it, so behind it (one a branch took in before it was rewritten has the same
+// parents, so the same history), and a sha for every pull request outgrew the command
 // line Windows allows
 const patch = lines(git('rev-list', '--first-parent', '--no-merges', 'HEAD', '--not', anchor, ...merges.slice(0, 1))).length;
 const version = `${major}.${merges.length}.${patch}`;
