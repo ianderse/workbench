@@ -19,6 +19,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync } from 'fs';
 import path from 'path';
 import type { Task } from '../../shared/types';
 import { writeFileAtomicSync } from '../utils/atomic-file';
+import { sanitizeChangedFiles } from '../../shared/utils/changed-files';
 
 export const RESYNC_REQUEST_FILE = 'resync_request.json';
 
@@ -85,7 +86,11 @@ export function readResyncRequest(specDir: string): ResyncRequest | undefined {
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as ResyncRequest;
     if (typeof parsed?.ref !== 'string' || typeof parsed.into !== 'string' || typeof parsed.at !== 'string') return undefined;
-    return { ...parsed, merged: Array.isArray(parsed.merged) ? parsed.merged : [] };
+    // Requests written before pseudo paths (`agent:/x`, `conflict:/1`) were filtered may list them
+    const merged = Array.isArray(parsed.merged)
+      ? parsed.merged.map((task) => ({ ...task, files: sanitizeChangedFiles(task.files) }))
+      : [];
+    return { ...parsed, merged };
   } catch {
     return undefined;
   }
