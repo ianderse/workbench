@@ -14,6 +14,7 @@ import type { ClaudeUsageSnapshot } from '../../../shared/types/agent';
 import { useTaskStore } from '../../stores/task-store';
 import { ClawdScene, ClawdSky, SCENE_H } from './ClawdScene';
 import { Hearts } from './Hearts';
+import { skinForUsage } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
 import { getBarColorClass, getColorClass } from './usage-colors';
 
@@ -74,6 +75,13 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
     waiting: tasks.filter((task) => task.status === 'human_review').length,
   }), [tasks]);
 
+  // A new random skin every time the numbers change; a failed refresh brings no new numbers, so
+  // he keeps the one he has. The 5-hour window resetting earns him the crown.
+  const skin = useMemo(
+    () => skinForUsage({ session: usage.sessionPercent, weekly: usage.weeklyPercent, fable: usage.fablePercent }),
+    [usage.sessionPercent, usage.weeklyPercent, usage.fablePercent],
+  );
+
   const { render, pet } = useClawd({
     sessionPercent: usage.sessionPercent,
     sessionReset: usage.sessionResetTimestamp,
@@ -83,6 +91,7 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
     span,
     pointerX,
     active: open,
+    skin,
   });
 
   const compact = useCallback((timestamp?: string) => formatTimeRemaining(timestamp, t, {

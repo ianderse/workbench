@@ -23,6 +23,7 @@ import {
   BURROW_DIG, MASCOT_W, getClawdGeo, getSoulGeo, makeFrame,
   type ClawdGeo, type Rect,
 } from './sprite';
+import type { ClawdSkin } from './skins';
 
 /** What the scene knows about the world each tick */
 interface ClawdInput {
@@ -42,12 +43,16 @@ interface ClawdInput {
   pointerX: number | null;
   /** The popover is open; the timer stops when it is not */
   active: boolean;
+  /** What he wears */
+  skin: ClawdSkin;
 }
 
 interface Particle { x: number; y: number; opacity: number }
 
 export interface ClawdRender {
   geo: ClawdGeo;
+  /** The skin the geometry was drawn in, for its colours */
+  skin: ClawdSkin;
   /** Left edge of the mascot box */
   x: number;
   /** How far the box is lifted off the ground */
@@ -137,7 +142,8 @@ export function useClawd(input: ClawdInput) {
       // The soul's own frame comes from the animation, stopped where the spirit hangs at the top
       const act = reaction === 'soul' ? stepAct('soul', SOUL_HANG_FRAME) : null;
       setRender({
-        geo: getClawdGeo(act ? act.frame : makeFrame(gone ? { flip: true, eyes: 'x' } : {})),
+        geo: getClawdGeo(act ? act.frame : makeFrame(gone ? { flip: true, eyes: 'x' } : {}), input.skin),
+        skin: input.skin,
         x, lift: 0,
         bubble: '', bubbleKind: '', bubbleY: 22, zzz: null, sweat: null, dust: [], confetti: [],
         // The heart over the middle of him, at full opacity, halfway along the path it would fly
@@ -165,7 +171,7 @@ export function useClawd(input: ClawdInput) {
       clearTimeout(reset);
       pet.current = () => {};
     };
-  }, [input.active, input.sessionPercent, input.span]);
+  }, [input.active, input.sessionPercent, input.span, input.skin]);
 
   useEffect(() => {
     if (!input.active || prefersReducedMotion()) return;
@@ -512,7 +518,8 @@ export function useClawd(input: ClawdInput) {
         : null;
 
       setRender({
-        geo: getClawdGeo(f),
+        geo: getClawdGeo(f, live.current.skin),
+        skin: live.current.skin,
         x: rx, lift, bubble, bubbleKind,
         bubbleY: 22 + lift + 1.5 * Math.sin(m.tick / 3),
         zzz: zzzOut, sweat, dust, confetti, love, soul,

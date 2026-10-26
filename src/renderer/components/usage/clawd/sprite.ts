@@ -34,6 +34,8 @@ export const CLAWD_FX = '#6B7280';
 /** Sand of the burrow */
 export const CLAWD_SAND = '#B8955E';
 
+import type { ClawdSkin } from './skins';
+
 export interface Rect {
   x: number;
   y: number;
@@ -41,11 +43,13 @@ export interface Rect {
   h: number;
 }
 
-/** The four layers a frame paints, in draw order */
+/** The layers a frame paints, in draw order */
 export interface ClawdGeo {
   sand: Rect[];
   body: Rect[];
   eyes: Rect[];
+  /** The skin's accessories, one colour each */
+  acc: { color: string; rects: Rect[] }[];
   fx: Rect[];
 }
 
@@ -214,9 +218,9 @@ function buildGrid(f: ClawdFrame): Uint8Array {
   return g;
 }
 
-/** Geometry for one frame. Cached, so callers may call it every tick. */
-export function getClawdGeo(f: ClawdFrame): ClawdGeo {
-  const key = `${f.eyes}|${f.arms}|${f.feet}|${f.look}|${f.flip}|${f.off}|${f.x}|${f.facing}|${f.poof}|${f.shadow}|${f.dig}|${f.spray}`;
+/** Geometry for one frame in a skin. Cached, so callers may call it every tick. */
+export function getClawdGeo(f: ClawdFrame, skin?: ClawdSkin): ClawdGeo {
+  const key = `${skin?.id ?? 'classic'}|${f.eyes}|${f.arms}|${f.feet}|${f.look}|${f.flip}|${f.off}|${f.x}|${f.facing}|${f.poof}|${f.shadow}|${f.dig}|${f.spray}`;
   const hit = geoCache.get(key);
   if (hit) return hit;
 
@@ -257,6 +261,28 @@ export function getClawdGeo(f: ClawdFrame): ClawdGeo {
     }
   }
 
+  // Skin accessories, in Clawd's pixels (rows above his head are negative). Above the head they
+  // show while the head is in the frame, on the body like the body; turning in place only what
+  // is above the head stays, and lying on his back he loses them all.
+  const acc: ClawdGeo['acc'] = [];
+  for (const layer of skin?.layers ?? []) {
+    const rects: Rect[] = [];
+    if (!f.flip) {
+      for (const [lx, ly] of layer.px) {
+        const x = lx + ox;
+        const yy = ly + oy;
+        if (ly >= 0 && f.facing) continue;
+        if (x < 0 || x >= GRID_W || yy >= lim) continue;
+        if (ly < 0 ? oy < 0 : yy < 0) continue;
+        // Pixels come row by row, left to right: grow the last run when this one touches it
+        const last = rects[rects.length - 1];
+        if (last && last.y === yy * MASCOT_PY && last.x + last.w === x * MASCOT_PX) last.w += MASCOT_PX;
+        else rects.push({ x: x * MASCOT_PX, y: yy * MASCOT_PY, w: MASCOT_PX, h: MASCOT_PY });
+      }
+    }
+    acc.push({ color: layer.color, rects });
+  }
+
   // Dust "·" and "~" at the edges of the bottom row while crouched.
   if (f.poof && f.off > 0) {
     for (const cx of [0, GRID_W - 2]) {
@@ -293,7 +319,7 @@ export function getClawdGeo(f: ClawdFrame): ClawdGeo {
     }
   }
 
-  const geo: ClawdGeo = { sand, body, eyes, fx };
+  const geo: ClawdGeo = { sand, body, eyes, acc, fx };
   geoCache.set(key, geo);
   return geo;
 }

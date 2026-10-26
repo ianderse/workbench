@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { HEART_FULL } from './clawd/heart';
 import {
-  CLAWD_BODY, CLAWD_EYE, CLAWD_FX, CLAWD_SAND, MASCOT_H, MASCOT_SINK,
+  CLAWD_FX, CLAWD_SAND, MASCOT_H, MASCOT_SINK,
   type Rect,
 } from './clawd/sprite';
 import { arcPos, moonArt, seeded, skyLook, usageWeather } from './clawd/sky';
@@ -347,8 +347,11 @@ export function ClawdScene({ render, onSpan, onPointer, onPet }: ClawdSceneProps
           {/* Clawd himself */}
           <g transform={`translate(${Math.round(render.x)} ${mascotTop})`}>
             <Pixels rects={render.geo.sand} fill={CLAWD_SAND} />
-            <Pixels rects={render.geo.body} fill={CLAWD_BODY} />
-            <Pixels rects={render.geo.eyes} fill={CLAWD_EYE} />
+            <Pixels rects={render.geo.body} fill={render.skin.body} />
+            <Pixels rects={render.geo.eyes} fill={render.skin.eyes} />
+            {render.geo.acc.map((layer, i) => (
+              <Pixels key={`acc-${i}`} rects={layer.rects} fill={layer.color} />
+            ))}
             <Pixels rects={render.geo.fx} fill={CLAWD_FX} />
           </g>
 
