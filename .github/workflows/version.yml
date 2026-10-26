@@ -59,9 +59,13 @@ jobs:
 
           # Word for word the message the merge carries, minus the trailers that would credit the
           # new commit's own author: the token that signs it, and the merge's author, who is put
-          # back in front of the others below so they come first whatever the merge already said
+          # back in front of the others below so they come first whatever the merge already said.
+          # Its own trailer is told without case or whitespace, as the check below tells them: a
+          # `Co-Authored-By:` spelling of it left in would credit it twice
           awk -v self="Co-authored-by: $author" -v token="$token_author" '
-            tolower($0) ~ /^co-authored-by:/ && (index($0, token) > 0 || $0 == self) { next }
+            function bare(text) { text = tolower(text); gsub(/[ \t\r]/, "", text); return text }
+            BEGIN { self = bare(self) }
+            tolower($0) ~ /^co-authored-by:/ && (index($0, token) > 0 || bare($0) == self) { next }
             { print }
           ' "$RUNNER_TEMP/merged" > "$RUNNER_TEMP/stripped"
 
