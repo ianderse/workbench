@@ -33,19 +33,24 @@ function dim([r, g, b, a]: Rgba, k: number): Rgba {
   return [(r + (l - r) * k) * f, (g + (l - g) * k) * f, (b + (l - b) * k) * f, a];
 }
 
-/** The sky's tint at each time of day, from the top of the row to the bottom */
+/**
+ * The sky's colour at each time of day, from the top of the row to the bottom. Solid and the
+ * same in either app theme - a night sky is dark and a day sky blue whatever the popover is; the
+ * scene fades its edges into the popover instead.
+ */
 const PALETTE: Record<string, { top: Rgba; bottom: Rgba; light: number }> = {
-  night: { top: hex('#00304A8C'), bottom: hex('#1A304A8C'), light: 0 },
-  dawn:  { top: hex('#00404E8A'), bottom: hex('#33E08A66'), light: 0.5 },
-  day:   { top: hex('#004A8CCB'), bottom: hex('#2E6FA8D8'), light: 1 },
-  dusk:  { top: hex('#00383070'), bottom: hex('#33D86A50'), light: 0.5 },
+  night: { top: hex('#FF0A1228'), bottom: hex('#FF1C2B52'), light: 0 },
+  dawn:  { top: hex('#FF28366A'), bottom: hex('#FFE7946C'), light: 0.5 },
+  day:   { top: hex('#FF3E86D4'), bottom: hex('#FF9CCBF0'), light: 1 },
+  dusk:  { top: hex('#FF2A2452'), bottom: hex('#FFD8704E'), light: 0.5 },
 };
 
-const SUN_HIGH = hex('#FFFDE68A');
+const SUN_HIGH = hex('#FFFACC15');
 const SUN_LOW = hex('#FFFB923C');
-const CLOUD_DAY = hex('#FFB4B4BC');
-const CLOUD_NIGHT = hex('#FF5E5E68');
-const CLOUD_RAIN = hex('#FF52525B');
+const CLOUD_DAY = hex('#FFF1F5F9');
+const CLOUD_NIGHT = hex('#FF475069');
+const CLOUD_RAIN = hex('#FF4B5563');
+const CLOUD_SNOW = hex('#FF94A3B8');
 
 /** December to February */
 export function isWinter(now: Date): boolean {
@@ -134,33 +139,23 @@ export function moonAge(now: Date): number {
   return (e / 360) * MOON_MONTH;
 }
 
-/** The moon as 7x7 pixel art: the lit part and the dark rest of the disc ('#' on, '.' off) */
-export function moonArt(now: Date): { lit: string[]; dark: string[] } {
+/**
+ * The lit part of the moon as an SVG path on a disc of radius r around (cx, cy): half the rim on
+ * the lit side, then back along the terminator, an ellipse as wide as the phase is thin.
+ */
+export function moonLitPath(now: Date, cx: number, cy: number, r: number): string {
   const th = (2 * Math.PI * moonAge(now)) / MOON_MONTH;
   const k = Math.cos(th);
-  const south = homePlace(now).lat < 0;
-  const n = 7;
-  const r = n / 2;
-  const lit: string[] = [];
-  const dark: string[] = [];
-  for (let y = 0; y < n; y++) {
-    let a = '';
-    let b = '';
-    for (let x = 0; x < n; x++) {
-      let u = (x + 0.5 - r) / r;
-      const v = (y + 0.5 - r) / r;
-      // In the southern hemisphere the waxing moon is lit on the left
-      if (south) u = -u;
-      const inDisc = u * u + v * v <= 1.05;
-      const t = k * Math.sqrt(Math.max(0, 1 - v * v));
-      const on = inDisc && (th < Math.PI ? u > t : u < -t);
-      a += on ? '#' : '.';
-      b += inDisc && !on ? '#' : '.';
-    }
-    lit.push(a);
-    dark.push(b);
-  }
-  return { lit, dark };
+  // Waxing is lit on the right, waning on the left; the southern hemisphere sees it mirrored
+  let side = th < Math.PI ? 1 : -1;
+  if (homePlace(now).lat < 0) side = -side;
+  // Where the terminator bulges: toward the lit side for a crescent, away from it past half
+  const rx = Math.abs(k) * r;
+  const termRight = side * k > 0;
+  const top = `${cx} ${cy - r}`;
+  const bottom = `${cx} ${cy + r}`;
+  return `M ${top} A ${r} ${r} 0 0 ${side > 0 ? 1 : 0} ${bottom} `
+    + `A ${rx} ${r} 0 0 ${termRight ? 0 : 1} ${top} Z`;
 }
 
 export interface SkyLook {
@@ -173,8 +168,8 @@ export interface SkyLook {
   /** Moon along its arc from sunset to sunrise */
   moon: { p: number; opacity: number } | null;
   stars: number;
-  /** Cloud colour when the weather turns, null for the usual fair-weather clouds */
-  cloud: string | null;
+  /** Cloud colour: white by day, slate at night, greyer in rain and snow */
+  cloud: string;
 }
 
 /** How the sky looks at this moment in this weather */
@@ -205,11 +200,10 @@ export function skyLook(now: Date, weather: Weather): SkyLook {
   const sp = (t - sr) / (ss - sr);
   const mp = ((t - ss + 1440) % 1440) / (sr + 1440 - ss);
 
-  let cloud: string | null = null;
-  if (weather.kind !== 'fair') {
-    const c = mix(CLOUD_NIGHT, CLOUD_DAY, light);
-    cloud = css(weather.kind === 'rain' ? mix(c, CLOUD_RAIN, 0.55) : c);
-  }
+  const fair = mix(CLOUD_NIGHT, CLOUD_DAY, light);
+  const cloud = css(weather.kind === 'rain' ? mix(fair, CLOUD_RAIN, 0.55)
+    : weather.kind === 'snow' ? mix(fair, CLOUD_SNOW, 0.35)
+    : fair);
 
   return {
     light,
@@ -224,10 +218,14 @@ export function skyLook(now: Date, weather: Weather): SkyLook {
   };
 }
 
-/** Top-left of a body of size 2*half on the arc across a w x h sky */
-export function arcPos(p: number, w: number, h: number, half: number): { x: number; y: number } {
-  const alt = Math.sin(Math.PI * p);
-  return { x: 7 + p * (w - 14) - half, y: h + 3 - alt * (h - 12) - half };
+/**
+ * Centre of the sun or the moon, p of the way along its arc (0 rising, 1 setting), in a sky w
+ * wide. They travel inside the band the clouds float in: low at the ends of the arc, highest in
+ * the middle, and never into the faded edges.
+ */
+export function skyBodyPos(p: number, w: number): { cx: number; cy: number } {
+  const alt = Math.sin(Math.PI * clamp01(p));
+  return { cx: w * (0.16 + 0.68 * clamp01(p)), cy: 15 - 8 * alt };
 }
 
 /** A small seeded generator, so the stars and drops land in the same places every time */

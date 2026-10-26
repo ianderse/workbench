@@ -12,7 +12,7 @@ import {
   CLAWD_FX, CLAWD_SAND, MASCOT_H, MASCOT_SINK,
   type Rect,
 } from './clawd/sprite';
-import { arcPos, moonArt, seeded, skyLook, usageWeather } from './clawd/sky';
+import { moonLitPath, seeded, skyBodyPos, skyLook, usageWeather } from './clawd/sky';
 import type { ClawdRender } from './clawd/useClawd';
 
 /** Height of the scene; the mascot stands on its bottom edge */
@@ -59,9 +59,27 @@ function artRects(rows: string[], px: number): Rect[] {
 const CLOUD_RECTS = CLOUD_SHAPES.map((rows) => artRects(rows, CLOUD_PX));
 const CLOUD_W = CLOUD_SHAPES.map((rows) => rows[0].length * CLOUD_PX);
 
-const SUN_PX = 1.4;
-const SUN_RECTS = artRects(['..###..', '.#####.', '#######', '#######', '#######', '.#####.', '..###..'], SUN_PX);
-const MOON_PX = 1.3;
+/** Radius of the sun and the moon */
+const BODY_R = 4.5;
+/** The sunlit part of the moon, pale gold */
+const MOON_LIT = '#F3E6B8';
+
+/** Opacity along the sky's width and height ([offset, opacity]), eased so no edge shows */
+const FADE_X: [number, number][] = [
+  [0, 0], [0.05, 0.1], [0.1, 0.35], [0.16, 0.75], [0.22, 1],
+  [0.78, 1], [0.84, 0.75], [0.9, 0.35], [0.95, 0.1], [1, 0],
+];
+/** Top and bottom fade alike, so the sky leaves the same small gap under the header as over the bar */
+const FADE_Y: [number, number][] = [
+  [0, 0.1], [0.08, 0.5], [0.2, 1], [0.8, 1], [0.92, 0.5], [1, 0.1],
+];
+
+/**
+ * How far the sky reaches past its row: out through the popover's side padding to its edges, and
+ * up through the gap to the header's line, so it fills the whole area with no bare strips
+ */
+const SKY_BLEED_X = 12;
+const SKY_BLEED_TOP = 10;
 
 /** Weather counts are tuned for a 140px strip; a wider sky gets more */
 const DENSITY_W = 140;
@@ -125,20 +143,25 @@ export function ClawdSky({ percent }: { percent: number | null }) {
   const now = useMinute();
   const weather = useMemo(() => usageWeather(percent, now), [percent, now]);
   const look = useMemo(() => skyLook(now, weather), [now, weather]);
-  const moon = useMemo(() => {
-    const art = moonArt(now);
-    return { lit: artRects(art.lit, MOON_PX), dark: artRects(art.dark, MOON_PX) };
-  }, [now]);
+  // Some clouds are thick enough to hide the sun or the moon; which ones changes each time the
+  // sky opens, so a passing cloud only sometimes covers them
+  const [thick] = useState(() => CLOUDS.map(() => Math.random() < 0.5));
 
-  const h = SCENE_H;
+  const h = SCENE_H + SKY_BLEED_TOP;
   const density = Math.max(1, w / DENSITY_W);
   const clouds = Math.min(CLOUDS.length, Math.round(weather.clouds * density));
   const fall = Math.round(weather.fall * density);
-  const sun = look.sun && arcPos(look.sun.p, w, h, (7 * SUN_PX) / 2);
-  const moonAt = look.moon && arcPos(look.moon.p, w, h, (7 * MOON_PX) / 2);
+  // The sky grew upward, so the sun and the moon come down with the clouds' band
+  const lower = (pos: { cx: number; cy: number }) => ({ cx: pos.cx, cy: pos.cy + SKY_BLEED_TOP / 2 });
+  const sun = look.sun && lower(skyBodyPos(look.sun.p, w));
+  const moonAt = look.moon && lower(skyBodyPos(look.moon.p, w));
 
   return (
-    <div ref={ref} className="pointer-events-none absolute inset-0 text-muted-foreground">
+    <div
+      ref={ref}
+      className="pointer-events-none absolute"
+      style={{ left: -SKY_BLEED_X, right: -SKY_BLEED_X, top: -SKY_BLEED_TOP, bottom: 0 }}
+    >
       {w > 0 && (
         <svg
           width={w}
@@ -149,131 +172,138 @@ export function ClawdSky({ percent }: { percent: number | null }) {
           aria-hidden="true"
         >
           <defs>
-            <linearGradient id="clawd-sky-fade" x1="0" x2="1" y1="0" y2="0">
-              <stop offset="0" stopColor="#fff" stopOpacity="0" />
-              <stop offset="0.12" stopColor="#fff" stopOpacity="1" />
-              <stop offset="0.88" stopColor="#fff" stopOpacity="1" />
-              <stop offset="1" stopColor="#fff" stopOpacity="0" />
+            {/* Eased fades on every side, so the sky melts into the popover in either theme
+                instead of ending in an edge */}
+            <linearGradient id="clawd-sky-fade-x" x1="0" x2="1" y1="0" y2="0">
+              {FADE_X.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
             </linearGradient>
-            {/* The sky's tint for the time of day, clear at the top and strongest at the ground */}
+            <linearGradient id="clawd-sky-fade-y" x1="0" x2="0" y1="0" y2="1">
+              {FADE_Y.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
+            </linearGradient>
+            <mask id="clawd-sky-mask-x">
+              <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-fade-x)" />
+            </mask>
+            <mask id="clawd-sky-mask-y">
+              <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-fade-y)" />
+            </mask>
+            {/* The sky's own colour for the time of day */}
             <linearGradient id="clawd-sky-tint" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0" stopColor={look.top} />
               <stop offset="1" stopColor={look.bottom} />
             </linearGradient>
             <radialGradient id="clawd-sun-glow">
-              <stop offset="0" stopColor="#FDE68A" stopOpacity="0.25" />
-              <stop offset="1" stopColor="#FDE68A" stopOpacity="0" />
+              <stop offset="0" stopColor={look.sun?.color ?? '#FACC15'} stopOpacity="0.45" />
+              <stop offset="1" stopColor={look.sun?.color ?? '#FACC15'} stopOpacity="0" />
             </radialGradient>
-            <mask id="clawd-sky-mask">
-              <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-fade)" />
-            </mask>
+            <radialGradient id="clawd-moon-glow">
+              <stop offset="0" stopColor={MOON_LIT} stopOpacity="0.3" />
+              <stop offset="1" stopColor={MOON_LIT} stopOpacity="0" />
+            </radialGradient>
           </defs>
-          <g mask="url(#clawd-sky-mask)">
-            <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-tint)" />
+          <g mask="url(#clawd-sky-mask-x)">
+            <g mask="url(#clawd-sky-mask-y)">
+              <rect x="0" y="0" width={w} height={h} fill="url(#clawd-sky-tint)" fillOpacity={0.5} />
 
-            {/* Stars twinkle at night */}
-            {look.stars > 0 && (
-              <g opacity={look.stars} className="text-slate-400 dark:text-slate-50">
-                {STARS.map((s, i) => (
-                  <rect
-                    key={i}
-                    x={Math.round(s.fx * (w - 2))} y={Math.round(2 + s.fy * h)}
-                    width={1.2} height={1.2} fill="currentColor"
-                    className="clawd-star"
-                    style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
-                  />
-                ))}
-              </g>
-            )}
-
-            {/* The moon in its real phase, from sunset to sunrise */}
-            {look.moon && moonAt && (
-              <g
-                transform={`translate(${moonAt.x} ${moonAt.y})`}
-                opacity={look.moon.opacity}
-                className="text-slate-500 dark:text-slate-100"
-              >
-                <Pixels rects={moon.dark} fill="currentColor" opacity={0.18} />
-                <Pixels rects={moon.lit} fill="currentColor" />
-              </g>
-            )}
-
-            {/* The sun by day, orange near the horizon */}
-            {look.sun && sun && (
-              <g opacity={look.sun.opacity}>
-                <circle cx={sun.x + 4.9} cy={sun.y + 4.9} r={10} fill="url(#clawd-sun-glow)" />
-                <g transform={`translate(${sun.x} ${sun.y})`}>
-                  <Pixels rects={SUN_RECTS} fill={look.sun.color} />
-                </g>
-              </g>
-            )}
-
-            {CLOUDS.slice(0, clouds).map((c, i) => (
-              <g
-                key={i}
-                className="motion-safe:[animation:clawd-cloud-drift_linear_infinite]"
-                style={{
-                  animationDuration: `${c.dur}s`,
-                  animationDelay: `${c.delay}s`,
-                  ['--clawd-cloud-from' as string]: `${-CLOUD_W[c.shape]}px`,
-                  ['--clawd-cloud-to' as string]: `${w}px`,
-                }}
-              >
-                <g transform={`translate(0 ${Math.round(c.top * h)})`}>
-                  {look.cloud
-                    ? <Pixels rects={CLOUD_RECTS[c.shape]} fill={look.cloud} opacity={0.65} />
-                    : <Pixels rects={CLOUD_RECTS[c.shape]} fill="currentColor" opacity={0.28} />}
-                </g>
-              </g>
-            ))}
-
-            {/* Rain, slanting a little with the wind */}
-            {weather.kind === 'rain' && DROPS.slice(0, Math.min(DROPS.length, fall)).map((d, i) => (
-              <rect
-                key={i}
-                x={Math.round(d.fx * w)} y={0} width={1} height={3.5}
-                className="clawd-drop text-sky-500 dark:text-blue-300"
-                fill="currentColor" opacity={0.55}
-                style={{
-                  animationDuration: `${d.dur}s`,
-                  animationDelay: `${d.delay}s`,
-                  ['--clawd-y0' as string]: `${Math.round(d.fy * h)}px`,
-                  ['--clawd-fall' as string]: `${h + 4}px`,
-                }}
-              />
-            ))}
-
-            {/* Snow falls slowly and sways, and settles in a thin strip on the ground */}
-            {weather.kind === 'snow' && (
-              <g className="text-slate-400 dark:text-zinc-200">
-                {FLAKES.slice(0, Math.min(FLAKES.length, fall)).map((f, i) => (
-                  <g
-                    key={i}
-                    className="clawd-flake"
-                    style={{
-                      animationDuration: `${f.dur}s`,
-                      animationDelay: `${f.delay}s`,
-                      ['--clawd-y0' as string]: `${Math.round(f.fy * h)}px`,
-                      ['--clawd-fall' as string]: `${h + 2}px`,
-                    }}
-                  >
+              {/* Stars twinkle at night */}
+              {look.stars > 0 && (
+                <g opacity={look.stars}>
+                  {STARS.map((s, i) => (
                     <rect
-                      x={Math.round(f.fx * w)} y={0} width={1.6} height={1.6}
-                      fill="currentColor" opacity={0.75}
-                      className="clawd-flake-sway"
-                      style={{ animationDuration: `${f.sway}s`, animationDelay: `${f.delay}s` }}
+                      key={i}
+                      x={Math.round(s.fx * (w - 2))} y={Math.round(2 + s.fy * h)}
+                      width={1.2} height={1.2} fill="#F8FAFC"
+                      className="clawd-star"
+                      style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
+                    />
+                  ))}
+                </g>
+              )}
+
+              {/* The moon in its real phase, from sunset to sunrise: pale gold where the sun
+                  lights it, the rest of the disc a dim slate. True circles, so it reads as a moon. */}
+              {look.moon && moonAt && (
+                <g opacity={look.moon.opacity} shapeRendering="geometricPrecision">
+                  <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R * 2.2} fill="url(#clawd-moon-glow)" />
+                  <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R} fill="#64748B" opacity={0.45} />
+                  <path d={moonLitPath(now, moonAt.cx, moonAt.cy, BODY_R)} fill={MOON_LIT} />
+                </g>
+              )}
+
+              {/* The sun by day, yellow high up and orange near the horizon */}
+              {look.sun && sun && (
+                <g opacity={look.sun.opacity} shapeRendering="geometricPrecision">
+                  <circle cx={sun.cx} cy={sun.cy} r={BODY_R * 2.4} fill="url(#clawd-sun-glow)" />
+                  <circle cx={sun.cx} cy={sun.cy} r={BODY_R} fill={look.sun.color} />
+                </g>
+              )}
+
+              {/* Clouds drift past in front of the sun and the moon. Thick ones are solid and hide
+                  them; which ones are thick changes each time the sky opens. */}
+              {CLOUDS.slice(0, clouds).map((c, i) => (
+                <g
+                  key={i}
+                  className="motion-safe:[animation:clawd-cloud-drift_linear_infinite]"
+                  style={{
+                    animationDuration: `${c.dur}s`,
+                    animationDelay: `${c.delay}s`,
+                    ['--clawd-cloud-from' as string]: `${-CLOUD_W[c.shape]}px`,
+                    ['--clawd-cloud-to' as string]: `${w}px`,
+                  }}
+                >
+                  <g transform={`translate(0 ${Math.round(c.top * h)})`}>
+                    <Pixels
+                      rects={CLOUD_RECTS[c.shape]} fill={look.cloud}
+                      opacity={thick[i] ? 1 : weather.kind === 'fair' ? 0.55 : 0.75}
                     />
                   </g>
-                ))}
-                <rect x={0} y={h - 1.5} width={w} height={1.5} fill="currentColor"
-                      opacity={0.3 + 0.2 * look.light} />
-              </g>
-            )}
+                </g>
+              ))}
 
-            {/* A thunderstorm flashes now and then, sometimes twice in a row */}
-            {weather.storm && (
-              <rect x="0" y="0" width={w} height={h} fill="currentColor"
-                    className="clawd-flash text-slate-500 dark:text-slate-50" />
+              {/* Rain, slanting a little with the wind */}
+              {weather.kind === 'rain' && DROPS.slice(0, Math.min(DROPS.length, fall)).map((d, i) => (
+                <rect
+                  key={i}
+                  x={Math.round(d.fx * w)} y={0} width={1} height={3.5}
+                  className="clawd-drop" fill="#BFDBFE" opacity={0.75}
+                  style={{
+                    animationDuration: `${d.dur}s`,
+                    animationDelay: `${d.delay}s`,
+                    ['--clawd-y0' as string]: `${Math.round(d.fy * h)}px`,
+                    ['--clawd-fall' as string]: `${h + 4}px`,
+                  }}
+                />
+              ))}
+
+              {/* Snow falls slowly and sways */}
+              {weather.kind === 'snow' && FLAKES.slice(0, Math.min(FLAKES.length, fall)).map((f, i) => (
+                <g
+                  key={i}
+                  className="clawd-flake"
+                  style={{
+                    animationDuration: `${f.dur}s`,
+                    animationDelay: `${f.delay}s`,
+                    ['--clawd-y0' as string]: `${Math.round(f.fy * h)}px`,
+                    ['--clawd-fall' as string]: `${h + 2}px`,
+                  }}
+                >
+                  <rect
+                    x={Math.round(f.fx * w)} y={0} width={1.6} height={1.6}
+                    fill="#F8FAFC" opacity={0.9}
+                    className="clawd-flake-sway"
+                    style={{ animationDuration: `${f.sway}s`, animationDelay: `${f.delay}s` }}
+                  />
+                </g>
+              ))}
+
+              {/* A thunderstorm flashes now and then, sometimes twice in a row */}
+              {weather.storm && (
+                <rect x="0" y="0" width={w} height={h} fill="#F8FAFC" className="clawd-flash" />
+              )}
+            </g>
+
+            {/* Settled snow: a thin strip on the ground, outside the bottom fade so it stays */}
+            {weather.kind === 'snow' && (
+              <rect x={0} y={h - 1.5} width={w} height={1.5} fill="#E2E8F0" opacity={0.6 + 0.3 * look.light} />
             )}
           </g>
         </svg>

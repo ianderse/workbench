@@ -3,7 +3,7 @@
  * stars are at a given time.
  */
 import { describe, expect, it } from 'vitest';
-import { moonArt, skyLook, sunTimes, usageWeather } from '../sky';
+import { moonLitPath, skyBodyPos, skyLook, sunTimes, usageWeather } from '../sky';
 
 const OCTOBER = new Date(2026, 9, 26, 12);
 const JANUARY = new Date(2027, 0, 15, 12);
@@ -43,9 +43,19 @@ describe('sky', () => {
     expect(skyLook(OCTOBER, usageWeather(80, OCTOBER)).sun).toBeNull();
   });
 
-  it('draws a moon of 7x7 pixels', () => {
-    const { lit, dark } = moonArt(OCTOBER);
-    expect(lit).toHaveLength(7);
-    expect(lit.join('').split('#').length + dark.join('').split('#').length).toBeGreaterThan(30);
+  it('draws the lit part of the moon as a closed path on its disc', () => {
+    const d = moonLitPath(OCTOBER, 20, 10, 4.5);
+    expect(d).toMatch(/^M 20 5\.5 A 4\.5 4\.5 .* Z$/);
+  });
+
+  it('keeps the sun and the moon in the cloud band, away from the faded edges', () => {
+    for (const p of [-0.05, 0, 0.25, 0.5, 0.75, 1, 1.05]) {
+      const { cx, cy } = skyBodyPos(p, 300);
+      expect(cy).toBeGreaterThanOrEqual(7);
+      expect(cy).toBeLessThanOrEqual(15);
+      expect(cx).toBeGreaterThanOrEqual(300 * 0.16 - 1e-9);
+      expect(cx).toBeLessThanOrEqual(300 * 0.84 + 1e-9);
+    }
+    expect(skyBodyPos(0.5, 300).cy).toBeLessThan(skyBodyPos(0.1, 300).cy);
   });
 });
