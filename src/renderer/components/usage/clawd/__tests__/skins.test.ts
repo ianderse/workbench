@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { getClawdGeo, makeFrame } from '../sprite';
-import { SKINS, isHalloween, parseSkin, pickSkin, skinForUsage, skinPool } from '../skins';
+import { SKINS, createSkinPicker, isHalloween, parseSkin, pickSkin, skinForUsage, skinPool } from '../skins';
 import { isWinter } from '../sky';
 
 const OCTOBER = new Date(2026, 9, 26, 12);
@@ -100,6 +100,20 @@ describe('skins', () => {
     expect(b).not.toBe(a);
     expect(b.id).not.toBe('crown');
     expect(skinForUsage({ session: 0, weekly: 21 }, OCTOBER).id).toBe('crown');
+  });
+
+  it('crowns him only when the same account\'s window resets, even one missed while closed', () => {
+    const pick = createSkinPicker();
+    const at = (h: number) => new Date(Date.UTC(2026, 9, 27, h)).toISOString();
+    const now = new Date(Date.UTC(2026, 9, 27, 12));
+    pick({ session: 80, weekly: 20, profile: 'a', reset: at(14) }, now);
+    // Another account with less used is not a reset
+    expect(pick({ session: 10, weekly: 20, profile: 'b', reset: at(13) }, now).id).not.toBe('crown');
+    // The window reset and filled up past where it was while nobody looked
+    pick({ session: 40, weekly: 20, profile: 'a', reset: at(14) }, now);
+    expect(pick({ session: 55, weekly: 21, profile: 'a', reset: at(20) }, now).id).toBe('crown');
+    // A slightly different reset time for the same window is not a reset
+    expect(pick({ session: 50, weekly: 21, profile: 'a', reset: new Date(Date.UTC(2026, 9, 27, 20, 0, 40)).toISOString() }, now).id).not.toBe('crown');
   });
 
   it('draws the accessories standing, and drops them lying on his back', () => {

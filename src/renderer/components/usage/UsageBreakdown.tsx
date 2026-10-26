@@ -100,10 +100,14 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
       {
         session: usage.sessionPercent, weekly: usage.weeklyPercent, fable: usage.fablePercent,
         clock: pinnedAt == null ? null : String(pinnedAt),
+        profile: usage.profileId, reset: usage.sessionResetTimestamp,
       },
       pinnedAt == null ? new Date() : new Date(pinnedAt),
     ),
-    [pickSkin, usage.sessionPercent, usage.weeklyPercent, usage.fablePercent, pinnedAt],
+    [
+      pickSkin, usage.sessionPercent, usage.weeklyPercent, usage.fablePercent, usage.profileId,
+      usage.sessionResetTimestamp, pinnedAt,
+    ],
   );
 
   const { render, pet } = useClawd({

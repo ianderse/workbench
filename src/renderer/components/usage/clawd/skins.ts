@@ -160,6 +160,31 @@ export interface UsageNumbers {
   fable?: number;
   /** A pinned moment (the usage simulator's); a new one picks again for that moment */
   clock?: string | null;
+  /** The account the numbers belong to; switching accounts is not a reset */
+  profile?: string;
+  /** When the 5-hour window resets (ISO), if known */
+  reset?: string | null;
+}
+
+const HOUR = 3_600_000;
+
+/**
+ * Whether the 5-hour window reset between two readings of the same account. A new window ends
+ * at least five hours after the old one, so its reset time jumps ahead; this also catches a
+ * reset that happened while nobody was looking. Without reset times, the percentage dropping
+ * is the only sign.
+ */
+function windowReset(
+  before: { profile?: string; session: number; reset: number | null },
+  after: UsageNumbers,
+  now: Date,
+): boolean {
+  if (before.profile !== after.profile) return false;
+  const reset = after.reset ? Date.parse(after.reset) : NaN;
+  const was = before.reset;
+  if (was != null && Number.isFinite(reset)) return reset > was + HOUR;
+  if (was != null) return now.getTime() >= was && after.session < before.session;
+  return after.session < before.session;
 }
 
 export type SkinPicker = (usage: UsageNumbers, now?: Date) => ClawdSkin;
@@ -167,18 +192,22 @@ export type SkinPicker = (usage: UsageNumbers, now?: Date) => ClawdSkin;
 /**
  * A skin picker with a memory of its own. A new skin is picked only when the numbers change, so
  * a failed refresh (no new numbers) leaves him in the one he has. When the 5-hour window resets
- * (its percentage drops) he puts on the crown.
+ * he puts on the crown.
  */
 export function createSkinPicker(): SkinPicker {
-  let worn: { key: string; session: number; skin: ClawdSkin } | null = null;
+  let worn: { key: string; profile?: string; session: number; reset: number | null; skin: ClawdSkin } | null = null;
   return (usage, now = new Date()) => {
-    const key = `${usage.session}|${usage.weekly}|${usage.fable ?? ''}|${usage.clock ?? ''}`;
+    const key = `${usage.profile ?? ''}|${usage.session}|${usage.weekly}|${usage.fable ?? ''}|${usage.clock ?? ''}`;
     if (worn?.key === key) return worn.skin;
-    const reset = worn != null && usage.session < worn.session;
+    const reset = worn != null && windowReset(worn, usage, now);
     const skin = reset
       ? SKINS.find((s) => s.id === 'crown') ?? CLASSIC_SKIN
       : pickSkin(worn?.skin ?? null, { now, percent: usage.session });
-    worn = { key, session: usage.session, skin };
+    const resetAt = usage.reset ? Date.parse(usage.reset) : NaN;
+    worn = {
+      key, profile: usage.profile, session: usage.session,
+      reset: Number.isFinite(resetAt) ? resetAt : null, skin,
+    };
     return skin;
   };
 }
