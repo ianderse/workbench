@@ -1378,6 +1378,15 @@ body {
       agent-loader-color calc(var(--agent-loader-beat) * 3) step-end infinite;
   }
 }
+/* With reduced motion it stays put but keeps changing color, so it still shows it is loading.
+   The global reduced-motion rule would end the color cycle at once; a class beats `*` */
+@media (prefers-reduced-motion: reduce) {
+  .agent-loader-body,
+  .agent-loader-shadow {
+    animation-duration: calc(var(--agent-loader-beat) * 3) !important;
+    animation-iteration-count: infinite !important;
+  }
+}
 /* Bounces straight back off the floor like jelly: squashed on impact, stretched tall as it
    springs back, jiggling as it rises, still at the top, and stretching again as it falls faster.
    The keyframes trace the jump's parabola closely, so they run linear between them */
