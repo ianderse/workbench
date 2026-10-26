@@ -212,6 +212,8 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
     env: options.env,
     windowsHide: true,
     stdio: 'pipe',
+    // The tools the agent runs (npm test -> vitest workers) end with it
+    processGroup: true,
   });
 
   const startedMs = Date.now();

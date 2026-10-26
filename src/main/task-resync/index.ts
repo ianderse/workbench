@@ -22,7 +22,9 @@
  *
  * Checks for a project run one at a time, together with the queue's passes (`runExclusive`).
  */
+import { readFileSync } from 'fs';
 import path from 'path';
+import { resolveMergeBaseDuring } from '../../shared/utils/merge-base-timing';
 import type { Project, Task, TaskStatus } from '../../shared/types';
 import { getSpecsDir } from '../../shared/constants/config';
 import { appLog } from '../app-logger';
@@ -75,6 +77,16 @@ export type ResyncAction = 'none' | 'up-to-date' | 'noted' | 'fast-forwarded' | 
 
 function specDirOf(project: Project, task: Pick<Task, 'specId'>): string {
   return path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId);
+}
+
+/** Whether the task's last AI review loop passed (`claude_run.json` `reviewVerdict`) */
+export function passedAiReview(specDir: string): boolean {
+  try {
+    const info = JSON.parse(readFileSync(path.join(specDir, 'claude_run.json'), 'utf-8')) as { reviewVerdict?: { status?: string } };
+    return info.reviewVerdict?.status === 'passed';
+  } catch {
+    return false;
+  }
 }
 
 function describeMerged(request: ResyncRequest): string {
@@ -133,6 +145,13 @@ export class TaskResync {
     if (!request || request.failedAt) return;
     // The user stopped it: leave it alone until the user starts it
     if (isStoppedByUser(specDir)) return;
+    // A merge that landed during the AI review round that passed: the task is not sent back to
+    // be validated again (merging the base branch into it is part of its merge: local, PR and
+    // autonomous merges pull the base branch in first)
+    if (resolveMergeBaseDuring(project.settings) === 'validate' && passedAiReview(specDir)) {
+      appLog.info(`[TaskResync] ${task.specId} passed AI review: ${request.into} is merged into it when it is merged, not now`);
+      return;
+    }
     this.schedule(project.id, task.id, this.deps?.delays?.afterRunMs ?? AFTER_RUN_DELAY_MS, 0);
   }
 

@@ -78,6 +78,7 @@ import {
   runTool,
   runToolScript,
   spawnTool,
+  wslSignalScript,
 } from '../runtime-exec';
 
 type ExecCallback = (error: Error | null, result?: { stdout: string; stderr: string }) => void;
@@ -268,7 +269,7 @@ function wrapped(cwd: string | null, ...argv: string[]): string[] {
 /** The scripts sent through their own wsl.exe launch (the TERM/KILL calls) */
 function wslScripts(): string[] {
   return mocks.execFile.mock.calls
-    .filter((call) => call[0] === WSL_EXE && call[1][2] === '--exec' && String(call[1].at(-1)).startsWith('pkill'))
+    .filter((call) => call[0] === WSL_EXE && call[1][2] === '--exec' && /^all=/.test(String(call[1].at(-1))))
     .map((call) => call[1].at(-1) as string);
 }
 
@@ -290,7 +291,7 @@ function wslRunStoppedBy(starts: string[], failure: object): { child: ReturnType
   let stopRun: (() => void) | undefined;
   mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {
     const script = String(args.at(-1));
-    if (script.startsWith('pkill')) {
+    if (script.startsWith('all=')) {
       callback(null, { stdout: '', stderr: '' });
       return undefined;
     }
@@ -316,7 +317,7 @@ function wslRunRecycledOnTerm(before: string, after: string): { child: ReturnTyp
   let stopRun: (() => void) | undefined;
   mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {
     const script = String(args.at(-1));
-    if (script.startsWith('pkill')) {
+    if (script.startsWith('all=')) {
       terminated = true;
       callback(null, { stdout: '', stderr: '' });
       return undefined;
@@ -350,7 +351,7 @@ function wslRunReadAnsweredLate(before: string, after: string): { child: ReturnT
   let stopRun: (() => void) | undefined;
   mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {
     const script = String(args.at(-1));
-    if (script.startsWith('pkill')) {
+    if (script.startsWith('all=')) {
       terminated = true;
       callback(null, { stdout: '', stderr: '' });
       return undefined;
@@ -490,7 +491,7 @@ describe('WSL mode', () => {
         await stoppedRun(['72923660', '72923660']);
 
         expect(wslScripts()).toEqual([
-          'pkill -TERM -P 909 2>/dev/null; kill -TERM -909 2>/dev/null; kill -TERM 909 2>/dev/null; exit 0',
+          wslSignalScript(909, 'TERM'),
         ]);
         await vi.advanceTimersByTimeAsync(5000);
         expect(wslScripts()[1]).toContain('kill -KILL -909');
@@ -509,7 +510,7 @@ describe('WSL mode', () => {
 
         await vi.advanceTimersByTimeAsync(5000);
         expect(wslScripts()).toEqual([
-          'pkill -TERM -P 909 2>/dev/null; kill -TERM -909 2>/dev/null; kill -TERM 909 2>/dev/null; exit 0',
+          wslSignalScript(909, 'TERM'),
         ]);
       } finally {
         vi.useRealTimers();
@@ -586,7 +587,7 @@ describe('WSL mode', () => {
           ['\x1eWBPID 9', '09\n']);
 
         expect(wslScripts()).toEqual([
-          'pkill -TERM -P 909 2>/dev/null; kill -TERM -909 2>/dev/null; kill -TERM 909 2>/dev/null; exit 0',
+          wslSignalScript(909, 'TERM'),
         ]);
         await vi.advanceTimersByTimeAsync(5000);
         expect(wslScripts()[1]).toContain('kill -KILL -909');
@@ -805,7 +806,7 @@ describe('WSL mode', () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(mocks.execFile.mock.calls[0][1].slice(0, 5)).toEqual(['-d', 'Ubuntu', '--exec', '/bin/sh', '-c']);
       expect(killScripts()).toEqual([
-        'pkill -TERM -P 4242 2>/dev/null; kill -TERM -4242 2>/dev/null; kill -TERM 4242 2>/dev/null; exit 0',
+        wslSignalScript(4242, 'TERM'),
       ]);
       expect(mocks.killProcessGracefully).not.toHaveBeenCalled();
 

@@ -5,6 +5,7 @@
  * Kept free of Electron and the app logger so any main-process module can emit hooks.
  */
 import type { Project, Task, TaskStatus } from '../shared/types';
+import { sanitizeChangedFiles } from '../shared/utils/changed-files';
 
 export interface TaskHookEvents {
   /** The task entered a state: its board status and, when the state machine moved it, the machine state */
@@ -48,6 +49,13 @@ export const taskHooks = {
 
   /** Run the hooks registered for `name`; a failing hook never affects the caller or other hooks */
   emit<K extends TaskHookName>(name: K, event: TaskHookEvents[K]): void {
+    if (name === 'files-edited') {
+      // The agent's tools also name pseudo targets (`agent:/x`, `conflict:/1`): real files only
+      const edited = event as TaskHookEvents['files-edited'];
+      const files = sanitizeChangedFiles(edited.files);
+      if (files.length === 0) return;
+      event = { ...edited, files } as TaskHookEvents[K];
+    }
     for (const handler of handlers[name]) {
       try {
         const result = handler(event);

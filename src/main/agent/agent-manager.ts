@@ -19,6 +19,7 @@ import { readSettingsFile } from '../settings-utils';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import { resolveEffectiveAgent } from '../../shared/utils/agent-override';
 import { resolveUiImplementer } from '../../shared/utils/ui-work';
+import { resolveMergeBaseDuring } from '../../shared/utils/merge-base-timing';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { isSelfImproveEnabled, SELF_IMPROVE_NUDGE } from '../self-improve';
 import { getCompengDir } from '../self-improve/paths';
@@ -583,6 +584,7 @@ export class AgentManager extends EventEmitter {
       ...(task.metadata?.agentOverride ? { agentOverride: task.metadata.agentOverride } : {}),
       ...(typeof task.metadata?.uiWork === 'boolean' ? { uiWork: task.metadata.uiWork } : {}),
       uiImplementer: resolveUiImplementer(project.settings),
+      mergeBaseDuring: resolveMergeBaseDuring(project.settings),
       // A Spec review ticket runs one read-only review step
       ...(task.metadata?.specReview ? { specReview: true } : {}),
       ...(resync ? { resync } : {}),

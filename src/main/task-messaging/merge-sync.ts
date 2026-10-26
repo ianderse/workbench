@@ -7,9 +7,13 @@
  * it was merged into take the change in. Each of those whose worktree branch lacks the merge gets a
  * resync request (`task-resync/request.ts`; several merges coalesce into one that merges every ref):
  *
- * - running (its run is live, or it is In Progress / AI Review): a `[Workbench]` notice tells it
- *   to merge that branch now (live stdin, or the inbox for its next step). Should the run end
- *   without doing it, the request is still there and the resync service takes over;
+ * - running (its run is live, or it is In Progress / AI Review): with the project setting
+ *   `mergeBaseDuring` = `validate` (default) a `[Workbench]` notice only says what was merged and that
+ *   Workbench merges the base branch into the task's branch once, right before validation (the
+ *   runner applies the recorded request, `ClaudeTaskRun.syncBeforeValidation`); with `immediately`
+ *   it tells the agent to merge that branch now (live stdin, or the inbox for its next step).
+ *   Should the run end without the request being applied, it is still there and the resync service
+ *   takes over;
  * - waiting in the Queue (a rate-limit hold): the request only; its run applies it when it resumes;
  * - not running (Human Review for any reason, Error, PR Created after a merged PR): the resync
  *   service (`requestResync`) moves it back to In Progress, where its own session merges the
@@ -31,6 +35,7 @@ import { isTaskBranchMerging } from '../worktree/merge-guard';
 import { activeAutoMerge } from '../../shared/utils/autonomous';
 import { keepsLocalMergeOut as keepsLocalResyncOut, recordResyncRequest } from '../task-resync/request';
 import { getTaskMessagingEnv, isTaskLive, taskSpecDir } from './broker';
+import { resolveMergeBaseDuring } from '../../shared/utils/merge-base-timing';
 
 /** How a task was merged */
 export type MergeVia = 'local' | 'pr';
@@ -305,8 +310,20 @@ export class MergeSync {
     }
   }
 
-  private mergeNowText(event: MergeEvent, ref: string, fetchNote?: string): string {
+  /**
+   * The notice a running task gets. Default (project setting `mergeBaseDuring` = validate): informational,
+   * Workbench merges the base branch into the task's branch once before validation. `immediately`: the
+   * agent merges at once.
+   */
+  private mergeNowText(event: MergeEvent, ref: string, fetchNote?: string, informational = resolveMergeBaseDuring(event.project.settings) === 'validate'): string {
     const { info, files } = event;
+    if (informational) {
+      return [
+        `${event.who} was merged into \`${info.into}\`${files.length ? ` (files: ${listFiles(files)})` : ''}.`,
+        `Don't merge it now; Workbench merges \`${info.into}\` into your branch before validation. Merge now only if you are blocked on that change (\`git merge --no-edit ${ref}\`).`,
+        fetchNote,
+      ].filter(Boolean).join(' ');
+    }
     return [
       `${event.who} was merged into \`${info.into}\`, your base branch.${files.length ? ` It changed ${listFiles(files)}.` : ''}`,
       `Merge it into your branch now: commit your work in progress, run \`git merge --no-edit ${ref}\`, resolve any conflicts keeping both sides' intent, re-run the checks for what changed, and commit.`,
@@ -355,7 +372,8 @@ export class MergeSync {
     if (!worktreePath) {
       // Nothing of its own to sync: a running task in the project itself is told; the rest create
       // their worktree from the base branch when they start
-      if (this.running(project.id, task)) this.options.queueNotice(project.id, specId, this.mergeNowText(event, ref, fetchNote));
+      // (no worktree, so no resync request and no merge before validation: it merges itself)
+      if (this.running(project.id, task)) this.options.queueNotice(project.id, specId, this.mergeNowText(event, ref, fetchNote, false));
       return;
     }
     const upToDate = await git(['merge-base', '--is-ancestor', ref, 'HEAD'], { cwd: worktreePath, isolated: true })

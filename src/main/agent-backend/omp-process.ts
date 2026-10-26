@@ -243,7 +243,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
   const runOnce = (args: string[], input: string, holdResult: boolean, resumeNote?: string, rpc = false) => {
     // `spawnTool` names only the tools cli-tool-manager knows; `command` is what runs
     // (inside WSL it must be an absolute Linux path)
-    const child = spawnTool('claude', args, { command, cwd: options.cwd, env, windowsHide: true, stdio: 'pipe' });
+    const child = spawnTool('claude', args, { command, cwd: options.cwd, env, windowsHide: true, stdio: 'pipe', processGroup: true });
     current = child;
     if (resumeNote) appLog.info(`[OMP] ${resumeNote}`);
     return new Promise<RunOnceResult>((resolve) => {
@@ -570,6 +570,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       oneShot: options.oneShot,
       advisorMode: advisor.mode,
       advisorOverlayFile: setup.advisorOverlayFile,
+      foregroundOverlayFile: setup.foregroundOverlayFile,
       extensionPaths: options.extensions,
       transport: 'rpc',
     })

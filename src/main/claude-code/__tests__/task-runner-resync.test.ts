@@ -280,8 +280,42 @@ describe('ClaudeTaskRun resync', () => {
       }, messages: [result()] },
       { messages: [validated()] },
     );
-    await makeRun(request).run();
+    await makeRun(request, {}, { mergeBaseDuring: 'immediately' }).run();
     expect(readResyncRequest(specDir)?.merged.map((t) => t.specId)).toEqual(['001-a', '009-z']);
+  });
+
+  it('merges a base branch that moved while it worked once, right before validation', async () => {
+    runInfo([done('triage'), done('implement')]);
+    // 001-a was merged into main while the implementation ran: merge sync recorded a request, the agent did not merge
+    mergeIntoMain();
+    scripts.push(
+      { effect: () => git(worktree, 'merge', '--no-edit', 'main'), messages: [result({ result: 'Merged main, no conflicts' })] },
+      { messages: [validated()] },
+    );
+    const outcome = await makeRun(undefined).run();
+
+    expect(outcome.status).toBe('completed');
+    expect(loadClaudeRunInfo(specDir)!.phases.map((p) => p.name)).toEqual(['triage', 'implement', 'resync', 'validate']);
+    expect(promptOf(0)).toMatch(/^Your base branch moved on/);
+    expect(promptOf(1)).toContain('Before handing this off, validate the work:');
+    expect(readResyncRequest(specDir)).toBeUndefined();
+    expect(existsSync(path.join(worktree, 'c.txt'))).toBe(true);
+  });
+
+  it('does not merge before validation without a pending request, or when the setting is immediately', async () => {
+    runInfo([done('triage'), done('implement')]);
+    scripts.push({ messages: [validated()] });
+    expect((await makeRun(undefined).run()).status).toBe('completed');
+    expect(loadClaudeRunInfo(specDir)!.phases.map((p) => p.name)).toEqual(['triage', 'implement', 'validate']);
+
+    spawned.length = 0;
+    runInfo([done('triage'), done('implement')]);
+    const request = mergeIntoMain();
+    scripts.push({ messages: [validated()] });
+    await makeRun(undefined, {}, { mergeBaseDuring: 'immediately' }).run();
+    expect(spawned).toHaveLength(1);
+    expect(promptOf(0)).toContain('Before handing this off, validate the work:');
+    expect(readResyncRequest(specDir)?.at).toBe(request.at);
   });
 
   it('merges with the merge helper when the task has no session, then implements and validates', async () => {

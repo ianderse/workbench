@@ -16,6 +16,9 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 
 ### 2026-10-25
 
+**Agent runs**
+- Stopping a task, Start over, a step timeout, a restart or quitting the app now ends everything the agent started (such as the vitest workers of `npm test`), not just Claude Code or OMP itself: agent CLIs run in their own process group on macOS/Linux, `taskkill /T` on Windows, and at startup leftover processes of an earlier session working inside a task worktree are ended and logged
+
 **Spec review**
 - A Spec review is no longer marked complete unless it actually saw the project's tests pass: the report has a `checksObserved` field, and a review with no gaps but no observed checks leaves the batch "unverified" (no new round) with the line "Tests were not observed; run them or rerun the review"; rerunning the same review ticket applies the new report
 - OMP no longer loses background jobs: when the model runs a long command (such as `npm test`) as a background bash job and ends its turn, the live (RPC) session stays open until the job finishes and omp's follow-up run (which delivers the output) ends, instead of closing 8 s after the first answer and killing the job; runs through `omp -p` turn background bash off, and every OMP run with bash gets the rule to run needed commands in the foreground
@@ -28,6 +31,11 @@ Entries are dated so changes can be tracked; commit hashes point at the change. 
 - The parallel task limit now counts tasks in AI review as well as in progress, so a task moving to AI review no longer frees a slot for a fourth model run
 
 - Follow-up and decision tickets that go to the Queue are now also dependencies of the tickets that waited for their source task, so a ticket like "Write the validation report" no longer starts while the follow-up work from its predecessors' reviews is still running (tickets waiting for a decision never block)
+
+**Parallel tasks**
+- A running task is no longer told to merge `main` every time another task is merged (111 notices and 55 conflict resolutions across 86 tickets): the notice is informational (what was merged, which files) and says Workbench merges the base branch into the task's branch once, right before validation, through the existing resync step. A task that already passed AI review is not sent back to validate again for a merge that landed during the review. New project setting Settings > Project > Tasks > "Take in merged tasks" (Before validation, default; Immediately keeps the old behavior)
+- Changelog lists, notices, briefings and resync requests no longer show OMP pseudo paths such as `agent:/IntCli040`, `conflict:/1` and `conflict:/*`: only real repo-relative files are recorded, and old entries are filtered when read
+- Implement and revise prompts (Claude Code and OMP) now say to run the tests that cover the change while working and the full suite once before committing, not after every edit
 
 **Notifications**
 - Notifications for the autonomous workflow: task merged (auto-merge or merge to Done, once per task), decision needed (one per new decision ticket, batched into one when several are created together), needs attention (blocked auto-merge, interrupted run that could not be resumed, task left in error) and all work done in a project ("N merged, M waiting for review or decision", after the queue, In Progress and AI review stay empty for a few seconds, never at app start)

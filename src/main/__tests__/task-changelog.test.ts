@@ -56,6 +56,23 @@ describe('foldTaskChangelog', () => {
     const content = `${JSON.stringify({ at: at(1), task: '001-a', event: 'state', status: 'queue' })}\n{"at":"cut short\n\n`;
     expect(parseTaskChangelog(content)).toHaveLength(1);
   });
+
+  it('drops OMP pseudo paths from old entries when reading', () => {
+    const content = JSON.stringify({ at: at(1), task: '001-a', event: 'edit', files: ['src/a.ts', 'agent:/IntCli040', 'conflict:/1', 'conflict:/*'] });
+    const entries = parseTaskChangelog(content);
+    expect(entries[0].files).toEqual(['src/a.ts']);
+    expect(foldTaskChangelog(entries).get('001-a')?.files).toEqual(['src/a.ts']);
+  });
+
+  it('switches the merge instruction of the parallel tasks section with mergeBaseDuring', async () => {
+    const specsDir = path.join(tmp, 'tasks');
+    mkdirSync(specsDir, { recursive: true });
+    const changelog = path.join(tmp, 'none.jsonl');
+    const byDefault = await buildParallelTasksPrompt(changelog, '001-self', specsDir, changelog, { projectId: 'p1', tools: true });
+    expect(byDefault).toContain('do not merge it now, Workbench merges the base branch into your branch once, before validation');
+    const now = await buildParallelTasksPrompt(changelog, '001-self', specsDir, changelog, { projectId: 'p1', tools: true, mergeBaseDuring: 'immediately' });
+    expect(now).toContain('do it right away, as the notice says');
+  });
 });
 
 describe('buildParallelTasksPrompt', () => {
@@ -169,7 +186,7 @@ describe('task changelog writer', () => {
     try {
       const project = { id: 'p2', path: path.join(tmp, 'p2'), autoBuildPath: '.workbench', settings: {} } as unknown as Project;
       const task = { id: 't2', specId: '002-b', title: 'Task B', metadata: { useWorktree: false } } as unknown as Task;
-      taskHooks.emit('files-edited', { project, task, files: ['x.ts'] });
+      taskHooks.emit('files-edited', { project, task, files: ['x.ts', 'agent:/IntCli040', 'conflict:/*'] });
       vi.advanceTimersByTime(3000);
       await flushTaskChangelog();
       expect(readEntries(project)).toEqual([expect.objectContaining({ task: '002-b', event: 'edit', files: ['x.ts'] })]);

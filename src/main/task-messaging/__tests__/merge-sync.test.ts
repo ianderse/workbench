@@ -190,7 +190,7 @@ describe('merge sync', () => {
     expect(request('002-b')?.ref).toBe('main');
     expect(request('003-c')?.ref).toBe('main');
     expect(resyncs).toEqual([]);
-    expect(await texts('002-b')).toEqual([expect.stringContaining('Merge it into your branch now')]);
+    expect(await texts('002-b')).toEqual([expect.stringContaining("Don't merge it now; Workbench merges `main` into your branch before validation")]);
     expect(await texts('003-c')).toEqual([]);
   });
 
@@ -300,7 +300,55 @@ describe('merge sync', () => {
 
     expect(resyncs).toEqual([]);
     expect(request('002-b')?.ref).toBe('main');
-    expect(await texts('002-b')).toEqual([expect.stringContaining('Merge it into your branch now')]);
+    expect(await texts('002-b')).toEqual([expect.stringContaining("Don't merge it now")]);
+  });
+
+  it('tells a running task what was merged and not to merge it now by default (merge before validation)', async () => {
+    mkdirSync(path.join(root, '.workbench'), { recursive: true });
+    writeFileSync(path.join(root, '.workbench', 'changelog.jsonl'),
+      JSON.stringify({ at: '2026-10-01T00:00:00Z', task: '001-a', event: 'state', status: 'human_review', files: ['src/a.ts', 'agent:/IntCli040', 'conflict:/*'] }));
+    tasks.push(task('002-b', 'in_progress'));
+    addWorktree('002-b');
+    commitFile(root, 'c.txt', 'from task a\n', 'task a merged');
+    await merged();
+
+    const [notice] = await texts('002-b');
+    expect(notice).toMatch(/^Task 001-a "T001" \(session wb-[a-z0-9]{6}-001-a\) was merged into `main` \(files: `src\/a\.ts`\)\. /);
+    expect(notice).toContain("Don't merge it now; Workbench merges `main` into your branch before validation. Merge now only if you are blocked on that change");
+    expect(notice).not.toContain('agent:/');
+    expect(notice).not.toContain('conflict:/');
+    // The request is what the runner applies before validation
+    expect(request('002-b')?.merged.map((t) => t.specId)).toEqual(['001-a']);
+    expect(resyncs).toEqual([]);
+  });
+
+  it('batches the notices of several merged tasks, and tells the agent to merge at once with mergeBaseDuring = immediately', async () => {
+    tasks.push(task('002-b', 'in_progress'));
+    addWorktree('002-b');
+    commitFile(root, 'c.txt', 'from task a\n', 'task a merged');
+    // Two merges close together: one batch, one line per merged task
+    recordTaskMerge('p1', '001-a', { into: 'main', via: 'local' });
+    await notices.onState({ project, task: tasks[0], status: 'done' });
+    tasks.push(task('003-c', 'human_review'));
+    commitFile(root, 'd.txt', 'from task c\n', 'task c merged');
+    recordTaskMerge('p1', '003-c', { into: 'main', via: 'local' });
+    await notices.onState({ project, task: tasks[2], status: 'done' });
+    await notices.flush();
+    const [batched] = await texts('002-b');
+    expect(batched).toMatch(/^Updates on parallel tasks:\n- Task 001-a .*was merged into `main`.*\n- Task 003-c .*was merged into `main`/);
+    expect(batched.match(/Don't merge it now/g)).toHaveLength(2);
+
+    project = { ...project, settings: { ...project.settings, mergeBaseDuring: 'immediately' } };
+    tasks.push(task('004-d', 'in_progress'));
+    addWorktree('004-d');
+    commitFile(root, 'e.txt', 'again\n', 'another merge');
+    tasks.push(task('005-e', 'human_review'));
+    recordTaskMerge('p1', '005-e', { into: 'main', via: 'local' });
+    await notices.onState({ project, task: tasks[tasks.length - 1], status: 'done' });
+    await notices.flush();
+    const [notice] = await texts('004-d');
+    expect(notice).toContain('Merge it into your branch now: commit your work in progress, run `git merge --no-edit main`');
+    expect(notice).not.toContain("Don't merge it now");
   });
 
   it('records requests while task messaging notices are off, without sending notices', async () => {

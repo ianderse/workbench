@@ -11,6 +11,7 @@ import { readFile } from 'fs/promises';
 import path from 'path';
 import type { TaskStatus } from '../shared/types';
 import { taskSessionName } from '../shared/utils/task-messaging';
+import { sanitizeChangedFiles } from '../shared/utils/changed-files';
 
 export const TASK_CHANGELOG_FILE = 'changelog.jsonl';
 
@@ -72,7 +73,11 @@ export function parseTaskChangelog(content: string): TaskChangelogEntry[] {
     if (!line.trim()) continue;
     try {
       const entry = JSON.parse(line) as TaskChangelogEntry;
-      if (entry && typeof entry.task === 'string' && typeof entry.at === 'string') entries.push(entry);
+      if (entry && typeof entry.task === 'string' && typeof entry.at === 'string') {
+        // Older entries hold pseudo targets of the agent's tools (`agent:/x`, `conflict:/1`)
+        if (Array.isArray(entry.files)) entry.files = sanitizeChangedFiles(entry.files);
+        entries.push(entry);
+      }
     } catch {
       // A line cut short by a crash; the next entries are still valid
     }
@@ -127,6 +132,8 @@ export interface ParallelTasksMessaging {
   projectId: string;
   /** The session has Workbench's `list_parallel_tasks` and `message_task` tools */
   tools: boolean;
+  /** Project setting `mergeBaseDuring` (unset = validate) */
+  mergeBaseDuring?: 'validate' | 'immediately';
 }
 
 /**
@@ -159,5 +166,9 @@ export async function buildParallelTasksPrompt(
   return `## Parallel tasks
 Other tasks of this project run in parallel in their own worktrees, and their branches are merged into the same base branch, so editing the same files causes merge conflicts. Workbench logs every task's states and the files it changes in \`${promptPath}\` (JSON Lines, newest last; don't modify it).
 ${list}
-${check} Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.${messaging ? ' When another task is merged into your base branch, a `[Workbench]` notice tells you to merge it into your branch: do it right away, as the notice says.' : ''}`;
+${check} Prefer approaches that leave those files alone; when the task needs them, keep those edits small and mention the overlap in your final summary.${messaging
+    ? (messaging.mergeBaseDuring === 'immediately'
+      ? ' When another task is merged into your base branch, a `[Workbench]` notice tells you to merge it into your branch: do it right away, as the notice says.'
+      : ' When another task is merged into your base branch, a `[Workbench]` notice tells you so: do not merge it now, Workbench merges the base branch into your branch once, before validation (merge earlier only if you are blocked on that change).')
+    : ''}`;
 }
