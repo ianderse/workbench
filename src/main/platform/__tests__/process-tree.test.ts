@@ -45,6 +45,17 @@ describe('collectTree', () => {
     ];
     expect(collectTree(table, 100).sort()).toEqual([100, 101, 102, 103, 104]);
   });
+
+  it("leaves OMP's shared worker broker (an omp group leader) and its children alone", () => {
+    const table = [
+      row(100, 1, 100, 'omp'), // the run
+      row(101, 100, 100, 'node'), // its test runner
+      row(150, 100, 150, 'omp'), // the broker the run started, shared by other runs
+      row(151, 150, 150, 'omp'),
+      row(160, 100, 160, 'node'), // a test runner that started its own group: still the run's
+    ];
+    expect(collectTree(table, 100).sort()).toEqual([100, 101, 160]);
+  });
 });
 
 describe('orphan selection', () => {

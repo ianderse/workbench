@@ -52,6 +52,11 @@ export function parsePsTable(output: string): ProcEntry[] {
   return table;
 }
 
+/** OMP's worker broker: an `omp` process leading its own group, shared by the omp processes of several runs */
+export function isSharedAgentDaemon(entry: ProcEntry): boolean {
+  return /^omp(\.exe)?$/i.test(entry.comm) && entry.pgid === entry.pid;
+}
+
 /**
  * Every process that belongs to the tree of `rootPid`: the root itself, all its descendants (by parent
  * pid, transitively) and the members of the root's process group. Never contains pid 0 or 1 or `exclude`.
@@ -59,6 +64,8 @@ export function parsePsTable(output: string): ProcEntry[] {
 export function collectTree(table: readonly ProcEntry[], rootPid: number, exclude: number = process.pid): number[] {
   const children = new Map<number, number[]>();
   for (const entry of table) {
+    // OMP starts a worker broker daemon in its own group that other omp processes share: never part of a run's tree
+    if (isSharedAgentDaemon(entry) && entry.pid !== rootPid) continue;
     const list = children.get(entry.ppid);
     if (list) list.push(entry.pid);
     else children.set(entry.ppid, [entry.pid]);
@@ -74,7 +81,7 @@ export function collectTree(table: readonly ProcEntry[], rootPid: number, exclud
   }
   // A group member whose parent already died (reparented to init) is no descendant any more
   for (const entry of table) {
-    if (entry.pgid === rootPid) found.add(entry.pid);
+    if (entry.pgid === rootPid && !isSharedAgentDaemon(entry)) found.add(entry.pid);
   }
   return [...found].filter((pid) => pid > 1 && pid !== exclude);
 }
