@@ -37,6 +37,7 @@ import { taskStateManager } from '../task-state-manager';
 import { taskQueue } from '../services/task-queue';
 import { groomQueueAfterMerge } from '../queue-grooming';
 import { findTaskWorktree } from '../worktree-paths';
+import { guardKey, localMerges, waitForBranchSync } from '../worktree/merge-guard';
 import { resolveDefaultBaseBranch } from '../utils/base-branch';
 import { TaskLogWriter } from '../claude-code/task-log';
 import { persistPlanStatusAndReasonSync, updateTaskMetadataFields, getPlanPath } from '../ipc-handlers/task/plan-file-utils';
@@ -236,6 +237,14 @@ export function clearAutoMergeBlocked(project: Project, task: Task): void {
 
 async function blockAutoMerge(project: Project, task: Task, reason: 'conflicts' | 'dirty_target' | 'error', message: string): Promise<void> {
   const text = reason === 'conflicts' ? `Auto-merge blocked: conflicts. ${message}` : `Auto-merge blocked: ${message}`;
+  // The task left Human Review while the merge ran (main changed and a resync took it back to work):
+  // the run clears a block only when it starts, so a flag written now would outlive it and stop the
+  // merge that follows the run. The task reaches Human Review again and gets a fresh attempt
+  const current = freshTask(project.id, task.id);
+  if (!current || current.status !== 'human_review' || current.reviewReason !== 'completed') {
+    logTask(project, task, 'info', `Auto-merge not completed (${message}); it will be retried when the task is back in review`);
+    return;
+  }
   // (the board shows a translated line for the reason; the full text is its tooltip)
   logTask(project, task, 'warn', text);
   writeMetadata(project, task, { autoMergeBlocked: { reason, message: text, at: new Date().toISOString() } });
@@ -243,7 +252,29 @@ async function blockAutoMerge(project: Project, task: Task, reason: 'conflicts' 
   taskHooks.emit('needs-attention', { project, task, reason: 'auto-merge-blocked', detail: message });
 }
 
-async function runAutoMerge(project: Project, task: Task, deps: AutoMergeDeps): Promise<void> {
+/**
+ * Merges run one at a time per project, so a task can wait a long while for its turn (a merge agent
+ * resolving another task's conflicts), and a resync can take the task back to work meanwhile. The
+ * task's branch is marked as being merged for the whole merge, so a resync waits instead of
+ * changing the worktree under the merge agent
+ */
+async function runAutoMerge(project: Project, taskIn: Task, deps: AutoMergeDeps): Promise<void> {
+  await waitForBranchSync(project.id, taskIn.id);
+  const task = freshTask(project.id, taskIn.id);
+  if (!task || task.status !== 'human_review' || task.reviewReason !== 'completed') {
+    logTask(project, taskIn, 'info', 'Auto-merge skipped: the task went back to work while it waited; it is merged when it is back in review');
+    return;
+  }
+  const key = guardKey(project.id, task.id);
+  localMerges.add(key);
+  try {
+    await mergeIntoTarget(project, task, deps);
+  } finally {
+    localMerges.delete(key);
+  }
+}
+
+async function mergeIntoTarget(project: Project, task: Task, deps: AutoMergeDeps): Promise<void> {
   const config = resolveAutonomousConfig(project.settings);
   logTask(project, task, 'info', 'AI review passed, merging into the target branch');
 

@@ -285,6 +285,7 @@ export async function autoMergeIntoTarget(input: AutoMergeInput): Promise<AutoMe
       mergeAgent,
       onProgress: (step, params) => {
         if (step === 'resolving') log(`Merge conflicts in ${params?.count ?? ''} file(s), asking the merge agent`);
+        if (step === 'verifying') log('The merge agent resolved the conflicts, checking the result');
       },
     });
     if (!pulled.success) {
