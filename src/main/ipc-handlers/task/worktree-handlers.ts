@@ -401,6 +401,16 @@ async function withRetry<T>(
  * otherwise from the task's worktree (against its base branch, uncommitted work included).
  * null when neither exists.
  */
+/**
+ * What a task's own changes are diffed against: the merge base with its base branch, not the
+ * base branch's tip. A branch that is behind its base (other tasks merged since) would otherwise
+ * show everything those merges added as deletions of its own
+ */
+async function ownChangesBase(worktreePath: string, baseBranch: string): Promise<string> {
+  const out = await git(['merge-base', baseBranch, 'HEAD'], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null);
+  return out?.stdout.trim() || baseBranch;
+}
+
 export async function collectTaskChanges(task: Task, project: Project): Promise<TaskChangeSummary | null> {
   const worktreePath = findTaskWorktree(project.path, task.specId);
   let files: TaskChangeFile[];
@@ -420,8 +430,9 @@ export async function collectTaskChanges(task: Task, project: Project): Promise<
     source = 'merge';
   } else if (worktreePath) {
     const baseBranch = await getEffectiveBaseBranch(project.path, task.specId, project.settings?.mainBranch);
+    const diffBase = await ownChangesBase(worktreePath, baseBranch);
     const [diff, count] = await Promise.all([
-      git(['diff', '--numstat', baseBranch], { cwd: worktreePath, encoding: 'utf-8' }),
+      git(['diff', '--numstat', diffBase], { cwd: worktreePath, encoding: 'utf-8' }),
       git(['rev-list', '--count', `${baseBranch}..HEAD`], { cwd: worktreePath, encoding: 'utf-8' }).catch(() => null),
     ]);
     files = parseNumstat(diff.stdout);
@@ -502,10 +513,11 @@ export function registerWorktreeHandlers(
           // for every task, so in WSL the three share one launch (one after the other natively).
           // The working-tree diff against baseBranch captures ALL changes (committed and
           // uncommitted), so the UI shows file stats before the agent commits its work.
+          const diffBase = await ownChangesBase(worktreePath, baseBranch);
           const [branchResult, countResult, diffResult] = await runToolScript('git', [
             ['rev-parse', '--abbrev-ref', 'HEAD'],
             ['rev-list', '--count', `${baseBranch}..HEAD`],
-            ['diff', '--stat', baseBranch],
+            ['diff', '--stat', diffBase],
           ], { cwd: worktreePath, encoding: 'utf-8' });
           if (branchResult.code !== 0) throw new Error(branchResult.stderr.trim() || 'git rev-parse failed');
           const branch = branchResult.stdout.trim();
