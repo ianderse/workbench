@@ -1344,6 +1344,85 @@ body {
   }
 }
 
+/* The sky's weather and stars. Each element sets its own duration, delay and distances; with
+   reduced motion they hold still where they are (drops and flakes at --clawd-y0). */
+.clawd-drop,
+.clawd-flake {
+  transform: translateY(var(--clawd-y0));
+}
+.clawd-flash {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .clawd-star {
+    animation: clawd-twinkle ease-in-out infinite alternate;
+  }
+  .clawd-drop {
+    animation: clawd-rain-fall linear infinite;
+  }
+  .clawd-flake {
+    animation: clawd-snow-fall linear infinite;
+  }
+  .clawd-flake-sway {
+    animation: clawd-snow-sway ease-in-out infinite alternate;
+  }
+  .clawd-flash {
+    animation: clawd-flash 9s linear infinite;
+  }
+}
+@keyframes clawd-twinkle {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.1;
+  }
+}
+@keyframes clawd-rain-fall {
+  from {
+    transform: translate(0, -6px);
+  }
+  to {
+    transform: translate(3px, var(--clawd-fall));
+  }
+}
+@keyframes clawd-snow-fall {
+  from {
+    transform: translate(0, -2px);
+  }
+  to {
+    transform: translate(2px, var(--clawd-fall));
+  }
+}
+@keyframes clawd-snow-sway {
+  from {
+    transform: translateX(-1.5px);
+  }
+  to {
+    transform: translateX(1.5px);
+  }
+}
+@keyframes clawd-flash {
+  0%, 3%, 7%, 100% {
+    opacity: 0;
+  }
+  1% {
+    opacity: 0.18;
+  }
+  2% {
+    opacity: 0.05;
+  }
+  4% {
+    opacity: 0.25;
+  }
+  5% {
+    opacity: 0.1;
+  }
+  6% {
+    opacity: 0.04;
+  }
+}
+
 /* ============================================
    Live agent grid (the website's hero stage)
    A faint grid behind the graph, so the nodes read as sitting in a space; it

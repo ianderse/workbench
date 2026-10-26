@@ -118,7 +118,7 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
           the ground he stands on, so the two sit flush with no gap between them. */}
       <div>
         <div className="relative flex items-end gap-2" style={{ height: SCENE_H }}>
-          <ClawdSky />
+          <ClawdSky percent={usage.sessionPercent} />
           {/* Clawd stands on the bar, the number sits a touch above it */}
           <div className="relative mb-1 flex shrink-0 items-start self-end">
             <span className={`text-[2rem] font-light leading-none tabular-nums ${getColorClass(usage.sessionPercent)}`}>
