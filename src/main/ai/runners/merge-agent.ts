@@ -119,6 +119,8 @@ export const runMergeAgent: MergeAgentFn = async (input) => {
     prompt: userPrompt(input),
     appendSystemPrompt: systemPrompt(input),
     model: input.model ?? 'opus',
+    // OMP: the judge role (a stronger model than the local default, which took minutes per conflict)
+    ompRole: 'judge',
     effort: input.effort ?? 'medium',
     cwd: input.worktreePath,
     usage: { job: 'merge' },
