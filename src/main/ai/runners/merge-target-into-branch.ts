@@ -240,10 +240,16 @@ export async function mergeTargetIntoBranch(config: MergeTargetIntoBranchConfig)
     return { success: false, conflictedFiles: [], error: `Could not find ${targetRef}: ${errorText(error)}` };
   }
   const rollback = async () => {
-    if (await isMerging()) await git(['merge', '--abort']).catch(() => undefined);
+    if (await isMerging()) {
+      await git(['merge', '--abort']).catch(() => undefined);
+      // An abort that failed (a lock held by another git process, say) leaves a half-done merge
+      if (await isMerging()) await git(['reset', '--merge']).catch(() => undefined);
+    }
     const head = (await git(['rev-parse', 'HEAD']).catch(() => before)).trim();
     if (head !== before) await git(['reset', '--hard', before]).catch(() => undefined);
-    await removeMarker(git, worktreePath);
+    // The marker stays while a merge is still in progress: without it the leftover reads as
+    // someone else's merge, which Workbench never undoes, and the task keeps a dirty worktree
+    if (!(await isMerging())) await removeMarker(git, worktreePath);
   };
   // Marks the merge as Workbench's own: one left over from an interrupted run may be undone later
   await writeMarker(git, worktreePath, { targetCommit, before });
