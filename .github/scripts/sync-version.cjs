@@ -61,30 +61,29 @@ if (!exists(`refs/tags/${anchor}`)) {
  * branch's own line are taken for pull requests.
  */
 const mainRef = ['refs/remotes/origin/main', 'refs/heads/main'].find(exists);
-const parentsOf = new Map(lines(git('rev-list', '--parents', `${anchor}..HEAD`)).map((line) => {
+// Merges only, newest first: listing every commit's parents outgrew execFileSync's output
+// buffer on a long history
+const listMerges = (...args) => lines(git('rev-list', '--merges', '--parents', ...args)).map((line) => {
   const [sha, ...parents] = line.split(' ');
-  return [sha, parents.join(' ')];
-}));
-const pullRequests = mainRef
-  ? new Set(lines(git('rev-list', '--first-parent', '--merges', '--parents', `${anchor}..${mainRef}`))
-    .map((line) => line.split(' ').slice(1).join(' ')))
-  : null;
+  return { sha, parents: parents.join(' ') };
+});
 
-const merges = new Map();
-if (pullRequests) {
-  for (const [sha, parents] of parentsOf) {
-    if (pullRequests.has(parents)) merges.set(parents, sha);
-  }
+let merges;
+if (mainRef) {
+  const here = new Map(listMerges(`${anchor}..HEAD`).map(({ sha, parents }) => [parents, sha]));
+  merges = listMerges('--first-parent', `${anchor}..${mainRef}`)
+    .filter(({ parents }) => here.has(parents))
+    .map(({ parents }) => here.get(parents));
 } else {
-  for (const line of lines(git('rev-list', '--first-parent', '--merges', '--parents', `${anchor}..HEAD`))) {
-    const [sha, ...parents] = line.split(' ');
-    merges.set(parents.join(' '), sha);
-  }
+  merges = listMerges('--first-parent', `${anchor}..HEAD`).map(({ sha }) => sha);
 }
 // --first-parent: only this branch's own history, so the commits a merge brought in are not
-// counted again as patches after it
-const patch = lines(git('rev-list', '--first-parent', '--no-merges', 'HEAD', '--not', anchor, ...merges.values())).length;
-const version = `${major}.${merges.size}.${patch}`;
+// counted again as patches after it. Only the newest merge needs leaving out: the others are on
+// main's line before it, so behind it (one a branch took in before version.yml rewrote it has
+// the same parents, so the same history), and a sha for every pull request outgrew the command
+// line Windows allows
+const patch = lines(git('rev-list', '--first-parent', '--no-merges', 'HEAD', '--not', anchor, ...merges.slice(0, 1))).length;
+const version = `${major}.${merges.length}.${patch}`;
 
 if (version === current) {
   console.log(`[sync-version] ${version}`);
