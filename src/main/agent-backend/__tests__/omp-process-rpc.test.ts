@@ -157,13 +157,20 @@ describe('startOmpProcess with live messages', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'omp-rpc-test-'));
-    fake = path.join(dir, 'omp');
-    await writeFile(fake, FAKE_OMP, 'utf-8');
-    await chmod(fake, 0o755);
+    if (process.platform === 'win32') {
+      // Windows cannot execute a shebang script: a .cmd wrapper (run through a shell, like npm's omp shim) starts it with node
+      await writeFile(path.join(dir, 'omp.js'), FAKE_OMP, 'utf-8');
+      fake = path.join(dir, 'omp.cmd');
+      await writeFile(fake, '@echo off\r\nnode "%~dp0omp.js" %*\r\n', 'utf-8');
+    } else {
+      fake = path.join(dir, 'omp');
+      await writeFile(fake, FAKE_OMP, 'utf-8');
+      await chmod(fake, 0o755);
+    }
   });
   afterEach(async () => {
     delete process.env.FAKE_MODE;
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   const run = (mode: string, extra: Partial<Parameters<typeof startOmpProcess>[0]> = {}) => {
@@ -285,7 +292,8 @@ describe('startOmpProcess with live messages', () => {
     // A message taken while the RPC process was starting goes back to the inbox with the unread ones
     if (early) expect(outcome.unread).toEqual([{ id: 'wbm-test3', text: 'early message' }]);
     expect(handle.send('after the fallback')).toBe(false);
-  });
+    // Ending the RPC process and starting the print-mode one is two process launches (through cmd.exe and node on Windows)
+  }, 30_000);
 
   it.each(['rpc-slow-start', 'rpc-compact'])('does not fall back when agent_start is slow after the prompt was accepted (%s)', async (mode) => {
     const { messages, promise } = run(mode);

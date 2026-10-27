@@ -627,9 +627,12 @@ function endTree(child: ChildProcess, options: KillProcessOptions): void {
   if (!entry) return;
   trees.delete(child);
   if (!entry.group) {
-    // Windows: the whole tree at once (the direct child is killed too when taskkill is unavailable)
-    track(taskkillTree(getTaskkillExePath(), entry.pid));
-    killProcessGracefully(child, options);
+    // Windows: the whole tree at once. The direct child is only killed afterwards (when taskkill failed or is
+    // unavailable): killing it first leaves taskkill /T without a parent to walk from, so a `.cmd` shim's node
+    // child would live on and keep the pipes open.
+    void track(taskkillTree(getTaskkillExePath(), entry.pid)).then(() => {
+      if (child.exitCode === null && child.signalCode === null) killProcessGracefully(child, options);
+    });
     return;
   }
   retainedGroups.add(entry.pid);

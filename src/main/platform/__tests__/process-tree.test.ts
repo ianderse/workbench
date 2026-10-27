@@ -59,15 +59,18 @@ describe('collectTree', () => {
 });
 
 describe('orphan selection', () => {
-  const roots = taskWorktreeRoots(['/work/app']);
+  // Paths go through path.resolve/join like the production code, so they are drive paths with backslashes on Windows
+  const p = (...parts: string[]) => path.join(path.resolve('/work'), ...parts);
+  const roots = taskWorktreeRoots([p('app')]);
+  const tasks = (...rest: string[]) => p('app', '.workbench', 'worktrees', 'tasks', ...rest);
 
   it('only matches inside the task worktrees of a project', () => {
-    expect(isInTaskWorktree('/work/app/.workbench/worktrees/tasks/001-x', roots)).toBe(true);
-    expect(isInTaskWorktree('/work/app/.workbench/worktrees/tasks/001-x/src', roots)).toBe(true);
-    expect(isInTaskWorktree('/work/app/.workbench/worktrees/tasks', roots)).toBe(false);
-    expect(isInTaskWorktree('/work/app/.workbench/worktrees/tasks-other/x', roots)).toBe(false);
-    expect(isInTaskWorktree('/work/app', roots)).toBe(false);
-    expect(isInTaskWorktree('/work/other/.workbench/worktrees/tasks/001', roots)).toBe(false);
+    expect(isInTaskWorktree(tasks('001-x'), roots)).toBe(true);
+    expect(isInTaskWorktree(tasks('001-x', 'src'), roots)).toBe(true);
+    expect(isInTaskWorktree(tasks(), roots)).toBe(false);
+    expect(isInTaskWorktree(p('app', '.workbench', 'worktrees', 'tasks-other', 'x'), roots)).toBe(false);
+    expect(isInTaskWorktree(p('app'), roots)).toBe(false);
+    expect(isInTaskWorktree(p('other', '.workbench', 'worktrees', 'tasks', '001'), roots)).toBe(false);
   });
 
   it('candidates have parent 1 and a program agent tools start', () => {
@@ -85,8 +88,8 @@ describe('orphan selection', () => {
   it('selects candidates by working directory only', () => {
     const candidates = [row(10, 1, 10), row(11, 1, 11), row(12, 1, 12)];
     const cwds = new Map([
-      [10, '/work/app/.workbench/worktrees/tasks/001-x'],
-      [11, '/work/app'],
+      [10, tasks('001-x')],
+      [11, p('app')],
       // 12: lsof failed
     ]);
     expect(selectOrphans(candidates, cwds, roots).map((e) => e.pid)).toEqual([10]);
