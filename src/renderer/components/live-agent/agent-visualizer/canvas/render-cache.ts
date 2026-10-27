@@ -4,6 +4,11 @@
 
 const glowSpriteCache = new Map<string, HTMLCanvasElement>()
 
+/** Sprites kept, the least recently drawn going first. A node's glow takes a handful (its color,
+ *  size and state alpha), but the main agent's color is eased as it wakes up and passes through a
+ *  new color every frame of it: without a bound every wake would leave a hundred or so behind */
+const MAX_GLOW_SPRITES = 256
+
 /** Agent glow: gradient from innerRadius to outerRadius */
 export function getAgentGlowSprite(
   color: string, innerRadius: number, outerRadius: number, glowAlphaHex: string,
@@ -12,7 +17,12 @@ export function getAgentGlowSprite(
   const oR = Math.ceil(outerRadius)
   const key = `ag|${color}|${iR}|${oR}|${glowAlphaHex}`
   let sprite = glowSpriteCache.get(key)
-  if (sprite) return sprite
+  if (sprite) {
+    // Drawn again: to the back of the line, so the glows on screen are never the ones let go
+    glowSpriteCache.delete(key)
+    glowSpriteCache.set(key, sprite)
+    return sprite
+  }
 
   const size = oR * 2
   sprite = document.createElement('canvas')
@@ -26,5 +36,6 @@ export function getAgentGlowSprite(
   ctx.fillRect(0, 0, size, size)
 
   glowSpriteCache.set(key, sprite)
+  if (glowSpriteCache.size > MAX_GLOW_SPRITES) glowSpriteCache.delete(glowSpriteCache.keys().next().value!)
   return sprite
 }

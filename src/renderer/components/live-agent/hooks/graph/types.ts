@@ -10,6 +10,9 @@ export interface GraphState {
   agents: Map<string, Agent>
   toolCalls: Map<string, ToolCallNode>
   edges: Edge[]
+  /** Sub-agents that have done nothing since they spawned, with the graph time
+   *  they spawned: drawn working meanwhile, until SUBAGENT_START_QUIET_S passes */
+  quietSubagents: Map<string, number>
   currentTime: number
   isPlaying: boolean
   /** Position in MOCK_SCENARIO (demo mode only) */
@@ -22,6 +25,7 @@ export function createEmptyState(overrides?: Partial<GraphState>): GraphState {
     agents: new Map(),
     toolCalls: new Map(),
     edges: [],
+    quietSubagents: new Map(),
     currentTime: 0,
     isPlaying: false,
     eventIndex: 0,

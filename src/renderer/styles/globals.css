@@ -1334,6 +1334,158 @@ body {
   font-size: 0.875rem;
 }
 
+/* ============================================
+   Agent loader (components/ui/agent-loader.tsx)
+   The live agent's pentagon bounces in place like jelly, taking the next of the live agent
+   view's colors each time it hits the floor. The color cycle is three hops long, so its steps
+   fall on the landings; the shadow runs the same cycle, so it always matches.
+   ============================================ */
+.agent-loader {
+  --agent-loader-hop: calc(var(--agent-loader-size) * 0.45);
+  --agent-loader-beat: 0.9s;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: var(--agent-loader-hop);
+}
+.agent-loader-body,
+.agent-loader-shadow {
+  color: #fca935;
+  animation: agent-loader-color calc(var(--agent-loader-beat) * 3) step-end infinite;
+}
+.agent-loader-body {
+  display: block;
+  transform-origin: 50% 100%;
+}
+.agent-loader-shadow {
+  display: block;
+  width: calc(var(--agent-loader-size) * 0.8);
+  height: calc(var(--agent-loader-size) * 0.12);
+  margin-top: calc(var(--agent-loader-size) * 0.06);
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.25;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .agent-loader-body {
+    animation:
+      agent-loader-hop var(--agent-loader-beat) linear infinite,
+      agent-loader-color calc(var(--agent-loader-beat) * 3) step-end infinite;
+  }
+  .agent-loader-shadow {
+    animation:
+      agent-loader-shadow var(--agent-loader-beat) linear infinite,
+      agent-loader-color calc(var(--agent-loader-beat) * 3) step-end infinite;
+  }
+}
+/* With reduced motion it stays put but keeps changing color, so it still shows it is loading.
+   The global reduced-motion rule would end the color cycle at once; a class beats `*` */
+@media (prefers-reduced-motion: reduce) {
+  .agent-loader-body,
+  .agent-loader-shadow {
+    animation-duration: calc(var(--agent-loader-beat) * 3) !important;
+    animation-iteration-count: infinite !important;
+  }
+}
+/* Bounces straight back off the floor like jelly: squashed on impact, stretched tall as it
+   springs back, jiggling as it rises, still at the top, and stretching again as it falls faster.
+   The keyframes trace the jump's parabola closely, so they run linear between them */
+@keyframes agent-loader-hop {
+  0% {
+    transform: translateY(0) scale(1.28, 0.72);
+  }
+  5% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.19)) scale(0.82, 1.22);
+  }
+  12% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.42)) scale(1.08, 0.93);
+  }
+  20% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.64)) scale(0.93, 1.07);
+  }
+  28% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.82)) scale(1.03, 0.97);
+  }
+  36% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.92)) scale(0.99, 1.01);
+  }
+  50% {
+    transform: translateY(calc(var(--agent-loader-hop) * -1)) scale(1, 1);
+  }
+  62% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.94)) scale(0.99, 1.02);
+  }
+  75% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.75)) scale(0.95, 1.06);
+  }
+  85% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.51)) scale(0.91, 1.11);
+  }
+  94% {
+    transform: translateY(calc(var(--agent-loader-hop) * -0.23)) scale(0.86, 1.17);
+  }
+  100% {
+    transform: translateY(0) scale(1.28, 0.72);
+  }
+}
+/* The shadow spreads with the squash, and shrinks and fades the higher it is */
+@keyframes agent-loader-shadow {
+  0% {
+    transform: scaleX(1.15);
+    opacity: 0.3;
+  }
+  5% {
+    transform: scaleX(0.914);
+    opacity: 0.238;
+  }
+  12% {
+    transform: scaleX(0.811);
+    opacity: 0.199;
+  }
+  20% {
+    transform: scaleX(0.712);
+    opacity: 0.161;
+  }
+  28% {
+    transform: scaleX(0.631);
+    opacity: 0.131;
+  }
+  36% {
+    transform: scaleX(0.586);
+    opacity: 0.114;
+  }
+  50% {
+    transform: scaleX(0.55);
+    opacity: 0.1;
+  }
+  62% {
+    transform: scaleX(0.577);
+    opacity: 0.11;
+  }
+  75% {
+    transform: scaleX(0.662);
+    opacity: 0.143;
+  }
+  85% {
+    transform: scaleX(0.77);
+    opacity: 0.183;
+  }
+  94% {
+    transform: scaleX(0.896);
+    opacity: 0.231;
+  }
+  100% {
+    transform: scaleX(1.15);
+    opacity: 0.3;
+  }
+}
+/* Orange, blue, pink: the live agent's tool calling, thinking and idle colors */
+@keyframes agent-loader-color {
+  0%, 100% { color: #fca935; }
+  33.333% { color: #0088ff; }
+  66.667% { color: #ff4081; }
+}
+
 /* Clouds drifting behind Clawd in the usage breakdown; each one sets its own from/to */
 @keyframes clawd-cloud-drift {
   from {
@@ -1341,6 +1493,85 @@ body {
   }
   to {
     transform: translateX(var(--clawd-cloud-to));
+  }
+}
+
+/* The sky's weather and stars. Each element sets its own duration, delay and distances; with
+   reduced motion they hold still where they are (drops and flakes at --clawd-y0). */
+.clawd-drop,
+.clawd-flake {
+  transform: translateY(var(--clawd-y0));
+}
+.clawd-flash {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .clawd-star {
+    animation: clawd-twinkle ease-in-out infinite alternate;
+  }
+  .clawd-drop {
+    animation: clawd-rain-fall linear infinite;
+  }
+  .clawd-flake {
+    animation: clawd-snow-fall linear infinite;
+  }
+  .clawd-flake-sway {
+    animation: clawd-snow-sway ease-in-out infinite alternate;
+  }
+  .clawd-flash {
+    animation: clawd-flash 9s linear infinite;
+  }
+}
+@keyframes clawd-twinkle {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0.1;
+  }
+}
+@keyframes clawd-rain-fall {
+  from {
+    transform: translate(0, -6px);
+  }
+  to {
+    transform: translate(3px, var(--clawd-fall));
+  }
+}
+@keyframes clawd-snow-fall {
+  from {
+    transform: translate(0, -2px);
+  }
+  to {
+    transform: translate(2px, var(--clawd-fall));
+  }
+}
+@keyframes clawd-snow-sway {
+  from {
+    transform: translateX(-1.5px);
+  }
+  to {
+    transform: translateX(1.5px);
+  }
+}
+@keyframes clawd-flash {
+  0%, 3%, 7%, 100% {
+    opacity: 0;
+  }
+  1% {
+    opacity: 0.18;
+  }
+  2% {
+    opacity: 0.05;
+  }
+  4% {
+    opacity: 0.25;
+  }
+  5% {
+    opacity: 0.1;
+  }
+  6% {
+    opacity: 0.04;
   }
 }
 
