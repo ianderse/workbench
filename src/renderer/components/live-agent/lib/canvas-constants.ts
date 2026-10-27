@@ -321,6 +321,10 @@ export const ZZZ = {
 export const TOOL_DRAW = {
   /** Tool name font size */
   fontSize: 8,
+  /** Tool name font weight: bold, so the name reads as clearly as the agents' icons */
+  fontWeight: 'bold',
+  /** Border width: an agent's state ring's, so tool calls look as solid as sub-agents */
+  borderWidth: 2,
   /** Space between the text and the circle edge */
   padding: 5,
   minRadius: 14,

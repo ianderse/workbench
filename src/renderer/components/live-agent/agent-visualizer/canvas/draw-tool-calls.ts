@@ -5,7 +5,7 @@ import { alphaHex } from '../../lib/utils'
 import { drawJellyShape, type NodeMotion } from '../../lib/jelly'
 import { clipOutsideAttached } from './node-motion'
 
-const NAME_FONT = `${TOOL_DRAW.fontSize}px monospace`
+const NAME_FONT = `${TOOL_DRAW.fontWeight} ${TOOL_DRAW.fontSize}px monospace`
 
 /** Draw each tool call as a circle showing the tool name, sized to fit it.
  *  `motions`: where the jelly has each node this frame (see node-motion.ts) */
@@ -37,7 +37,7 @@ export function drawToolCalls(
 
     drawJellyShape(ctx, motion.x, motion.y, r, 0, 0, motion, time)
     ctx.strokeStyle = getToolColor(tool.state)
-    ctx.lineWidth = 1
+    ctx.lineWidth = TOOL_DRAW.borderWidth
     ctx.stroke()
 
     ctx.shadowBlur = 0
