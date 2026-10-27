@@ -836,9 +836,10 @@ app.whenReady().then(async () => {
     console.warn('[main] ========================================');
   }
 
-  // Initialize app auto-updater (only in production, or when DEBUG_UPDATER is set)
-  const forceUpdater = process.env.DEBUG_UPDATER === 'true';
-  if (app.isPackaged || forceUpdater) {
+  // Initialize the app auto-updater. Development builds get it too, so "Check for updates" with
+  // a lowered package.json version shows the update dialog; they only check on that button
+  // (or on their own with DEBUG_UPDATER=true) and never download or install (see app-updater.ts)
+  {
     // Load settings to get beta updates preference
     const settings = loadSettingsSync();
     const betaUpdates = settings.betaUpdates ?? false;
@@ -846,16 +847,6 @@ app.whenReady().then(async () => {
     initializeAppUpdater(() => getFocusedWindow(), betaUpdates);
     console.warn('[main] App auto-updater initialized');
     console.warn(`[main] Beta updates: ${betaUpdates ? 'enabled' : 'disabled'}`);
-    if (forceUpdater && !app.isPackaged) {
-      console.warn('[main] Updater forced in dev mode via DEBUG_UPDATER=true');
-      console.warn('[main] Note: Updates won\'t actually work in dev mode');
-    }
-  } else {
-    console.warn('[main] ========================================');
-    console.warn('[main] App auto-updater DISABLED (development mode)');
-    console.warn('[main] To test updater logging, set DEBUG_UPDATER=true');
-    console.warn('[main] Note: Actual updates only work in packaged builds');
-    console.warn('[main] ========================================');
   }
 
   // macOS: clicking the dock icon re-creates the window, or shows it if it was hidden to the tray

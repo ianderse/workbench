@@ -260,14 +260,23 @@ let intentionalDowngrade = false;
 /**
  * Initialize the app updater system
  *
- * Sets up event handlers and starts periodic update checks.
- * Should only be called in production (app.isPackaged).
+ * Sets up event handlers and starts periodic update checks (packaged builds; development
+ * builds only check when asked, and never download).
  *
  * @param getWindow - Resolves the window update events go to
  * @param betaUpdates - Whether to receive beta/pre-release updates
  */
 export function initializeAppUpdater(getWindow: () => BrowserWindow | null, betaUpdates = false): void {
   getUpdateWindow = getWindow;
+
+  // Development builds check the published releases as well (electron-updater skips an unpacked
+  // app otherwise), so the update dialog can be tried by lowering package.json's version. There
+  // is nothing to install an update into, so they never download one or install on quit.
+  if (!app.isPackaged) {
+    autoUpdater.forceDevUpdateConfig = true;
+    autoUpdater.setFeedURL({ provider: 'github', owner: GITHUB_OWNER, repo: GITHUB_REPO });
+    autoUpdater.autoInstallOnAppQuit = false;
+  }
 
   // Set update channel based on user preference
   const channel = betaUpdates ? 'beta' : 'latest';
@@ -312,7 +321,8 @@ export function initializeAppUpdater(getWindow: () => BrowserWindow | null, beta
       releaseDate: info.releaseDate
     });
 
-    // Download the update now that we've confirmed it's valid
+    // Download the update now that we've confirmed it's valid (not in development builds)
+    if (!app.isPackaged) return;
     autoUpdater.downloadUpdate().catch((error) => {
       console.error('[app-updater] Failed to download update:', error.message);
     });
@@ -382,6 +392,12 @@ export function initializeAppUpdater(getWindow: () => BrowserWindow | null, beta
   // ============================================
   // Update Check Schedule
   // ============================================
+
+  // Development builds check only when asked (unless DEBUG_UPDATER is set)
+  if (!app.isPackaged && process.env.DEBUG_UPDATER !== 'true') {
+    console.warn('[app-updater] Development build: checking only on "Check for updates"');
+    return;
+  }
 
   // Check for updates 3 seconds after launch
   const INITIAL_DELAY = 3000;
@@ -478,6 +494,10 @@ export async function checkForUpdates(): Promise<AppUpdateCheckResult> {
  * Called from IPC handler when user requests manual download
  */
 export async function downloadUpdate(): Promise<void> {
+  // A development build has nothing to install an update into (see initializeAppUpdater)
+  if (!app.isPackaged) {
+    throw new Error('Development builds only check for updates; they do not download them');
+  }
   try {
     console.warn('[app-updater] Manual update download requested');
     await autoUpdater.downloadUpdate();
