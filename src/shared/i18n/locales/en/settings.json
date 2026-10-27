@@ -654,5 +654,20 @@
     "percentLabel": "5-hour usage",
     "percentDescription": "The percentage the preview shows; empty uses the real value",
     "percentPlaceholder": "Real"
+  },
+  "liveAgentSimulator": {
+    "masterNode": "Master node",
+    "masterNodeDescription": "The session's main agent; add nodes under it to build the graph",
+    "kinds": {
+      "subtask": "Subtask",
+      "subagent": "Subagent",
+      "tool": "Tool"
+    },
+    "nodes": {
+      "subtask": "Subtask {{n}}",
+      "subagent": "Subagent {{n}}"
+    },
+    "toolNode": "Tool · {{tool}}",
+    "remove": "Remove"
   }
 }

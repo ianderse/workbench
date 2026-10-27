@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
+import { LiveAgentSimulatorSettings } from './LiveAgentSimulatorSettings';
 import { SessionResets, UsageCardSurface, UsageHero } from '../usage/UsageBreakdown';
 import { createSkinPicker } from '../usage/clawd/skins';
 import { IS_DEV_BUILD } from '../../lib/title-bar';
@@ -114,6 +115,9 @@ export function UsageSimulatorSettings() {
           />
         </SettingsRow>
       </SettingsRows>
+
+      {/* The live agent graph, built by hand */}
+      <LiveAgentSimulatorSettings />
     </SettingsSection>
   );
 }
