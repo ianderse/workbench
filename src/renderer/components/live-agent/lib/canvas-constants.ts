@@ -73,7 +73,7 @@ export const CAMERA = {
 // ─── Tool slot placement config ─────────────────────────────────────────────
 
 export const NODE_SLOT = {
-  /** Rings tried outward from the parent; if every slot is taken, the least crowded one is used */
+  /** Rings tried one step apart outward from the parent; past them the steps grow, so a full graph gets longer edges */
   maxRings: 12,
   /** How much further out each ring past the first sits */
   ringIncrement: 25,
@@ -137,11 +137,61 @@ export const FACE = {
   doubleBlinkChance: 0.25,
   /** Seconds the face laughs after a turn ends, before it has nothing to do */
   happyDuration: 2.2,
-  /** The resting cycle, with nothing to do: it looks about for lookDuration,
-   *  sulks for the rest of boredDuration, then whistles for as long again,
-   *  and around it goes (all in seconds) */
-  lookDuration: 5,
-  boredDuration: 30,
+  /** The resting cycle, with nothing to do: it whistles to itself, runs out of
+   *  tune and sulks, then falls asleep and stays asleep until something wants
+   *  it. The phases are counted out in whole animations, not seconds, so one
+   *  only gives way to the next once what it is playing has finished: this
+   *  many blows (whistlesMin, plus up to whistlesRange more) and then this
+   *  many sulks, each a turn of the bored lids sinking and catching */
+  whistlesMin: 3,
+  /** More blows than whistlesMin, at most (see whistlesMin) */
+  whistlesRange: 2,
+  /** Sulks it sits through, and up to how many more (see whistlesMin) */
+  sulksMin: 2,
+  sulksRange: 1,
+  /** A moment of simply being awake before any of it starts, so that work a
+   *  beat behind (a graph rebuilt around a new prompt comes back with a face
+   *  that has never seen it busy) is never caught mid-blow */
+  restLead: 2.5,
+  /** Falling asleep: the lids take this long to come down, it catches itself
+   *  this many times (and holds itself open that long each time before the
+   *  next, slower side takes it), and the close after the last save is the one
+   *  it sleeps through */
+  sleepyClose: 3.9,
+  sleepySaves: 2,
+  sleepyOpenHold: 0.65,
+  /** How fast the eyes come back when it catches itself (per second): the
+   *  pose, as well as the lids (joltSpeed) */
+  wakeEase: 26,
+  /** How fast the main node's color follows its state (per second), and for
+   *  how long after it has been woken: waking into work is a morph from one
+   *  state's color to the other, where every other change is a cut */
+  colorEase: 2.6,
+  colorEaseWindow: 2,
+  /** How fast the lids follow their weight: sinking, the jolt that pulls them
+   *  open again, and the snap when work wakes it (per second) */
+  drowseSpeed: 3.2,
+  joltSpeed: 22,
+  wakeSpeed: 18,
+  /** Asleep: how low the head hangs, how far it breathes and how slowly */
+  sleepHang: 0.07,
+  sleepBreathAmp: 0.022,
+  sleepBreathSpeed: 0.9,
+  /** The head sinking along with the lids, and the shiver as it comes to */
+  nodAmp: 0.075,
+  nodShake: 0.02,
+  /** Shut lids: the same arc as the happy one, dipped the other way (relaxed,
+   *  not pleased) */
+  sleepArcDip: 0.05,
+  /** Where the eye hands over to that arc: it thins out to nothing by
+   *  lidHandover, and the arc comes up from arcFrom just before that, so the
+   *  one becomes the other instead of the two being drawn over each other
+   *  (which read as the eye having two outlines) or leaving a gap between them */
+  lidHandover: 0.9,
+  arcFrom: 0.84,
+  /** How far the lids come down on a close it catches itself out of: the eye
+   *  is a bored sliver by then, but still an eye, and never the shut arc */
+  sleepyShut: 0.78,
   /** How long the bored lids take to sink before it catches itself (seconds) */
   sagCycle: 7,
   /** How far aside the bored gaze parks, and how far down it sits: it holds
@@ -231,6 +281,39 @@ export const WHISTLE = {
   alpha: 0.9,
   /** Note glow blur (pixels) */
   glowBlur: 6,
+} as const
+
+/** The Zs that rise off the main agent once it has fallen asleep. They float
+ *  like the whistled notes and are drawn by the same code (see draw-notes.ts),
+ *  only slower, larger and always off the same side, three sizes in turn so
+ *  they read as one "Zzz" climbing away from its head */
+export const ZZZ = {
+  /** Seconds between two of them (plus jitter) */
+  gap: 1,
+  gapJitter: 0.45,
+  /** The sizes they take in turn (half a Z's height, in node radii) */
+  sizes: [0.1, 0.14, 0.19],
+  /** Where one appears, from the node's center (node radii), and how far along
+   *  that point it can wander */
+  fromX: 0.34,
+  fromY: -0.5,
+  spread: 0.12,
+  /** How fast it floats up and off to the side (world units per second) */
+  riseSpeed: 11,
+  riseJitter: 5,
+  driftSpeed: 7,
+  driftJitter: 6,
+  /** Its sideways swing on the way up (world units) */
+  sway: 1.6,
+  swayJitter: 1.4,
+  /** Where it starts tilted (radians) and how fast it turns on the way */
+  tilt: 0.18,
+  spin: 0.12,
+  /** Seconds it stays in the air */
+  life: 3.4,
+  lifeJitter: 0.9,
+  /** How thick it is drawn, in glyph units (the glyph's box is 2 tall) */
+  weight: 0.26,
 } as const
 
 // ─── Tool node drawing constants ────────────────────────────────────────────

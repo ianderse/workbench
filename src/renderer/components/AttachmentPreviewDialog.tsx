@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { AgentLoader } from './ui/agent-loader';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog';
 import { getSentAttachmentDataUrl } from '../stores/insights-store';
 import type { ImageAttachment } from '../../shared/types';
@@ -77,7 +77,7 @@ export function AttachmentPreviewDialog({ projectId, attachment, onClose }: Atta
             />
           )}
           {isLoading && (
-            <Loader2 className="absolute h-5 w-5 animate-spin text-white/70" aria-label={t('insights.attachments.loadingPreview')} />
+            <AgentLoader size={24} className="absolute" label={t('insights.attachments.loadingPreview')} />
           )}
         </div>
         <p className="max-w-[90vw] truncate text-sm text-white/90">{attachment?.filename}</p>

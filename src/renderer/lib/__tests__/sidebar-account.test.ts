@@ -28,6 +28,11 @@ describe('sidebarAccount', () => {
     expect(sidebarAccount([claude({})], 'c1', [], null)).toEqual({ name: 'Personal', planIsKey: false });
   });
 
+  it('shows API for a detected setup that is not a subscription, ignoring a leftover sign-in', () => {
+    const bedrock = claude({ name: 'Bedrock', subscriptionType: 'pro', detected: { provider: 'bedrock', isDefaultDir: true, values: [] } });
+    expect(sidebarAccount([bedrock], 'c1', [], null)).toEqual({ name: 'Bedrock', plan: 'api', planIsKey: true });
+  });
+
   it('names an active API profile first, as runs use it', () => {
     expect(sidebarAccount([claude({})], 'c1', [api({})], 'a1')).toEqual({ name: 'Gateway', plan: 'api', planIsKey: true });
     // An active id that no longer exists falls back to the Claude account

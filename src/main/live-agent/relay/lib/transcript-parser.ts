@@ -3,8 +3,10 @@
  * delegate, keeping the parsing logic decoupled from file-watching concerns.
  */
 
+import * as fs from 'fs'
+import * as path from 'path'
 import {
-  AgentEvent, PendingToolCall, WatchedSession,
+  AgentEvent, LaunchShape, PendingToolCall, WatchedSession,
   TranscriptEntry, ToolUseBlock, ToolResultBlock,
   spawnSubagentNode, subagentDedupFor,
 } from './protocol'
@@ -61,9 +63,68 @@ function thinkingHashKey(entryUuid: string | undefined, fallbackSource: string):
 /** Whether the parent transcript records an Agent/Task launch as a background
  *  (async) launch, via the entry-level `toolUseResult` field of the user entry
  *  carrying its tool_result. */
-export function isAsyncLaunch(toolUseResult: unknown): boolean {
+function isAsyncLaunch(toolUseResult: unknown): boolean {
   if (!isRecord(toolUseResult)) return false
   return toolUseResult.status === 'async_launched' || toolUseResult.isAsync === true
+}
+
+
+/** The answer the Agent tool gives a background launch, for a result without a toolUseResult
+ *  (see launchedInBackground) */
+const ASYNC_LAUNCH_ANSWER = 'Async agent launched successfully'
+
+/**
+ * Whether an Agent/Task call's result says the agent goes on in the background: then it has only
+ * started, and what ends it is its <task-notification>. Taken for its end instead, a background
+ * agent a sub-agent launches (the reviewers /code-review's fork sends out) was drawn finished the
+ * moment it was launched, and went on working unseen. The result itself comes first: its
+ * toolUseResult, which a sub-agent's own transcript leaves out, then the answer's wording. Only a
+ * result that says neither is settled by the `requestShape` in the launched agent's .meta.json
+ * (`shape`, read only when needed): it is written once, when the call is made, so it still says
+ * 'foreground' for an agent Claude Code moved to the background later (Ctrl+B, or on its own).
+ * A call that failed launched nothing that will report, even where its .meta.json was already
+ * written for the background.
+ */
+export function launchedInBackground(toolUseResult: unknown, block: unknown, shape?: () => LaunchShape | undefined): boolean {
+  if (isRecord(block) && block.is_error === true) return false
+  if (isAsyncLaunch(toolUseResult)) return true
+  if (saysHowItRan(toolUseResult)) return false
+  const content = isRecord(block) ? block.content : undefined
+  const answer = typeof content === 'string' || Array.isArray(content)
+    ? userContentText(content as TranscriptEntry['message']['content'])
+    : ''
+  if (answer.startsWith(ASYNC_LAUNCH_ANSWER)) return true
+  return shape?.() === 'background'
+}
+
+/**
+ * How the Agent/Task call `toolUseId` ran, by the `requestShape` its sub-agent's .meta.json records
+ * (matched by its `toolUseId`), or undefined while that isn't written. A .meta.json is read until
+ * it has both, and only when a result needs it.
+ */
+export function launchShape(session: WatchedSession, toolUseId: string): LaunchShape | undefined {
+  const known = session.launchShapes.get(toolUseId)
+  if (known) return known
+  let files: string[]
+  try { files = fs.readdirSync(session.subagentsDir) } catch { return undefined }
+  for (const file of files) {
+    if (!file.endsWith('.meta.json') || session.readLaunchMetas.has(file)) continue
+    try {
+      const meta = JSON.parse(fs.readFileSync(path.join(session.subagentsDir, file), 'utf-8')) as Record<string, unknown>
+      // Done with it only once it says both: Claude Code writes a .meta.json more than once
+      if (typeof meta.toolUseId === 'string' && (meta.requestShape === 'background' || meta.requestShape === 'foreground')) {
+        session.launchShapes.set(meta.toolUseId, meta.requestShape)
+        session.readLaunchMetas.add(file)
+      }
+    } catch { /* not written yet, or partially: read again next time */ }
+  }
+  return session.launchShapes.get(toolUseId)
+}
+
+/** A toolUseResult that states how the agent ran (its status, or whether it went to the background) */
+function saysHowItRan(toolUseResult: unknown): boolean {
+  return isRecord(toolUseResult) && !Array.isArray(toolUseResult)
+    && (typeof toolUseResult.status === 'string' || typeof toolUseResult.isAsync === 'boolean')
 }
 
 const TASK_NOTIFICATION_PREFIX = '<task-notification'
@@ -190,9 +251,32 @@ function sessionTurnEffect(entry: Record<string, unknown>, session: WatchedSessi
  * and it reports back with a <task-notification>, like a background one.
  */
 function backgroundAgentLaunchId(entry: Record<string, unknown>): string | undefined {
-  return entry.type === 'system' && typeof entry.launchedAgentId === 'string' && entry.launchedAgentId
-    ? entry.launchedAgentId
-    : undefined
+  if (entry.type !== 'system') return undefined
+  if (typeof entry.launchedAgentId === 'string' && entry.launchedAgentId) return entry.launchedAgentId
+  return typedForkedSkillAgentId(entry)
+}
+
+/** The marker a forked skill typed as a command leaves in the command's output */
+const FORKED_SKILL_LAUNCH = /<forked-skill-launch>(\{.*?\})<\/forked-skill-launch>/s
+
+/**
+ * The background agent a forked skill typed as a command runs in (`/code-review` at the prompt):
+ * it runs like /subtask's, its work in subagents/agent-<id>.jsonl and its end a <task-notification>,
+ * but Claude Code records its start only as a marker in the command's output. Called from a Skill
+ * tool call instead, the same agent shows in the call's result (see forkedSkillAgentId). Without
+ * its launch the agent is still drawn, from its sidecar, but its notification has nothing to finish
+ * and it is left on the graph as still working.
+ */
+function typedForkedSkillAgentId(entry: Record<string, unknown>): string | undefined {
+  if (entry.subtype !== 'local_command' || typeof entry.content !== 'string') return undefined
+  const marker = FORKED_SKILL_LAUNCH.exec(entry.content)
+  if (!marker) return undefined
+  try {
+    const launch = JSON.parse(marker[1]) as Record<string, unknown>
+    return typeof launch.agentId === 'string' && launch.agentId ? launch.agentId : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** Whether a transcript line is the agent working (a message, a tool call or
@@ -383,7 +467,7 @@ export class TranscriptParser {
 
     if (toolName === 'Task' || toolName === 'Agent') {
       const launch = session.launches.get(block.tool_use_id)
-      if (isAsyncLaunch(toolUseResult)) {
+      if (launchedInBackground(toolUseResult, block, () => launchShape(session, block.tool_use_id))) {
         // Background launch: the subagent keeps running. It finishes when its
         // <task-notification> arrives (see handleTaskNotification).
         if (launch) launch.background = true
@@ -575,7 +659,7 @@ export class TranscriptParser {
               const resultBlock = block as ToolResultBlock
               const launch = session.launches.get(resultBlock.tool_use_id)
               if (launch) {
-                if (isAsyncLaunch(entry.toolUseResult)) launch.background = true
+                if (launchedInBackground(entry.toolUseResult, resultBlock, () => launchShape(session, resultBlock.tool_use_id))) launch.background = true
                 else launch.finished = true
               }
               session.pendingToolCalls.delete(resultBlock.tool_use_id)

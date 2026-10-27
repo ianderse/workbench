@@ -12,7 +12,7 @@ import * as path from 'path'
 import { AgentEvent, SubagentLaunch, SubagentState, WatchedSession, spawnSubagentNode, subagentDedupFor } from './protocol'
 import { SESSION_ID_DISPLAY, SUBAGENT_META_WAIT_MS, SUBAGENT_LAUNCH_WAIT_MS, INACTIVITY_TIMEOUT_MS, HIDDEN_TOOLS } from './constants'
 import { readCompleteLines, readNewFileLines } from './fs-utils'
-import { TranscriptParser, isAsyncLaunch, isConversationEntry, taskNotificationLaunchId } from './transcript-parser'
+import { TranscriptParser, isConversationEntry, launchShape, launchedInBackground, taskNotificationLaunchId } from './transcript-parser'
 import { createLogger } from './logger'
 
 const log = createLogger('SubagentWatcher')
@@ -74,22 +74,33 @@ export function scanSubagentsDir(
   const subDir = session.subagentsDir
   if (!fs.existsSync(subDir)) return
 
+  // Every new file is pre-scanned before any of them gets a node: a file can record the launch of
+  // another (a fork's reviewers), and readdir order says nothing about which launched which, so a
+  // nested agent read before its launcher would otherwise be drawn under the main agent
+  const settles: Array<() => void> = []
   try {
     for (const file of fs.readdirSync(subDir)) {
       if (!file.endsWith('.jsonl')) continue
       const filePath = path.join(subDir, file)
       if (session.subagentWatchers.has(filePath) || session.ignoredSubagentFiles.has(filePath)) continue
-      startWatchingSubagentFile(delegate, parser, filePath, session)
+      const settle = startWatchingSubagentFile(delegate, parser, filePath, session)
+      if (settle) settles.push(settle)
     }
   } catch { /* dir not readable yet */ }
+  for (const settle of settles) settle()
 }
 
+/**
+ * Start tailing a sub-agent file. A file found with history is pre-scanned here; what gives it its
+ * node (and starts its watcher) is returned, to be run once the other files of the scan are
+ * pre-scanned too (see scanSubagentsDir).
+ */
 function startWatchingSubagentFile(
   delegate: SubagentWatcherDelegate,
   parser: TranscriptParser,
   filePath: string,
   session: WatchedSession,
-): void {
+): (() => void) | undefined {
   const sessionId = session.sessionId
 
   // Identify the subagent by its launch ID. Wait a little for a missing sidecar;
@@ -196,7 +207,7 @@ function startWatchingSubagentFile(
               pending.delete(block.tool_use_id)
               const nested = session.launches.get(block.tool_use_id)
               if (nested && !nested.finished) {
-                if (isAsyncLaunch(entry.toolUseResult)) nested.background = true
+                if (launchedInBackground(entry.toolUseResult, block, () => launchShape(session, block.tool_use_id!))) nested.background = true
                 else finishNested(block.tool_use_id, nested)
               }
             }
@@ -207,27 +218,36 @@ function startWatchingSubagentFile(
     }
   } catch { /* file not readable yet */ }
 
-  // A subagent still running gets a node (unless the hook gave it one): one
-  // whose launch we know and that isn't finished (recorded by a transcript's
-  // pre-scan, the main one or a parent sub-agent's), or (for launches we don't
-  // know) one with tool calls still pending. Its running tools get nodes too.
-  // One whose file has long gone quiet is only tailed, and gets its node once
-  // it does something again (one killed by a Claude Code restart never will).
-  const recent = fileIdleMs(filePath) <= INACTIVITY_TIMEOUT_MS
-  const running = recent && (!!launch || pending.size > 0)
-  if (running) {
-    spawnSubagentNode(delegate, session, agentName)
-    for (const [id, call] of pending) {
-      if (call.name === 'Agent' || call.name === 'Task' || HIDDEN_TOOLS.has(call.name) || shown.has(id)) continue
-      delegate.emit({
-        time: delegate.elapsed(sessionId),
-        type: 'tool_call_start',
-        payload: { agent: agentName, tool: call.name, id },
-      }, sessionId)
+  return () => {
+    // Its launch as the scan's other files recorded it (a parent sub-agent's pre-scan may have
+    // recorded or finished it after this file was read)
+    const known = session.launches.get(agentName)
+    if (known?.finished) {
+      stopTailing(session, filePath, state)
+      return
     }
-  }
+    // A subagent still running gets a node (unless the hook gave it one): one
+    // whose launch we know and that isn't finished (recorded by a transcript's
+    // pre-scan, the main one or a parent sub-agent's), or (for launches we don't
+    // know) one with tool calls still pending. Its running tools get nodes too.
+    // One whose file has long gone quiet is only tailed, and gets its node once
+    // it does something again (one killed by a Claude Code restart never will).
+    const recent = fileIdleMs(filePath) <= INACTIVITY_TIMEOUT_MS
+    const running = recent && (!!known || pending.size > 0)
+    if (running) {
+      spawnSubagentNode(delegate, session, agentName)
+      for (const [id, call] of pending) {
+        if (call.name === 'Agent' || call.name === 'Task' || HIDDEN_TOOLS.has(call.name) || shown.has(id)) continue
+        delegate.emit({
+          time: delegate.elapsed(sessionId),
+          type: 'tool_call_start',
+          payload: { agent: agentName, tool: call.name, id },
+        }, sessionId)
+      }
+    }
 
-  watchSubagentFile(delegate, parser, filePath, state, sessionId)
+    watchSubagentFile(delegate, parser, filePath, state, sessionId)
+  }
 }
 
 /** How long since a file was last written (ms); Infinity if it can't be read */
