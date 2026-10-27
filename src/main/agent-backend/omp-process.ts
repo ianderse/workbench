@@ -32,6 +32,7 @@ import { resolveOmpCommand } from './omp-command';
 import { startWithOmpCooldownRecovery } from './omp-provider-recovery';
 import type { OmpFallbackChains } from './omp-roles';
 import { getOmpRoles } from './omp-roles';
+import { buildOmpUtilityExtension } from './omp-utility';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
 import { hasPendingAsyncWork, isSessionSettled, isWorkingEvent, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PENDING_ID, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
@@ -136,6 +137,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     appendSystemPromptFile?: string;
     advisorOverlayFile?: string;
     foregroundOverlayFile?: string;
+    extensionPaths: string[];
+    repairExtensionPath?: string;
   };
   // One-shot utility calls never use the advisor; the setting applies to the other runs
   const advisor = resolveOmpAdvisor(options.settings, options.oneShot);
@@ -143,6 +146,7 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
   const roles = getOmpRoles();
   const role = options.role ?? 'default';
   const selection = resolveOmpSelection(options.model, options.settings, role, roles);
+  const isolatedUtility = options.oneShot === true && options.tools !== 'all' && options.tools.length === 0 && !options.extensions?.length;
   try {
     if (options.session) await mkdir(options.session.dir, { recursive: true });
     const { text, files } = splitPrompt(options.prompt);
@@ -177,7 +181,20 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
       advisorOverlayFile = path.join(tempDir, 'advisor-overlay.yml');
       await writeFile(advisorOverlayFile, advisorOverlay, 'utf-8');
     }
+    const extensionPaths = [...(options.extensions ?? [])];
+    let repairExtensionPath: string | undefined;
+    if (options.oneShot) {
+      repairExtensionPath = path.join(tempDir, 'json-repair-utility.mjs');
+      await writeFile(repairExtensionPath, buildOmpUtilityExtension('Format the supplied answer as the requested JSON. Preserve its information, do not add facts, and do not use tools.'), 'utf8');
+    }
+    if (isolatedUtility) {
+      const utilityFile = path.join(tempDir, 'text-utility.mjs');
+      await writeFile(utilityFile, buildOmpUtilityExtension(options.systemPrompt, options.appendSystemPrompt), 'utf8');
+      extensionPaths.push(utilityFile);
+    }
     setup = {
+      extensionPaths,
+      repairExtensionPath,
       advisorOverlayFile,
       foregroundOverlayFile,
       text: options.jsonSchema ? `${text}\n\n${buildStructuredInstruction(options.jsonSchema)}` : text,
@@ -553,11 +570,12 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     session: options.session,
     maxTimeMinutes: options.maxTimeMinutes,
     oneShot: options.oneShot,
+    isolatedUtility,
     advisorMode: advisor.mode,
     advisorOverlayFile: setup.advisorOverlayFile,
     foregroundOverlayFile: setup.foregroundOverlayFile,
     attachmentPaths: setup.attachmentPaths,
-    extensionPaths: options.extensions,
+    extensionPaths: setup.extensionPaths,
   });
   // Live messages: an RPC process takes steer commands while the step runs. Attachments (`@file`) are not
   // supported in RPC mode, so those steps stay on print mode, as do utility calls and the setting turned off
@@ -634,6 +652,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
             session: resumeSession,
             maxTimeMinutes: options.maxTimeMinutes,
             oneShot: options.oneShot,
+            isolatedUtility: options.oneShot === true && !resumeSession,
+            extensionPaths: options.oneShot && !resumeSession && setup.repairExtensionPath ? [setup.repairExtensionPath] : undefined,
             advisorMode: advisor.mode,
             advisorOverlayFile: setup.advisorOverlayFile,
           });

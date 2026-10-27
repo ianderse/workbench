@@ -7,7 +7,7 @@ import path from 'path';
 import type { Project, Task } from '../../../shared/types';
 import { getSpecsDir } from '../../../shared/constants';
 import { getCompengDir } from '../paths';
-import { captureTaskMemory, normalizeCapturedMemories, verifyMemoryCitation } from '../automatic-capture';
+import { boundCaptureInput, captureTaskMemory, MEMORY_CAPTURE_INPUT_BYTES, MEMORY_EXTRACTION_VERSION, normalizeCapturedMemories, verifyMemoryCitation } from '../automatic-capture';
 import { listProjectMemories, mutateProjectMemory } from '../project-memory';
 vi.mock('../../claude-code/run-text', () => ({ runClaudeText: vi.fn(() => { throw new Error('Unexpected live model call'); }) }));
 vi.mock('../../agent-backend/settings', () => ({ getAgentBackendSettings: () => ({ kind: 'omp' }) }));
@@ -100,6 +100,34 @@ it('persists extraction attempts and stops after three failures', async () => {
   const files = await readdir(dir);
   expect(JSON.parse(await readFile(path.join(dir, files[0]), 'utf8')).attempts).toBe(3);
   expect(await entries()).toEqual([]);
+});
+
+it('records context overflows as terminal and does not retry on repeated completion or restart', async () => {
+  const overflow = vi.fn(async () => { throw new Error('400 Prompt is too long: 72219 tokens > 40960 maximum context length (context_length_exceeded)'); });
+  expect(await captureTaskMemory(project, task, { extract: overflow })).toBe(true);
+  await captureTaskMemory(project, task, { extract: overflow });
+  const dir = path.join(getCompengDir(root), 'records/captures');
+  const jobFile = path.join(dir, (await readdir(dir))[0]);
+  const job = JSON.parse(await readFile(jobFile, 'utf8'));
+  expect(job).toMatchObject({ status: 'failed', attempts: 1, extractionVersion: MEMORY_EXTRACTION_VERSION, error: expect.stringContaining('context_length_exceeded') });
+  expect(overflow).toHaveBeenCalledTimes(1);
+  expect(await entries()).toEqual([]);
+  // A journal exhausted by the old setup is eligible once the extraction policy changes.
+  delete job.extractionVersion; job.status = 'extracting'; job.attempts = 3;
+  await writeFile(jobFile, JSON.stringify(job));
+  const fixed = vi.fn(async () => ({ memories: [] }));
+  await captureTaskMemory(project, task, { extract: fixed });
+  expect(fixed).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(await readFile(jobFile, 'utf8'))).toMatchObject({ status: 'complete', attempts: 1, extractionVersion: MEMORY_EXTRACTION_VERSION });
+});
+
+it('bounds actual serialized capture input including Unicode and JSON escaping', () => {
+  const raw = { task: 'Task', request: '\u0000'.repeat(30_000), outcome: '🧠'.repeat(30_000), reportedValidation: { summary: 'x'.repeat(50_000) },
+    sources: Array.from({ length: 5 }, (_, i) => ({ file: `docs/${i}.md`, text: 'source'.repeat(5000) })), active: Array.from({ length: 30 }, (_, i) => ({ id: String(i), title: 'Memory', body: 'recalled'.repeat(5000) })) };
+  const bounded = boundCaptureInput(raw);
+  expect(Buffer.byteLength(JSON.stringify(bounded))).toBeLessThanOrEqual(MEMORY_CAPTURE_INPUT_BYTES);
+  expect(bounded.task).toBe(raw.task);
+  expect(raw.active).toHaveLength(30);
 });
 
 it('bounds extraction and rejects fabricated conflict identifiers', () => {

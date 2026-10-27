@@ -45,6 +45,14 @@ describe('omp args', () => {
     expect(args[args.length - 1]).toBe('@/a.png');
   });
 
+  it('isolates context only for explicitly marked text utilities', () => {
+    const args = buildOmpArgs({ settings, tools: [], oneShot: true, isolatedUtility: true, extensionPaths: ['/tmp/utility.mjs'] });
+    expect(args).toContain('--no-context-files');
+    expect(args).toContain('--no-rules');
+    expect(args).toContain('/tmp/utility.mjs');
+    expect(buildOmpArgs({ settings, tools: 'all' })).not.toContain('--no-context-files');
+  });
+
   it('auto-approves only when tools can change things', () => {
     expect(buildOmpArgs({ settings, tools: ['read', 'grep'] })).not.toContain('--auto-approve');
     expect(buildOmpArgs({ settings, tools: ['read', 'bash'] })).toContain('--auto-approve');

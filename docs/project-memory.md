@@ -13,6 +13,15 @@ document excerpts and up to 30 current memories to one tool-free utility call. O
 `memory` model role (falling back through normal OMP defaults); Claude Code uses Haiku. The call has
 no advisor, task mutation tools or transcript ingestion. Model-reported validation is labeled as such.
 
+OMP text utilities replace the ambient coding system prompt with the supplied utility instruction,
+disable project context files, rules and LSP, and remove all tool schemas from provider requests.
+This includes ambient MCP tools: OMP's `--no-tools` flag alone disables only built-in tools.
+The JSON-format repair call uses the same isolation. MCP servers may still be discovered at CLI
+startup, but their tools and instructions are excluded from these utility requests. Coding sessions
+keep their normal context and tools. Serialized extraction input is capped at 24,000 UTF-8 bytes,
+including JSON escaping; existing-memory context is dropped first when space is needed. This is a
+byte bound, not a tokenizer measurement or a guarantee for every model's context window.
+
 Capture asks what a future worker would do differently: a specific situation, action or constraint,
 and project-specific reason. Task recaps and generic lessons about the importance of documentation
 do not qualify. Capture asks for plain language and the consequence for future work, rather than
@@ -61,7 +70,10 @@ or explicit **Refresh**. Source previews show current files/tasks; recorded cita
 - Extraction journals live under `records/captures/`, keyed by task and run generation. Results are
   persisted before publication, making retries/restarts idempotent. Merge reassessment reuses the
   result without another model call. Stale runs are discarded; extraction is capped at three
-  attempts. Startup resumes unfinished journals, without ingesting the historical task backlog.
+  attempts. Context-limit errors are recorded as terminal failures instead of repeating the unchanged
+  request. Startup resumes unfinished journals, without ingesting the historical task backlog. An
+  extraction-policy version change allows previously exhausted jobs without saved results to retry
+  with the repaired setup; completed results are preserved.
 - Removed claims are tombstoned against automatic rediscovery of the same body, even under a
   different category or title. Saved extraction jobs also pass the current quality filter before publication. Removal
   stops future recall; it does not erase history, old context receipts or agent sessions.

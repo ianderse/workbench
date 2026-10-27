@@ -59,6 +59,10 @@ if (process.env.FAKE_ARGV_OUT) {
   const argv = process.argv.slice(2);
   const configs = argv.flatMap((a, i) => (argv[i - 1] === '--config' ? [require('fs').readFileSync(a, 'utf-8')] : []));
   require('fs').writeFileSync(process.env.FAKE_ARGV_OUT, JSON.stringify({ argv, configs }));
+  if (process.env.FAKE_ARGV_HISTORY) {
+    const extensions = argv.flatMap((a, i) => argv[i - 1] === '-e' ? [require('fs').readFileSync(a, 'utf-8')] : []);
+    require('fs').appendFileSync(process.env.FAKE_ARGV_HISTORY, JSON.stringify({ argv, extensions }) + '\\n');
+  }
 }
 const rpc = process.argv.includes('rpc');
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
@@ -78,7 +82,8 @@ if (!rpc) {
     if (mode === 'provider-cooldown' && model.startsWith('quota-fixture/')) {
       out({ type: 'message_end', message: { role: 'assistant', provider: 'quota-fixture', model: 'limited', stopReason: 'error', usage, content: [], errorMessage: '429 rate_limit_error retry-after-ms=246899000' } });
       out({ type: 'agent_end', messages: [] });
-    } else finish('print answer: ' + input.trim());
+    } else if (mode === 'utility-repair') finish(input.includes('<answer>') ? '{"memories":[]}' : 'not JSON yet');
+    else finish('print answer: ' + input.trim());
   });
 } else if (mode === 'rpc-exit') {
   process.stderr.write('unknown option --mode rpc\\n');
@@ -228,6 +233,26 @@ describe('startOmpProcess with live messages', () => {
     const seen = JSON.parse(await readFile(argvFile, 'utf-8')) as { argv: string[]; configs: string[] };
     expect(seen.argv).toContain('rpc');
     expect(seen.configs).toContain(OMP_FOREGROUND_OVERLAY);
+  });
+
+  it('keeps both the tool-free utility and its JSON repair isolated through the CLI transport', async () => {
+    const history = path.join(dir, 'argv-history.jsonl');
+    const handle = await startOmpProcess({ settings: settings(), cwd: dir, model: 'fixture/small', tools: [], oneShot: true,
+      systemPrompt: 'Extract project memories.', prompt: 'Outcome', jsonSchema: { type: 'object', required: ['memories'], properties: { memories: { type: 'array' } } },
+      env: { FAKE_MODE: 'utility-repair', FAKE_ARGV_OUT: path.join(dir, 'argv.json'), FAKE_ARGV_HISTORY: history } });
+    const outcome = await handle.done;
+    expect(outcome.result?.structured_output).toEqual({ memories: [] });
+    const calls = (await readFile(history, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { argv: string[]; extensions: string[] });
+    expect(calls).toHaveLength(2);
+    for (const call of calls) {
+      expect(call.argv).toContain('--no-tools');
+      expect(call.argv).toContain('--no-context-files');
+      expect(call.argv).toContain('--no-rules');
+      expect(call.extensions).toHaveLength(1);
+      expect(call.extensions[0]).toContain("pi.on('before_provider_request'");
+    }
+    expect(calls[0].extensions[0]).toContain('Extract project memories.');
+    expect(calls[1].extensions[0]).toContain('Format the supplied answer');
   });
 
   it('steers a message into the running step, reports it read and ends the process', async () => {

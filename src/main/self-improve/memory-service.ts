@@ -11,7 +11,7 @@ import { memoryReviewContent } from '../../shared/utils/notification-events';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getCompengDir } from './paths';
 import { memoryChanged, memoryEvents } from './memory-events';
-import { captureTaskMemory } from './automatic-capture';
+import { captureTaskMemory, MEMORY_EXTRACTION_VERSION } from './automatic-capture';
 import { claimMemoryReviewNotice, listProjectMemories, reviewAutomaticMemories } from './project-memory';
 import { isSelfImproveEnabledForPath } from './setting';
 
@@ -91,8 +91,9 @@ export function startMemoryAutomation(getMainWindow: () => BrowserWindow | null 
       try { files = await readdir(dir); } catch { continue; }
       for (const file of files.filter((name) => /^[a-f\d]{64}\.json$/.test(name))) {
         try {
-          const job = JSON.parse(await readFile(path.join(dir, file), 'utf8')) as { taskId: string; status: string; attempts?: number };
-          if (job.status === 'complete' || job.status === 'stale' || (job.attempts ?? 0) >= 3) continue;
+          const job = JSON.parse(await readFile(path.join(dir, file), 'utf8')) as { taskId: string; status: string; attempts?: number; extractionVersion?: number };
+          if (job.status === 'complete' || job.status === 'stale'
+            || job.extractionVersion === MEMORY_EXTRACTION_VERSION && (job.status === 'failed' || (job.attempts ?? 0) >= 3)) continue;
           const task = projectStore.getTasks(project.id).find((item) => item.specId === job.taskId);
           if (task) capture(project, task);
         } catch (error) { appLog.warn('[ProjectMemory] Capture journal could not be resumed:', error); }

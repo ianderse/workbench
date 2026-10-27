@@ -7,12 +7,14 @@ import { startMemoryAutomation } from '../memory-service';
 const mocks = vi.hoisted(() => ({
   projects: [] as Project[], tasks: [] as Task[], notify: vi.fn(), send: vi.fn(), capture: vi.fn(async (..._args: unknown[]) => true),
   enabled: vi.fn(async () => true), list: vi.fn(async () => [] as unknown[]), claim: vi.fn(async () => [] as unknown[]), assess: vi.fn(),
+  readdir: vi.fn(), readFile: vi.fn(),
 }));
+vi.mock('fs/promises', () => ({ readdir: mocks.readdir, readFile: mocks.readFile }));
 vi.mock('../../project-store', () => ({ projectStore: { getProjects: () => mocks.projects, getProject: (id: string) => mocks.projects.find((project) => project.id === id), getTasks: () => mocks.tasks } }));
 vi.mock('../../notification-service', () => ({ notificationService: { notifyContent: mocks.notify } }));
 vi.mock('../../ipc-handlers/utils', () => ({ safeSendToRenderer: mocks.send }));
 vi.mock('../../app-logger', () => ({ appLog: { warn: vi.fn() } }));
-vi.mock('../automatic-capture', () => ({ captureTaskMemory: mocks.capture }));
+vi.mock('../automatic-capture', () => ({ captureTaskMemory: mocks.capture, MEMORY_EXTRACTION_VERSION: 2 }));
 vi.mock('../setting', () => ({ isSelfImproveEnabledForPath: mocks.enabled }));
 vi.mock('../project-memory', () => ({ listProjectMemories: mocks.list, claimMemoryReviewNotice: mocks.claim, reviewAutomaticMemories: mocks.assess }));
 let stop: () => void;
@@ -23,6 +25,7 @@ beforeEach(() => {
   project = { id: 'p', name: 'Fixture', path: '/tmp/isolated-memory-service-fixture', settings: { selfImprove: true } } as Project;
   task = { id: 't', specId: '001-fixture', projectId: 'p', status: 'in_progress' } as Task;
   mocks.projects = [project]; mocks.tasks = [task]; mocks.enabled.mockResolvedValue(true); mocks.capture.mockResolvedValue(true); mocks.list.mockResolvedValue([]); mocks.claim.mockResolvedValue([]);
+  mocks.readdir.mockResolvedValue([]);
   stop = startMemoryAutomation();
 });
 afterEach(() => { stop(); vi.useRealTimers(); });
@@ -78,4 +81,20 @@ it('reassesses previously classified proposals so old duplicate conflicts can re
   memoryChanged(getCompengDir(project.path), project.id);
   await vi.advanceTimersByTimeAsync(2000);
   expect(mocks.assess).toHaveBeenCalledWith(getCompengDir(project.path), project.id, [{ id: 'duplicate', expectedRevision: 2 }]);
+});
+
+it('resumes exhausted old-policy captures without repeating terminal current-policy jobs', async () => {
+  const jobs = [
+    { taskId: 'old', status: 'extracting', attempts: 3 },
+    { taskId: 'failed', status: 'failed', attempts: 1, extractionVersion: 2 },
+    { taskId: 'exhausted', status: 'extracting', attempts: 3, extractionVersion: 2 },
+    { taskId: 'complete', status: 'complete', attempts: 1 },
+  ];
+  const files = jobs.map((_, index) => `${String(index).repeat(64)}.json`);
+  mocks.tasks = jobs.map((job) => ({ ...task, specId: job.taskId, status: 'done' }));
+  mocks.readdir.mockResolvedValue(files);
+  mocks.readFile.mockImplementation(async (file: string) => JSON.stringify(jobs[files.indexOf(file.split('/').pop()!)]));
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(mocks.capture).toHaveBeenCalledTimes(1);
+  expect(mocks.capture.mock.calls[0][1]).toMatchObject({ specId: 'old' });
 });

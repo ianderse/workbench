@@ -216,6 +216,8 @@ export interface OmpArgsOptions {
   maxTimeMinutes?: number;
   /** Utility call: skip extension and skill discovery to keep small models focused */
   oneShot?: boolean;
+  /** Tool-free utility: suppress project instructions and rules, in addition to the utility extension. */
+  isolatedUtility?: boolean;
   /** Advisor mode (`on` adds `--advisor`); default `inherit` */
   advisorMode?: OmpAdvisorMode;
   /** Config overlay file made from `buildOmpAdvisorOverlay` (`--config`) */
@@ -260,6 +262,7 @@ export function buildOmpArgs(options: OmpArgsOptions): string[] {
   if (options.advisorOverlayFile) args.push('--config', options.advisorOverlayFile);
   if (options.foregroundOverlayFile) args.push('--config', options.foregroundOverlayFile);
   if (settings.extraArgs?.length) args.push(...settings.extraArgs);
+  if (options.isolatedUtility) args.push('--no-context-files', '--no-rules', '--no-lsp');
   if (options.attachmentPaths?.length) args.push(...options.attachmentPaths.map((p) => `@${p}`));
   return args;
 }

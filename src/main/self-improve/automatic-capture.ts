@@ -13,12 +13,37 @@ import { runClaudeText } from '../claude-code/run-text';
 import { getAgentBackendSettings } from '../agent-backend/settings';
 import { getCompengDir } from './paths';
 import { isSelfImproveEnabledForPath } from './setting';
+import { appLog } from '../app-logger';
 import { listProjectMemories, mutateProjectMemory, reviewAutomaticMemories, sameMemoryClaim, usefulAutomaticMemory, validateMemoryContent, writeMemoryFileAtomic } from './project-memory';
 
 interface Candidate { kind: MemoryContent['kind']; title: string; body: string; evidence: string; file?: string; quote?: string; conflictsWith?: string[] }
-interface CaptureJob { version: 1; taskId: string; generation: string; sourceSha?: string; status: 'extracting' | 'ready' | 'complete' | 'stale'; candidates?: Candidate[]; attempts?: number }
+interface CaptureJob { version: 1; taskId: string; generation: string; sourceSha?: string; status: 'extracting' | 'ready' | 'complete' | 'stale' | 'failed'; candidates?: Candidate[]; attempts?: number; extractionVersion?: number; error?: string }
 interface CaptureInput { task: string; request: string; outcome: string; reportedValidation: unknown; sources: Array<{ file: string; text: string }>; active: Array<{ id: string; title: string; body: string }> }
 type Extractor = (input: CaptureInput) => Promise<unknown>;
+/** Bump when extraction setup changes so previously exhausted jobs can try the repaired path. */
+export const MEMORY_EXTRACTION_VERSION = 2;
+export const MEMORY_CAPTURE_INPUT_BYTES = 24_000;
+
+const clip = (value: string, bytes: number) => {
+  let result = '', size = 0;
+  for (const character of value) { const next = Buffer.byteLength(character); if (size + next > bytes) break; result += character; size += next; }
+  return result;
+};
+
+/** Hard limit on serialized input, including JSON escaping; lower-priority recall drops first. */
+export function boundCaptureInput(input: CaptureInput): CaptureInput {
+  const value = { ...input, task: clip(input.task, 512), request: clip(input.request, 3000), outcome: clip(input.outcome, 6000), active: [...input.active], sources: [...input.sources] };
+  while (Buffer.byteLength(JSON.stringify(value)) > MEMORY_CAPTURE_INPUT_BYTES) {
+    if (value.active.length) value.active.pop();
+    else if (value.sources.length) value.sources.pop();
+    else if (Buffer.byteLength(value.outcome) > 256) value.outcome = clip(value.outcome, Math.floor(Buffer.byteLength(value.outcome) / 2));
+    else if (Buffer.byteLength(value.request) > 256) value.request = clip(value.request, Math.floor(Buffer.byteLength(value.request) / 2));
+    else value.reportedValidation = null;
+  }
+  return value;
+}
+
+const contextOverflow = (error: unknown) => /context_length_exceeded|prompt is too long|maximum context length|context (?:window|length).*(?:exceed|limit)|too many (?:input )?tokens/i.test(String(error));
 
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['memories'], properties: { memories: {
@@ -107,6 +132,11 @@ export async function captureTaskMemory(project: Project, task: Task, options: {
     }
     if (job.version !== 1 || job.taskId !== task.specId || job.generation !== generation) throw new Error('Capture journal belongs to another run');
     if (job.status === 'stale') return true;
+    if (!job.candidates && job.extractionVersion !== MEMORY_EXTRACTION_VERSION) {
+      Object.assign(job, { extractionVersion: MEMORY_EXTRACTION_VERSION, attempts: 0, status: 'extracting' });
+      delete job.error;
+    }
+    if (job.status === 'failed') return true;
     let target = options.target ?? task.metadata?.autoMerge?.branch ?? task.metadata?.baseBranch ?? project.settings.mainBranch;
     if (!target) target = await run(['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']).then((result) => result.stdout.trim(), () => undefined);
     if (!job.sourceSha) {
@@ -138,7 +168,15 @@ export async function captureTaskMemory(project: Project, task: Task, options: {
           jsonSchema: SCHEMA, cwd: project.path, tools: [], timeoutMs: 120_000, usage: { job: 'other', projectPath: project.path, projectId: project.id, taskId: task.specId } });
         return result.structured ?? JSON.parse(result.text);
       });
-      const raw = await extract(input);
+      let raw: unknown;
+      try { raw = await extract(boundCaptureInput(input)); }
+      catch (error) {
+        if (!contextOverflow(error)) throw error;
+        job.status = 'failed'; job.error = String(error).slice(0, 1000);
+        await writeMemoryFileAtomic(file, job);
+        appLog.warn(`[ProjectMemory] Capture stopped for ${task.specId}: context limit exceeded; the unchanged request will not be retried.`);
+        return true;
+      }
       if (captureGeneration(await readInfo(specDir)) !== generation || !(await isSelfImproveEnabledForPath(project.path))) {
         job.status = 'stale'; await writeMemoryFileAtomic(file, job); return true;
       }
