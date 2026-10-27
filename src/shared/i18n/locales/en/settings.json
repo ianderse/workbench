@@ -675,5 +675,15 @@
     },
     "toolNode": "Tool · {{tool}}",
     "remove": "Remove"
+  },
+  "graphifySimulator": {
+    "title": "Graphify graph",
+    "size": "Random graph",
+    "sizeDescription": "Number of nodes and edges of the generated graph",
+    "nodes": "Nodes",
+    "edges": "Edges",
+    "generate": "Generate",
+    "style": "Graph style",
+    "styleDescription": "Plain or colored by community"
   }
 }

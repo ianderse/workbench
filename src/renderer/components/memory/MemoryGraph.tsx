@@ -12,6 +12,7 @@ import type { GraphifyGraph, GraphifyGraphNode } from '../../../shared/types/cli
 import type { LayoutMessage, LayoutRequest } from './graph-layout.worker';
 import { communityColorIndex, GRAPHIFY_COMMUNITY_COLORS } from './graphify-colors';
 import { labelledNodes } from './graph-labels';
+import type { GraphViewSync } from './graph-view-sync';
 
 interface ViewNode extends GraphifyGraphNode {
   index: number;
@@ -39,11 +40,14 @@ const AUTO_ROTATE_SPEED = 0.00016;
 /** How long the zoom takes to ease back to the fitted view */
 const ZOOM_RESET_MS = 1000;
 
-/** Theme colors from the page's CSS, re-read when the appearance changes */
-function readColors() {
-  const body = getComputedStyle(document.body);
-  const root = getComputedStyle(document.documentElement);
-  const text = new Color(body.color);
+/**
+ * Theme colors from the CSS where the graph is drawn (`element`, its container), re-read when the
+ * appearance changes: the page's theme, or the one of a themed part of the page it sits in (the
+ * previews on the simulation page)
+ */
+function readColors(element: Element) {
+  const style = getComputedStyle(element);
+  const text = new Color(style.color);
   return {
     // Colorful style: node and link colors come from Graphify's palette, the same in light and
     // dark. Links are much fainter than Graphify's 0.7 / 0.35 (kept as a 2:1 ratio) because
@@ -53,15 +57,15 @@ function readColors() {
     // Plain style: nodes in the muted label grey (in 3D many overlap, and the text color added up
     // too bright), links in the text color; a hovered neighbourhood lights up in the primary color
     plain: {
-      node: new Color(root.getPropertyValue('--nav-label-color').trim() || body.color),
+      node: new Color(style.getPropertyValue('--nav-label-color').trim() || style.color),
       nodeAlpha: 0.5,
-      accent: new Color(root.getPropertyValue('--primary').trim() || body.color),
+      accent: new Color(style.getPropertyValue('--primary').trim() || style.color),
       link: text,
       linkAlpha: 0.035,
       dimmedLinkAlpha: 0.02,
     },
     text,
-    font: body.fontFamily,
+    font: style.fontFamily,
   };
 }
 
@@ -83,7 +87,18 @@ function LoadingDots() {
  * (it keeps spinning when flicked), wheel to zoom, Shift+drag to pan, drag nodes to move them and hover to highlight a node's neighbours and show their names.
  * Left alone, the graph turns slowly, and 5 seconds after the last touch the view resets to it.
  */
-export function MemoryGraph({ projectId }: { projectId: string }) {
+interface MemoryGraphProps {
+  /** The project whose memory graph is loaded and shown */
+  projectId?: string;
+  /** A graph to show instead of loading one (the simulation page's generated graphs) */
+  graph?: GraphifyGraph;
+  /** Plain or colorful whatever the Graph style setting is */
+  colorful?: boolean;
+  /** Move as one with the other views of the same graph (see GraphViewSync) */
+  sync?: GraphViewSync;
+}
+
+export function MemoryGraph({ projectId = '', graph: givenGraph, colorful: givenColorful, sync }: MemoryGraphProps) {
   const { t } = useTranslation('navigation');
   const containerRef = useRef<HTMLDivElement>(null);
   const revision = useMemoryGraphStore((state) => state.revision[projectId] ?? 0);
@@ -92,7 +107,8 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
   // False until the first layout of the loaded graph is drawn
   const [laidOut, setLaidOut] = useState(false);
   // Graph style: switching it redraws the graph in place (no new layout)
-  const colorful = useSettingsStore((state) => state.settings.graphStyle ?? 'plain') === 'colorful';
+  const colorfulSetting = useSettingsStore((state) => state.settings.graphStyle ?? 'plain') === 'colorful';
+  const colorful = givenColorful ?? colorfulSetting;
   const colorfulRef = useRef(colorful);
   const restyleRef = useRef<(() => void) | null>(null);
   useEffect(() => {
@@ -100,8 +116,13 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
     restyleRef.current?.();
   }, [colorful]);
 
-  // Load the graph (again after a rebuild)
+  // Load the graph (again after a rebuild), or take the one given
   useEffect(() => {
+    if (givenGraph) {
+      setGraph(givenGraph);
+      setStatus(givenGraph.nodes.length === 0 ? 'empty' : 'ready');
+      return;
+    }
     let cancelled = false;
     setStatus('loading');
     window.electronAPI.getGraphifyGraph(projectId).then((result) => {
@@ -118,7 +139,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       if (!cancelled) setStatus('error');
     });
     return () => { cancelled = true; };
-  }, [projectId, revision]);
+  }, [projectId, revision, givenGraph]);
 
   // Lay it out and draw it
   useEffect(() => {
@@ -132,6 +153,11 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
     let themeObserver: MutationObserver | null = null;
     const worker = new Worker(new URL('./graph-layout.worker.ts', import.meta.url), { type: 'module' });
     const send = (request: LayoutRequest) => worker.postMessage(request);
+    // Moving as one with other views of this graph: the one touched last leads, the others follow
+    const syncId = Symbol('graph view');
+    const leaveSync = sync?.join(syncId, send);
+    const following = () => !!sync && !sync.isLeader(syncId);
+    let seenVersion = -1;
 
     // Graph data: sizes by number of connections
     const indexById = new Map(graph.nodes.map((node, i) => [node.id, i]));
@@ -203,7 +229,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       world.visible = false;
       pixi.stage.addChild(world);
 
-      let colors = readColors();
+      let colors = readColors(container);
       let hovered: ViewNode | null = null;
       let dragged: ViewNode | null = null;
       let dragMoved = false;
@@ -425,6 +451,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         lastInteraction = performance.now();
         autoRotating = false;
         zoomReset = null;
+        sync?.lead(syncId);
       }
       canvas.addEventListener('pointerdown', markInteraction);
 
@@ -434,8 +461,9 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         for (let i = 0; i < nodes.length; i++) {
           graphRadius = Math.max(graphRadius, Math.hypot(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]));
         }
-        // Keep the graph in view while it spreads out, until the user zooms or pans
-        if (!userMoved && !zoomReset) fitToView();
+        // Keep the graph in view while it spreads out, until the user zooms or pans (a view
+        // following another takes its zoom instead)
+        if (!userMoved && !zoomReset && !following()) fitToView();
         if (!world.visible) {
           world.visible = true;
           setLaidOut(true);
@@ -513,6 +541,21 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
 
       // Draw at most once per frame, only when something changed
       pixi.ticker.add((ticker) => {
+        // Following another view: take its turn and zoom, and nothing of its own moves it
+        if (following()) {
+          spin = null;
+          const shared = sync!.view;
+          if (shared && sync!.version !== seenVersion) {
+            seenVersion = sync!.version;
+            rotation = [...shared.rotation];
+            canvasSelection.call(zoomBehavior!.transform, zoomIdentity.translate(shared.x, shared.y).scale(shared.k));
+            dirty = true;
+          }
+          if (!dirty) return;
+          dirty = false;
+          render();
+          return;
+        }
         const now = performance.now();
         if (hovered || rotating || dragged || spin) lastInteraction = now;
         if (!autoRotating && now - lastInteraction > IDLE_RESET_MS) {
@@ -542,6 +585,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         }
         if (!dirty) return;
         dirty = false;
+        sync?.publish(syncId, { rotation, x: transform.x, y: transform.y, k: transform.k });
         render();
       });
 
@@ -557,19 +601,24 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         const rx = point.x / perspective[index];
         const ry = point.y / perspective[index];
         const rz = depth[index];
-        send({
+        const request: LayoutRequest = {
           type: 'drag',
           index,
           x: rotation[0] * rx + rotation[3] * ry + rotation[6] * rz,
           y: rotation[1] * rx + rotation[4] * ry + rotation[7] * rz,
           z: rotation[2] * rx + rotation[5] * ry + rotation[8] * rz,
-        });
+        };
+        send(request);
+        sync?.forward(syncId, request);
       });
       const endDrag = () => {
         if (!dragged) return;
         const node = dragged;
         dragged = null;
-        if (dragMoved) send({ type: 'release', index: node.index });
+        if (dragMoved) {
+          send({ type: 'release', index: node.index });
+          sync?.forward(syncId, { type: 'release', index: node.index });
+        }
       };
       pixi.stage.on('pointerup', endDrag);
       pixi.stage.on('pointerupoutside', endDrag);
@@ -577,7 +626,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       // Follow the theme (light/dark)
       // Theme or graph style changed: redraw with the new colors
       const restyle = () => {
-        colors = readColors();
+        colors = readColors(container);
         for (const node of nodes) drawNode(node);
         for (const label of labels.values()) label.style.fill = colors.text;
         dirty = true;
@@ -593,6 +642,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       disposed = true;
       restyleRef.current = null;
       themeObserver?.disconnect();
+      leaveSync?.();
       send({ type: 'stop' });
       worker.terminate();
       if (zoomBehavior) zoomBehavior.on('zoom', null);
@@ -601,7 +651,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
         app.destroy(true, { children: true });
       }
     };
-  }, [graph, status]);
+  }, [graph, status, sync]);
 
   return (
     <div className="relative flex h-full flex-col">

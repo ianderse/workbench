@@ -31,6 +31,7 @@ import { AccountSettings } from './AccountSettings';
 import { ProjectSettingsContent, ProjectSettingsSection } from './ProjectSettingsContent';
 import { UsageSimulatorSettings } from './UsageSimulatorSettings';
 import { LiveAgentSimulatorSettings } from './LiveAgentSimulatorSettings';
+import { GraphifySimulatorSettings } from './GraphifySimulatorSettings';
 import { IS_DEV_BUILD } from '../../lib/title-bar';
 import { ConnectorsSettings } from './ConnectorsSettings';
 import { useProjectStore } from '../../stores/project-store';
@@ -251,6 +252,7 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
         return (
           <>
             <LiveAgentSimulatorSettings />
+            <GraphifySimulatorSettings />
             <UsageSimulatorSettings />
           </>
         );
