@@ -103,12 +103,12 @@ export interface PendingToolCall {
 
 // ─── Session Types ──────────────────────────────────────────────────────────
 
-/** An Agent/Task launch. Its tool_use ID is the sub-agent's node id: unique per
- *  launch, and the same ID the sub-agent's .meta.json (`toolUseId`), inline
- *  progress events (`parentToolUseID`) and <task-notification> refer to. */
 /** How an Agent/Task call ran: its caller waited for it, or it went on in the background */
 export type LaunchShape = 'foreground' | 'background'
 
+/** An Agent/Task launch. Its tool_use ID is the sub-agent's node id: unique per
+ *  launch, and the same ID the sub-agent's .meta.json (`toolUseId`), inline
+ *  progress events (`parentToolUseID`) and <task-notification> refer to. */
 export interface SubagentLaunch {
   /** Agent that launched it (the orchestrator, or a sub-agent for nested launches) */
   parent: string
@@ -171,7 +171,7 @@ export interface WatchedSession {
    *  session closed */
   ignoredSubagentFiles: Set<string>
   /** How each Agent/Task call ran (by tool_use ID), as its sub-agent's .meta.json records it, and
-   *  the .meta.json files already read for it (see launchShape in subagent-watcher.ts) */
+   *  the .meta.json files already read for it (see launchShape in transcript-parser.ts) */
   launchShapes: Map<string, LaunchShape>
   readLaunchMetas: Set<string>
   /** When a sub-agent file was first seen without its .meta.json (it's written a moment later) */
