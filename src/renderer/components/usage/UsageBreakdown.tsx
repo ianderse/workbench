@@ -165,6 +165,16 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
   );
 }
 
+/** "resets in 0h 47m" under the hero: when the 5-hour limit resets; nothing once it has */
+export function SessionResets({ usage }: { usage: ClaudeUsageSnapshot }) {
+  const { t } = useTranslation(['common']);
+  const resets = formatTimeRemaining(usage.sessionResetTimestamp, t, {
+    hoursKey: 'common:usage.resetsInLowerHours',
+    daysKey: 'common:usage.resetsInLowerDays',
+  });
+  return resets ? <div className="text-[11px] text-muted-foreground">{resets}</div> : null;
+}
+
 export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
   const { t } = useTranslation(['common']);
 
@@ -172,11 +182,6 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
     hoursKey: 'common:usage.compactHours',
     daysKey: 'common:usage.compactDays',
   }), [t]);
-
-  const sessionResets = formatTimeRemaining(usage.sessionResetTimestamp, t, {
-    hoursKey: 'common:usage.resetsInLowerHours',
-    daysKey: 'common:usage.resetsInLowerDays',
-  });
 
   // Anthropic's second window is a week, and the design calls it that. Other providers meter a
   // different span there - z.ai bills a calendar month - so those keep their own name.
@@ -188,7 +193,7 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
   return (
     <div className="space-y-2.5 p-3">
       <UsageHero usage={usage} active={open} />
-      {sessionResets && <div className="text-[11px] text-muted-foreground">{sessionResets}</div>}
+      <SessionResets usage={usage} />
 
       <UsageRow
         label={weeklyLabel}

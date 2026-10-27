@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
-import { UsageHero } from '../usage/UsageBreakdown';
+import { SessionResets, UsageHero } from '../usage/UsageBreakdown';
 import { createSkinPicker } from '../usage/clawd/skins';
 import { IS_DEV_BUILD } from '../../lib/title-bar';
 import { simulatedMoment, useUsageSimulatorStore } from '../../stores/usage-simulator-store';
@@ -75,6 +75,7 @@ export function UsageSimulatorSettings() {
           >
             <div className="space-y-2.5 p-3">
               <UsageHero usage={usage} active pickSkin={previewSkin} pinned={pinned} />
+              <SessionResets usage={usage} />
             </div>
           </div>
         ))}
