@@ -210,14 +210,17 @@ export function UsageCardSurface() {
   );
 }
 
-/** "resets in 0h 47m" under the hero: when the 5-hour limit resets; nothing once it has */
+/**
+ * "resets in 0h 47m" under the hero: when the 5-hour limit resets. With no window running (no
+ * reset time, or one already past) the next one starts with the next message, as claude.ai says.
+ */
 export function SessionResets({ usage }: { usage: ClaudeUsageSnapshot }) {
   const { t } = useTranslation(['common']);
   const resets = formatTimeRemaining(usage.sessionResetTimestamp, t, {
     hoursKey: 'common:usage.resetsInLowerHours',
     daysKey: 'common:usage.resetsInLowerDays',
-  });
-  return resets ? <div className="text-[11px] text-muted-foreground">{resets}</div> : null;
+  }) ?? t('common:usage.sessionNotStarted');
+  return <div className="text-[11px] text-muted-foreground">{resets}</div>;
 }
 
 export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {

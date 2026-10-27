@@ -266,6 +266,7 @@
     "compactDays": "{{days}}d {{hours}}h",
     "resetsInLowerHours": "resets in {{hours}}h {{minutes}}m",
     "resetsInLowerDays": "resets in {{days}}d {{hours}}h",
+    "sessionNotStarted": "starts when a message is sent",
     "heartsLeft": "{{percent}}% of the 5-hour limit left",
     "weekScoped": "{{model}} · Week"
   },
