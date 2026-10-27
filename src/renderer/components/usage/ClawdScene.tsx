@@ -93,6 +93,8 @@ function fadeX(w: number, h: number): [number, number][] {
  */
 const SKY_BLEED_X = 12;
 const SKY_BLEED_TOP = 10;
+/** Down behind the top half of the 8px progress bar, so the sky ends at the bar's middle */
+const SKY_BLEED_BOTTOM = 4;
 
 /** Weather counts are tuned for a 140px strip; a wider sky gets more */
 const DENSITY_W = 140;
@@ -166,7 +168,9 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
   // sky opens, so a passing cloud only sometimes covers them
   const [thick] = useState(() => CLOUDS.map(() => Math.random() < 0.5));
 
-  const h = SCENE_H + SKY_BLEED_TOP;
+  // The ground (the bar's top edge): the clouds, stars and falling weather are laid out above it
+  const ground = SCENE_H + SKY_BLEED_TOP;
+  const h = ground + SKY_BLEED_BOTTOM;
   const density = Math.max(1, w / DENSITY_W);
   const clouds = Math.min(CLOUDS.length, Math.round(weather.clouds * density));
   const fall = Math.round(weather.fall * density);
@@ -179,7 +183,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
     <div
       ref={ref}
       className="pointer-events-none absolute"
-      style={{ left: -SKY_BLEED_X, right: 0, top: -SKY_BLEED_TOP, bottom: 0 }}
+      style={{ left: -SKY_BLEED_X, right: 0, top: -SKY_BLEED_TOP, bottom: -SKY_BLEED_BOTTOM }}
     >
       {w > 0 && (
         <svg
@@ -234,7 +238,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
                   {STARS.map((s, i) => (
                     <rect
                       key={i}
-                      x={Math.round(s.fx * (w - 2))} y={Math.round(2 + s.fy * h)}
+                      x={Math.round(s.fx * (w - 2))} y={Math.round(2 + s.fy * ground)}
                       width={1.2} height={1.2} fill="#F8FAFC"
                       className="clawd-star"
                       style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
@@ -274,7 +278,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
                     ['--clawd-cloud-to' as string]: `${w}px`,
                   }}
                 >
-                  <g transform={`translate(0 ${Math.round(c.top * h)})`}>
+                  <g transform={`translate(0 ${Math.round(c.top * ground)})`}>
                     <g opacity={thick[i] ? 1 : weather.kind === 'fair' ? 0.85 : 0.75}>
                       <Pixels
                         rects={CLOUD_RECTS[c.shape].filter((r) => r.y < CLOUD_BASE_Y[c.shape])}
@@ -300,7 +304,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
                   style={{
                     animationDuration: `${d.dur}s`,
                     animationDelay: `${d.delay}s`,
-                    ['--clawd-y0' as string]: `${Math.round(d.fy * h)}px`,
+                    ['--clawd-y0' as string]: `${Math.round(d.fy * ground)}px`,
                     ['--clawd-fall' as string]: `${h + 4}px`,
                   }}
                 />
@@ -315,7 +319,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
                   style={{
                     animationDuration: `${f.dur}s`,
                     animationDelay: `${f.delay}s`,
-                    ['--clawd-y0' as string]: `${Math.round(f.fy * h)}px`,
+                    ['--clawd-y0' as string]: `${Math.round(f.fy * ground)}px`,
                     ['--clawd-fall' as string]: `${h + 2}px`,
                   }}
                 >
@@ -336,7 +340,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
 
             {/* Settled snow: a thin strip on the ground, outside the bottom fade so it stays */}
             {weather.kind === 'snow' && (
-              <rect x={0} y={h - 1.5} width={w} height={1.5} fill="#E2E8F0" opacity={0.6 + 0.3 * look.light} />
+              <rect x={0} y={ground - 1.5} width={w} height={1.5} fill="#E2E8F0" opacity={0.6 + 0.3 * look.light} />
             )}
           </g>
         </svg>

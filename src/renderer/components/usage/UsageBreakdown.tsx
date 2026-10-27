@@ -17,6 +17,7 @@ import { Hearts } from './Hearts';
 import { skinForUsage, type SkinPicker } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
 import { holidayDecor } from './clawd/decor';
+import { daylight } from './clawd/sky';
 import { getBarColorClass, getColorClass } from './usage-colors';
 
 /** The label the main process sends for Anthropic's second window */
@@ -75,8 +76,10 @@ interface UsageHeroProps {
 
 /**
  * The top of the usage popover: the header with the hearts, and the 5-hour limit, large, with
- * the sky behind it and Clawd walking alongside. Rendered as siblings, so it sits in the
- * popover's spacing; the usage simulator in Settings shows it on its own as a preview.
+ * the sky behind it and Clawd walking alongside. Its background, out to the card's edges, follows
+ * the daylight and covers the card's border, so the parent must be the card's content: 12px
+ * padding inside a 1px border, rounded-xl, no overflow clipping, and UsageCardSurface for the
+ * rest of the background (the popover and the usage simulator in Settings both are).
  */
 export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = null }: UsageHeroProps) {
   const { t } = useTranslation(['common']);
@@ -129,20 +132,42 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
   const day = now.toDateString();
   // Worked out again once a day
   const decor = useMemo(() => holidayDecor(new Date(day)), [day]);
+  // The top of the card is outdoors: light by day, dark at night, halfway between at dawn and
+  // dusk, whatever the app's theme. Its text takes the theme closer to that background.
+  const light = daylight(now);
+  const tone = light >= 0.5 ? 'light' : 'dark';
 
   return (
-    <>
+    <div className="relative isolate space-y-2.5">
+      {/* The daylight background, over the card's padding and its 1px border (with a border of its
+          own) down to the 5-hour bar, fading out across the bar so it meets the theme's background
+          at the bar's middle. The dark popover with the light one over it, as light as the day.
+          First, so the spacing between the rows below stays the same; m-0 undoes that spacing's
+          margin, which would lift an absolute box's bottom edge. */}
+      <div
+        aria-hidden="true"
+        className="absolute -inset-x-[13px] -top-[13px] bottom-0 -z-10 m-0 [mask-image:linear-gradient(to_bottom,#000_calc(100%-8px),transparent)]"
+      >
+        <div className="dark absolute inset-0 rounded-t-xl border border-b-0 border-border bg-popover" />
+        <div
+          className="light absolute inset-0 rounded-t-xl border border-b-0 border-border bg-popover"
+          style={{ opacity: light }}
+        />
+      </div>
+
       {/* Header: the three hearts are the 5-hour limit left */}
-      <div className="flex items-center justify-between gap-2 border-b pb-2">
+      <div className={`${tone} flex items-center justify-between gap-2 border-b pb-2 text-popover-foreground`}>
         <span className="text-xs font-semibold">
           {t('common:usage.usageBreakdown')}
         </span>
         <Hearts fraction={render?.shownFraction ?? null} beat={render?.beat ?? 1} />
       </div>
 
-      {/* The bar is the ground Clawd stands on, so the two sit flush with no gap between them */}
-      <div>
-        <div className="relative flex items-end gap-2" style={{ height: SCENE_H }}>
+      {/* The bar is the ground Clawd stands on, so the two sit flush with no gap between them.
+          In the light theme its track is mixed a little lighter: the same grey next to the white
+          below it looks darker than it does in the dark theme. */}
+      <div className="[--bar-track-mix:20%] dark:[--bar-track-mix:15%]">
+        <div className={`${tone} relative flex items-end gap-2 text-popover-foreground`} style={{ height: SCENE_H }}>
           <ClawdSky percent={usage.sessionPercent} pinned={pinned} />
           {/* Clawd stands on the bar, the number sits a touch above it */}
           <div className="relative mb-1 flex shrink-0 items-start self-end">
@@ -154,14 +179,34 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
           <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} decor={decor} />
         </div>
 
-        <div className={`h-2 ${BAR_TRACK}`}>
+        {/* Positioned, so it sits over the bottom of the sky, which reaches to its middle. Its
+            track is always the dark theme's, solid (the track over the dark popover), so it reads
+            the same across the daylight and the theme backgrounds. */}
+        <div
+          className={`dark relative h-2 overflow-hidden rounded-full bg-[color-mix(in_srgb,var(--muted-foreground)_var(--bar-track-mix),var(--popover))]`}
+        >
           <div
             className={`h-full rounded-full transition-[width] duration-500 ease-out ${getBarColorClass(usage.sessionPercent)}`}
             style={{ width: `${Math.min(usage.sessionPercent, 100)}%` }}
           />
         </div>
       </div>
-    </>
+    </div>
+  );
+}
+
+/**
+ * The usage card's own background and border in the app's theme, below the corners only: the
+ * hero's daylight background covers the top, and nothing under its rounded corners can show
+ * through their soft edge. The card itself (the popover, a simulator card) draws no background
+ * or border; this goes first inside its padded content, which is relative and isolate.
+ */
+export function UsageCardSurface() {
+  return (
+    <div
+      aria-hidden="true"
+      className="absolute -inset-px top-10 -z-10 m-0 rounded-b-xl border border-t-0 border-border bg-popover"
+    />
   );
 }
 
@@ -191,7 +236,8 @@ export function UsageBreakdown({ usage, open }: UsageBreakdownProps) {
     : t('common:usage.weekAllModels');
 
   return (
-    <div className="space-y-2.5 p-3">
+    <div className="relative isolate space-y-2.5 p-3">
+      <UsageCardSurface />
       <UsageHero usage={usage} active={open} />
       <SessionResets usage={usage} />
 

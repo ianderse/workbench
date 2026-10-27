@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next';
 import type { ClaudeUsageSnapshot } from '../../shared/types/agent';
 import type { AppSection } from './settings/AppSettings';
 import { useSettingsStore } from '../stores/settings-store';
+import { cn } from '../lib/utils';
 import { UsageBreakdown } from './usage/UsageBreakdown';
 import { useUsageStore } from '../stores/usage-store';
 import {
@@ -406,7 +407,12 @@ export function UsageIndicator() {
         side="top"
         align="end"
         sideOffset={popoverOffset}
-        className="text-xs w-[17rem] p-0 max-h-[80vh] overflow-y-auto"
+        // Not clipped: the usage card's daylight background covers the popover's border. The card
+        // draws its own background and border (UsageCardSurface), so the popover drops both.
+        className={cn(
+          'text-xs w-[17rem] p-0',
+          !usage.needsReauthentication && 'border-transparent bg-transparent',
+        )}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
       >

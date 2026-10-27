@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Input } from '../ui/input';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
-import { SessionResets, UsageHero } from '../usage/UsageBreakdown';
+import { SessionResets, UsageCardSurface, UsageHero } from '../usage/UsageBreakdown';
 import { createSkinPicker } from '../usage/clawd/skins';
 import { IS_DEV_BUILD } from '../../lib/title-bar';
 import { simulatedMoment, useUsageSimulatorStore } from '../../stores/usage-simulator-store';
@@ -66,14 +66,15 @@ export function UsageSimulatorSettings() {
   return (
     <SettingsSection title={t('usageSimulator.title')}>
       {/* The popover in each theme side by side, whatever the app's theme, so both can be compared
-          at the same moment. Each card has the popover's own width, surface and padding. */}
+          at the same moment. Each card has the popover's own width, shape and padding. */}
       <div className="flex flex-wrap gap-4">
         {PREVIEW_THEMES.map((theme) => (
           <div
             key={theme}
-            className={`${theme} w-[17rem] rounded-xl border border-border bg-popover text-xs text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.24)]`}
+            className={`${theme} w-[17rem] rounded-xl border border-transparent text-xs text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.24)]`}
           >
-            <div className="space-y-2.5 p-3">
+            <div className="relative isolate space-y-2.5 p-3">
+              <UsageCardSurface />
               <UsageHero usage={usage} active pickSkin={previewSkin} pinned={pinned} />
               <SessionResets usage={usage} />
             </div>
