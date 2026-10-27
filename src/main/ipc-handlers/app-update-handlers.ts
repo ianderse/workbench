@@ -15,6 +15,7 @@ import {
   quitAndInstall,
   getCurrentVersion,
   getDownloadedUpdateInfo,
+  getAvailableUpdateInfo,
   skipUpdateVersion,
   snoozeUpdate,
   shouldSuppressUpdate
@@ -138,6 +139,15 @@ export function registerAppUpdateHandlers(): void {
    * This allows the UI to show "Install and Restart" even if the user
    * opens Settings after the download completed in the background.
    */
+  /**
+   * APP_UPDATE_GET_AVAILABLE: the newer version the last check found (e.g. the one at launch), so
+   * Settings > Updates shows its Download button without checking again
+   */
+  ipcMain.handle(
+    IPC_CHANNELS.APP_UPDATE_GET_AVAILABLE,
+    async (): Promise<IPCResult<AppUpdateInfo | null>> => ({ success: true, data: getAvailableUpdateInfo() })
+  );
+
   ipcMain.handle(
     IPC_CHANNELS.APP_UPDATE_GET_DOWNLOADED,
     async (): Promise<IPCResult<AppUpdateInfo | null>> => {

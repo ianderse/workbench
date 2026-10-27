@@ -23,6 +23,8 @@ export interface AppUpdateAPI {
   installAppUpdate: () => void;
   getAppVersion: () => Promise<string>;
   getDownloadedAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
+  /** The newer version the last check found (the launch check's, until the next check) */
+  getAvailableAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
   skipAppUpdate: (version: string) => Promise<IPCResult>;
   snoozeAppUpdate: () => Promise<IPCResult>;
   isAppUpdateSuppressed: (version: string) => Promise<IPCResult<boolean>>;
@@ -48,6 +50,8 @@ export interface AppUpdateAPI {
   onAppUpdateError: (
     callback: (error: AppUpdateErrorEvent) => void
   ) => IpcListenerCleanup;
+  /** The update notification was clicked: open Settings > Updates */
+  onAppUpdateOpenSettings: (callback: () => void) => IpcListenerCleanup;
 }
 
 /**
@@ -75,6 +79,9 @@ export const createAppUpdateAPI = (): AppUpdateAPI => ({
 
   getDownloadedAppUpdate: (): Promise<IPCResult<AppUpdateInfo | null>> =>
     invokeIpc(IPC_CHANNELS.APP_UPDATE_GET_DOWNLOADED),
+
+  getAvailableAppUpdate: (): Promise<IPCResult<AppUpdateInfo | null>> =>
+    invokeIpc(IPC_CHANNELS.APP_UPDATE_GET_AVAILABLE),
 
   skipAppUpdate: (version: string): Promise<IPCResult> =>
     invokeIpc(IPC_CHANNELS.APP_UPDATE_SKIP_VERSION, version),
@@ -117,5 +124,8 @@ export const createAppUpdateAPI = (): AppUpdateAPI => ({
   onAppUpdateError: (
     callback: (error: AppUpdateErrorEvent) => void
   ): IpcListenerCleanup =>
-    createIpcListener(IPC_CHANNELS.APP_UPDATE_ERROR, callback)
+    createIpcListener(IPC_CHANNELS.APP_UPDATE_ERROR, callback),
+
+  onAppUpdateOpenSettings: (callback: () => void): IpcListenerCleanup =>
+    createIpcListener(IPC_CHANNELS.APP_UPDATE_OPEN_SETTINGS, callback)
 });

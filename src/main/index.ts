@@ -836,9 +836,10 @@ app.whenReady().then(async () => {
     console.warn('[main] ========================================');
   }
 
-  // Initialize the app auto-updater. Development builds get it too, so "Check for updates" with
-  // a lowered package.json version shows the update dialog; they only check on that button
-  // (or on their own with DEBUG_UPDATER=true) and never download or install (see app-updater.ts)
+  // Initialize the app auto-updater. It checks once at launch and notifies about a new version.
+  // Development builds get it too, so a lowered package.json version can try the update flow;
+  // they don't check periodically (unless DEBUG_UPDATER=true) and never download or install
+  // (see app-updater.ts)
   {
     // Load settings to get beta updates preference
     const settings = loadSettingsSync();

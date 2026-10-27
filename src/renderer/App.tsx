@@ -250,6 +250,15 @@ export function App() {
     };
   }, []);
 
+  // The update notification shown at launch was clicked: open Settings > Updates, which shows the
+  // version found and its Download button
+  useEffect(() => {
+    return window.electronAPI.onAppUpdateOpenSettings(() => {
+      setSettingsInitialSection('updates');
+      setIsSettingsDialogOpen(true);
+    });
+  }, []);
+
   // Reset init success flag when selected project changes
   // This allows the init dialog to show for new/different projects
   useEffect(() => {

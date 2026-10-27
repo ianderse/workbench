@@ -135,6 +135,21 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
         if (isCancelled) return;
       }
 
+      // A newer version the app already found (the check at launch): show it and its Download
+      // button without checking again
+      try {
+        const result = await window.electronAPI.getAvailableAppUpdate();
+        if (isCancelled) return;
+        if (result.success && result.data) {
+          setAppUpdateInfo(result.data);
+          setAppUpdateStatus('update-available');
+          return;
+        }
+      } catch (err) {
+        console.error('Failed to get the available update:', err);
+        if (isCancelled) return;
+      }
+
       // Show the last check's result for this version; only check on the button (or when this
       // version was never checked). An already-downloaded update (above) takes precedence:
       // electron-updater reports no available update then, which would lose the version metadata

@@ -23,13 +23,14 @@ import { safeSendToRenderer } from './ipc-handlers/utils';
 import path from 'path';
 import { autoUpdater } from 'electron-updater';
 import type { UpdateInfo } from 'electron-updater';
-import { app, net } from 'electron';
+import { app, net, Notification } from 'electron';
 import type { BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
 import type { AppUpdateCheckResult, AppUpdateInfo } from '../shared/types';
 import { compareVersions } from './updater/version-manager';
 import { isMacOS } from './platform';
 import { readSettingsFile, writeSettingsFile } from './settings-utils';
+import { showWindow } from './window-manager';
 
 // GitHub repo info for API calls
 const GITHUB_OWNER = 'proactive-agent';
@@ -221,6 +222,7 @@ export function snoozeUpdate(): void {
  */
 export function setUpdateChannel(channel: UpdateChannel): void {
   autoUpdater.channel = channel;
+  availableUpdateInfo = null;
   // Enable pre-release scanning when beta channel is selected
   // This allows electron-updater to find beta releases on GitHub
   autoUpdater.allowPrerelease = channel === 'beta';
@@ -253,6 +255,34 @@ function sendUpdateEvent(channel: string, payload?: unknown): void {
 
 // Track downloaded update state so it persists across Settings page navigations
 let downloadedUpdateInfo: AppUpdateInfo | null = null;
+
+// The newer version the last check found (on the user's channel, not skipped or snoozed), so
+// Settings > Updates shows its Download button when opened, e.g. from the launch notification
+let availableUpdateInfo: AppUpdateInfo | null = null;
+
+// The launch notification, kept so it isn't garbage collected before it is clicked
+let updateNotification: Notification | null = null;
+
+/**
+ * Tell the user about a new version found at launch with a desktop notification. Clicking it
+ * shows a window and opens Settings > Updates there, where the Download button is.
+ */
+function notifyUpdateAvailable(info: AppUpdateInfo): void {
+  if (!Notification.isSupported()) return;
+  updateNotification?.close();
+  const notification = new Notification({
+    title: 'Workbench update available',
+    body: `Version ${info.version} is ready to download`
+  });
+  notification.on('click', () => {
+    const window = getUpdateWindow();
+    if (!window) return;
+    showWindow(window);
+    safeSendToRenderer(() => window, IPC_CHANNELS.APP_UPDATE_OPEN_SETTINGS);
+  });
+  updateNotification = notification;
+  notification.show();
+}
 
 // Flag to allow intentional downgrades (e.g., switching from beta to stable)
 let intentionalDowngrade = false;
@@ -315,17 +345,13 @@ export function initializeAppUpdater(getWindow: () => BrowserWindow | null, beta
       return;
     }
 
-    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_AVAILABLE, {
+    availableUpdateInfo = {
       version: info.version,
       releaseNotes: formatReleaseNotes(info.releaseNotes),
       releaseDate: info.releaseDate
-    });
-
-    // Download the update now that we've confirmed it's valid (not in development builds)
-    if (!app.isPackaged) return;
-    autoUpdater.downloadUpdate().catch((error) => {
-      console.error('[app-updater] Failed to download update:', error.message);
-    });
+    };
+    // Not downloaded here: Settings > Updates has the Download button
+    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_AVAILABLE, availableUpdateInfo);
   });
 
   // Update downloaded - ready to install
@@ -377,6 +403,7 @@ export function initializeAppUpdater(getWindow: () => BrowserWindow | null, beta
 
   // No update available
   autoUpdater.on('update-not-available', (info) => {
+    availableUpdateInfo = null;
     console.warn('[app-updater] No updates available - you are on the latest version');
     console.warn('[app-updater]   Current version:', info.version);
     if (DEBUG_UPDATER) {
@@ -393,25 +420,31 @@ export function initializeAppUpdater(getWindow: () => BrowserWindow | null, beta
   // Update Check Schedule
   // ============================================
 
-  // Development builds check only when asked (unless DEBUG_UPDATER is set)
-  if (!app.isPackaged && process.env.DEBUG_UPDATER !== 'true') {
-    console.warn('[app-updater] Development build: checking only on "Check for updates"');
-    return;
-  }
-
-  // Check for updates 3 seconds after launch
+  // Check for updates 3 seconds after launch (development builds too). Only this check shows a
+  // desktop notification for a new version; the 'update-available' handler above has already
+  // left out a version that isn't newer, or that the user skipped or snoozed.
   const INITIAL_DELAY = 3000;
   console.warn(`[app-updater] Will check for updates in ${INITIAL_DELAY / 1000} seconds...`);
 
   setTimeout(() => {
     console.warn('[app-updater] Performing initial update check');
-    autoUpdater.checkForUpdates().catch((error) => {
-      console.error('[app-updater] Initial update check failed:', error.message);
-      if (DEBUG_UPDATER) {
-        console.error('[app-updater:debug] Full error:', error);
-      }
-    });
+    autoUpdater.checkForUpdates()
+      .then(() => {
+        if (availableUpdateInfo) notifyUpdateAvailable(availableUpdateInfo);
+      })
+      .catch((error) => {
+        console.error('[app-updater] Initial update check failed:', error.message);
+        if (DEBUG_UPDATER) {
+          console.error('[app-updater:debug] Full error:', error);
+        }
+      });
   }, INITIAL_DELAY);
+
+  // Development builds check again only when asked (unless DEBUG_UPDATER is set)
+  if (!app.isPackaged && process.env.DEBUG_UPDATER !== 'true') {
+    console.warn('[app-updater] Development build: no periodic update checks');
+    return;
+  }
 
   // Check for updates every 4 hours
   const FOUR_HOURS = 4 * 60 * 60 * 1000;
@@ -557,6 +590,11 @@ export function quitAndInstall(): boolean {
   allowWindowClose(); // don't let hide-to-tray block the updater from closing the window
   autoUpdater.quitAndInstall(false, true);
   return true;
+}
+
+/** The newer version the last check found, or null (see availableUpdateInfo) */
+export function getAvailableUpdateInfo(): AppUpdateInfo | null {
+  return availableUpdateInfo;
 }
 
 /**

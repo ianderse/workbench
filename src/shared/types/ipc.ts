@@ -378,6 +378,7 @@ export interface ElectronAPI {
   downloadStableUpdate: () => Promise<IPCResult>;
   installAppUpdate: () => void;
   getDownloadedAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
+  getAvailableAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
   skipAppUpdate: (version: string) => Promise<IPCResult>;
   snoozeAppUpdate: () => Promise<IPCResult>;
   isAppUpdateSuppressed: (version: string) => Promise<IPCResult<boolean>>;
@@ -397,6 +398,7 @@ export interface ElectronAPI {
   onAppUpdateStableDowngrade: (
     callback: (info: AppUpdateInfo) => void
   ) => () => void;
+  onAppUpdateOpenSettings: (callback: () => void) => () => void;
   onAppUpdateReadOnlyVolume: (
     callback: (info: { appPath: string }) => void
   ) => () => void;
