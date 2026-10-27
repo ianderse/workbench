@@ -3,7 +3,9 @@ import { useTranslation } from 'react-i18next';
 import { Plus, X } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Switch } from '../ui/switch';
+import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
+import { IS_DEV_BUILD } from '../../lib/title-bar';
 import {
   CHILD_KINDS,
   MASTER_ID,
@@ -67,7 +69,7 @@ function NodeRow({ node, depth }: { node: SimNode; depth: number }) {
 }
 
 /**
- * Development builds only, inside the Simulation section: the live agent graph in the dark and
+ * Development builds only, on the Simulation page: the live agent graph in the dark and
  * the light theme side by side (two equal squares across the page's width), showing the master
  * node and the tree built under it with the rows below, or with "Mock graph" on, every kind of
  * node in every color. Each subtask, subagent and tool gets a
@@ -90,8 +92,10 @@ export function LiveAgentSimulatorSettings() {
   };
   walk(MASTER_ID, 1);
 
+  if (!IS_DEV_BUILD) return null;
+
   return (
-    <div className="mt-8">
+    <SettingsSection title={t('liveAgentSimulator.title')}>
       <div className="grid grid-cols-2 gap-4">
         {PREVIEW_THEMES.map((theme) => (
           <Suspense key={theme} fallback={<div className="aspect-square w-full" />}>
@@ -116,6 +120,6 @@ export function LiveAgentSimulatorSettings() {
         </SettingsRow>
         {rows.map(({ node, depth }) => <NodeRow key={node.id} node={node} depth={depth} />)}
       </SettingsRows>
-    </div>
+    </SettingsSection>
   );
 }

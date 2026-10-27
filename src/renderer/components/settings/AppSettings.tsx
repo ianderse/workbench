@@ -8,7 +8,7 @@ import {
   Download,
   Blocks
 } from 'lucide-react';
-import { AgentNodeIcon, GearIcon, ProjectOutlineIcon } from '../icons/app-icons';
+import { AgentNodeIcon, GearIcon, ProjectOutlineIcon, SimulationIcon } from '../icons/app-icons';
 
 import {
   FullScreenDialog,
@@ -30,6 +30,8 @@ import { GraphifySettings } from './GraphifySettings';
 import { AccountSettings } from './AccountSettings';
 import { ProjectSettingsContent, ProjectSettingsSection } from './ProjectSettingsContent';
 import { UsageSimulatorSettings } from './UsageSimulatorSettings';
+import { LiveAgentSimulatorSettings } from './LiveAgentSimulatorSettings';
+import { IS_DEV_BUILD } from '../../lib/title-bar';
 import { ConnectorsSettings } from './ConnectorsSettings';
 import { useProjectStore } from '../../stores/project-store';
 import type { UseProjectSettingsReturn } from '../project-settings/hooks/useProjectSettings';
@@ -51,7 +53,7 @@ interface AppSettingsDialogProps {
 }
 
 // App-level settings pages (claude.ai layout: related settings grouped on one page)
-type AppPage = 'general' | 'accounts' | 'agents' | 'connectors' | 'devtools' | 'updates';
+type AppPage = 'general' | 'accounts' | 'agents' | 'connectors' | 'devtools' | 'simulation' | 'updates';
 
 // Section ids accepted from the rest of the app; older ids map onto the page that now holds them
 export type AppSection = AppPage | 'agent' | 'claude-code' | 'terminal-fonts' | 'appearance' | 'display' | 'notifications' | 'paths' | 'debug' | 'integrations' | 'api-profiles';
@@ -98,6 +100,8 @@ const topNavItemsConfig: TopNavItem[] = [
   },
   { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'app', id: 'devtools', icon: CodeXml },
+  // Development builds only (the previews it holds are)
+  ...(IS_DEV_BUILD ? [{ kind: 'app', id: 'simulation', icon: SimulationIcon } as const] : []),
   { kind: 'app', id: 'updates', icon: Download }
 ];
 
@@ -239,9 +243,15 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
       case 'devtools':
         return (
           <>
-            {/* Development builds only */}
-            <UsageSimulatorSettings />
             <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />
+          </>
+        );
+      case 'simulation':
+        // Development builds only: previews of parts of the app in any state, in both themes
+        return (
+          <>
+            <LiveAgentSimulatorSettings />
+            <UsageSimulatorSettings />
           </>
         );
       case 'updates':
