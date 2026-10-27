@@ -18,7 +18,7 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import path from 'path';
 import { isMacOS } from '../platform';
 import { getClaudeHome, getClaudeManagedSettingsPath, isClaudeHomeInWsl } from '../platform/claude-home';
-import { toHostPath } from '../platform/shell-runtime';
+import { toHostPath, toRuntimePath } from '../platform/shell-runtime';
 import type { ClaudeCodeProvider, DetectedClaudeCodeAccount, DetectedClaudeCodeValue } from '../../shared/types/agent';
 import { getClaudeGlobalConfigPath, getDefaultClaudeConfigDir, isDefaultClaudeConfigDir } from './config-dir-paths';
 
@@ -114,6 +114,16 @@ function tildify(file: string): string {
   return file === home || file.startsWith(home + pathApi().sep) ? `~${file.slice(home.length)}` : file;
 }
 
+/**
+ * A file as Claude Code names it, shown on the account's details: in WSL its Linux path
+ * (`~/.claude/...`, `/etc/...`), not the UNC path Windows reaches it by. `~`-shortened when asked
+ */
+function displayPath(file: string, shorten = false): string {
+  const short = shorten ? tildify(file) : file;
+  if (!isClaudeHomeInWsl()) return short;
+  return short.startsWith('~') ? short.replace(/\\/g, '/') : toRuntimePath(file);
+}
+
 interface Source {
   label: string;
   env: Record<string, string>;
@@ -165,20 +175,21 @@ export function readClaudeCodeSetup(configDir: string, options: DetectionOptions
   // Precedence: managed settings, the dir's settings, then the environment
   const sources = [managed, user, environment].filter((source): source is Source => source !== null);
 
+  const sourceLabel = (source: Source) => (source === environment ? source.label : displayPath(source.label));
   const values: DetectedClaudeCodeValue[] = [];
   const effective = new Map<string, { value: string; source: Source }>();
   for (const name of SETUP_VARIABLES) {
     const source = sources.find((candidate) => candidate.env[name]);
     if (!source) continue;
     effective.set(name, { value: source.env[name], source });
-    values.push({ key: name, value: mask(name, source.env[name]), source: source.label });
+    values.push({ key: name, value: mask(name, source.env[name]), source: sourceLabel(source) });
   }
   for (const key of SETUP_SETTINGS) {
     const source = sources.find((candidate) => typeof candidate.settings[key] === 'string' && candidate.settings[key]);
     if (!source) continue;
     const value = String(source.settings[key]);
     effective.set(key, { value, source });
-    values.push({ key, value, source: source.label });
+    values.push({ key, value, source: sourceLabel(source) });
   }
 
   // The subscription sign-in (/login) of the dir
@@ -222,11 +233,11 @@ export function readClaudeCodeSetup(configDir: string, options: DetectionOptions
   if (provider === 'subscription') {
     const file = pathApi().join(configDir, '.credentials.json');
     credentials = existsSync(file) || !isMacOS()
-      ? tildify(file)
+      ? displayPath(file, true)
       : `Keychain: ${options.keychainEntry?.(configDir) ?? 'Claude Code-credentials'}`;
   } else {
     const source = decidingKey ? effective.get(decidingKey)?.source.label : undefined;
-    credentials = !source || source === 'environment' ? 'environment' : tildify(source);
+    credentials = !source || source === 'environment' ? 'environment' : displayPath(source, true);
   }
 
   return {
