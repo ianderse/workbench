@@ -3,7 +3,8 @@
 
 /* dark: follows the app's theme (the .dark class on <html>, set from Settings > Appearance), not the
    OS color scheme: otherwise light mode on a dark OS got dark-mode text, e.g. white code in Markdown */
-@custom-variant dark (&:where(.dark, .dark *));
+/* .light (below) forces the light theme inside a dark app, e.g. the usage simulator's light card */
+@custom-variant dark (&:where(.dark, .dark *):not(:where(.light, .light *)));
 
 /* Bundled UI font (shipped with the build, no network needed). Each weight the UI uses (regular,
    medium, semibold, bold) has its own cut: a synthesized bold smears the regular letters, which
@@ -107,66 +108,8 @@
   /* Display/heading font - same as sans in @theme; the Default theme overrides it with a serif stack */
   --font-heading: var(--font-sans);
 
-  /* Colors - using CSS variables for theme switching */
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-
-  --color-destructive: var(--destructive);
-  --color-destructive-foreground: var(--destructive-foreground);
-
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-
-  /* Semantic colors */
-  --color-success: var(--success);
-  --color-success-foreground: var(--success-foreground);
-  --color-warning: var(--warning);
-  --color-warning-foreground: var(--warning-foreground);
-  --color-info: var(--info);
-  --color-info-foreground: var(--info-foreground);
-
-  /* Theme-overridable surface tokens (see "Shared design tokens" below) */
-  --color-segment: var(--segment);
-  --color-segment-active: var(--segment-active);
-  --color-nav-hover: var(--nav-hover);
-  --color-switch-track: var(--switch-track);
-  --color-switch-track-hover: var(--switch-track-hover);
-  --color-switch-on: var(--switch-on);
-  --color-switch-on-hover: var(--switch-on-hover);
-  --color-switch-knob: var(--switch-knob);
-  --color-segment-track: var(--segment-track);
-  --color-segment-thumb: var(--segment-thumb);
-  --color-settings-surface: var(--settings-surface);
-  --color-settings-nav: var(--settings-nav);
-  --color-settings-divider: var(--settings-divider);
-  --color-fill-control: var(--fill-control);
-  --color-fill-control-hover: var(--fill-control-hover);
   --ease-snap: cubic-bezier(.32, .72, 0, 1);
   --ease-overshoot: cubic-bezier(.34, 1.3, .64, 1);
-  --color-nav-hover-foreground: var(--nav-hover-foreground);
-  --color-nav-active: var(--nav-active);
-  --color-nav-active-foreground: var(--nav-active-foreground);
 
   /* Border radius - from design system */
   --radius-sm: 4px;
@@ -223,6 +166,69 @@
   }
 }
 
+/* Colors - using CSS variables for theme switching. Inlined so each utility reads the variable
+   (var(--popover)) on its own element: a .light or .dark part of the page then gets its theme
+   colors, where a plain @theme would fix them once at :root with the app's theme. */
+@theme inline {
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  /* Semantic colors */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+
+  /* Theme-overridable surface tokens (see "Shared design tokens" below) */
+  --color-segment: var(--segment);
+  --color-segment-active: var(--segment-active);
+  --color-nav-hover: var(--nav-hover);
+  --color-switch-track: var(--switch-track);
+  --color-switch-track-hover: var(--switch-track-hover);
+  --color-switch-on: var(--switch-on);
+  --color-switch-on-hover: var(--switch-on-hover);
+  --color-switch-knob: var(--switch-knob);
+  --color-segment-track: var(--segment-track);
+  --color-segment-thumb: var(--segment-thumb);
+  --color-settings-surface: var(--settings-surface);
+  --color-settings-nav: var(--settings-nav);
+  --color-settings-divider: var(--settings-divider);
+  --color-fill-control: var(--fill-control);
+  --color-fill-control-hover: var(--fill-control-hover);
+  --color-nav-hover-foreground: var(--nav-hover-foreground);
+  --color-nav-active: var(--nav-active);
+  --color-nav-active-foreground: var(--nav-active-foreground);
+}
+
 /* Shadow utilities resolve to theme-overridable elevation tokens.
    Inlined so the utilities reference --elevation-* directly (not the design-system --shadow-* vars). */
 @theme inline {
@@ -261,8 +267,10 @@
    DEFAULT THEME (Light)
    Anthropic product styling — surfaces, text and nav states measured from claude.ai.
    Also defines the shared design tokens other themes override.
+   .light applies it to one part of the page whatever the app theme (.dark does the same for dark).
    ============================================ */
-:root {
+:root,
+.light {
   /* Native controls (number input arrows, scrollbars, pickers) follow the theme */
   color-scheme: light;
   /* Backgrounds */
