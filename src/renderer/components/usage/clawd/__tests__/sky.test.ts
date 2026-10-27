@@ -2,8 +2,8 @@
  * The sky's rules: the weather the 5-hour limit brings, and where the sun, the moon and the
  * stars are at a given time.
  */
-import { describe, expect, it } from 'vitest';
-import { moonLitPath, skyBodyPos, skyLook, sunTimes, usageWeather } from '../sky';
+import { describe, expect, it, vi } from 'vitest';
+import { isSouthern, moonLitPath, skyBodyPos, skyLook, sunTimes, usageWeather } from '../sky';
 
 const OCTOBER = new Date(2026, 9, 26, 12);
 const JANUARY = new Date(2027, 0, 15, 12);
@@ -67,5 +67,21 @@ describe('sky', () => {
       expect(cx).toBeLessThanOrEqual(300 * 0.84 + 1e-9);
     }
     expect(skyBodyPos(0.5, 300).cy).toBeLessThan(skyBodyPos(0.1, 300).cy);
+  });
+
+  it('places every Argentine time zone in the south, under either of its names', () => {
+    const inZone = (timeZone: string) => {
+      const spy = vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(
+        () => ({ resolvedOptions: () => ({ timeZone }) }) as unknown as Intl.DateTimeFormat,
+      );
+      try {
+        return isSouthern(OCTOBER);
+      } finally {
+        spy.mockRestore();
+      }
+    };
+    for (const zone of ['America/Cordoba', 'America/Mendoza', 'America/Buenos_Aires', 'America/Argentina/Salta']) {
+      expect(inZone(zone)).toBe(true);
+    }
   });
 });

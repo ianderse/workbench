@@ -55,8 +55,9 @@ const CLOUD_SNOW = hex('#FF94A3B8');
 /** The shaded underside of a cloud */
 const CLOUD_SHADE = hex('#FF64748B');
 
-/** Time zones south of the equator; most have no summer time to tell them apart by */
-const SOUTH_ZONES = /^(Australia|Antarctica)\/|^America\/(Argentina\/|Buenos_Aires|Sao_Paulo|Santiago|Punta_Arenas|Montevideo|Asuncion|La_Paz|Lima|Cuiaba|Campo_Grande|Porto_Velho|Rio_Branco|Bahia|Maceio|Recife|Araguaina|Fortaleza|Belem|Noronha)$|^Africa\/(Johannesburg|Maputo|Harare|Lusaka|Windhoek|Gaborone|Maseru|Mbabane|Blantyre|Lubumbashi|Luanda|Dar_es_Salaam|Kinshasa|Kigali|Bujumbura)$|^Indian\/(Antananarivo|Mauritius|Reunion|Mayotte|Comoro)$|^Pacific\/(Auckland|Chatham|Fiji|Tongatapu|Apia|Noumea|Efate|Port_Moresby|Tahiti|Rarotonga|Pago_Pago|Easter|Norfolk|Guadalcanal)$|^Asia\/(Jakarta|Makassar|Jayapura|Dili)$/;
+/** Time zones south of the equator; most have no summer time to tell them apart by. ICU names
+ *  five Argentine zones by their old America/<city> names */
+const SOUTH_ZONES = /^(Australia|Antarctica)\/|^America\/(Argentina\/\w+|Buenos_Aires|Cordoba|Catamarca|Jujuy|Mendoza|Sao_Paulo|Santiago|Punta_Arenas|Montevideo|Asuncion|La_Paz|Lima|Cuiaba|Campo_Grande|Porto_Velho|Rio_Branco|Bahia|Maceio|Recife|Araguaina|Fortaleza|Belem|Noronha)$|^Africa\/(Johannesburg|Maputo|Harare|Lusaka|Windhoek|Gaborone|Maseru|Mbabane|Blantyre|Lubumbashi|Luanda|Dar_es_Salaam|Kinshasa|Kigali|Bujumbura)$|^Indian\/(Antananarivo|Mauritius|Reunion|Mayotte|Comoro)$|^Pacific\/(Auckland|Chatham|Fiji|Tongatapu|Apia|Noumea|Efate|Port_Moresby|Tahiti|Rarotonga|Pago_Pago|Easter|Norfolk|Guadalcanal)$|^Asia\/(Jakarta|Makassar|Jayapura|Dili)$/;
 
 function zoneName(): string {
   try {
