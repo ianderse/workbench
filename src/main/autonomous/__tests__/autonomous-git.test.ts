@@ -218,9 +218,11 @@ describe('autoMergeIntoTarget', () => {
         return { status: 'resolved' as const, summary: 'kept both', intentionallyDropped: [] };
       });
 
-      const result = await autoMergeIntoTarget({ ...mergeInput(two, '002-b'), mergeAgent });
+      const onProgress = vi.fn();
+      const result = await autoMergeIntoTarget({ ...mergeInput(two, '002-b'), mergeAgent, onProgress });
 
       expect(result.success).toBe(true);
+      expect(onProgress.mock.calls).toEqual([['resolving', 1], ['verifying', undefined]]);
       expect(git(project, 'show', 'workbench/auto:a.txt')).toContain('TWO from one');
       expect(git(project, 'show', 'workbench/auto:a.txt')).toContain('TWO from two');
     });

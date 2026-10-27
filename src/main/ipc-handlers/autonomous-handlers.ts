@@ -24,6 +24,7 @@ import {
   configureAutonomous,
   getAutonomousStatus,
   maybeAutoMerge,
+  markInterruptedAutoMerges,
   mergeIntegrationIntoMain,
   previewRevert,
   revertAutoMerge,
@@ -37,6 +38,10 @@ export function registerAutonomousHandlers(getMainWindow: () => BrowserWindow | 
     safeSendToRenderer(getMainWindow, IPC_CHANNELS.AUTONOMOUS_CHANGED, projectId);
     safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_LIST_CHANGED, projectId);
   });
+  for (const project of projectStore.getProjects()) {
+    try { markInterruptedAutoMerges(project); }
+    catch (error) { appLog.warn('[Autonomous] Could not recover merge activity:', error); }
+  }
 
   // A task that enters Human Review after its run may be merged on its own; a task that runs
   // again forgets that its last merge was blocked

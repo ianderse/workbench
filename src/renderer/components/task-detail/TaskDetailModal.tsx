@@ -69,6 +69,7 @@ import { AutoMergePanel } from './task-review/AutoMergePanel';
 import { WhatWasDonePanel, shouldShowWhatWasDone } from './task-review/WhatWasDonePanel';
 import { SpecReviewPanel, shouldShowSpecReview } from './task-review/SpecReviewPanel';
 import { activeAutoMerge } from '../../../shared/utils/autonomous';
+import { TaskMergeStatus } from '../TaskMergeStatus';
 import { CreatePRDialog } from './task-review/CreatePRDialog';
 import { MergePRDialog } from './task-review/MergePRDialog';
 import { LocalMergeDialog } from './task-review/LocalMergeDialog';
@@ -415,6 +416,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
             <div className="flex-1 min-h-0 overflow-hidden">
                   <div className="h-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                     <div className="px-6 pb-6 pt-2 space-y-5 overflow-x-hidden max-w-full">
+                      <TaskMergeStatus task={task} />
                       {/* What the agent did, how it checked itself and what it changed */}
                       {shouldShowSpecReview(task) && <SpecReviewPanel task={task} />}
                       {shouldShowWhatWasDone(task) && <WhatWasDonePanel task={task} />}

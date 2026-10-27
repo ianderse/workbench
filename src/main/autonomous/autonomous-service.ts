@@ -12,6 +12,7 @@
  */
 import path from 'path';
 import type { Project, Task } from '../../shared/types';
+import type { AutoMergeProgress } from '../../shared/types/task';
 import type {
   AutonomousMergeIntoBaseResult,
   AutonomousRevertPreview,
@@ -180,6 +181,33 @@ function serialized<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
 /** Tasks whose automatic merge is queued or running */
 const inFlight = new Set<string>();
 
+function mergeProgress(project: Project, task: Task, phase: AutoMergeProgress['phase'], targetBranch?: string, conflictCount?: number): void {
+  const current = freshTask(project.id, task.id) ?? task;
+  const previous = current.metadata?.autoMergeProgress;
+  const at = new Date().toISOString();
+  writeMetadata(project, current, { autoMergeProgress: {
+    phase, at, startedAt: phase === 'queued' ? at : previous?.startedAt ?? at,
+    targetBranch: targetBranch ?? previous?.targetBranch,
+    ...(phase === 'resolving' && conflictCount !== undefined ? { conflictCount } : {}),
+  } satisfies AutoMergeProgress });
+  notifyChanged(project.id);
+}
+
+/** A saved spinner is not a live process. Called before startup catch-up schedules new merges. */
+export function markInterruptedAutoMerges(project: Project): void {
+  for (const task of projectStore.getTasks(project.id)) {
+    const progress = task.metadata?.autoMergeProgress;
+    if (!progress || progress.phase === 'interrupted' || inFlight.has(`${project.id}\0${task.id}`)) continue;
+    if ((task.metadata?.autoMerge && Date.parse(task.metadata.autoMerge.at) >= Date.parse(progress.at))
+      || (task.metadata?.autoMergeBlocked && Date.parse(task.metadata.autoMergeBlocked.at) >= Date.parse(progress.at))) {
+      writeMetadata(project, task, { autoMergeProgress: undefined });
+      notifyChanged(project.id);
+      continue;
+    }
+    mergeProgress(project, task, 'interrupted');
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Auto-merge
 // -----------------------------------------------------------------------------
@@ -220,18 +248,27 @@ export async function maybeAutoMerge(projectIn: Project, taskIn: Pick<Task, 'id'
       }
       return;
     }
+    const target = getAutonomousTargetSync(project, task);
+    mergeProgress(project, task, 'queued', target === ANY_TARGET_BRANCH ? undefined : target);
     await serialized(project.id, () => runAutoMerge(project, task, deps));
   } catch (error) {
     appLog.error(`[Autonomous] Auto-merge of ${taskIn.id} failed unexpectedly:`, error);
+    const task = freshTask(project.id, taskIn.id);
+    if (task) await blockAutoMerge(project, task, 'error', error instanceof Error ? error.message : String(error));
   } finally {
     inFlight.delete(key);
+    const task = freshTask(project.id, taskIn.id);
+    if (task?.metadata?.autoMergeProgress && task.metadata.autoMergeProgress.phase !== 'interrupted') {
+      writeMetadata(project, task, { autoMergeProgress: undefined });
+      notifyChanged(project.id);
+    }
   }
 }
 
 /** The task runs again (request changes, resume): a new review may pass, so its blocked merge is forgotten */
 export function clearAutoMergeBlocked(project: Project, task: Task): void {
-  if (!task.metadata?.autoMergeBlocked) return;
-  writeMetadata(project, task, { autoMergeBlocked: undefined });
+  if (!task.metadata?.autoMergeBlocked && !task.metadata?.autoMergeProgress) return;
+  writeMetadata(project, task, { autoMergeBlocked: undefined, autoMergeProgress: undefined });
   notifyChanged(project.id);
 }
 
@@ -247,7 +284,7 @@ async function blockAutoMerge(project: Project, task: Task, reason: 'conflicts' 
   }
   // (the board shows a translated line for the reason; the full text is its tooltip)
   logTask(project, task, 'warn', text);
-  writeMetadata(project, task, { autoMergeBlocked: { reason, message: text, at: new Date().toISOString() } });
+  writeMetadata(project, task, { autoMergeBlocked: { reason, message: text, at: new Date().toISOString() }, autoMergeProgress: undefined });
   notifyChanged(project.id);
   taskHooks.emit('needs-attention', { project, task, reason: 'auto-merge-blocked', detail: message });
 }
@@ -298,6 +335,7 @@ async function mergeIntoTarget(project: Project, task: Task, deps: AutoMergeDeps
     return blockAutoMerge(project, task, 'error', error instanceof Error ? error.message : String(error));
   }
 
+  mergeProgress(project, task, 'merging', targetBranch);
   const result = await autoMergeIntoTarget({
     projectDir: project.path,
     worktreePath,
@@ -311,6 +349,7 @@ async function mergeIntoTarget(project: Project, task: Task, deps: AutoMergeDeps
     backend: resolveEffectiveAgent(task.metadata?.agentOverride, getAgentBackendSettings().kind).backend,
     mergeAgent: deps.mergeAgent,
     log: (message) => logTask(project, task, 'info', message),
+    onProgress: (phase, conflictCount) => mergeProgress(project, task, phase, targetBranch, conflictCount),
     shouldContinue: () => {
       // The user may have moved the task while a conflict was being resolved
       const current = freshTask(project.id, task.id);
@@ -323,6 +362,7 @@ async function mergeIntoTarget(project: Project, task: Task, deps: AutoMergeDeps
   let pushed: boolean | undefined;
   let pushError: string | undefined;
   if (config.push) {
+    mergeProgress(project, task, 'pushing', targetBranch);
     const push = await pushBranch(project.path, targetBranch);
     pushed = push.pushed;
     if (push.skipped) logTask(project, task, 'info', 'no remote to push to');
@@ -341,6 +381,7 @@ async function mergeIntoTarget(project: Project, task: Task, deps: AutoMergeDeps
       ...(pushError ? { pushError } : {}),
     },
     autoMergeBlocked: undefined,
+    autoMergeProgress: undefined,
   });
   logTask(project, task, 'info', `merged into ${targetBranch} (${result.sha.slice(0, 8)}), waiting for your review`);
 

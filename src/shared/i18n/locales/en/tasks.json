@@ -344,6 +344,25 @@
     }
   },
   "autonomous": {
+    "progress": {
+      "title": "Merge status",
+      "target": "target branch",
+      "queued": "Queued for merge into {{branch}}",
+      "merging": "Merging into {{branch}}",
+      "resolving": "Resolving merge conflicts with {{branch}}",
+      "resolvingCount_one": "Resolving conflicts in {{count}} file with {{branch}}",
+      "resolvingCount_other": "Resolving conflicts in {{count}} files with {{branch}}",
+      "verifying": "Verifying merge into {{branch}}",
+      "pushing": "Pushing {{branch}}",
+      "merged": "Merged into {{branch}}",
+      "blocked": "Merge blocked",
+      "interrupted": "Merge interrupted",
+      "reverted": "Merge reverted on {{branch}}",
+      "pushFailed": "push failed",
+      "updated": "Last update:",
+      "workingHelp": "Workbench is completing the merge. This status updates as conflict resolution, verification and publishing finish.",
+      "interruptedHelp": "The app stopped before this merge finished. An eligible task will be retried after startup; check the task log if it stays interrupted."
+    },
     "cardLabel": "Merged automatically",
     "cardLabelTitle": "Merged into {{branch}} on its own. Move it to Done to sign it off",
     "blocked": {

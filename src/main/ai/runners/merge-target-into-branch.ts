@@ -319,6 +319,7 @@ export async function mergeTargetIntoBranch(config: MergeTargetIntoBranchConfig)
       if (config.abortSignal?.aborted) throw new Error('Stopped');
       summaries.push(second.summary);
       if (second.status !== 'resolved') throw new Error(`Claude Code could not restore the changes from ${target}: ${second.summary}`);
+      onProgress?.('verifying');
       if ((await git(['status', '--porcelain', '--untracked-files=no'])).trim()) {
         await git(['add', '-u']);
         await git(['commit', '-m', `Restore changes from ${target} lost in the merge`]);

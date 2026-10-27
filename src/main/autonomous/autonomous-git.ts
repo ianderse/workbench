@@ -220,6 +220,7 @@ export interface AutoMergeInput {
   /** Resolves conflicts (tests replace it) */
   mergeAgent?: MergeAgentFn;
   log?: (message: string) => void;
+  onProgress?: (step: 'resolving' | 'verifying', conflictCount?: number) => void;
   /** Checked before the target branch is changed; false abandons the merge (the user moved the task meanwhile) */
   shouldContinue?: () => boolean;
 }
@@ -284,6 +285,7 @@ export async function autoMergeIntoTarget(input: AutoMergeInput): Promise<AutoMe
       backend: input.backend,
       mergeAgent,
       onProgress: (step, params) => {
+        input.onProgress?.(step, typeof params?.count === 'number' ? params.count : undefined);
         if (step === 'resolving') log(`Merge conflicts in ${params?.count ?? ''} file(s), asking the merge agent`);
         if (step === 'verifying') log('The merge agent resolved the conflicts, checking the result');
       },

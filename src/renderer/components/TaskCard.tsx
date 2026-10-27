@@ -23,7 +23,7 @@ import { stopTask, checkTaskRunning, isIncompleteHumanReview, archiveTasks, hasR
 import type { Task, TaskStatus } from '../../shared/types';
 import { useSettingsStore } from '../stores/settings-store';
 import { useProjectStore } from '../stores/project-store';
-import { activeAutoMerge } from '../../shared/utils/autonomous';
+import { TaskMergeStatus } from './TaskMergeStatus';
 import { taskNumber } from '../../shared/utils/queue-grooming';
 import { deriveSpecReviewNext, specReviewNextKey } from '../../shared/utils/spec-review';
 import { specReviewNextText } from '../lib/spec-review-next';
@@ -75,6 +75,10 @@ function taskCardPropsAreEqual(prevProps: TaskCardProps, nextProps: TaskCardProp
     prevTask.reviewReason === nextTask.reviewReason &&
     prevTask.metadata?.autoMerge?.sha === nextTask.metadata?.autoMerge?.sha &&
     prevTask.metadata?.autoMerge?.revertedAt === nextTask.metadata?.autoMerge?.revertedAt &&
+    prevTask.metadata?.autoMerge?.branch === nextTask.metadata?.autoMerge?.branch &&
+    prevTask.metadata?.autoMerge?.pushed === nextTask.metadata?.autoMerge?.pushed &&
+    prevTask.metadata?.autoMerge?.pushError === nextTask.metadata?.autoMerge?.pushError &&
+    JSON.stringify(prevTask.metadata?.autoMergeProgress) === JSON.stringify(nextTask.metadata?.autoMergeProgress) &&
     prevTask.metadata?.autoMergeBlocked?.at === nextTask.metadata?.autoMergeBlocked?.at &&
     prevTask.claudeRun?.reviewVerdict?.status === nextTask.claudeRun?.reviewVerdict?.status &&
     prevTask.claudeRun?.reviewVerdict?.rounds === nextTask.claudeRun?.reviewVerdict?.rounds &&
@@ -335,9 +339,6 @@ export const TaskCard = memo(function TaskCard({
   };
 
   const isArchived = !!task.metadata?.archivedAt;
-  // Autonomous mode: merged into its target branch on its own (a string, so the memoized card compares it cheaply)
-  const autoMergedInto = task.status === 'human_review' ? activeAutoMerge(task)?.branch : undefined;
-  const autoMergeBlocked = task.status === 'human_review' ? task.metadata?.autoMergeBlocked : undefined;
   // Human Review after every AI review round failed (a number, so the memoized card compares it cheaply)
   const failedReviewRounds = task.status === 'human_review' && task.claudeRun?.reviewVerdict?.status === 'failed'
     ? task.claudeRun.reviewVerdict.rounds
@@ -400,16 +401,7 @@ export const TaskCard = memo(function TaskCard({
             {t('aiReviewFailed.cardLabel', { count: failedReviewRounds })}
           </p>
         )}
-        {autoMergedInto && (
-          <p className="mt-1.5 text-xs font-medium text-(--nav-label-color) wrap-anywhere" title={t('autonomous.cardLabelTitle', { branch: autoMergedInto })}>
-            {t('autonomous.cardLabel')}
-          </p>
-        )}
-        {autoMergeBlocked && !autoMergedInto && (
-          <p className="mt-1.5 text-xs font-medium text-warning line-clamp-2 wrap-anywhere" title={autoMergeBlocked.message}>
-            {t(`autonomous.blocked.${autoMergeBlocked.reason}`)}
-          </p>
-        )}
+        <TaskMergeStatus task={task} compact />
         {splitCount > 0 && (
           <p className="mt-1.5 text-xs text-(--nav-label-color) line-clamp-1">{t('queueGrooming.splitCardLabel', { count: splitCount })}</p>
         )}

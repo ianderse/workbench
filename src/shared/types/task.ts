@@ -292,6 +292,8 @@ export interface TaskMetadata {
 
   /** Autonomous mode: the task's merge into the target branch (one --no-ff merge commit) */
   autoMerge?: AutoMergeRecord;
+  /** Automatic merge activity, persisted so an interrupted app session is visible. */
+  autoMergeProgress?: AutoMergeProgress;
   /** Autonomous mode: why the last automatic merge did not happen (cleared when it succeeds) */
   autoMergeBlocked?: { reason: 'conflicts' | 'dirty_target' | 'error'; message: string; at: string };
   /** Id of the "Fix: ..." task that "Request changes" created for an automatically merged task */
@@ -317,6 +319,14 @@ export interface RateLimitHold {
   pausedAt: string;
   /** Build phase that was interrupted (planning, coding, qa_review, qa_fixing) */
   phase?: string;
+}
+
+export interface AutoMergeProgress {
+  phase: 'queued' | 'merging' | 'resolving' | 'verifying' | 'pushing' | 'interrupted';
+  targetBranch?: string;
+  conflictCount?: number;
+  startedAt: string;
+  at: string;
 }
 
 /** A task merged by autonomous mode (`metadata.autoMerge`) */
