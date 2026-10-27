@@ -39,6 +39,10 @@ reviews, requests changes (same session continues) or merges.
 
 ## Critical Rules
 
+**Commit completed work** — After implementing and validating work in this repository, commit it before reporting
+completion. Do not wait for a separate request to commit unless the user explicitly asks to leave changes uncommitted.
+Inspect and preserve existing work, honor the requested commit scope, and verify the working tree after delivery.
+
 **AI work goes through the agent backend layer** — All AI work (tasks, triage, Insights, titles, PR text, commit messages,
 merge conflict help) runs through a local coding-agent CLI: Claude Code by default (`src/main/claude-code/`, `ClaudeTaskRun`
 for tasks, `runClaudeText()` for one-shot calls) or OMP when Settings > Agents selects it (`src/main/agent-backend/`).
