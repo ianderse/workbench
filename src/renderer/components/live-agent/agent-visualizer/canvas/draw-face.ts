@@ -1,6 +1,7 @@
 import type { Agent, AgentState, ToolCallNode } from '../../lib/agent-types'
-import { FACE, WHISTLE } from '../../lib/canvas-constants'
-import { advanceNotes, spawnNote, type WhistleNote } from './draw-notes'
+import { FACE, WHISTLE, ZZZ } from '../../lib/canvas-constants'
+import { getStateColor } from '../../lib/colors'
+import { advanceNotes, spawnNote, spawnZ, type WhistleNote } from './draw-notes'
 
 /**
  * The main agent's face: two eyes (the shape of agent-flow's EMO sample: a
@@ -8,13 +9,22 @@ import { advanceNotes, spawnNote, type WhistleNote } from './draw-notes'
  * that show how the agent is doing. Only how the eyes move changes with the
  * agent's state; their shape and color (the node's) don't.
  *
- * Left with nothing to do it looks about for a few seconds and then sulks
- * with heavy lids until FACE.boredDuration is up; then it whistles to
- * itself for as long again — one blow at a time, eyes shut happy over it and
- * notes drifting out of its pucker (see draw-notes.ts), eyes open again for
- * the breath between two blows — and the two take turns for as long as it is
- * left alone. Caught at it by new work, its eyes snap open for a moment
- * before it takes up what it has to do.
+ * Left with nothing to do it whistles itself three to five blows — one at a
+ * time, eyes shut happy over it and notes drifting out of its pucker (see
+ * draw-notes.ts), eyes open again for the breath between two of them. Out of
+ * tune, it sulks through two or three turns of the heavy lids sinking and
+ * catching. Then sleep takes it: the lids come down over a gaze parked off to
+ * one side, it catches itself and looks the other way, twice, and the third
+ * time they stay down and the Zs start rising off its head. It is counted in
+ * whole animations rather than seconds, so a blow or a sulk is never cut off
+ * halfway (see startResting and advanceRest).
+ *
+ * None of that starts while the window it belongs to is still starting (see
+ * `suspended`): behind the window's spinner there is nobody to whistle to.
+ *
+ * Nothing wakes it but work, and when that comes its eyes snap wide open and
+ * the node turns over to the color of whatever it is now doing as they do (see
+ * displayedColor).
  */
 
 /** What the face shows */
@@ -25,10 +35,15 @@ type Expression =
   | 'upset'    // a tool failed: frowning, a shake
   | 'watch'    // waiting on sub-agents: following the newest one
   | 'happy'    // just finished its turn: a short laugh
-  | 'awkward'  // nothing to do: uneven eyes looking around, sneaking glances back
   | 'bored'    // bored: flat lids over round eyes, sinking, still looking about
-  | 'whistle'  // bored long enough: eyes closed happy, notes out of its mouth
-  | 'startled' // caught whistling: eyes snapped open, taking it in
+  | 'whistle'  // nothing to do: eyes closed happy, notes out of its mouth
+  | 'sleepy'   // bored long enough: lids sinking, catching itself over and over
+  | 'asleep'   // it gave in: eyes shut, head hanging, Zs rising off it
+  | 'startled' // caught at it: eyes snapped open, taking it in
+  | 'waiting'  // nothing to do yet: awake, blinking, nothing more
+
+/** Where the face is in its resting cycle, once it has nothing to do */
+type Rest = 'whistle' | 'bored' | 'sleepy' | 'asleep'
 
 /** One eye, in node radii from the node's center (x, y), scaled (sx, sy) and tilted (radians) */
 interface EyePose { x: number; y: number; sx: number; sy: number; tilt: number }
@@ -43,6 +58,37 @@ export interface FaceState {
   squint: number
   /** 0 the eye's own shape, 1 the bored one: lid flat over a round eye */
   boredShape: number
+  /** How heavy the lids are: 0 wide awake, 1 shut for the night. It comes down
+   *  over a close, springs back when it catches itself, and only stays at 1
+   *  once it is asleep */
+  drowse: number
+  /** Where it is in the resting cycle, and how much of each phase is left to
+   *  play: blows still to whistle, sulks still to sit through */
+  rest: Rest
+  whistlesLeft: number
+  sulksLeft: number
+  /** When the sulk it is on has sunk and caught itself, so the next can start
+   *  (or, with none left, sleep can) */
+  sulkEnd: number
+  /** Falling asleep: the lids are either coming down (since `closeFrom`, toward
+   *  `closeSide`) or being held open until `openUntil` after catching itself,
+   *  with `savesLeft` of those left before the close it sleeps through */
+  closing: boolean
+  closeFrom: number
+  closeSide: -1 | 1
+  savesLeft: number
+  openUntil: number
+  /** The color it is drawn in on the way to its state's own (see
+   *  displayedColor), when that was last moved along, and how long it is still
+   *  being eased for, toward which color (only the moment after work has woken
+   *  it, toward that work's) */
+  rgb: [number, number, number] | null
+  rgbTime: number
+  colorEaseUntil: number
+  colorEaseTo: string
+  /** Which of the three Z sizes comes next, and when */
+  zStep: number
+  nextZ: number
   expression: Expression
   /** When the expression started (graph clock seconds) */
   since: number
@@ -86,6 +132,9 @@ const WORKING: ReadonlySet<AgentState> = new Set(['thinking', 'tool_calling', 'w
  *  is what the happy laugh follows */
 const AT_WORK: ReadonlySet<Expression> = new Set(['ponder', 'focus', 'ask', 'upset', 'watch', 'startled'])
 
+/** Resting states work has to pull it out of: it is startled out of these */
+const RESTING_DEEP: ReadonlySet<Expression> = new Set(['whistle', 'sleepy', 'asleep'])
+
 const restingEye = (side: -1 | 1): EyePose => ({ x: side * FACE.eyeOffsetX, y: FACE.eyeOffsetY, sx: 1, sy: 1, tilt: 0 })
 
 /** Where the bored gaze parks itself, in turn: off to one side, off to the
@@ -98,7 +147,23 @@ function newFace(time: number): FaceState {
     motion: 0,
     squint: 0,
     boredShape: 0,
-    expression: 'bored',
+    drowse: 0,
+    rest: 'whistle',
+    whistlesLeft: 0,
+    sulksLeft: 0,
+    sulkEnd: 0,
+    closing: true,
+    closeFrom: 0,
+    closeSide: -1,
+    savesLeft: 0,
+    openUntil: 0,
+    rgb: null,
+    rgbTime: time,
+    colorEaseUntil: 0,
+    colorEaseTo: '',
+    zStep: 0,
+    nextZ: 0,
+    expression: 'waiting',
     since: time,
     lastTime: time,
     happyUntil: 0,
@@ -136,6 +201,21 @@ function boredSag(t: number): number {
   return c < 0.8 ? c / 0.8 : Math.max(0, 1 - (c - 0.8) / 0.08)
 }
 
+/**
+ * How heavy the lids are while it is falling asleep: they come down over
+ * FACE.sleepyClose, and the moment it catches itself they are pulled back up
+ * (fast, see the rates in drawFace) and held there until the next close takes
+ * over. The close it sleeps through is the same curve, just with nothing on
+ * the other end of it.
+ */
+function drowseAt(face: FaceState, time: number): number {
+  if (!face.closing) return 0
+  // Only the close it sleeps through shuts the eyes: the ones it catches
+  // itself out of leave them a bored sliver, open enough to still be eyes
+  const far = face.savesLeft > 0 ? FACE.sleepyShut : 1
+  return far * smooth(Math.min(1, (time - face.closeFrom) / FACE.sleepyClose))
+}
+
 /** Where the face looks for an expression (-1..1 each way; +y is down) */
 function gazeFor(face: FaceState, agent: Agent, agents: Map<string, Agent>, toolCalls: Map<string, ToolCallNode>, time: number) {
   const t = time - face.since
@@ -166,12 +246,6 @@ function gazeFor(face: FaceState, agent: Agent, agents: Map<string, Agent>, tool
     }
     case 'upset':
       return { x: 0, y: 0.15 }
-    case 'awkward': {
-      // Looking away and down, with a quick glance back now and then (and away again)
-      const cycle = t % 3.4
-      const glance = cycle > 2.6 && cycle < 3.05
-      return glance ? { x: 0.15, y: 0 } : { x: -0.75, y: 0.4 }
-    }
     case 'bored':
       // Off to one side, waiting for something interesting to turn up there.
       // It holds that way until the next blink takes it to the next station
@@ -184,6 +258,20 @@ function gazeFor(face: FaceState, agent: Agent, agents: Map<string, Agent>, tool
       return face.blowing
         ? { x: Math.sin(t * 0.6) * 0.08, y: -0.04 }
         : { x: Math.sin(t * 0.5) * 0.3, y: -0.3 }
+    case 'sleepy':
+      // The lids come down over a gaze parked off to one side, as when bored,
+      // and take it further that way and further down as they fall. Catching
+      // itself brings it back to the front, wide awake for a moment, and the
+      // close after that is the other side's
+      return face.closing
+        ? {
+            x: FACE.boredLookX * face.closeSide * (0.45 + 0.55 * face.drowse),
+            y: FACE.boredGazeY + 0.3 * face.drowse,
+          }
+        : { x: 0, y: -0.06 }
+    case 'asleep':
+      // Nothing to look at: the eyes are shut and the head hangs
+      return { x: 0, y: 0.3 }
     case 'startled':
       // Caught: up and straight ahead, taking in who wants it now
       return { x: 0, y: -0.12 }
@@ -222,17 +310,6 @@ function targetPose(face: FaceState, gaze: { x: number; y: number }, t: number):
         pose.y -= 0.07
         pose.tilt = side * 0.13
         break
-      case 'awkward':
-        // Uneven: one eye squeezed and tilted, the other a bit higher
-        if (side === -1) {
-          pose.sy = 0.8
-          pose.tilt = 0.14
-          pose.y += 0.02
-        } else {
-          pose.tilt = -0.06
-          pose.y -= 0.03
-        }
-        break
       case 'bored': {
         // Wide and short under a flat lid (the shape itself is drawn from
         // FaceState.boredShape), sinking lower until it catches itself
@@ -258,6 +335,26 @@ function targetPose(face: FaceState, gaze: { x: number; y: number }, t: number):
           pose.y -= 0.02
           pose.tilt = side * 0.08
         }
+        break
+      case 'sleepy':
+        if (!face.closing) {
+          // Caught itself: the eyes come back the size and shape they are when
+          // it is wide awake (the bored lid goes with them, see boredTarget)
+          break
+        }
+        // Going under: the bored eye, wider, shorter and lower the heavier the
+        // lids get. How far they have actually come down is `drowse`, which
+        // closes the eye itself (see drawFace)
+        pose.sx = 1.2
+        pose.sy = 0.62
+        pose.y += 0.04 + 0.05 * face.drowse
+        pose.tilt = side * 0.12 // outer corners down: giving up on the day
+        break
+      case 'asleep':
+        pose.sx = 1.1
+        pose.sy = 0.5
+        pose.y += 0.07
+        pose.tilt = side * 0.1
         break
       case 'startled': {
         // Snapped wide open, then held open while it comes to
@@ -311,14 +408,61 @@ function workingExpression(agent: Agent, displayed: AgentState, waitingOnSubagen
 }
 
 /**
- * The resting cycle, `idleFor` seconds into having nothing to do: it looks
- * around, sulks out the rest of FACE.boredDuration, then whistles for as long
- * again — and takes it from the top for as long as it is left alone.
+ * Set the resting cycle going: so many blows to whistle and so many sulks to
+ * sit through, drawn afresh every time it is left alone, so the idle stretch
+ * never plays out the same way twice. Each phase is counted out in whole
+ * animations and hands over only when the one it is playing has finished (see
+ * advanceRest), which is what keeps a blow or a sulk from being cut off.
  */
-function restingExpression(idleFor: number): Expression {
-  const phase = idleFor % (FACE.boredDuration * 2)
-  if (phase >= FACE.boredDuration) return 'whistle'
-  return phase < FACE.lookDuration ? 'awkward' : 'bored'
+function startResting(face: FaceState) {
+  face.rest = 'whistle'
+  face.whistlesLeft = FACE.whistlesMin + Math.floor(Math.random() * (FACE.whistlesRange + 1))
+  face.sulksLeft = FACE.sulksMin + Math.floor(Math.random() * (FACE.sulksRange + 1))
+}
+
+/** The lids start coming down toward `side`, from here */
+function startClosing(face: FaceState, side: -1 | 1, time: number) {
+  face.closing = true
+  face.closeFrom = time
+  face.closeSide = side
+}
+
+/**
+ * Carry the resting cycle on, once an animation it was playing is done:
+ * - the sulk it is on has sunk and caught itself, and it has no more to sit
+ *   through: the lids start coming down for good
+ * - the lids are all the way down: it catches itself, looks the other way and
+ *   lets them come down again — until the last save is spent, and that close
+ *   is the one it sleeps through
+ * (a blow is counted off in `whistle`, which is where one ends)
+ */
+function advanceRest(face: FaceState, time: number) {
+  if (face.rest === 'bored' && time >= face.sulkEnd) {
+    if (--face.sulksLeft > 0) face.sulkEnd = time + FACE.sagCycle
+    else {
+      face.rest = 'sleepy'
+      face.savesLeft = FACE.sleepySaves
+      startClosing(face, -1, time)
+    }
+    return
+  }
+  if (face.rest !== 'sleepy') return
+  if (face.closing) {
+    if (time - face.closeFrom < FACE.sleepyClose) return
+    if (face.savesLeft <= 0) {
+      // Nothing left to fight it off with: this close is the one it sleeps
+      // through (drawFace starts the Zs once the lids are down)
+      face.rest = 'asleep'
+      return
+    }
+    // Caught itself: the eyes come back wide open for a moment
+    face.savesLeft--
+    face.closing = false
+    face.openUntil = time + FACE.sleepyOpenHold
+    return
+  }
+  // Held itself open long enough: down they come again, the other way this time
+  if (time >= face.openUntil) startClosing(face, face.closeSide === -1 ? 1 : -1, time)
 }
 
 /**
@@ -326,21 +470,41 @@ function restingExpression(idleFor: number): Expression {
  * resting cycle above, which a last happy moment comes before. Work that
  * interrupts the whistling startles it first.
  */
-function expressionFor(agent: Agent, displayed: AgentState, waitingOnSubagents: boolean, face: FaceState, time: number): Expression {
+function expressionFor(agent: Agent, displayed: AgentState, waitingOnSubagents: boolean, face: FaceState, time: number, suspended: boolean, replaying: boolean): Expression {
+  // A rebuilt graph replays its session in one frame: those states already
+  // happened, so the face holds what it was doing instead of being woken by
+  // work from the past and starting its resting cycle over
+  if (replaying) return face.expression
   const working = workingExpression(agent, displayed, waitingOnSubagents)
   if (working) {
-    // Caught whistling: the eyes snap open before it takes the work up
-    if (face.expression === 'whistle') face.startleUntil = time + FACE.startleDuration
+    // Caught whistling, or fast asleep: the eyes snap wide open and take in
+    // who wants it now, while the node turns over to that work's own color
+    // (the one change worth easing, see displayedColor)
+    if (RESTING_DEEP.has(face.expression)) face.startleUntil = time + FACE.startleDuration
     face.idleSince = 0
     return time < face.startleUntil ? 'startled' : working
+  }
+  if (suspended && face.idleSince === 0) {
+    // The window is still starting and the graph is behind its spinner: the
+    // resting cycle waits for it rather than playing to nobody, so whoever is
+    // watching sees it whistle from the first blow. One already under way goes
+    // on (a session being opened, its spinner over the one still shown):
+    // nothing wakes it but work
+    return 'waiting'
   }
   if (face.idleSince === 0) {
     // Nothing left to do: a turn that has just ended is happy about it first
     face.idleSince = time
+    startResting(face)
     if (AT_WORK.has(face.expression)) face.happyUntil = time + FACE.happyDuration
   }
   if (time < face.happyUntil) return 'happy'
-  return restingExpression(time - face.idleSince)
+  // Awake and doing nothing for a moment first: whistling the instant there is
+  // nothing to do caught every session that came back to life a beat later
+  if (time - face.idleSince < FACE.restLead) return 'waiting'
+  advanceRest(face, time)
+  // Each part of the cycle is the expression of the same name
+  return face.rest
 }
 
 /** How much a note coming out opens the pucker, `t` seconds after it left: it
@@ -377,6 +541,13 @@ function whistle(face: FaceState, cx: number, cy: number, r: number, color: stri
     face.blow = 0
     face.whistleSide = face.whistleSide === -1 ? 1 : -1
     face.nextNote = time + WHISTLE.phraseGap + Math.random() * WHISTLE.phraseGapJitter
+    // That is one of the blows it had in it. With the last one out it has no
+    // tune left and sits down to sulk, which is why a blow is never cut off
+    // halfway: the count only runs down here, between two of them
+    if (--face.whistlesLeft <= 0) {
+      face.rest = 'bored'
+      face.sulkEnd = time + FACE.sagCycle
+    }
     return
   }
   face.phraseLeft--
@@ -406,6 +577,66 @@ function drawWhistle(
   ctx.restore()
 }
 
+/** A #rrggbb string as its three channels */
+function channels(hex: string): [number, number, number] {
+  const n = parseInt(hex.slice(1), 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+
+/** How far apart the eased colors are, per channel (see displayedColor) */
+const COLOR_STEP = 6
+
+const hex2 = (v: number) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')
+
+/**
+ * The color to draw the main agent in: its state's own, and for the moment
+ * after work has woken it, eased on the way there — the one change the node
+ * makes something of, since it is coming round rather than carrying on. Every
+ * other change is its new color at once, as for any other node, and so is one
+ * that comes along while the wake is still easing. The glow and the ring take it
+ * from here too, so the node turns over with the face rather than around it.
+ *
+ * The eased color moves in steps of COLOR_STEP per channel, too small to see:
+ * the glow's sprite is cached by color, and a new color every frame built a
+ * new sprite every frame of the ease.
+ */
+export function displayedColor(faces: Map<string, FaceState>, id: string, state: AgentState, time: number): string {
+  const target = getStateColor(state)
+  const face = faces.get(id)
+  if (!face) return target
+  const to = channels(target)
+  if (!face.rgb) {
+    face.rgb = to
+    face.rgbTime = time
+    return target
+  }
+  // Waking is noticed here rather than in drawFace: the glow and the ring need
+  // the color before the face has been advanced, so this call comes first and
+  // work's color arriving while the face is still resting is the wake itself.
+  // Any other change it sleeps through (a finished agent coming back idle) is cut
+  const differs = Math.abs(face.rgb[0] - to[0]) + Math.abs(face.rgb[1] - to[1]) + Math.abs(face.rgb[2] - to[2]) > 2
+  if (differs && WORKING.has(state) && RESTING_DEEP.has(face.expression)) {
+    face.colorEaseUntil = time + FACE.colorEaseWindow
+    face.colorEaseTo = target
+  }
+  if (time >= face.colorEaseUntil || target !== face.colorEaseTo) {
+    face.colorEaseUntil = 0
+    face.rgb = to
+    face.rgbTime = time
+    return target
+  }
+  const dt = Math.min(Math.max(time - face.rgbTime, 0), 0.1)
+  face.rgbTime = time
+  const k = 1 - Math.exp(-dt * FACE.colorEase)
+  face.rgb = [
+    face.rgb[0] + (to[0] - face.rgb[0]) * k,
+    face.rgb[1] + (to[1] - face.rgb[1]) * k,
+    face.rgb[2] + (to[2] - face.rgb[2]) * k,
+  ]
+  const step = (v: number) => hex2(Math.round(v / COLOR_STEP) * COLOR_STEP)
+  return `#${step(face.rgb[0])}${step(face.rgb[1])}${step(face.rgb[2])}`
+}
+
 /**
  * Advance and draw the main agent's face at (cx, cy) for radius r, in `color`.
  * The notes it whistles are drawn separately (they float free of the node, see
@@ -422,16 +653,22 @@ export function drawFace(
   cx: number, cy: number, r: number,
   color: string,
   time: number,
+  /** The window is still starting: hold the resting cycle until it is shown */
+  suspended: boolean,
+  /** This frame replays a rebuilt graph's history: the face sits it out */
+  replaying: boolean,
 ): void {
   let face = faces.get(agent.id)
   if (!face) {
     face = newFace(time)
     faces.set(agent.id, face)
   }
-  const expression = expressionFor(agent, displayed, waitingOnSubagents, face, time)
+  const expression = expressionFor(agent, displayed, waitingOnSubagents, face, time, suspended, replaying)
   if (face.expression !== expression) {
     face.expression = expression
     face.since = time
+    // Every sleep's Zs climb from the smallest, wherever the last one's stopped
+    if (expression === 'asleep') { face.nextZ = time + ZZZ.gap; face.zStep = 0 }
   }
   const dt = Math.min(Math.max(time - face.lastTime, 0), 0.1)
   face.lastTime = time
@@ -444,10 +681,25 @@ export function drawFace(
   const overTune = expression === 'whistle'
   face.squint += ((blowing ? 1 : 0) - face.squint) * (1 - Math.exp(-dt * (overTune ? FACE.squintSpeed : FACE.squintOpenSpeed)))
   face.blow += ((blowing ? 1 : 0) - face.blow) * (1 - Math.exp(-dt * FACE.blowEase))
-  const boredTarget = expression === 'bored' ? 1 : 0
-  face.boredShape += (boredTarget - face.boredShape) * (1 - Math.exp(-dt * FACE.boredShapeSpeed))
+  // The lids sink over a nod and the jolt pulls them back, so they follow
+  // their weight at two speeds; waking up is faster still. `jolt` is how hard
+  // they are being pulled open right now, which the shiver below goes with
+  const wasDrowse = face.drowse
+  const drowseTarget = expression === 'sleepy' ? drowseAt(face, time) : expression === 'asleep' ? 1 : 0
+  const drowseSpeed = drowseTarget >= face.drowse || expression === 'asleep'
+    ? FACE.drowseSpeed
+    : expression === 'sleepy' ? FACE.joltSpeed : FACE.wakeSpeed
+  face.drowse += (drowseTarget - face.drowse) * (1 - Math.exp(-dt * drowseSpeed))
+  const jolt = expression === 'sleepy' ? Math.max(0, (wasDrowse - face.drowse) / Math.max(dt, 1e-3)) : 0
+
+  // Sleep keeps the bored eye: the lid stays flat over it as it closes, and
+  // only lifts off when it catches itself, where the eye is its own shape again
+  const saved = expression === 'sleepy' && !face.closing
+  const boredTarget = !saved && (expression === 'bored' || expression === 'sleepy' || expression === 'asleep') ? 1 : 0
+  face.boredShape += (boredTarget - face.boredShape) * (1 - Math.exp(-dt * (saved ? FACE.wakeEase : FACE.boredShapeSpeed)))
   const motionTarget = expression === 'upset' || expression === 'happy' || expression === 'ask'
-    || expression === 'awkward' || expression === 'bored' || expression === 'whistle' ? 1 : 0
+    || expression === 'bored' || expression === 'whistle'
+    || expression === 'sleepy' || expression === 'asleep' ? 1 : 0
   face.motion += (motionTarget - face.motion) * (1 - Math.exp(-dt * FACE.motionEase))
 
   // Whistling: notes out of the mouth; once it stops, the ones in the air
@@ -456,6 +708,14 @@ export function drawFace(
   if (expression === 'whistle') whistle(face, cx, cy, r, color, time)
   // Not whistling (or caught at it): the pucker goes at once, with the tune
   else { face.blowing = false; face.blow = 0; face.phraseLeft = 0; face.nextNote = time }
+
+  // Asleep: a Z rises off its head now and then, the three sizes in turn, so
+  // they climb away from it as one "Zzz"
+  if (expression === 'asleep' && time >= face.nextZ) {
+    spawnZ(face.notes, cx + ZZZ.fromX * r, cy + ZZZ.fromY * r, r, face.zStep, 1, color)
+    face.zStep = (face.zStep + 1) % ZZZ.sizes.length
+    face.nextZ = time + ZZZ.gap + Math.random() * ZZZ.gapJitter
+  }
 
   // Quick glances while focused
   if (expression === 'focus' && time >= face.nextSaccade) {
@@ -471,7 +731,7 @@ export function drawFace(
   if (time >= face.nextBlink) {
     const gap = FACE.blinkMinGap * (expression === 'focus' ? 1.6 : 1)
     face.nextBlink = time + gap + Math.random() * FACE.blinkJitter
-    if (expression !== 'whistle') {
+    if (expression !== 'whistle' && expression !== 'asleep' && face.drowse < 0.5) {
       face.blinkStart = time
       face.doubleBlink = Math.random() < FACE.doubleBlinkChance
       // A bored blink is what the gaze moves over: by the time the lids are
@@ -495,7 +755,10 @@ export function drawFace(
   }
 
   const target = targetPose(face, gazeFor(face, agent, agents, toolCalls, time), t)
-  const k = snap ? 1 : 1 - Math.exp(-dt * FACE.poseEase)
+  // Catching itself is the one thing the eyes do quickly: the pose comes back
+  // with the lids rather than easing along behind them
+  const poseRate = expression === 'sleepy' && !face.closing ? FACE.wakeEase : FACE.poseEase
+  const k = snap ? 1 : 1 - Math.exp(-dt * poseRate)
   face.pose = { left: lerpPose(face.pose.left, target.left, k), right: lerpPose(face.pose.right, target.right, k) }
 
   // The expression's own motion, on top of its pose
@@ -503,8 +766,14 @@ export function drawFace(
   if (expression === 'upset') shakeX = Math.sin(t * 38) * (0.045 * Math.exp(-t * 1.6) + 0.006)
   else if (expression === 'happy') bobY = -Math.abs(Math.sin(t * 11)) * 0.05
   else if (expression === 'ask') bobY = Math.sin(t * 2.6) * 0.025
-  else if (expression === 'awkward') shakeX = Math.sin(t * 1.9) * 0.025 // a nervous shuffle
   else if (expression === 'bored') bobY = Math.sin(t * 0.8) * 0.022 // a slow sigh
+  else if (expression === 'sleepy') {
+    // The head goes down with the lids and comes back up with them; the shiver
+    // is the save itself, so it only happens when it really catches itself
+    bobY = face.drowse * FACE.nodAmp
+    shakeX = Math.sin(time * 34) * FACE.nodShake * Math.min(1, jolt * 0.4)
+  }
+  else if (expression === 'asleep') bobY = FACE.sleepHang * face.drowse + Math.sin(t * FACE.sleepBreathSpeed) * FACE.sleepBreathAmp
   else if (expression === 'whistle') {
     // Bobbing along to its own tune
     bobY = Math.sin(t * FACE.whistleBobSpeed) * FACE.whistleBobAmp
@@ -513,7 +782,14 @@ export function drawFace(
   shakeX *= face.motion
   bobY *= face.motion
 
-  const lidOpen = blinkFactor(face, time) * (1 - face.squint)
+  // A shut lid draws an arc instead of the eye: the happy one it whistles
+  // behind, or, once sleep has the eyes, the same arc dipped the other way —
+  // relaxed rather than pleased. The eye is down to nothing by the time that
+  // arc comes in, so the two are never drawn over each other, which looked
+  // like one eye with two outlines through every closing and opening
+  const closed = Math.max(face.squint, face.drowse)
+  const lidOpen = blinkFactor(face, time) * Math.max(0, 1 - closed / FACE.lidHandover)
+  const shut = Math.max(0, (closed - FACE.arcFrom) / (1 - FACE.arcFrom))
   ctx.save()
   ctx.fillStyle = color
   ctx.shadowColor = color
@@ -536,20 +812,21 @@ export function drawFace(
       ctx.roundRect(-w / 2, -h / 2, w, h, [top, top, bottom, bottom])
       ctx.fill()
     }
-    if (face.squint > 0.02) {
+    if (shut > 0.02) {
       // Closed and content: an arc bowed up, taking over as the eye flattens.
       // The one above the pucker is squeezed a little narrower.
       // (it follows the pucker, so it is gone the moment the blow is)
       const squeeze = side === face.whistleSide ? 1 - 0.12 * face.blow : 1
       const aw = FACE.arcWidth * r * pose.sx * squeeze
+      const lift = face.drowse > face.squint ? -FACE.sleepArcDip : FACE.arcLift
       ctx.save()
-      ctx.globalAlpha *= face.squint
+      ctx.globalAlpha *= shut
       ctx.strokeStyle = color
       ctx.lineWidth = Math.max(1, FACE.arcWeight * r)
       ctx.lineCap = 'round'
       ctx.beginPath()
       ctx.moveTo(-aw / 2, 0)
-      ctx.quadraticCurveTo(0, -FACE.arcLift * r * 2, aw / 2, 0)
+      ctx.quadraticCurveTo(0, -lift * r * 2, aw / 2, 0)
       ctx.stroke()
       ctx.restore()
     }

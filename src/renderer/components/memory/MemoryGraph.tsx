@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Loader2 } from 'lucide-react';
+import { AgentLoader } from '../ui/agent-loader';
 // The app's Content Security Policy forbids eval; this makes PixiJS build its shaders without it
 import 'pixi.js/unsafe-eval';
 import { Application, Circle, Color, Container, Graphics, Text } from 'pixi.js';
@@ -608,7 +608,7 @@ export function MemoryGraph({ projectId }: { projectId: string }) {
       <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
         {(status !== 'ready' || !laidOut) && (
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 text-sm text-(--nav-label-color)">
-            {(status === 'loading' || status === 'ready') && <Loader2 className="h-5 w-5 animate-spin" strokeWidth={1.75} />}
+            {(status === 'loading' || status === 'ready') && <AgentLoader size={24} />}
             {/* The left padding balances the dots, so the words stay centered under the icon */}
             {status === 'loading' && <span className="pl-[3ch]">{t('memoryGraph.loading')}<LoadingDots /></span>}
             {status === 'ready' && graph && (

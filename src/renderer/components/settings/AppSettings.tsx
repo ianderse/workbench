@@ -30,6 +30,7 @@ import { ClaudeCodeSettings } from './ClaudeCodeSettings';
 import { GraphifySettings } from './GraphifySettings';
 import { AccountSettings } from './AccountSettings';
 import { ProjectSettingsContent, ProjectSettingsSection } from './ProjectSettingsContent';
+import { UsageSimulatorSettings } from './UsageSimulatorSettings';
 import { ConnectorsSettings } from './ConnectorsSettings';
 import { useProjectStore } from '../../stores/project-store';
 import { useIsOmpBackend } from '../../hooks/useIsOmpBackend';
@@ -92,7 +93,12 @@ const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'general', icon: GearIcon },
   { kind: 'app', id: 'accounts', icon: CircleUserRound },
   { kind: 'app', id: 'agents', icon: AgentNodeIcon, iconClassName: 'h-[16px] w-[16px]' },
-  { kind: 'project', id: 'general', icon: ProjectOutlineIcon },
+  // Its artwork reads small next to the others: 2px larger, pulled in by a pixel on each side so the
+  // label stays in line, with the stroke thinned to match
+  {
+    kind: 'project', id: 'general', icon: ProjectOutlineIcon,
+    iconClassName: 'h-[1.25rem] w-[1.25rem] -mx-px', iconStrokeWidth: 1.35
+  },
   { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'app', id: 'devtools', icon: CodeXml },
   { kind: 'app', id: 'updates', icon: Download }
@@ -246,7 +252,13 @@ export function AppSettingsDialog({ open, onOpenChange, initialSection, initialP
           <ConnectorsSettings settings={settings} onSettingsChange={setSettings} />
         );
       case 'devtools':
-        return <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />;
+        return (
+          <>
+            {/* Development builds only */}
+            <UsageSimulatorSettings />
+            <GeneralSettings settings={settings} onSettingsChange={setSettings} section="paths" />
+          </>
+        );
       case 'updates':
         return (
           <>

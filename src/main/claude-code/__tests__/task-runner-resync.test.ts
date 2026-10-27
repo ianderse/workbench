@@ -119,7 +119,8 @@ describe('ClaudeTaskRun resync', () => {
   });
 
   afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+    // Windows refuses to delete a directory while a git process or virus scanner still holds a handle
+    rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
   function runInfo(phases: ClaudeRunInfo['phases'], sessionId: string | null = 's1'): void {

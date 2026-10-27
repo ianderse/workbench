@@ -4,6 +4,12 @@ import type { MutableEventState } from './process-event'
 import { findFreeSlot } from './find-slot'
 import { asString, asBoolean } from './types'
 
+/** A direction of its own for a node with nothing around it yet */
+function hashAngle(name: string): number {
+  const hash = name.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)
+  return (Math.abs(hash) % 360) * (Math.PI / 180)
+}
+
 /** The middle of the widest direction still free around the parent */
 function widestGapAngle(name: string, parent: Agent, state: MutableEventState): number {
   // Directions already taken around the parent: its other sub-agents, its own
@@ -17,11 +23,8 @@ function widestGapAngle(name: string, parent: Agent, state: MutableEventState): 
     if (tc.agentId === parent.id) take(tc)
   }
 
-  if (takenAngles.length === 0) {
-    // Nothing around it yet: use a hash-based angle
-    const hash = name.split('').reduce((h, c) => ((h << 5) - h) + c.charCodeAt(0), 0)
-    return (Math.abs(hash) % 360) * (Math.PI / 180)
-  }
+  // Nothing around it yet: use a hash-based angle
+  if (takenAngles.length === 0) return hashAngle(name)
 
   takenAngles.sort((a, b) => a - b)
   let bestGap = 0
@@ -39,6 +42,7 @@ function widestGapAngle(name: string, parent: Agent, state: MutableEventState): 
 
 export function handleAgentSpawn(
   payload: Record<string, unknown>,
+  eventTime: number,
   state: MutableEventState,
 ): void {
   const name = asString(payload.name)
@@ -76,10 +80,30 @@ export function handleAgentSpawn(
     })
     x = pos.x
     y = pos.y
+  } else {
+    // Nothing to hang off (the main agent, or a sub-agent seen before the agent it belongs to):
+    // the middle, unless something already sits there, then the nearest free spot around it
+    const radius = isMain ? NODE.radiusMain : NODE.radiusSub
+    const pos = findFreeSlot({
+      parent: { id: '', x: 0, y: 0, radius: 0 },
+      radius,
+      footprint: radius + AGENT_DRAW.glowPadding,
+      preferredAngle: hashAngle(name),
+      agents: state.agents,
+      toolCalls: state.toolCalls,
+      atParent: true,
+    })
+    x = pos.x
+    y = pos.y
   }
 
   const agent: Agent = {
-    id: name, state: 'idle',
+    // A sub-agent is launched with work to do, so it is working from the start: drawn idle until
+    // its first message, it sat there looking idle for as long as it took to start, which for a
+    // fork (it takes the whole conversation along) is a good while. The main agent starts out
+    // waiting for a prompt. One that does nothing (e.g. a dead one found again on re-attach)
+    // falls back to idle after a while (see animate.ts)
+    id: name, state: isMain ? 'idle' : 'thinking',
     parentId: parentId || null,
     x, y,
     isMain,
@@ -87,6 +111,7 @@ export function handleAgentSpawn(
     opacity: 0,
   }
   state.agents.set(name, agent)
+  if (!isMain) state.quietSubagents.set(name, eventTime)
 
   if (parentId) {
     state.edges.push({ from: parentId, to: name, type: 'parent-child' })

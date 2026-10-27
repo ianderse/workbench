@@ -41,13 +41,14 @@ vi.mock('../../platform', async (importOriginal) => ({
 const wslRef = vi.hoisted(() => ({ on: true }));
 vi.mock('../../platform/shell-runtime', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../platform/shell-runtime')>();
-  const { wslToWindows } = await import('../../platform/wsl-paths');
+  const { windowsToWsl, wslToWindows } = await import('../../platform/wsl-paths');
   const info = { distro: 'Ubuntu', home: '/home/me', mountRoot: '/mnt/', loginPath: '/usr/bin', tools: {} };
   return {
     ...actual,
     isWslRuntime: () => wslRef.on,
     getWslInfo: () => (wslRef.on ? info : null),
     toHostPath: (p: string) => (wslRef.on ? wslToWindows(p, info) : p),
+    toRuntimePath: (p: string) => (wslRef.on ? windowsToWsl(p, info) ?? p : p),
   };
 });
 
@@ -92,7 +93,9 @@ describe('Claude Code setups in WSL', () => {
 
     expect(setups.map((setup) => setup.configDir)).toEqual([`${HOME}\\.claude`, `${HOME}\\.claude-work`]);
     expect(setups[0]).toMatchObject({ provider: 'subscription', isDefaultDir: true, email: 'me@example.com', plan: 'max' });
-    expect(setups[0].credentials).toBe('~\\.claude\\.credentials.json');
+    // Shown as Claude Code names them in the distribution, not by their UNC paths
+    expect(setups[0].credentials).toBe('~/.claude/.credentials.json');
+    expect(setups[1].values.find((value) => value.key === 'AWS_REGION')?.source).toBe('/home/me/.claude-work/settings.json');
     expect(setups[1]).toMatchObject({ provider: 'bedrock', isDefaultDir: false });
     expect(detectedAccountName(setups[1])).toBe('Claude Code (work)');
   });
@@ -103,7 +106,7 @@ describe('Claude Code setups in WSL', () => {
 
     const [setup] = detectClaudeCodeSetups({ hasSubscriptionCredentials: () => false });
     expect(setup).toMatchObject({ provider: 'auth-token', isDefaultDir: true });
-    expect(setup.credentials).toBe('\\\\wsl.localhost\\Ubuntu\\etc\\claude-code\\managed-settings.json');
+    expect(setup.credentials).toBe('/etc/claude-code/managed-settings.json');
   });
 
   it("doesn't take the app's Windows environment for Claude Code's, but a passed one counts", () => {

@@ -2,7 +2,7 @@ import { Agent, ToolCallNode, Edge, BEAM } from '../../lib/agent-types'
 import { getStateColor, getToolColor } from '../../lib/colors'
 import { alphaHex } from '../../lib/utils'
 import { MIN_VISIBLE_OPACITY } from '../../lib/canvas-constants'
-import { restingMotion, type NodeMotion } from '../../lib/jelly'
+import { drawJellyShape, restingMotion, type NodeMotion } from '../../lib/jelly'
 import { displayedState } from '../../hooks/graph/types'
 
 const DASH = [...BEAM.dash]
@@ -70,6 +70,49 @@ function computeControlPoints(fromX: number, fromY: number, toX: number, toY: nu
   }
 }
 
+/** An edge as it is drawn this frame: the part of its curve between the two nodes, and how */
+interface DrawnEdge {
+  curve: [Point, Point, Point, Point]
+  /** The box the curve, glow and all, stays inside */
+  box: { left: number; top: number; right: number; bottom: number }
+  color: string
+  fade: number
+  isTool: boolean
+  offset: number
+}
+
+/** Stroke an edge, its strength scaled by `alpha`: a faint solid line with the dashes over it */
+function strokeEdge(ctx: CanvasRenderingContext2D, edge: DrawnEdge, alpha: number) {
+  const [s0, s1, s2, s3] = edge.curve
+  // Fade in from both ends, so the edge emerges softly from each node
+  const length = Math.hypot(s3.x - s0.x, s3.y - s0.y)
+  const fadeFrac = Math.min(0.45, BEAM.endFade / Math.max(length, 1))
+  const fading = (strength: number) => {
+    const gradient = ctx.createLinearGradient(s0.x, s0.y, s3.x, s3.y)
+    gradient.addColorStop(0, edge.color + '00')
+    gradient.addColorStop(fadeFrac, edge.color + alphaHex(strength))
+    gradient.addColorStop(1 - fadeFrac, edge.color + alphaHex(strength))
+    gradient.addColorStop(1, edge.color + '00')
+    return gradient
+  }
+
+  ctx.save()
+  ctx.beginPath()
+  ctx.moveTo(s0.x, s0.y)
+  ctx.bezierCurveTo(s1.x, s1.y, s2.x, s2.y, s3.x, s3.y)
+
+  ctx.strokeStyle = fading(BEAM.glow.alpha * edge.fade * alpha)
+  ctx.lineWidth = BEAM.glow.width
+  ctx.stroke()
+
+  ctx.setLineDash(DASH)
+  ctx.lineDashOffset = edge.offset
+  ctx.strokeStyle = fading(BEAM.alpha * edge.fade * alpha)
+  ctx.lineWidth = edge.isTool ? BEAM.width.tool : BEAM.width.parentChild
+  ctx.stroke()
+  ctx.restore()
+}
+
 /**
  * Draw edges as dashed curves from an agent to its sub-agents and tool calls.
  * While the target is still working (a running tool, a sub-agent that hasn't
@@ -80,6 +123,12 @@ function computeControlPoints(fromX: number, fromY: number, toX: number, toY: nu
  * nodes where the jelly has them (`motions`, see node-motion.ts), so it keeps
  * hold of a node budding out of its parent or merging back into it.
  * `deltaTime` (seconds since the last frame) moves the dashes.
+ *
+ * Nodes are drawn over the edges but are see-through, so where a crowded graph
+ * has an edge cross another node, that part is only faintly drawn
+ * (BEAM.underNode): the node stays in front of it. What is faint is the node's
+ * own outline as drawn this frame (`time`), and only as faint as the node is
+ * shown: one fading in or out dims what it crosses as little as it is there.
  */
 export function drawEdges(
   ctx: CanvasRenderingContext2D,
@@ -89,7 +138,9 @@ export function drawEdges(
   awaiting: Set<string>,
   motions: Map<string, NodeMotion>,
   deltaTime: number,
+  time: number,
 ) {
+  const drawn: DrawnEdge[] = []
   for (const edge of edges) {
     const from = agents.get(edge.from)
     if (!from || from.opacity < MIN_VISIBLE_OPACITY) continue
@@ -109,7 +160,6 @@ export function drawEdges(
     const t0 = exitParam(nodeClearance(fromMotion), false, p0, p1, p2, p3)
     const t1 = exitParam(nodeClearance(toMotion), true, p0, p1, p2, p3)
     if (t1 <= t0) continue // the nodes overlap: nothing in between to draw
-    const [s0, s1, s2, s3] = bezierSegment(t0, t1, p0, p1, p2, p3)
 
     const working = isTool
       ? (target as ToolCallNode).state === 'running'
@@ -118,39 +168,89 @@ export function drawEdges(
     const color = working
       ? getStateColor(displayedState(from, awaiting))
       : isTool ? getToolColor((target as ToolCallNode).state) : getStateColor(displayedState(target as Agent, awaiting))
-    const fade = Math.min(from.opacity, target.opacity)
-
-    // Fade in from both ends, so the edge emerges softly from each node
-    const length = Math.hypot(s3.x - s0.x, s3.y - s0.y)
-    const fadeFrac = Math.min(0.45, BEAM.endFade / Math.max(length, 1))
-    const fading = (alpha: number) => {
-      const gradient = ctx.createLinearGradient(s0.x, s0.y, s3.x, s3.y)
-      gradient.addColorStop(0, color + '00')
-      gradient.addColorStop(fadeFrac, color + alphaHex(alpha))
-      gradient.addColorStop(1 - fadeFrac, color + alphaHex(alpha))
-      gradient.addColorStop(1, color + '00')
-      return gradient
-    }
-
-    ctx.save()
-    ctx.beginPath()
-    ctx.moveTo(s0.x, s0.y)
-    ctx.bezierCurveTo(s1.x, s1.y, s2.x, s2.y, s3.x, s3.y)
-
-    ctx.strokeStyle = fading(BEAM.glow.alpha * fade)
-    ctx.lineWidth = BEAM.glow.width
-    ctx.stroke()
 
     // The path runs from caller to target: a falling dash offset moves the
     // dashes toward the target, a rising one moves them back. It carries on
     // from the last frame, so the dashes don't jump when the direction flips.
-    ctx.setLineDash(DASH)
     const offset = ((dashOffsets.get(edge) ?? 0) + (working ? -1 : 1) * deltaTime * BEAM.flowSpeed) % DASH_PERIOD
     dashOffsets.set(edge, offset)
-    ctx.lineDashOffset = offset
-    ctx.strokeStyle = fading(BEAM.alpha * fade)
-    ctx.lineWidth = isTool ? BEAM.width.tool : BEAM.width.parentChild
-    ctx.stroke()
-    ctx.restore()
+
+    const curve = bezierSegment(t0, t1, p0, p1, p2, p3)
+    const xs = curve.map((p) => p.x), ys = curve.map((p) => p.y)
+    const pad = BEAM.glow.width
+    drawn.push({
+      curve,
+      box: { left: Math.min(...xs) - pad, top: Math.min(...ys) - pad, right: Math.max(...xs) + pad, bottom: Math.max(...ys) + pad },
+      color,
+      fade: Math.min(from.opacity, target.opacity),
+      isTool,
+      offset,
+    })
   }
+  if (drawn.length === 0) return
+
+  // The nodes an edge can pass under: every one shown, with how far out its
+  // outline can reach (see coverReach)
+  const covers: Cover[] = []
+  for (const [id, motion] of motions) {
+    const node = agents.get(id) ?? toolCalls.get(id)
+    if (!node || node.opacity < MIN_VISIBLE_OPACITY) continue
+    covers.push({ motion, r: motion.radius * motion.scale, reach: coverReach(motion), opacity: Math.min(node.opacity, 1) })
+  }
+  const outline = (cover: Cover) =>
+    drawJellyShape(ctx, cover.motion.x, cover.motion.y, cover.r, cover.motion.sides, cover.motion.rotation, cover.motion, time)
+  // Everything but the node: what is left once it is cut out of a square far past the screen
+  const clipOutside = (cover: Cover) => {
+    outline(cover)
+    ctx.rect(cover.motion.x - OUTSIDE, cover.motion.y - OUTSIDE, OUTSIDE * 2, OUTSIDE * 2)
+    ctx.clip('evenodd')
+  }
+  const near = (a: Cover, box: DrawnEdge['box']) =>
+    a.motion.x + a.reach > box.left && a.motion.x - a.reach < box.right
+    && a.motion.y + a.reach > box.top && a.motion.y - a.reach < box.bottom
+  const overlap = (a: Cover, b: Cover) => Math.hypot(a.motion.x - b.motion.x, a.motion.y - b.motion.y) < a.reach + b.reach
+
+  // Outside every node: each clip takes one more node out of what is left
+  ctx.save()
+  for (const cover of covers) clipOutside(cover)
+  for (const edge of drawn) strokeEdge(ctx, edge, 1)
+  ctx.restore()
+
+  // Under each node in turn (but not again under one done before it, where two
+  // overlap): the edges that come near it, as faint as it is shown
+  covers.forEach((cover, index) => {
+    const under = drawn.filter((edge) => near(cover, edge.box))
+    if (under.length === 0) return
+    ctx.save()
+    outline(cover)
+    ctx.clip()
+    for (let j = 0; j < index; j++) if (overlap(covers[j], cover)) clipOutside(covers[j])
+    const strength = 1 - cover.opacity * (1 - BEAM.underNode)
+    for (const edge of under) strokeEdge(ctx, edge, strength)
+    ctx.restore()
+  })
 }
+
+/** A node an edge can pass under (see drawEdges) */
+interface Cover {
+  motion: NodeMotion
+  /** Its radius as drawn, and how far from its center its outline can reach */
+  r: number
+  reach: number
+  opacity: number
+}
+
+/** How far past its radius a node's outline can bulge, at most (its wobble and dents) */
+const COVER_REACH = 1.3
+
+/** How far from its center a node's outline can reach this frame: its bulges,
+ *  the goo necks it draws out toward the nodes it is gooed to (each `length`
+ *  radii, see JellyReach), and as far as it is stretched */
+export function coverReach(motion: NodeMotion): number {
+  let necks = 0
+  for (const reach of motion.reaches) necks += reach.length
+  return motion.radius * motion.scale * (COVER_REACH + necks) * (1 + Math.abs(motion.stretch))
+}
+
+/** Half the side of the square a node is cut out of: far past anything on screen */
+const OUTSIDE = 1e6
