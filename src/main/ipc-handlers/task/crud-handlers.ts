@@ -15,6 +15,9 @@ import { git } from '../../utils/git-exec';
 import { taskStateManager } from '../../task-state-manager';
 import { buildInitialPlan } from './plan-file-utils';
 import { taskQueue } from '../../services/task-queue';
+import { isUnstartedDependent } from '../../../shared/utils/dependents-wait';
+import { wouldCreateDependencyCycle } from '../../../shared/utils/task-dependencies';
+import { writeFileAtomicSync } from '../../utils/atomic-file';
 
 
 /**
@@ -355,156 +358,185 @@ export function registerTaskCRUDHandlers(agentManager: AgentManager): void {
       updates: { title?: string; description?: string; metadata?: Partial<TaskMetadata> },
       projectId?: string
     ): Promise<IPCResult<Task>> => {
-      try {
-        // The board the edit was made on: searching the projects for the task id would write the
-        // edit into whichever project happens to hold that id first, and `metadata.baseBranch` is
-        // among the fields this writes, so it also decides what a later run branches from
-        const { task, project } = findTaskAndProject(taskId, projectId);
-
-        if (!task || !project) {
-          return { success: false, error: 'Task not found' };
-        }
-
-        const autoBuildDir = project.autoBuildPath || '.workbench';
-        const specDir = path.join(project.path, autoBuildDir, DATA_DIR_NAMES.tasks, task.specId);
-
-        if (!existsSync(specDir)) {
-          return { success: false, error: 'Spec directory not found' };
-        }
-
-        // Auto-generate title if empty
-        let finalTitle = updates.title;
-        if (updates.title !== undefined && !updates.title.trim()) {
-          const descriptionToUse = updates.description ?? task.description;
-          console.warn('[TASK_UPDATE] Title is empty, generating with Claude AI...');
-          finalTitle = await generateTitleWithFallback(descriptionToUse, 'TASK_UPDATE', project.path);
-        }
-
-        // Update implementation_plan.json
-        const planPath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
+      const owner = findTaskAndProject(taskId, projectId).project;
+      if (!owner) return { success: false, error: 'Task not found' };
+      // Dependency edits and promotion share a lock: re-read after any pending start finishes.
+      return taskQueue.runExclusive(owner.id, async (): Promise<IPCResult<Task>> => {
         try {
-          const planContent = readFileSync(planPath, 'utf-8');
-          const plan = JSON.parse(planContent);
+          // The board the edit was made on: searching the projects for the task id would write the
+          // edit into whichever project happens to hold that id first, and `metadata.baseBranch` is
+          // among the fields this writes, so it also decides what a later run branches from
+          const { task, project } = findTaskAndProject(taskId, owner.id);
 
-          if (finalTitle !== undefined) {
-            plan.feature = finalTitle;
-          }
-          if (updates.description !== undefined) {
-            plan.description = updates.description;
-          }
-          plan.updated_at = new Date().toISOString();
-
-          writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf-8');
-        } catch (planErr: unknown) {
-          // File missing or invalid JSON - continue anyway
-          if ((planErr as NodeJS.ErrnoException).code !== 'ENOENT') {
-            console.error('[TASK_UPDATE] Error updating implementation plan:', planErr);
-          }
-        }
-
-        // Update metadata if provided
-        let updatedMetadata = task.metadata;
-        if (updates.metadata) {
-          updatedMetadata = { ...task.metadata, ...updates.metadata };
-          // Keep the user's own description as the task card's source of truth
-          if (updates.description !== undefined) {
-            updatedMetadata.userDescription = updates.description;
+          if (!task || !project) {
+            return { success: false, error: 'Task not found' };
           }
 
-          // Save newly attached files (any type) in the task's attachments folder
-          if (updates.metadata.attachedImages && updates.metadata.attachedImages.length > 0) {
-            const attachmentsDir = path.join(specDir, 'attachments');
-            mkdirSync(attachmentsDir, { recursive: true });
-            const resolvedAttachmentsDir = path.resolve(attachmentsDir);
-
-            const savedImages: typeof updates.metadata.attachedImages = [];
-
-            for (const image of updates.metadata.attachedImages) {
-              // If image has data (new image), save it
-              if (image.data) {
-                // Sanitize filename to prevent path traversal attacks
-                const sanitizedFilename = path.basename(image.filename);
-                if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
-                  console.warn(`[TASK_UPDATE] Skipping image with invalid filename: ${image.filename}`);
-                  continue;
-                }
-
-                // Validate resolved path stays within attachments directory
-                const imagePath = path.join(attachmentsDir, sanitizedFilename);
-                const resolvedPath = path.resolve(imagePath);
-                if (!resolvedPath.startsWith(resolvedAttachmentsDir + path.sep)) {
-                  console.warn(`[TASK_UPDATE] Skipping image with path traversal attempt: ${image.filename}`);
-                  continue;
-                }
-
-                try {
-                  const buffer = Buffer.from(image.data, 'base64');
-                  writeFileSync(imagePath, buffer);
-
-                  savedImages.push({
-                    id: image.id,
-                    filename: sanitizedFilename,
-                    mimeType: image.mimeType || 'application/octet-stream',
-                    size: image.size,
-                    path: `attachments/${sanitizedFilename}`
-                  });
-                } catch (err) {
-                  console.error(`Failed to save image ${sanitizedFilename}:`, err);
-                }
-              } else if (image.path) {
-                // Existing image, keep it
-                savedImages.push(image);
+          const refs = updates.metadata?.dependsOnTaskIds;
+          if (updates.metadata && Object.hasOwn(updates.metadata, 'dependsOnTaskIds')) {
+            if (!Array.isArray(refs) || refs.some((ref) => typeof ref !== 'string')) {
+              return { success: false, error: 'Dependencies must be a list of ticket ids' };
+            }
+            if (!isUnstartedDependent(task)) {
+              return { success: false, error: 'Dependencies can only be edited in Planning or Queue' };
+            }
+            const tasks = projectStore.getTasks(project.id);
+            const current = task.metadata?.dependsOnTaskIds ?? [];
+            for (const ref of refs) {
+              // Existing missing references can be kept or removed; only new edges need validation.
+              if (current.includes(ref)) continue;
+              if (!tasks.some((t) => t.id === ref || t.specId === ref)) {
+                return { success: false, error: 'Dependency ticket not found in this project' };
+              }
+              if (wouldCreateDependencyCycle(tasks, task, ref)) {
+                return { success: false, error: 'Dependency would create a cycle' };
               }
             }
-
-            updatedMetadata.attachedImages = savedImages;
+            updates = { ...updates, metadata: { ...updates.metadata, dependsOnTaskIds: [...new Set(refs)] } };
           }
 
-          const metadataPath = path.join(specDir, 'task_metadata.json');
+          const autoBuildDir = project.autoBuildPath || '.workbench';
+          const specDir = path.join(project.path, autoBuildDir, DATA_DIR_NAMES.tasks, task.specId);
+
+          if (!existsSync(specDir)) {
+            return { success: false, error: 'Spec directory not found' };
+          }
+
+          // Auto-generate title if empty
+          let finalTitle = updates.title;
+          if (updates.title !== undefined && !updates.title.trim()) {
+            const descriptionToUse = updates.description ?? task.description;
+            console.warn('[TASK_UPDATE] Title is empty, generating with Claude AI...');
+            finalTitle = await generateTitleWithFallback(descriptionToUse, 'TASK_UPDATE', project.path);
+          }
+
+          // Update implementation_plan.json
+          const planPath = path.join(specDir, AUTO_BUILD_PATHS.IMPLEMENTATION_PLAN);
           try {
-            writeFileSync(metadataPath, JSON.stringify(updatedMetadata, null, 2), 'utf-8');
-          } catch (err) {
-            console.error('Failed to update task_metadata.json:', err);
+            const planContent = readFileSync(planPath, 'utf-8');
+            const plan = JSON.parse(planContent);
+
+            if (finalTitle !== undefined) {
+              plan.feature = finalTitle;
+            }
+            if (updates.description !== undefined) {
+              plan.description = updates.description;
+            }
+            plan.updated_at = new Date().toISOString();
+
+            writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf-8');
+          } catch (planErr: unknown) {
+            // File missing or invalid JSON - continue anyway
+            if ((planErr as NodeJS.ErrnoException).code !== 'ENOENT') {
+              console.error('[TASK_UPDATE] Error updating implementation plan:', planErr);
+            }
           }
+
+          // Update metadata if provided
+          let updatedMetadata = task.metadata;
+          if (updates.metadata) {
+            // Preserve metadata written since the task was cached, including automatic dependencies.
+            const metadataPath = path.join(specDir, 'task_metadata.json');
+            let onDisk: TaskMetadata = {};
+            if (existsSync(metadataPath)) onDisk = JSON.parse(readFileSync(metadataPath, 'utf-8')) as TaskMetadata;
+            updatedMetadata = { ...task.metadata, ...onDisk, ...updates.metadata };
+            // Keep the user's own description as the task card's source of truth
+            if (updates.description !== undefined) {
+              updatedMetadata.userDescription = updates.description;
+            }
+
+            // Save newly attached files (any type) in the task's attachments folder
+            if (updates.metadata.attachedImages && updates.metadata.attachedImages.length > 0) {
+              const attachmentsDir = path.join(specDir, 'attachments');
+              mkdirSync(attachmentsDir, { recursive: true });
+              const resolvedAttachmentsDir = path.resolve(attachmentsDir);
+
+              const savedImages: typeof updates.metadata.attachedImages = [];
+
+              for (const image of updates.metadata.attachedImages) {
+                // If image has data (new image), save it
+                if (image.data) {
+                  // Sanitize filename to prevent path traversal attacks
+                  const sanitizedFilename = path.basename(image.filename);
+                  if (!sanitizedFilename || sanitizedFilename === '.' || sanitizedFilename === '..') {
+                    console.warn(`[TASK_UPDATE] Skipping image with invalid filename: ${image.filename}`);
+                    continue;
+                  }
+
+                  // Validate resolved path stays within attachments directory
+                  const imagePath = path.join(attachmentsDir, sanitizedFilename);
+                  const resolvedPath = path.resolve(imagePath);
+                  if (!resolvedPath.startsWith(resolvedAttachmentsDir + path.sep)) {
+                    console.warn(`[TASK_UPDATE] Skipping image with path traversal attempt: ${image.filename}`);
+                    continue;
+                  }
+
+                  try {
+                    const buffer = Buffer.from(image.data, 'base64');
+                    writeFileSync(imagePath, buffer);
+
+                    savedImages.push({
+                      id: image.id,
+                      filename: sanitizedFilename,
+                      mimeType: image.mimeType || 'application/octet-stream',
+                      size: image.size,
+                      path: `attachments/${sanitizedFilename}`
+                    });
+                  } catch (err) {
+                    console.error(`Failed to save image ${sanitizedFilename}:`, err);
+                  }
+                } else if (image.path) {
+                  // Existing image, keep it
+                  savedImages.push(image);
+                }
+              }
+
+              updatedMetadata.attachedImages = savedImages;
+            }
+
+            // A failed save must not report success or release a queued ticket with unsaved edges.
+            writeFileAtomicSync(metadataPath, JSON.stringify(updatedMetadata, null, 2));
+          }
+
+          // Description-only edit: record the user's description in task_metadata.json,
+          // merging into the file on disk so fields written since the task was cached survive
+          if (!updates.metadata && updates.description !== undefined) {
+            const metadataPath = path.join(specDir, 'task_metadata.json');
+            let onDisk: TaskMetadata = {};
+            try {
+              onDisk = JSON.parse(readFileSync(metadataPath, 'utf-8')) as TaskMetadata;
+            } catch {
+              // Missing or unreadable — start from the cached metadata
+            }
+            updatedMetadata = { ...task.metadata, ...onDisk, userDescription: updates.description };
+            try {
+              writeFileSync(metadataPath, JSON.stringify(updatedMetadata, null, 2), 'utf-8');
+            } catch (err) {
+              console.error('Failed to update task_metadata.json:', err);
+            }
+          }
+
+          // Build the updated task object
+          const updatedTask: Task = {
+            ...task,
+            title: finalTitle ?? task.title,
+            description: updates.description ?? task.description,
+            metadata: updatedMetadata,
+            updatedAt: new Date()
+          };
+
+          // Invalidate cache since a task was updated
+          projectStore.invalidateTasksCache(project.id);
+          if (refs !== undefined) taskQueue.request(project.id);
+
+          return { success: true, data: updatedTask };
+        } catch (error) {
+          return {
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          };
         }
-
-        // Description-only edit: record the user's description in task_metadata.json,
-        // merging into the file on disk so fields written since the task was cached survive
-        if (!updates.metadata && updates.description !== undefined) {
-          const metadataPath = path.join(specDir, 'task_metadata.json');
-          let onDisk: TaskMetadata = {};
-          try {
-            onDisk = JSON.parse(readFileSync(metadataPath, 'utf-8')) as TaskMetadata;
-          } catch {
-            // Missing or unreadable — start from the cached metadata
-          }
-          updatedMetadata = { ...task.metadata, ...onDisk, userDescription: updates.description };
-          try {
-            writeFileSync(metadataPath, JSON.stringify(updatedMetadata, null, 2), 'utf-8');
-          } catch (err) {
-            console.error('Failed to update task_metadata.json:', err);
-          }
-        }
-
-        // Build the updated task object
-        const updatedTask: Task = {
-          ...task,
-          title: finalTitle ?? task.title,
-          description: updates.description ?? task.description,
-          metadata: updatedMetadata,
-          updatedAt: new Date()
-        };
-
-        // Invalidate cache since a task was updated
-        projectStore.invalidateTasksCache(project.id);
-
-        return { success: true, data: updatedTask };
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Unknown error'
-        };
-      }
+      });
     }
   );
 

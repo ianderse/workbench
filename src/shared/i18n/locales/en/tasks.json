@@ -228,6 +228,15 @@
     },
     "syncingWith": "Syncing with {{branch}}"
   },
+  "dependencyEditor": {
+    "help": "Select the tickets this one must wait for before starting. Existing automatic dependencies are selected; uncheck a ticket to remove it. Completed or merged dependencies follow the queue's usual rules.",
+    "notEditable": "Dependencies can be changed while this ticket is in Planning or Queue. Stop and move it there before editing.",
+    "search": "Search tickets by number or title",
+    "cycle": "Would create a cycle",
+    "empty": "No matching tickets",
+    "none": "No dependencies",
+    "edit": "Edit dependencies"
+  },
   "metadata": {
     "showMore": "Show more",
     "showLess": "Show less",
@@ -523,7 +532,7 @@
   },
   "edit": {
     "title": "Edit task",
-    "description": "Update the description, reference images, connectors and git options. Changes are saved to the task files.",
+    "description": "Update dependencies, description, reference images, connectors and git options. Changes are saved to the task files.",
     "saveChanges": "Save",
     "errors": {
       "updateFailed": "Failed to update task. Please try again."

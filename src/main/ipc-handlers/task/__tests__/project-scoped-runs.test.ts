@@ -736,6 +736,63 @@ describe('TASK_UPDATE', () => {
     expect(result).toMatchObject({ success: false });
     expect(JSON.parse(readFileSync(planOf('project-a'), 'utf-8')).description).toBe('owned by project-a');
   });
+
+  it('persists manual dependencies, preserves automatic ones and metadata, then allows clearing them', async () => {
+    const task = mocks.tasksByProject.get('project-b')![0];
+    task.status = 'queue';
+    task.metadata = { dependsOnTaskIds: ['002-auto'], sourceType: 'manual' };
+    mocks.tasksByProject.get('project-b')!.push(makeTask('project-b', { id: '003-manual', specId: '003-manual', status: 'backlog' }));
+    const file = path.join(path.dirname(planOf('project-b')), 'task_metadata.json');
+    writeFileSync(file, JSON.stringify({ ...task.metadata, rationale: 'written after cache' }));
+
+    const save = () => invokeIpcHandler(IPC_CHANNELS.TASK_UPDATE, TASK_ID, {
+      metadata: { dependsOnTaskIds: ['002-auto', '003-manual', '003-manual'] },
+    }, 'project-b');
+    expect(await save()).toMatchObject({ success: true });
+    expect(await save()).toMatchObject({ success: true });
+    expect(JSON.parse(readFileSync(file, 'utf-8'))).toMatchObject({
+      dependsOnTaskIds: ['002-auto', '003-manual'], sourceType: 'manual', rationale: 'written after cache',
+    });
+    expect(mocks.queue.runExclusive).toHaveBeenCalledWith('project-b', expect.any(Function));
+    expect(mocks.queue.request).toHaveBeenCalledWith('project-b');
+    expect(await invokeIpcHandler(IPC_CHANNELS.TASK_UPDATE, TASK_ID, { metadata: { dependsOnTaskIds: [] } }, 'project-b')).toMatchObject({ success: true });
+    expect(JSON.parse(readFileSync(file, 'utf-8')).dependsOnTaskIds).toEqual([]);
+  });
+
+  it('rejects self, transitive cycles and foreign tickets before writing any changes', async () => {
+    const task = mocks.tasksByProject.get('project-b')![0];
+    task.status = 'backlog';
+    mocks.tasksByProject.get('project-b')!.push(
+      makeTask('project-b', { id: '002-child', specId: '002-child', metadata: { dependsOnTaskIds: ['003-alias'] } }),
+      makeTask('project-b', { id: '003-id', specId: '003-alias', metadata: { dependsOnTaskIds: [TASK_ID] } }),
+    );
+    mocks.tasksByProject.get('project-a')!.push(makeTask('project-a', { id: '004-foreign', specId: '004-foreign' }));
+    for (const ref of [TASK_ID, '002-child', '004-foreign']) {
+      const result = await invokeIpcHandler(IPC_CHANNELS.TASK_UPDATE, TASK_ID, { description: 'must not write', metadata: { dependsOnTaskIds: [ref] } }, 'project-b');
+      expect(result).toMatchObject({ success: false });
+      expect(JSON.parse(readFileSync(planOf('project-b'), 'utf-8')).description).toBe('owned by project-b');
+    }
+    expect(mocks.queue.request).not.toHaveBeenCalled();
+  });
+
+  it('refuses dependency edits after a waiting ticket starts while the edit waits for the queue lock', async () => {
+    const task = mocks.tasksByProject.get('project-b')![0];
+    task.status = 'queue';
+    mocks.queue.runExclusive.mockImplementationOnce(async (_projectId, fn) => {
+      task.status = 'in_progress';
+      return fn();
+    });
+    expect(await invokeIpcHandler(IPC_CHANNELS.TASK_UPDATE, TASK_ID, { metadata: { dependsOnTaskIds: [] } }, 'project-b')).toMatchObject({
+      success: false, error: 'Dependencies can only be edited in Planning or Queue',
+    });
+  });
+
+  it('returns failure if metadata cannot be committed', async () => {
+    mocks.tasksByProject.get('project-b')![0].status = 'queue';
+    mkdirSync(path.join(path.dirname(planOf('project-b')), 'task_metadata.json'));
+    expect(await invokeIpcHandler(IPC_CHANNELS.TASK_UPDATE, TASK_ID, { metadata: { dependsOnTaskIds: [] } }, 'project-b')).toMatchObject({ success: false });
+    expect(mocks.queue.request).not.toHaveBeenCalled();
+  });
 });
 
 /**

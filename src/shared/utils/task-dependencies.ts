@@ -6,6 +6,23 @@ import type { Task } from '../types';
 import { dependentTargetHint, isDependencySatisfied } from './autonomous';
 import { taskNumber } from './queue-grooming';
 
+/** Whether adding this edge would make a ticket depend on itself, directly or transitively. */
+export function wouldCreateDependencyCycle(tasks: readonly Task[], task: Task, ref: string): boolean {
+  const projectTasks = tasks.filter((t) => t.projectId === task.projectId);
+  const byRef = new Map(projectTasks.flatMap((t) => [[t.id, t], [t.specId, t]] as const));
+  const seen = new Set<string>();
+  const stack = [ref];
+  while (stack.length > 0) {
+    const next = stack.pop()!;
+    if (next === task.id || next === task.specId) return true;
+    const dep = byRef.get(next);
+    if (!dep || seen.has(dep.id)) continue;
+    seen.add(dep.id);
+    stack.push(...(dep.metadata?.dependsOnTaskIds ?? []));
+  }
+  return false;
+}
+
 /** done/merged: finished (merged automatically counts); archived: set aside; missing: no such task */
 export type TaskDependencyState = 'done' | 'merged' | 'archived' | 'waiting' | 'missing';
 

@@ -20,6 +20,7 @@ interface TaskMetadataProps {
   worktreeAction?: ReactNode;
   /** Keep the original request closed until opened (the "What was done" panel is read first) */
   collapseDescription?: boolean;
+  onEditDependencies?: () => void;
 }
 
 // Height threshold for collapsing long descriptions (~8 lines)
@@ -28,7 +29,7 @@ const COLLAPSED_HEIGHT = 200;
 /** Task sources that mean an agent created the task (e.g. a suggestion in the Claude chat) */
 const AGENT_SOURCES = new Set(['insights', 'ideation', 'roadmap']);
 
-export function TaskMetadata({ task, worktreeStatus, worktreeAction, collapseDescription = false }: TaskMetadataProps) {
+export function TaskMetadata({ task, worktreeStatus, worktreeAction, collapseDescription = false, onEditDependencies }: TaskMetadataProps) {
   const { t } = useTranslation(['tasks', 'errors', 'taskReview']);
   const [isExpanded, setIsExpanded] = useState(false);
   const [descriptionOpen, setDescriptionOpen] = useState(!collapseDescription);
@@ -164,9 +165,13 @@ export function TaskMetadata({ task, worktreeStatus, worktreeAction, collapseDes
       )}
 
       {/* The tickets this one relies on, with where each stands */}
-      {dependencies.length > 0 && (
+      {(dependencies.length > 0 || onEditDependencies) && (
         <div className="text-sm">
-          <p className="text-xs text-(--nav-label-color)">{t('tasks:metadata.reliesOn')}</p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs text-(--nav-label-color)">{t('tasks:metadata.reliesOn')}</p>
+            {onEditDependencies && <Button variant="ghost" size="sm" onClick={onEditDependencies}>{t('tasks:dependencyEditor.edit')}</Button>}
+          </div>
+          {dependencies.length === 0 && <p className="mt-1 text-xs text-(--nav-label-color)">{t('tasks:dependencyEditor.none')}</p>}
           <ul className="mt-1 space-y-0.5">
             {dependencies.map((dep) => (
               <li key={dep.ref} className="flex items-baseline gap-2">

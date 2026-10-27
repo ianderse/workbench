@@ -435,6 +435,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       {/* Metadata */}
                       <TaskMetadata
                         task={task}
+                        onEditDependencies={(task.status === 'backlog' || task.status === 'queue') && !task.metadata?.archivedAt ? () => state.setIsEditDialogOpen(true) : undefined}
                         collapseDescription={shouldShowWhatWasDone(task)}
                         worktreeStatus={state.worktreeStatus}
                         worktreeAction={(task.claudeRun?.sessionId || task.metadata?.prUrl || (state.needsReview && state.worktreeStatus?.exists)) ? (

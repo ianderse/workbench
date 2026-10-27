@@ -1,7 +1,7 @@
 /**
  * TaskEditDialog - Dialog for editing task details
  *
- * Edits the task's description, reference images, MCP connectors and git options - the base
+ * Edits the task's dependencies, description, reference images, MCP connectors and git options - the base
  * branch and whether its branch is pushed (the title is kept), and the model and effort pinned on
  * the task. Unpinned model and effort, and planning, are decided by the triage run when it starts.
  *
@@ -20,7 +20,8 @@ import { Button } from './ui/button';
 import { TaskModalLayout } from './task-form/TaskModalLayout';
 import { TaskFormFields } from './task-form/TaskFormFields';
 import { PROJECT_DEFAULT_BRANCH, TaskGitOptionsSection, useTaskGitOptions } from './task-form/TaskGitOptions';
-import { persistUpdateTask } from '../stores/task-store';
+import { persistUpdateTask, useTaskStore } from '../stores/task-store';
+import { TaskDependenciesSection } from './task-form/TaskDependenciesSection';
 import { useProjectStore } from '../stores/project-store';
 import type { Task, TaskMetadata, ImageAttachment, AgentOverride } from '../../shared/types';
 import { normalizeAgentOverride } from '../../shared/utils/agent-override';
@@ -56,6 +57,20 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
   const [description, setDescription] = useState(task.description);
   const [isSaving, setIsSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const allTasks = useTaskStore((state) => state.tasks);
+  // Keep local additions/removals separate so automatic updates while editing do not erase
+  // the person's choices, and newly discovered prerequisites are retained on save.
+  const [dependencyEdits, setDependencyEdits] = useState<{ added: string[]; removed: string[] }>({ added: [], removed: [] });
+  const currentDependencies = task.metadata?.dependsOnTaskIds ?? [];
+  const dependsOnTaskIds = [...new Set([...currentDependencies, ...dependencyEdits.added])]
+    .filter((ref) => !dependencyEdits.removed.includes(ref));
+  const setDependsOnTaskIds = (refs: string[]) => setDependencyEdits({
+    added: refs.filter((ref) => !currentDependencies.includes(ref)),
+    removed: currentDependencies.filter((ref) => !refs.includes(ref)),
+  });
+  useEffect(() => {
+    setDependencyEdits({ added: [], removed: [] });
+  }, [open, task.id]);
 
   // Image attachments
   const [images, setImages] = useState<ImageAttachment[]>(task.metadata?.attachedImages || []);
@@ -103,7 +118,9 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
 
     // Check if anything changed
     const trimmedDescription = description.trim();
+    const dependenciesChanged = JSON.stringify(dependsOnTaskIds) !== JSON.stringify(task.metadata?.dependsOnTaskIds ?? []);
     const hasChanges =
+      dependenciesChanged ||
       trimmedDescription !== task.description ||
       [...mcpConnectors].sort().join(',') !== [...taskConnectors].sort().join(',') ||
       JSON.stringify(normalizeAgentOverride(agentOverride) ?? null) !== JSON.stringify(normalizeAgentOverride(taskAgentOverride) ?? null) ||
@@ -133,6 +150,8 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
       : (!!resolvedBaseBranch && gitOptions.isLocalBranch(resolvedBaseBranch)) || undefined;
 
     const metadataUpdates: Partial<TaskMetadata> = {
+      // Omit an untouched dependency list so later automatic additions survive unrelated edits.
+      ...(dependenciesChanged ? { dependsOnTaskIds } : {}),
       // Always set attachedImages to persist removal when all images are deleted
       attachedImages: images,
       mcpConnectors,
@@ -195,6 +214,15 @@ export function TaskEditDialog({ task, open, onOpenChange, onSaved }: TaskEditDi
         </div>
       }
     >
+      <TaskDependenciesSection
+        key={task.id}
+        task={task}
+        tasks={allTasks}
+        value={dependsOnTaskIds}
+        onChange={setDependsOnTaskIds}
+        autonomous={projects.find((p) => p.id === task.projectId)?.settings?.autonomous === true}
+        disabled={isSaving}
+      />
       <TaskFormFields
         projectPath={projectPath}
         specId={task.specId}

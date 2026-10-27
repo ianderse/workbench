@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Task } from '../../types';
-import { resolveTaskDependencies, unmetDependencyLabel } from '../task-dependencies';
+import { resolveTaskDependencies, unmetDependencyLabel, wouldCreateDependencyCycle } from '../task-dependencies';
 
 function makeTask(id: string, status: Task['status'], extra: Partial<Task> = {}): Task {
   return { id, specId: id, title: `Title ${id}`, status, metadata: {}, ...extra } as Task;
@@ -47,5 +47,25 @@ describe('unmetDependencyLabel', () => {
 
   it('is empty without dependencies', () => {
     expect(unmetDependencyLabel(tasks, tasks[1])).toBe('');
+  });
+});
+
+describe('wouldCreateDependencyCycle', () => {
+  it('rejects self references by id or spec id and transitive cycles through spec aliases', () => {
+    const a = makeTask('a', 'queue', { specId: '001-a' });
+    const b = makeTask('b', 'queue', { metadata: { dependsOnTaskIds: ['003-c'] } });
+    const c = makeTask('c', 'queue', { specId: '003-c', metadata: { dependsOnTaskIds: ['001-a'] } });
+    expect(wouldCreateDependencyCycle([a, b, c], a, 'a')).toBe(true);
+    expect(wouldCreateDependencyCycle([a, b, c], a, '001-a')).toBe(true);
+    expect(wouldCreateDependencyCycle([a, b, c], a, 'b')).toBe(true);
+    expect(wouldCreateDependencyCycle([a, b, c], c, 'b')).toBe(true);
+  });
+
+  it('ignores other projects and terminates on an existing unrelated cycle', () => {
+    const a = makeTask('a', 'queue', { projectId: 'p1' });
+    const b = makeTask('b', 'queue', { projectId: 'p1', metadata: { dependsOnTaskIds: ['c'] } });
+    const c = makeTask('c', 'queue', { projectId: 'p1', metadata: { dependsOnTaskIds: ['b'] } });
+    const other = { ...b, projectId: 'p2', metadata: { dependsOnTaskIds: ['a'] } };
+    expect(wouldCreateDependencyCycle([a, b, c, other], a, 'b')).toBe(false);
   });
 });
