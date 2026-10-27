@@ -25,7 +25,6 @@ import { Insights } from './components/Insights';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AuthFailureModal } from './components/AuthFailureModal';
-import { AppUpdateNotification } from './components/AppUpdateNotification';
 import { ProactiveSwapListener } from './components/ProactiveSwapListener';
 import { useProjectStore, loadProjects, initializeProject, removeProject } from './stores/project-store';
 import { useTaskStore, loadTasks } from './stores/task-store';
@@ -248,23 +247,6 @@ export function App() {
     window.addEventListener('open-project-settings', handleOpenProjectSettings);
     return () => {
       window.removeEventListener('open-project-settings', handleOpenProjectSettings);
-    };
-  }, []);
-
-  // Listen for app updates - auto-open settings to 'updates' section when update is ready
-  useEffect(() => {
-    // When an update is downloaded and ready to install, open settings to updates section.
-    // The event reaches every project window, so only the one the user is in opens the
-    // dialog; the others show the update notification like any other window would.
-    const cleanupDownloaded = window.electronAPI.onAppUpdateDownloaded(() => {
-      if (!document.hasFocus()) return;
-      console.warn('[App] Update downloaded, opening settings to updates section');
-      setSettingsInitialSection('updates');
-      setIsSettingsDialogOpen(true);
-    });
-
-    return () => {
-      cleanupDownloaded();
     };
   }, []);
 
@@ -903,9 +885,6 @@ export function App() {
           setSettingsInitialSection('accounts');
           setIsSettingsDialogOpen(true);
         }} />
-
-        {/* App Update Notification - shows when new app version is available */}
-        <AppUpdateNotification />
       </div>
       </TooltipProvider>
     </ViewStateProvider>

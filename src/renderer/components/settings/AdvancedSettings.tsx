@@ -4,6 +4,7 @@ import {
   RefreshCw,
   Download,
   ArrowDownToLine,
+  Loader2,
   X
 } from 'lucide-react';
 import ReactMarkdown, { type Components } from 'react-markdown';
@@ -11,6 +12,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import rehypeSanitize from 'rehype-sanitize';
 import { Button } from '../ui/button';
+import { ExternalLink } from '../ui/external-link';
 import { Switch } from '../ui/switch';
 import { Progress } from '../ui/progress';
 import { SettingsSection } from './SettingsSection';
@@ -59,6 +61,11 @@ function ReleaseNotesRenderer({ content }: { content: string }) {
       </ReactMarkdown>
     </div>
   );
+}
+
+/** A release's page on GitHub (its changelog); releases are tagged v<version> */
+function releaseUrl(version: string): string {
+  return `https://github.com/proactive-agent/workbench/releases/tag/v${version}`;
 }
 
 interface AdvancedSettingsProps {
@@ -293,7 +300,17 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
               <span className="flex items-center gap-1.5">
                 <span className="font-mono">{version || t('updates.loading')}</span>
                 {appUpdateInfo ? (
-                  <span>· {t('updates.newVersionAvailable')} {appUpdateInfo.version}</span>
+                  <span className="flex items-center gap-1.5">
+                    · {t('updates.newVersionAvailable')}
+                    {/* The release's page on GitHub, where its changelog is */}
+                    <ExternalLink
+                      href={releaseUrl(appUpdateInfo.version)}
+                      className="font-mono"
+                      aria-label={t('updates.viewReleaseAriaLabel', { version: appUpdateInfo.version })}
+                    >
+                      {appUpdateInfo.version}
+                    </ExternalLink>
+                  </span>
                 ) : (
                   !isCheckingAppUpdate &&
                   appUpdateStatus && (
@@ -310,62 +327,14 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
               </span>
             }
             footer={
-              (appUpdateInfo || isAppUpdateDownloaded) ? (
-                /* Electron App Update - shows when an update is available */
-                <div className="space-y-4 rounded-xl border border-border p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                      <p className="text-sm text-foreground">
-                        {t('updates.appUpdateReady')}: <span className="font-mono">{appUpdateInfo?.version || 'Unknown'}</span>
-                      </p>
-                      {appUpdateInfo?.releaseDate && (
-                        <p className="mt-0.5 text-sm text-(--nav-label-color)">
-                          {t('updates.released')} {new Date(appUpdateInfo.releaseDate).toLocaleDateString()}
-                        </p>
-                      )}
-                    </div>
-                    {isAppUpdateDownloaded ? (
-                      <Button size="sm" onClick={handleInstallAppUpdate} disabled={showReadOnlyWarning}>
-                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
-                        {t('updates.installAndRestart')}
-                      </Button>
-                    ) : (
-                      <Button size="sm" onClick={handleDownloadAppUpdate} disabled={isDownloadingAppUpdate}>
-                        {isDownloadingAppUpdate ? (
-                          <>
-                            <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-                            {t('updates.downloading')}
-                          </>
-                        ) : (
-                          <>
-                            <Download className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
-                            {t('updates.downloadUpdate')}
-                          </>
-                        )}
-                      </Button>
-                    )}
-                  </div>
-
-                  {/* Release Notes */}
-                  {appUpdateInfo?.releaseNotes && (
-                    <div className="max-h-48 overflow-y-auto rounded-lg bg-segment-track px-4 py-3">
-                      <ReleaseNotesRenderer content={appUpdateInfo.releaseNotes} />
-                    </div>
-                  )}
-
+              (renderDownloadProgress() || appUpdateError || showReadOnlyWarning) ? (
+                <div className="space-y-3">
                   {renderDownloadProgress()}
 
                   {/* Update Error */}
                   {appUpdateError && (
                     <p className="text-sm text-destructive">
                       {appUpdateError}
-                    </p>
-                  )}
-
-                  {/* Downloaded Success */}
-                  {isAppUpdateDownloaded && !showReadOnlyWarning && (
-                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground">
-                      {t('updates.updateDownloaded')}
                     </p>
                   )}
 
@@ -380,6 +349,24 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
               ) : undefined
             }
           >
+            {/* An available update: download it, then install it (like the Claude Code and Graphify rows) */}
+            {appUpdateInfo && (
+              isAppUpdateDownloaded ? (
+                <Button size="sm" className="gap-1.5" onClick={handleInstallAppUpdate} disabled={showReadOnlyWarning}>
+                  <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  {t('updates.installAndRestart')}
+                </Button>
+              ) : (
+                <Button size="sm" className="gap-1.5" onClick={handleDownloadAppUpdate} disabled={isDownloadingAppUpdate}>
+                  {isDownloadingAppUpdate ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+                  ) : (
+                    <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  )}
+                  {isDownloadingAppUpdate ? t('updates.downloading') : t('updates.downloadUpdate')}
+                </Button>
+              )
+            )}
             <Button
               size="sm"
               variant="outline"
