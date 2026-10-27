@@ -2,6 +2,7 @@ import type { Agent, AgentState, ToolCallNode } from '../../lib/agent-types'
 import { FACE, WHISTLE, ZZZ } from '../../lib/canvas-constants'
 import { getStateColor } from '../../lib/colors'
 import { advanceNotes, spawnNote, spawnZ, type WhistleNote } from './draw-notes'
+import { iconGlowColor } from './icon-glow'
 
 /**
  * The main agent's face: two eyes (the shape of agent-flow's EMO sample: a
@@ -568,7 +569,7 @@ function drawWhistle(
   ctx.save()
   ctx.globalAlpha *= alpha
   ctx.strokeStyle = color
-  ctx.shadowColor = color
+  ctx.shadowColor = iconGlowColor(color)
   ctx.shadowBlur = FACE.glowBlur
   ctx.lineWidth = Math.max(1, r * 0.05)
   ctx.beginPath()
@@ -792,7 +793,7 @@ export function drawFace(
   const shut = Math.max(0, (closed - FACE.arcFrom) / (1 - FACE.arcFrom))
   ctx.save()
   ctx.fillStyle = color
-  ctx.shadowColor = color
+  ctx.shadowColor = iconGlowColor(color)
   ctx.shadowBlur = FACE.glowBlur
   for (const [i, pose] of [face.pose.left, face.pose.right].entries()) {
     const side: -1 | 1 = i === 0 ? -1 : 1

@@ -7,6 +7,7 @@ import { CLAUDE_SPARK_D } from './draw-misc'
 import { displayedColor, drawFace, type FaceState } from './draw-face'
 import { drawNotes } from './draw-notes'
 import { getAgentGlowSprite } from './render-cache'
+import { iconGlowColor } from './icon-glow'
 import { AGENTS_ICON_PATH } from '../../../icons/app-icons'
 import { drawJellyShape, applyJellyStretch, shapeInradius, type NodeMotion } from '../../lib/jelly'
 import { clipOutsideAttached } from './node-motion'
@@ -30,7 +31,7 @@ function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.scale(scale, scale)
   ctx.translate(-AGENT_DRAW.sparkViewBox, -AGENT_DRAW.sparkViewBox + 1)
   ctx.fillStyle = color
-  ctx.shadowColor = color
+  ctx.shadowColor = iconGlowColor(color)
   ctx.shadowBlur = FACE.glowBlur / 4
   ctx.fill(getClaudeSparkPath())
   ctx.restore()
@@ -51,7 +52,7 @@ function drawAgentsIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
   ctx.scale(scale, scale)
   ctx.translate(-512, -533)
   ctx.fillStyle = color
-  ctx.shadowColor = color
+  ctx.shadowColor = iconGlowColor(color)
   ctx.shadowBlur = FACE.glowBlur / 4
   ctx.fill(getAgentsIconPath())
   ctx.restore()
