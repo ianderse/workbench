@@ -69,10 +69,9 @@ const BODY_R = 4.5;
 /** The sunlit part of the moon, pale gold */
 const MOON_LIT = '#F3E6B8';
 
-/** Opacity along the sky's width and height ([offset, opacity]), eased so no edge shows */
-const FADE_X: [number, number][] = [
+/** Opacity across the sky's left side ([offset, opacity]), eased so no edge shows */
+const FADE_LEFT: [number, number][] = [
   [0, 0], [0.05, 0.1], [0.1, 0.35], [0.16, 0.75], [0.22, 1],
-  [0.78, 1], [0.84, 0.75], [0.9, 0.35], [0.95, 0.1], [1, 0],
 ];
 /** Top and bottom fade alike, so the sky leaves the same small gap under the header as over the bar */
 const FADE_Y: [number, number][] = [
@@ -80,8 +79,17 @@ const FADE_Y: [number, number][] = [
 ];
 
 /**
- * How far the sky reaches past its row: out through the popover's side padding to its edges, and
- * up through the gap to the header's line, so it fills the whole area with no bare strips
+ * Opacity along the sky's width: the left side's long fade, and on the right the top's short fade
+ * over the same number of pixels, so the right edge matches the top one at any width
+ */
+function fadeX(w: number, h: number): [number, number][] {
+  const right = FADE_Y.filter(([o]) => o < 0.5).reverse().map(([o, a]): [number, number] => [1 - (o * h) / w, a]);
+  return [...FADE_LEFT, ...right];
+}
+
+/**
+ * How far the sky reaches past its row: out through the popover's left padding to its edge, and
+ * up through the gap to the header's line. The right side ends with the progress bar.
  */
 const SKY_BLEED_X = 12;
 const SKY_BLEED_TOP = 10;
@@ -171,7 +179,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
     <div
       ref={ref}
       className="pointer-events-none absolute"
-      style={{ left: -SKY_BLEED_X, right: -SKY_BLEED_X, top: -SKY_BLEED_TOP, bottom: 0 }}
+      style={{ left: -SKY_BLEED_X, right: 0, top: -SKY_BLEED_TOP, bottom: 0 }}
     >
       {w > 0 && (
         <svg
@@ -184,9 +192,9 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
         >
           <defs>
             {/* Eased fades on every side, so the sky melts into the popover in either theme
-                instead of ending in an edge */}
+                instead of ending in an edge: a long one on the left, the top's short one on the right */}
             <linearGradient id={id('sky-fade-x')} x1="0" x2="1" y1="0" y2="0">
-              {FADE_X.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
+              {fadeX(w, h).map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
             </linearGradient>
             <linearGradient id={id('sky-fade-y')} x1="0" x2="0" y1="0" y2="1">
               {FADE_Y.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
