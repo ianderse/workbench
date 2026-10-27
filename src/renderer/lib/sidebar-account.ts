@@ -30,6 +30,11 @@ export function sidebarAccount(
 
   const claude = claudeProfiles.find((profile) => profile.id === claudeActiveId);
   if (!claude) return null;
+  // A setup on a cloud provider, an API key or a gateway bills as API usage; a claude.ai sign-in
+  // left in its config dir (subscriptionType) doesn't apply to it
+  if (claude.detected && claude.detected.provider !== 'subscription') {
+    return { name: claude.name, plan: 'api', planIsKey: true };
+  }
   const raw = (claude.detected?.plan ?? claude.subscriptionType)?.trim();
   if (!raw) return { name: claude.name, planIsKey: false };
   const key = raw.toLowerCase();

@@ -28,12 +28,23 @@ interface CanvasProps {
    *  history): the previous graph's effects are dropped, new ones are held back
    *  for a moment, and the camera is placed afresh */
   viewKey: string
+  /** The session the graph is showing. The faces outlive a rebuild of the same
+   *  one: how long the main agent has been left alone is the window's business,
+   *  not this snapshot of the graph's, and clearing it started its resting
+   *  cycle over every time a session's history was replaced */
+  sessionKey: string
   /** Set while events queued at a swap or rebuild (its history, or what a
    *  restored graph missed) wait to be applied */
   historyQueuedRef: React.RefObject<boolean>
+  /** The window is still starting, so the graph sits behind its spinner: the
+   *  main agent holds its resting cycle until it is shown (see drawFace) */
+  suspended?: boolean
 }
 
-export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps) {
+export function AgentCanvas({ graphRef, viewKey, sessionKey, historyQueuedRef, suspended = false }: CanvasProps) {
+  // Read in the draw loop, which runs outside React's renders
+  const suspendedRef = useRef(suspended)
+  suspendedRef.current = suspended
   const containerRef = useRef<HTMLDivElement>(null)
   const mainCanvasRef = useRef<HTMLCanvasElement>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
@@ -45,9 +56,12 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
   const lastFrameTimeRef = useRef(0)
   const viewKeyRef = useRef(viewKey)
   viewKeyRef.current = viewKey
+  const sessionKeyRef = useRef(sessionKey)
+  sessionKeyRef.current = sessionKey
   const drawnViewKeyRef = useRef(viewKey)
   /** Effects are held back until the new graph has its queued events */
   const quietRef = useRef(false)
+  const drawnSessionKeyRef = useRef<string | null>(null)
 
   /** The main agent's face animation (eyes, blinks), kept between frames */
   const facesRef = useRef<Map<string, FaceState>>(new Map())
@@ -191,7 +205,10 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       if (drawnViewKeyRef.current !== viewKeyRef.current) {
         drawnViewKeyRef.current = viewKeyRef.current
         effectsRef.current.length = 0
-        facesRef.current.clear()
+        if (drawnSessionKeyRef.current !== sessionKeyRef.current) {
+          drawnSessionKeyRef.current = sessionKeyRef.current
+          facesRef.current.clear()
+        }
         resetJellyField(jellyRef.current)
         quietRef.current = true
         resetPlacement()
@@ -205,6 +222,10 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       const awaiting = agentsAwaitingSubagents(agents)
 
       // Detect state changes → visual effects
+      // Taken before the quiet period is cleared below: the frame that applies
+      // a rebuilt graph's history is itself a replay, and the faces have to sit
+      // it out rather than read it as the agents doing all of that now
+      const replaying = quietRef.current
       detectStateChanges(awaiting)
 
       // Advance the jelly: where every node is drawn this frame
@@ -241,9 +262,9 @@ export function AgentCanvas({ graphRef, viewKey, historyQueuedRef }: CanvasProps
       ctx.translate(transform.x, transform.y)
       ctx.scale(transform.scale, transform.scale)
 
-      drawEdges(ctx, edges, agents, toolCalls, awaiting, motions, deltaTime)
+      drawEdges(ctx, edges, agents, toolCalls, awaiting, motions, deltaTime, timeRef.current)
       drawToolCalls(ctx, toolCalls, motions, timeRef.current)
-      drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, motions, timeRef.current)
+      drawAgents(ctx, agents, awaiting, toolCalls, facesRef.current, motions, timeRef.current, suspendedRef.current, replaying)
       drawEffects(ctx, effectsRef.current)
 
       ctx.restore()

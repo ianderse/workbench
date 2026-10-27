@@ -124,4 +124,28 @@ describe('node placement', () => {
     expect(Math.hypot(subsub.x - sub.x, subsub.y - sub.y))
       .toBeCloseTo(NODE.radiusSub * 3 + NODE.radiusSub + 8, 5)
   })
+
+  it('keeps the main agent off a sub-agent that was seen before it', () => {
+    // Attaching mid-session: a sub-agent whose parent isn't known yet, then the main agent
+    const state = play([
+      spawn('early', 'orchestrator'),
+      toolStart('early', 'Read', 'early-read'),
+      spawn('main', undefined, true),
+      spawn('late', 'orchestrator'),
+    ])
+
+    expect(state.agents.size).toBe(3)
+    expect(overlaps(state)).toEqual([])
+  })
+
+  it('gives a full graph longer edges instead of overlapping nodes', () => {
+    // More calls than the rings near the main agent can hold
+    const events: GraphEvent[] = [spawn('main', undefined, true)]
+    for (let t = 0; t < 400; t++) events.push(toolStart('main', 'Bash', `main-bash-${t}`))
+
+    const state = play(events)
+
+    expect(state.toolCalls.size).toBe(400)
+    expect(overlaps(state)).toEqual([])
+  })
 })

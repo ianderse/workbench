@@ -1,10 +1,11 @@
-import { WHISTLE } from '../../lib/canvas-constants'
+import { WHISTLE, ZZZ } from '../../lib/canvas-constants'
 
 /**
- * The sheet music the main agent whistles when it has been left alone long
- * enough (see draw-face.ts). A note leaves its mouth and is on its own from
- * then on: it floats in world coordinates, rises, sways, turns and fades, so
- * the node can go back to work underneath while the last notes drift off.
+ * What comes off the main agent into the air: the sheet music it whistles when
+ * it has been left alone long enough, and the Zs once it has fallen asleep
+ * (see draw-face.ts). Either one leaves it and is on its own from then on: it
+ * floats in world coordinates, rises, sways, turns and fades, so the node can
+ * go back to work underneath while the last of them drift off.
  */
 export interface WhistleNote {
   x: number
@@ -12,7 +13,9 @@ export interface WhistleNote {
   /** How fast it floats away (world units per second) */
   vx: number
   vy: number
-  /** Which glyph: an eighth note, a sixteenth, or a beamed pair */
+  /** Which one it is, and which glyph of that kind: an eighth note, a
+   *  sixteenth or a beamed pair for a note, nothing to choose for a Z */
+  glyph: 'note' | 'z'
   kind: 0 | 1 | 2
   /** Half the glyph's height, in world units */
   size: number
@@ -35,6 +38,7 @@ const signed = () => (Math.random() < 0.5 ? -1 : 1)
 export function spawnNote(notes: WhistleNote[], x: number, y: number, r: number, drift: number, color: string) {
   if (notes.length >= WHISTLE.maxNotes) notes.shift()
   notes.push({
+    glyph: 'note',
     x: x + (Math.random() - 0.5) * WHISTLE.mouthSpread * r,
     y,
     vx: drift * rand(WHISTLE.driftSpeed, WHISTLE.driftJitter),
@@ -48,6 +52,29 @@ export function spawnNote(notes: WhistleNote[], x: number, y: number, r: number,
     color,
     age: 0,
     life: rand(WHISTLE.life, WHISTLE.lifeJitter),
+  })
+}
+
+/** One Z off a sleeping node of radius r at (x, y), the `step`th of the three
+ *  sizes they climb through, drifting off the side it rises on (`drift`: +1
+ *  right). They share the air with the notes: the same list, the same drift */
+export function spawnZ(notes: WhistleNote[], x: number, y: number, r: number, step: number, drift: number, color: string) {
+  if (notes.length >= WHISTLE.maxNotes) notes.shift()
+  notes.push({
+    glyph: 'z',
+    kind: 0,
+    x: x + (Math.random() - 0.5) * ZZZ.spread * r,
+    y: y + (Math.random() - 0.5) * ZZZ.spread * r,
+    vx: drift * rand(ZZZ.driftSpeed, ZZZ.driftJitter),
+    vy: -rand(ZZZ.riseSpeed, ZZZ.riseJitter),
+    size: ZZZ.sizes[step % ZZZ.sizes.length] * r,
+    tilt: signed() * Math.random() * ZZZ.tilt,
+    spin: signed() * Math.random() * ZZZ.spin,
+    sway: rand(ZZZ.sway, ZZZ.swayJitter),
+    phase: Math.random() * Math.PI * 2,
+    color,
+    age: 0,
+    life: rand(ZZZ.life, ZZZ.lifeJitter),
   })
 }
 
@@ -115,6 +142,20 @@ function noteGlyph(ctx: CanvasRenderingContext2D, kind: 0 | 1 | 2) {
   if (kind === 1) flag(0.34)
 }
 
+/** A Z, drawn around the origin in the same box the notes use: the two bars
+ *  and the stroke between them, with the corners rounded off */
+function zGlyph(ctx: CanvasRenderingContext2D) {
+  ctx.lineWidth = ZZZ.weight
+  ctx.lineJoin = 'round'
+  ctx.lineCap = 'round'
+  ctx.beginPath()
+  ctx.moveTo(-0.52, -0.62)
+  ctx.lineTo(0.52, -0.62)
+  ctx.lineTo(-0.52, 0.62)
+  ctx.lineTo(0.52, 0.62)
+  ctx.stroke()
+}
+
 /** Draw the notes in the air, dimmed by the node's own `opacity` */
 export function drawNotes(ctx: CanvasRenderingContext2D, notes: readonly WhistleNote[], opacity: number) {
   for (const note of notes) {
@@ -126,9 +167,12 @@ export function drawNotes(ctx: CanvasRenderingContext2D, notes: readonly Whistle
     ctx.rotate(note.tilt)
     ctx.scale(note.size, note.size)
     ctx.fillStyle = note.color
+    ctx.strokeStyle = note.color
     ctx.shadowColor = note.color
-    ctx.shadowBlur = WHISTLE.glowBlur / note.size
-    noteGlyph(ctx, note.kind)
+    // Pixels, whatever the glyph's size: a shadow's blur ignores the transform
+    ctx.shadowBlur = WHISTLE.glowBlur
+    if (note.glyph === 'z') zGlyph(ctx)
+    else noteGlyph(ctx, note.kind)
     ctx.restore()
   }
 }

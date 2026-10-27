@@ -1,8 +1,8 @@
 import { useEffect, useRef, useCallback, useState, useMemo, forwardRef, useImperativeHandle, lazy, Suspense } from 'react';
 import { useDroppable } from '@dnd-kit/core';
-import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { cn } from '../lib/utils';
+import { AgentLoader } from './ui/agent-loader';
 import '@xterm/xterm/css/xterm.css';
 import {
   buildPendingTaskSession,
@@ -744,8 +744,8 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
       {/* The terminal, and with Live agent on the agent's graph in the second half. The row is
           always there, so showing or hiding the graph never remounts xterm (session and scrollback stay) */}
       <div className="relative flex flex-1" style={{ minHeight: 0 }}>
-        {/* While the window starts (its shell, or Claude Code), a spinner instead of the command the
-            app types and the start-up output; xterm stays mounted underneath */}
+        {/* While the window starts (its shell, or Claude Code), the agent loader instead of the
+            command the app types and the start-up output; xterm stays mounted underneath */}
         {terminal?.loading && (
           <div
             className="absolute inset-0 z-50 flex items-center justify-center"
@@ -753,7 +753,7 @@ Please confirm you're ready by saying: I'm ready to work on ${selectedTask.title
             role="status"
             aria-label={t('terminal:loading')}
           >
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            <AgentLoader size={28} />
           </div>
         )}
         {/* Padding lives on the wrapper: xterm's fit addon sizes rows from its container's height,

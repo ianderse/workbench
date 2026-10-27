@@ -16,6 +16,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { useClawd } from '../useClawd';
 import { MASCOT_W } from '../sprite';
+import { CLASSIC_SKIN } from '../skins';
 
 /** An idle scene of the given width, with plenty of the limit left */
 function scene(span: number) {
@@ -26,7 +27,8 @@ function scene(span: number) {
     total: 1,
     span,
     pointerX: null,
-    active: true
+    active: true,
+    skin: CLASSIC_SKIN,
   };
 }
 

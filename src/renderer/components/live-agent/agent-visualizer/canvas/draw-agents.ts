@@ -1,10 +1,10 @@
 import { displayedState } from '../../hooks/graph/types'
 import { Agent, ANIM, type AgentState, type ToolCallNode } from '../../lib/agent-types'
 import { getStateColor } from '../../lib/colors'
-import { AGENT_DRAW } from '../../lib/canvas-constants'
+import { AGENT_DRAW, FACE } from '../../lib/canvas-constants'
 import { alphaHex } from '../../lib/utils'
 import { CLAUDE_SPARK_D } from './draw-misc'
-import { drawFace, type FaceState } from './draw-face'
+import { displayedColor, drawFace, type FaceState } from './draw-face'
 import { drawNotes } from './draw-notes'
 import { getAgentGlowSprite } from './render-cache'
 import { AGENTS_ICON_PATH } from '../../../icons/app-icons'
@@ -31,7 +31,7 @@ function drawClaudeSpark(ctx: CanvasRenderingContext2D, cx: number, cy: number, 
   ctx.translate(-AGENT_DRAW.sparkViewBox, -AGENT_DRAW.sparkViewBox + 1)
   ctx.fillStyle = color
   ctx.shadowColor = color
-  ctx.shadowBlur = 6 / scale
+  ctx.shadowBlur = FACE.glowBlur / 4
   ctx.fill(getClaudeSparkPath())
   ctx.restore()
 }
@@ -52,7 +52,7 @@ function drawAgentsIcon(ctx: CanvasRenderingContext2D, cx: number, cy: number, r
   ctx.translate(-512, -533)
   ctx.fillStyle = color
   ctx.shadowColor = color
-  ctx.shadowBlur = 6 / scale
+  ctx.shadowBlur = FACE.glowBlur / 4
   ctx.fill(getAgentsIconPath())
   ctx.restore()
 }
@@ -170,13 +170,22 @@ export function drawAgents(
   faces: Map<string, FaceState>,
   motions: Map<string, NodeMotion>,
   time: number,
+  /** The window is still starting: the main agent's resting cycle waits for it */
+  suspended: boolean,
+  /** This frame applies a rebuilt graph's history: its states are a replay of
+   *  what already happened, so the faces sit it out */
+  replaying: boolean,
 ) {
   for (const agent of agents.values()) {
     const state = displayedState(agent, awaiting)
     // Drawn where the jelly has it: out of its parent as it buds off, back in as it merges
     const motion = motions.get(agent.id)
     if (!motion) continue
-    const color = getStateColor(state)
+    // The main agent's color is eased, so waking up into work turns the whole
+    // node over from one state's color to the next instead of cutting to it
+    const color = agent.isMain
+      ? displayedColor(faces, agent.id, state, time)
+      : getStateColor(state)
 
     const isWaiting = state === 'waiting_permission'
     const isActive = state === 'thinking' || isWaiting
@@ -197,7 +206,7 @@ export function drawAgents(
     applyJellyStretch(ctx, motion)
     if (agent.isMain) {
       // The main agent always has its face on: at work, or bored and whistling
-      drawFace(ctx, faces, agent, state, awaiting.has(agent.id), agents, toolCalls, motion.x, motion.y, r, color, time)
+      drawFace(ctx, faces, agent, state, awaiting.has(agent.id), agents, toolCalls, motion.x, motion.y, r, color, time, suspended, replaying)
     } else {
       drawCenterIcon(ctx, motion, r, color, isWaiting, agent.isSatellite === true)
     }

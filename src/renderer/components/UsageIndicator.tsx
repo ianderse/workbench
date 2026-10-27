@@ -21,6 +21,7 @@ import type { ClaudeUsageSnapshot } from '../../shared/types/agent';
 import type { AppSection } from './settings/AppSettings';
 import { useSettingsStore } from '../stores/settings-store';
 import { UsageBreakdown } from './usage/UsageBreakdown';
+import { useUsageStore } from '../stores/usage-store';
 import {
   THRESHOLD_ELEVATED, THRESHOLD_WARNING, getBadgeColorClasses, getColorClass,
 } from './usage/usage-colors';
@@ -30,7 +31,10 @@ export const USAGE_LOADING_TIMEOUT_MS = 20_000;
 
 export function UsageIndicator() {
   const { t } = useTranslation(['common']);
-  const [usage, setUsage] = useState<ClaudeUsageSnapshot | null>(null);
+  // Starts from the last snapshot, so mounting again (the sidebar opening) never blanks the store
+  const [usage, setUsage] = useState<ClaudeUsageSnapshot | null>(() => useUsageStore.getState().usage);
+  // Shared, so the usage simulator's preview in Settings shows the same numbers without asking again
+  useEffect(() => { useUsageStore.getState().setUsage(usage); }, [usage]);
   const [isLoading, setIsLoading] = useState(true);
   const [isAvailable, setIsAvailable] = useState(false);
   const [activeProfileNeedsReauth, setActiveProfileNeedsReauth] = useState(false);

@@ -14,6 +14,11 @@ export interface SlotRequest {
   footprint?: number
   /** Where it would sit if the graph were empty (its own direction out of the parent) */
   preferredAngle: number
+  /**
+   * The parent is only a point to grow from (a node with nothing to hang off starts in the
+   * middle): try that point itself first
+   */
+  atParent?: boolean
   agents: Map<string, Agent>
   toolCalls: Map<string, ToolCallNode>
 }
@@ -35,9 +40,11 @@ function* sweepAngles(preferred: number, steps: number): Generator<number> {
  * direction outward to either side, so an uncrowded graph keeps growing the way
  * it always did and a crowded one spills around and further out instead of
  * stacking nodes on top of each other. Every agent and tool call counts, not
- * just the parent's own, since branches grow into each other's space.
+ * just the parent's own, since branches grow into each other's space. When
+ * every ring near the parent is taken, the edge grows longer until the node
+ * clears everything: nodes never overlap.
  */
-export function findFreeSlot({ parent, radius, footprint, preferredAngle, agents, toolCalls }: SlotRequest): { x: number; y: number } {
+export function findFreeSlot({ parent, radius, footprint, preferredAngle, agents, toolCalls, atParent }: SlotRequest): { x: number; y: number } {
   const room = footprint ?? radius
 
   // The nodes to stay clear of, flattened once: a spawn in a busy graph samples
@@ -59,37 +66,42 @@ export function findFreeSlot({ parent, radius, footprint, preferredAngle, agents
   }
   for (const tc of toolCalls.values()) add(tc.x, tc.y, estimateToolNodeRadius(tc.toolName))
 
-  /** How many nodes the new one would overlap at (x, y), counting no further than `limit` */
-  const clashes = (x: number, y: number, limit: number): number => {
-    let hits = 0
+  /** Whether the new node would overlap nothing at (x, y) */
+  const clear = (x: number, y: number): boolean => {
     for (let i = 0; i < n; i++) {
       const dx = x - xs[i], dy = y - ys[i]
-      if (dx * dx + dy * dy < minDistSq[i] && ++hits >= limit) break
+      if (dx * dx + dy * dy < minDistSq[i]) return false
     }
-    return hits
+    return true
+  }
+
+  if (atParent && clear(parent.x, parent.y)) return { x: parent.x, y: parent.y }
+
+  // Past this distance from the parent nothing is in the way in any direction
+  let clearDist = 0
+  for (let i = 0; i < n; i++) {
+    clearDist = Math.max(clearDist, Math.hypot(xs[i] - parent.x, ys[i] - parent.y) + Math.sqrt(minDistSq[i]))
   }
 
   // The first ring sits where the edge to the parent is as long as the parent is wide
   const nearest = nodeDistance(parent.radius, radius)
-  let best: { x: number; y: number } | undefined
-  let bestClashes = Infinity
+  const at = (angle: number, dist: number) =>
+    ({ x: parent.x + Math.cos(angle) * dist, y: parent.y + Math.sin(angle) * dist })
 
-  for (let ring = 1; ring <= NODE_SLOT.maxRings; ring++) {
-    const dist = nearest + (ring - 1) * NODE_SLOT.ringIncrement
+  for (let ring = 1; ; ring++) {
+    // Rings close in are tried about every node-width; once those are all taken, the rings
+    // spread further apart so a crowded graph reaches open space quickly
+    const extra = Math.max(0, ring - NODE_SLOT.maxRings)
+    const dist = nearest + (ring - 1 + extra * extra) * NODE_SLOT.ringIncrement
+    if (dist >= clearDist) return at(preferredAngle, Math.max(dist, nearest))
     // Sample the ring about every node-width, so nothing slips between two tries
     const steps = Math.min(
       NODE_SLOT.maxSteps,
       Math.max(NODE_SLOT.minSteps, Math.round((Math.PI * 2 * dist) / (room * 2 + NODE_SLOT.gap)))
     )
     for (const angle of sweepAngles(preferredAngle, steps)) {
-      const x = parent.x + Math.cos(angle) * dist
-      const y = parent.y + Math.sin(angle) * dist
-      const hits = clashes(x, y, bestClashes)
-      if (hits === 0) return { x, y }
-      // A graph crowded to the last ring takes the emptiest spot anywhere
-      if (hits < bestClashes) { bestClashes = hits; best = { x, y } }
+      const pos = at(angle, dist)
+      if (clear(pos.x, pos.y)) return pos
     }
   }
-
-  return best ?? { x: parent.x + Math.cos(preferredAngle) * nearest, y: parent.y + Math.sin(preferredAngle) * nearest }
 }

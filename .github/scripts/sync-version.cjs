@@ -6,12 +6,16 @@
  * the branch (a commit, an amend, a cherry-pick, a pull):
  * - major: the first number in package.json, never touched here. Raising it is the user's call,
  *   and the `v<major>.0.0` tag of that release is where the counting below starts
- * - minor: the merge commits on this branch since that tag (one per merged pull request)
- * - patch: the plain commits since the newest of those merges, so a merge resets it to 0
+ * - minor: the pull requests merged into main since that tag that this branch has, whether it was
+ *   cut after them or took them in by catching up with main. A merge made on the branch itself (a
+ *   catch-up, a `git pull` of its own remote) is no pull request
+ * - patch: the plain commits this branch has made since the newest of those merges it is built
+ *   on, so a merge resets it to 0 (catching up with main does not)
  *
- * The `post-commit` hook runs this and folds the change into the commit that caused it; a merge is
- * made on GitHub, where no hook runs, so .github/workflows/version.yml does the same to the merge
- * commit. Running it on its own only prints the version a clean checkout already has.
+ * The `post-commit` hook runs this and folds the change into the commit that caused it. A merge is
+ * made on GitHub, where no hook runs, so it keeps the version its branch had: the next commit made
+ * on top of it brings the version up to date. Running it on its own prints the version the
+ * checkout should have (and writes it, where that differs).
  *
  * The release workflows take the published version from the release tag, so what is written here
  * is what the app reports in a development or a locally packaged build.
@@ -29,24 +33,58 @@ const packageText = readFileSync(packagePath, 'utf8');
 const current = JSON.parse(packageText).version;
 const major = current.split('.')[0];
 
+const exists = (ref) => {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', ref], { cwd: root, stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 // Without the release tag there is nothing to count from: leave the version as it is rather than
 // guess one (a shallow clone, or a major raised before its release was tagged)
 const anchor = `v${major}.0.0`;
-try {
-  execFileSync('git', ['rev-parse', '--verify', `refs/tags/${anchor}`], {
-    cwd: root,
-    stdio: 'ignore',
-  });
-} catch {
+if (!exists(`refs/tags/${anchor}`)) {
   console.log(`[sync-version] no ${anchor} tag to count from, keeping ${current}`);
   process.exit(0);
 }
 
+/**
+ * The merges that count are main's: those on main's own line (its first parents), each the merge
+ * of a pull request. A merge made on a branch (catching up with main, or a `git pull` of its own
+ * remote) is never one, whichever side main is on, so the branch counts the same as the main it
+ * has taken in. A merge is known by its parents, which a rewritten merge commit keeps (merges on
+ * main were once rewritten to carry their version), so the one this branch took in may not be
+ * the one main has now.
+ *
+ * Worked out from two listings rather than asked of git commit by commit, which ran up to three
+ * git processes for every merge on every commit. Without main to compare with, the merges on this
+ * branch's own line are taken for pull requests.
+ */
+const mainRef = ['refs/remotes/origin/main', 'refs/heads/main'].find(exists);
+// Merges only, newest first: listing every commit's parents outgrew execFileSync's output
+// buffer on a long history
+const listMerges = (...args) => lines(git('rev-list', '--merges', '--parents', ...args)).map((line) => {
+  const [sha, ...parents] = line.split(' ');
+  return { sha, parents: parents.join(' ') };
+});
+
+let merges;
+if (mainRef) {
+  const here = new Map(listMerges(`${anchor}..HEAD`).map(({ sha, parents }) => [parents, sha]));
+  merges = listMerges('--first-parent', `${anchor}..${mainRef}`)
+    .filter(({ parents }) => here.has(parents))
+    .map(({ parents }) => here.get(parents));
+} else {
+  merges = listMerges('--first-parent', `${anchor}..HEAD`).map(({ sha }) => sha);
+}
 // --first-parent: only this branch's own history, so the commits a merge brought in are not
-// counted again as patches after it
-const merges = lines(git('rev-list', '--first-parent', '--merges', `${anchor}..HEAD`));
-const since = merges[0] ?? anchor;
-const patch = lines(git('rev-list', '--first-parent', '--no-merges', `${since}..HEAD`)).length;
+// counted again as patches after it. Only the newest merge needs leaving out: the others are on
+// main's line before it, so behind it (one a branch took in before it was rewritten has the same
+// parents, so the same history), and a sha for every pull request outgrew the command
+// line Windows allows
+const patch = lines(git('rev-list', '--first-parent', '--no-merges', 'HEAD', '--not', anchor, ...merges.slice(0, 1))).length;
 const version = `${major}.${merges.length}.${patch}`;
 
 if (version === current) {
