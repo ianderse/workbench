@@ -119,6 +119,8 @@ const browserMockAPI: ElectronAPI = {
   detectOmp: async () => ({ success: true as const, data: { installed: false, models: [] } }),
   onHumanWorkChanged: () => () => {},
   mutateHumanWork: async () => ({ success: false, error: 'Human work requires the desktop app' }),
+  getHumanReviewPacket: async () => ({ success: false, error: 'Review artifacts require the desktop app' }),
+  openHumanReviewArtifact: async () => ({ success: false, error: 'Review artifacts require the desktop app' }),
   listProjectMemories: async () => ({ success: true as const, data: [] }),
   onProjectMemoryChanged: () => () => {},
   mutateProjectMemory: async () => ({ success: false as const, error: 'Project memory requires the desktop app' }),

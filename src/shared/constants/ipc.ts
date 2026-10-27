@@ -41,6 +41,8 @@ export const IPC_CHANNELS = {
   TASK_REVIEW: 'task:review',
   TASK_HUMAN_WORK: 'task:humanWork',
   TASK_HUMAN_WORK_CHANGED: 'task:humanWorkChanged',
+  TASK_HUMAN_REVIEW_PACKET: 'task:humanReviewPacket',
+  TASK_HUMAN_REVIEW_OPEN: 'task:humanReviewOpen',
   TASK_UPDATE_STATUS: 'task:updateStatus',
   TASK_RECOVER_STUCK: 'task:recoverStuck',
   TASK_CHECK_RUNNING: 'task:checkRunning',

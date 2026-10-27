@@ -1,4 +1,4 @@
-import type { HumanWorkMutation, HumanWorkstream } from './human-work';
+import type { HumanReviewPacket, HumanWorkMutation, HumanWorkstream } from './human-work';
 /**
  * IPC (Inter-Process Communication) types for Electron API
  */
@@ -176,6 +176,8 @@ export interface ElectronAPI {
   stopTask: (taskId: string, projectId?: string) => void;
   retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
   mutateHumanWork: (projectId: string, taskId: string, mutation: HumanWorkMutation) => Promise<IPCResult<HumanWorkstream>>;
+  getHumanReviewPacket: (projectId: string, taskId: string) => Promise<IPCResult<HumanReviewPacket>>;
+  openHumanReviewArtifact: (projectId: string, taskId: string, reference: string, action: 'open' | 'reveal', expectedRoot: string) => Promise<IPCResult>;
   onHumanWorkChanged: (callback: (projectId: string) => void) => () => void;
   submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[], options?: TaskReviewOptions, projectId?: string) => Promise<IPCResult>;
   updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean; keepWorktree?: boolean }, projectId?: string) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;

@@ -1,4 +1,4 @@
-import type { HumanWorkMutation, HumanWorkstream } from '../../shared/types/human-work';
+import type { HumanReviewPacket, HumanWorkMutation, HumanWorkstream } from '../../shared/types/human-work';
 import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { TaskBreakdown } from '../../shared/types/task-breakdown';
@@ -55,6 +55,8 @@ export interface TaskAPI {
   stopTask: (taskId: string, projectId?: string) => void;
   retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
   mutateHumanWork: (projectId: string, taskId: string, mutation: HumanWorkMutation) => Promise<IPCResult<HumanWorkstream>>;
+  getHumanReviewPacket: (projectId: string, taskId: string) => Promise<IPCResult<HumanReviewPacket>>;
+  openHumanReviewArtifact: (projectId: string, taskId: string, reference: string, action: 'open' | 'reveal', expectedRoot: string) => Promise<IPCResult>;
   onHumanWorkChanged: (callback: (projectId: string) => void) => () => void;
   submitReview: (
     taskId: string,
@@ -136,6 +138,8 @@ export interface TaskAPI {
 }
 
 export const createTaskAPI = (): TaskAPI => ({
+  getHumanReviewPacket: (projectId, taskId) => ipcRenderer.invoke(IPC_CHANNELS.TASK_HUMAN_REVIEW_PACKET, projectId, taskId),
+  openHumanReviewArtifact: (projectId, taskId, reference, action, expectedRoot) => ipcRenderer.invoke(IPC_CHANNELS.TASK_HUMAN_REVIEW_OPEN, projectId, taskId, reference, action, expectedRoot),
   // Task Operations
   getTasks: (projectId: string, options?: { forceRefresh?: boolean }): Promise<IPCResult<Task[]>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_LIST, projectId, options),

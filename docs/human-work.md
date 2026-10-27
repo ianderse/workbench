@@ -77,3 +77,23 @@ Checks cover lifecycle/history, incomplete and stale submissions, project scope,
 actual IPC persistence, renderer controls and the board inbox, exact-revision evidence handoff,
 and early exit from human-only AI review loops. Real human approval and participant observations
 remain the user's acceptance boundary.
+## Finding the work to review
+
+Human-only reviews appear above the work summary as **What needs your input**. The checklist
+highlights participant sessions and visual review when the original findings mention them; the
+exact requirements remain available beside the response form. It does not replace the spec.
+
+**Files to review** resolves the report and its local Markdown links in this task's worktree,
+falling back to the project checkout only when there is no task worktree. **Open** uses the
+system's default viewer and **Show in file manager** reveals that exact artifact. Missing files
+remain labeled missing. Image counts describe files in the linked folder, not completed generation,
+visual acceptance or provenance verification. The generated-image location is checked when the
+report links source art. Report limitations are quoted separately. Lists are cached until a new
+review run or an explicit **Refresh files**.
+
+Related reworded notes from the same source can share a response form when their current receipts
+match. Grouping uses conservative text/topic matching for display, not semantic equivalence or gate
+resolution. Every original finding and its history remains stored. Saving a grouped response updates
+the selected records atomically under the same expected-revision check; different existing answers
+remain separate. Continuing still requires every tracked receipt and current blocker to be covered.
+The human override remains a separate, explicit owner decision.

@@ -417,12 +417,12 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                   <div className="h-full overflow-y-auto overflow-x-hidden scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent">
                     <div className="px-6 pb-6 pt-2 space-y-5 overflow-x-hidden max-w-full">
                       <TaskMergeStatus task={task} />
+                      {task.status === 'human_review' && <AIReviewFailedPanel claudeRun={task.claudeRun} task={task} />}
                       {/* What the agent did, how it checked itself and what it changed */}
                       {shouldShowSpecReview(task) && <SpecReviewPanel task={task} />}
                       {shouldShowWhatWasDone(task) && <WhatWasDonePanel task={task} />}
 
                       {/* Human Review after the last AI review round still failed: why, and how the rounds went */}
-                      {task.status === 'human_review' && <AIReviewFailedPanel claudeRun={task.claudeRun} task={task} />}
                       {task.status === 'human_review' && task.claudeRun?.reviewVerdict?.status !== 'failed' && task.metadata?.humanWork?.approvalOverride && <HumanWorkPanel task={task} findings={[]} />}
 
                       {/* Merged by autonomous mode: where it went, and Revert this task */}

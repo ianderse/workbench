@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, rmSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import type { Project, Task, IPCResult, TaskMetadata } from '../../../../shared/types';
@@ -7,6 +7,7 @@ import type { HumanWorkstream } from '../../../../shared/types/human-work';
 import { IPC_CHANNELS, getSpecsDir } from '../../../../shared/constants';
 import { invokeIpcHandler } from '../../ipc-registry';
 import { registerHumanWorkHandlers, collectHumanReviewActions } from '../human-work-handlers';
+import { shell } from 'electron';
 const state = vi.hoisted(() => ({ project: undefined as Project | undefined, task: undefined as Task | undefined, file: '', notify: vi.fn(), changed: vi.fn() }));
 vi.mock('../../../project-store', () => ({ projectStore: { invalidateTasksCache: vi.fn() } }));
 vi.mock('../shared', () => ({ findTaskAndProject: (id: string, projectId: string) => {
@@ -70,4 +71,22 @@ it('persists a named override and stops creating repeated human approval actions
   await collectHumanReviewActions('p', '001-human');
   expect(JSON.parse(readFileSync(state.file, 'utf8')).humanWork.items).toEqual([]);
   expect(state.task?.claudeRun?.reviewVerdict?.status).toBe('failed');
+});
+
+it('opens only available review artifacts for the owning project through IPC', async () => {
+  mkdirSync(path.join(root, 'docs'));
+  writeFileSync(path.join(root, 'docs/report.md'), '[Study protocol](protocol.md)');
+  writeFileSync(path.join(root, 'docs/protocol.md'), 'Actual recording sheets');
+  const packet = await invokeIpcHandler<IPCResult<import('../../../../shared/types/human-work').HumanReviewPacket>>(IPC_CHANNELS.TASK_HUMAN_REVIEW_PACKET, 'p', '001-human');
+  expect(packet.data?.artifacts).toContainEqual(expect.objectContaining({ path: 'docs/protocol.md', available: true }));
+  const open = (project: string, ref: string, action = 'open', expectedRoot = packet.data!.root) => invokeIpcHandler<IPCResult>(IPC_CHANNELS.TASK_HUMAN_REVIEW_OPEN, project, '001-human', ref, action, expectedRoot);
+  expect((await open('p', 'docs/protocol.md', 'reveal')).success).toBe(true);
+  expect(shell.showItemInFolder).toHaveBeenCalledWith(realpathSync(path.join(root, 'docs/protocol.md')));
+  expect((await open('p', 'docs/protocol.md')).success).toBe(true);
+  expect(shell.openPath).toHaveBeenCalledWith(realpathSync(path.join(root, 'docs/protocol.md')));
+  expect((await open('foreign', 'docs/protocol.md')).success).toBe(false);
+  expect((await open('p', '../outside.md')).success).toBe(false);
+  expect((await open('p', 'docs/unlisted.md')).success).toBe(false);
+  expect((await open('p', 'docs/protocol.md', 'execute')).success).toBe(false);
+  expect((await open('p', 'docs/protocol.md', 'open', '/a-previous-checkout')).success).toBe(false);
 });

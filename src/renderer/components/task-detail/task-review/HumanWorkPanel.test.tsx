@@ -84,6 +84,8 @@ it('records an explicit task override and continues without forcing additional a
   await waitFor(() => expect(review).toHaveBeenCalledWith('001-human', false, undefined, undefined, { humanWorkRevision: 1 }, 'p'));
   expect(mutate).toHaveBeenCalledWith('p', '001-human', expect.objectContaining({ action: 'override', expectedRevision: 0, approver: 'Ian Andersen' }));
   expect(screen.getByText('Human approval overridden by Ian Andersen')).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Recorded human approval decision' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'What needs your input' })).not.toBeInTheDocument();
   expect(useTaskStore.getState().tasks[0].metadata?.humanWork?.items).toEqual([]);
 });
 
@@ -96,4 +98,59 @@ it('can continue with a persisted override even when historic human actions are 
   fireEvent.click(screen.getByRole('button', { name: 'Continue with override' }));
   await waitFor(() => expect(review).toHaveBeenCalledWith('001-human', false, undefined, undefined, { humanWorkRevision: 2 }, 'p'));
   expect(mutate).not.toHaveBeenCalled();
+});
+
+it('records a shared response once for related notes and hands back every original requirement', async () => {
+  window.electronAPI = { ...window.electronAPI, getHumanReviewPacket: vi.fn(async () => ({ success: true, data: { root: '/project', location: 'project' as const, artifacts: [] } })) };
+  const notes = [finding, { ...finding, line: 40, description: 'A real reviewer must approve the committed images.' }];
+  let humanWork = applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding: notes[0] }, notes, 'note-1', '2026-10-27T16:00:00Z');
+  humanWork = applyHumanWorkMutation(humanWork, { action: 'create', expectedRevision: 1, finding: notes[1] }, notes, 'note-2', '2026-10-27T16:01:00Z');
+  useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork } }] });
+  render(<HumanWorkPanel task={task} findings={notes} />);
+  expect(screen.getAllByLabelText('Responsible person')).toHaveLength(1);
+  expect(screen.getByText('Read all 2 related review notes')).toBeInTheDocument();
+  fireEvent.change(screen.getByLabelText('Responsible person'), { target: { value: 'Ian' } });
+  fireEvent.change(screen.getByLabelText('Response, decision or participant observations'), { target: { value: 'The current images are accepted.' } });
+  fireEvent.change(screen.getByLabelText('Evidence references (report paths, review notes, artifact URLs)'), { target: { value: 'docs/reviewer-notes.md' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Submit and continue' }));
+  await waitFor(() => expect(review).toHaveBeenCalledWith('001-human', false, undefined, undefined, { humanWorkRevision: 3 }, 'p'));
+  expect(mutate).toHaveBeenCalledTimes(1);
+  expect(mutate).toHaveBeenCalledWith('p', '001-human', expect.objectContaining({ action: 'update', id: 'note-2', relatedIds: ['note-1'] }));
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork?.items.map(item => item.finding)).toEqual(notes);
+});
+
+it('shows worktree-aware artifact links, missing generated art and the quoted limitations', async () => {
+  task = { ...task, id: '002-materials', specId: '002-materials' };
+  const getPacket = vi.fn(async () => ({ success: true, data: { root: '/project/.workbench/worktrees/tasks/001-human', location: 'worktree', limitations: 'The portraits are silhouettes.', artifacts: [
+    { path: 'docs/report.md', kind: 'report', label: 'Delivery report', available: true },
+    { path: 'docs/protocol.md', kind: 'protocol', label: 'Study protocol', available: true },
+    { path: 'art/source/generated', kind: 'asset', label: 'art/source/generated', available: false },
+  ] } }));
+  const open = vi.fn(async () => ({ success: true }));
+  window.electronAPI = { ...window.electronAPI, getHumanReviewPacket: getPacket as never, openHumanReviewArtifact: open };
+  const view = render(<HumanWorkPanel task={task} findings={[{ ...finding, description: 'Three participant sessions and human review of the screenshots are required.' }]} />);
+  expect(screen.getByText(/Complete the requested participant sessions/)).toBeInTheDocument();
+  expect(await screen.findByText(/These files come from this task’s worktree/)).toBeInTheDocument();
+  expect(screen.getByText(/No generated image files found in this location/)).toBeInTheDocument();
+  fireEvent.click(screen.getAllByRole('button', { name: 'Show in file manager' })[0]);
+  await waitFor(() => expect(open).toHaveBeenCalledWith('p', '002-materials', 'docs/report.md', 'reveal', '/project/.workbench/worktrees/tasks/001-human'));
+  expect(screen.getByText('The portraits are silhouettes.')).toBeInTheDocument();
+  view.rerender(<HumanWorkPanel task={{ ...task }} findings={[finding]} />);
+  expect(getPacket).toHaveBeenCalledTimes(1);
+});
+
+it('never partially saves grouped responses against an older main process', async () => {
+  const notes = [finding, { ...finding, line: 40, description: 'A real reviewer must approve the committed images.' }];
+  let humanWork = applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding: notes[0] }, notes, 'note-1', '2026-10-27T16:00:00Z');
+  humanWork = applyHumanWorkMutation(humanWork, { action: 'create', expectedRevision: 1, finding: notes[1] }, notes, 'note-2', '2026-10-27T16:01:00Z');
+  useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork } }] });
+  window.electronAPI = { ...window.electronAPI, getHumanReviewPacket: vi.fn(async () => { throw new Error("No handler registered for 'task:humanReviewPacket'"); }) };
+  render(<HumanWorkPanel task={task} findings={notes} />);
+  fireEvent.change(screen.getByLabelText('Responsible person'), { target: { value: 'Ian' } });
+  fireEvent.change(screen.getByLabelText('Response, decision or participant observations'), { target: { value: 'Current images accepted' } });
+  fireEvent.change(screen.getByLabelText('Evidence references (report paths, review notes, artifact URLs)'), { target: { value: 'Recorded review notes' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Submit and continue' }));
+  expect(await screen.findByRole('alert')).toHaveTextContent('Restart Workbench');
+  expect(mutate).not.toHaveBeenCalled();
+  expect(review).not.toHaveBeenCalled();
 });

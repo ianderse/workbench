@@ -1,8 +1,35 @@
 import type { ReviewRoundFinding } from '../types/claude-code';
-import type { HumanApprovalOverride, HumanWorkMutation, HumanWorkSnapshot, HumanWorkstream } from '../types/human-work';
+import type { HumanApprovalOverride, HumanWorkItem, HumanWorkMutation, HumanWorkSnapshot, HumanWorkstream } from '../types/human-work';
 
 export function humanFindingKey(finding: ReviewRoundFinding): string {
   return JSON.stringify([finding.file ?? '', finding.line ?? null, finding.description.trim().replace(/\s+/g, ' ').toLowerCase()]);
+}
+
+export function humanReviewTopics(text: string): Array<'study' | 'visual'> {
+  return [/(?:participant|usability|study|testers?|playtest)/i.test(text) ? 'study' : undefined,
+    /\b(?:visual|art|images?|screenshots?|portraits?|gallery|comparisons?|captures?)\b/i.test(text) ? 'visual' : undefined].filter((value): value is 'study' | 'visual' => !!value);
+}
+
+/** Display grouping only: every source finding, receipt and server-side requirement stays intact. */
+export function groupHumanWorkItems(items: HumanWorkItem[]): HumanWorkItem[][] {
+  const groups: HumanWorkItem[][] = [];
+  const tokens = (text: string) => new Set(text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []);
+  for (const item of items) {
+    const group = groups.find(([other]) => {
+      if (!item.finding.file || item.finding.file !== other.finding.file) return false;
+      // Differing submissions must remain independently editable, even for similar requirements.
+      if (['owner', 'status', 'response', 'evidence'].some(key => item[key as keyof HumanWorkSnapshot] !== other[key as keyof HumanWorkSnapshot])) return false;
+      const a = tokens(item.finding.description), b = tokens(other.finding.description);
+      const shared = [...a].filter(token => b.has(token)).length;
+      const gate = item.finding.description.match(/\bgate\s+[\w.-]+/i)?.[0].toLowerCase();
+      const sameGate = !!gate && gate === other.finding.description.match(/\bgate\s+[\w.-]+/i)?.[0].toLowerCase();
+      const topics = humanReviewTopics(item.finding.description).join(',');
+      return !!topics && topics === humanReviewTopics(other.finding.description).join(',')
+        && shared / new Set([...a, ...b]).size >= (sameGate ? 0.3 : 0.5);
+    });
+    if (group) group.push(item); else groups.push([item]);
+  }
+  return groups;
 }
 const field = (value: unknown, max: number) => {
   if (typeof value !== 'string' || value.length > max || value.includes('\0')) throw new Error('Invalid human work field');
@@ -25,15 +52,22 @@ export function applyHumanWorkMutation(current: HumanWorkstream | undefined, mut
     if (stream.items.length >= 30) throw new Error('Human workstream is full');
     stream.items.push({ id, finding: { ...finding }, revision: 1, owner: '', status: 'open', response: '', evidence: '', at, createdAt: at, history: [] });
   } else if (mutation.action === 'update') {
-    const item = stream.items.find((entry) => entry.id === mutation.id);
-    if (!item) throw new Error('Human action not found');
+    if (mutation.relatedIds !== undefined && (!Array.isArray(mutation.relatedIds) || mutation.relatedIds.length > 29 || mutation.relatedIds.some(id => typeof id !== 'string'))) throw new Error('Invalid related human actions');
+    const ids = new Set([mutation.id, ...(mutation.relatedIds ?? [])]);
+    const items = stream.items.filter(entry => ids.has(entry.id));
+    if (items.length !== ids.size) throw new Error('Human action not found');
     if (!['open', 'in_progress', 'submitted'].includes(mutation.status)) throw new Error('Invalid human action status');
     const owner = field(mutation.owner, 160), response = field(mutation.response, 8000), evidence = field(mutation.evidence, 4000);
     if (mutation.status === 'submitted' && (!owner || !response || !evidence)) throw new Error('Record the responsible person, response and evidence before submitting');
-    const previous: HumanWorkSnapshot = { revision: item.revision, owner: item.owner, status: item.status, response: item.response, evidence: item.evidence, at: item.at };
-    if (owner === item.owner && response === item.response && evidence === item.evidence && mutation.status === item.status) return stream;
-    item.history.push(previous);
-    Object.assign(item, { revision: item.revision + 1, owner, status: mutation.status, response, evidence, at });
+    let changed = false;
+    for (const item of items) {
+      const previous: HumanWorkSnapshot = { revision: item.revision, owner: item.owner, status: item.status, response: item.response, evidence: item.evidence, at: item.at };
+      if (owner === item.owner && response === item.response && evidence === item.evidence && mutation.status === item.status) continue;
+      item.history.push(previous);
+      Object.assign(item, { revision: item.revision + 1, owner, status: mutation.status, response, evidence, at });
+      changed = true;
+    }
+    if (!changed) return stream;
   } else throw new Error('Invalid human work action');
   stream.revision++;
   return stream;

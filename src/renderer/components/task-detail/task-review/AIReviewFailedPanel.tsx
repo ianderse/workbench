@@ -21,6 +21,10 @@ export function AIReviewFailedPanel({ claudeRun, task }: AIReviewFailedPanelProp
 
   const humanOnly = failure.openFindings.length > 0 && failure.failingChecks.length === 0 && failure.openFindings.every((finding) => finding.requiresHuman || task?.metadata?.humanWork?.items.some((item) => item.finding.description === finding.description));
   const title = humanOnly ? t('humanWork.needsHuman') : t('aiReviewFailed.title', { count: verdict.rounds });
+  if (humanOnly && task) return <>
+    <HumanWorkPanel task={task} findings={failure.openFindings} />
+    <details className="rounded-lg border p-3 text-xs"><summary>{t('humanWork.technicalReview')}</summary><p className="mt-2 whitespace-pre-wrap wrap-anywhere">{failure.reason}</p><ul className="mt-2 space-y-1">{failure.roundLines.map(line => <li key={line}>{line}</li>)}</ul></details>
+  </>;
   return (
     <section
       role="region"
