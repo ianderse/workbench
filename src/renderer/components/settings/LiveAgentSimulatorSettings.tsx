@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Plus, X } from 'lucide-react';
 import { Button } from '../ui/button';
+import { Switch } from '../ui/switch';
 import { SettingsRow, SettingsRows } from './SettingsRow';
 import {
   CHILD_KINDS,
@@ -24,10 +25,12 @@ const INDENT_PX = 24;
 function AddButtons({ parentId, kinds }: { parentId: string; kinds: SimNodeKind[] }) {
   const { t } = useTranslation('settings');
   const add = useLiveAgentSimulatorStore((state) => state.add);
+  // The tree is kept but not shown while the mock graph is
+  const mock = useLiveAgentSimulatorStore((state) => state.mock);
   return (
     <>
       {kinds.map((kind) => (
-        <Button key={kind} variant="outline" size="sm" className="gap-1" onClick={() => add(parentId, kind)}>
+        <Button key={kind} variant="outline" size="sm" className="gap-1" disabled={mock} onClick={() => add(parentId, kind)}>
           <Plus className="h-3.5 w-3.5" />
           {t(`liveAgentSimulator.kinds.${kind}`)}
         </Button>
@@ -40,6 +43,7 @@ function AddButtons({ parentId, kinds }: { parentId: string; kinds: SimNodeKind[
 function NodeRow({ node, depth }: { node: SimNode; depth: number }) {
   const { t } = useTranslation('settings');
   const remove = useLiveAgentSimulatorStore((state) => state.remove);
+  const mock = useLiveAgentSimulatorStore((state) => state.mock);
   const label = node.kind === 'tool'
     ? t('liveAgentSimulator.toolNode', { tool: node.tool })
     : t(`liveAgentSimulator.nodes.${node.kind}`, { n: node.n });
@@ -52,6 +56,7 @@ function NodeRow({ node, depth }: { node: SimNode; depth: number }) {
           size="sm"
           className="w-8 px-0"
           aria-label={t('liveAgentSimulator.remove')}
+          disabled={mock}
           onClick={() => remove(node.id)}
         >
           <X className="h-3.5 w-3.5" />
@@ -64,12 +69,15 @@ function NodeRow({ node, depth }: { node: SimNode; depth: number }) {
 /**
  * Development builds only, inside the Simulation section: the live agent graph in the dark and
  * the light theme side by side (two equal squares across the page's width), showing the master
- * node and the tree built under it with the rows below. Each subtask, subagent and tool gets a
+ * node and the tree built under it with the rows below, or with "Mock graph" on, every kind of
+ * node in every color. Each subtask, subagent and tool gets a
  * row under its parent's, indented like a tree.
  */
 export function LiveAgentSimulatorSettings() {
   const { t } = useTranslation('settings');
   const nodes = useLiveAgentSimulatorStore((state) => state.nodes);
+  const mock = useLiveAgentSimulatorStore((state) => state.mock);
+  const setMock = useLiveAgentSimulatorStore((state) => state.setMock);
 
   // Depth-first, so each node's row comes right under its parent's
   const rows: { node: SimNode; depth: number }[] = [];
@@ -93,6 +101,13 @@ export function LiveAgentSimulatorSettings() {
       </div>
 
       <SettingsRows className="mt-4">
+        <SettingsRow
+          label={t('liveAgentSimulator.mockGraph')}
+          description={t('liveAgentSimulator.mockGraphDescription')}
+          htmlFor="live-agent-simulator-mock"
+        >
+          <Switch id="live-agent-simulator-mock" checked={mock} onCheckedChange={setMock} />
+        </SettingsRow>
         <SettingsRow
           label={t('liveAgentSimulator.masterNode')}
           description={t('liveAgentSimulator.masterNodeDescription')}

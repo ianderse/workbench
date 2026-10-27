@@ -655,6 +655,8 @@
     "percentPlaceholder": "Real"
   },
   "liveAgentSimulator": {
+    "mockGraph": "Mock graph",
+    "mockGraphDescription": "Show every kind of node in every color instead of the graph built below",
     "masterNode": "Master node",
     "masterNodeDescription": "The session's main agent; add nodes under it to build the graph",
     "kinds": {

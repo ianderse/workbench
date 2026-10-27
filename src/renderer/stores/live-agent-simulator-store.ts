@@ -33,6 +33,9 @@ export const CHILD_KINDS: Record<'master' | 'subtask' | 'subagent', SimNodeKind[
 const TOOL_NAMES = ['Read', 'Grep', 'Edit', 'Bash', 'Glob', 'Write', 'WebSearch'];
 
 interface LiveAgentSimulatorState {
+  /** Show the mock graph (every kind of node in every color) instead of the tree below */
+  mock: boolean;
+  setMock: (mock: boolean) => void;
   /** Every node, parents before their children (in the order they were added) */
   nodes: SimNode[];
   add: (parentId: string, kind: SimNodeKind) => void;
@@ -44,6 +47,8 @@ let nextId = 0;
 const counts: Record<SimNodeKind, number> = { subtask: 0, subagent: 0, tool: 0 };
 
 export const useLiveAgentSimulatorStore = create<LiveAgentSimulatorState>((set) => ({
+  mock: false,
+  setMock: (mock) => set({ mock }),
   nodes: [],
   add: (parentId, kind) => set((state) => {
     const n = ++counts[kind];
