@@ -38,6 +38,8 @@ import { selectOtherProjectsRunning, useQueueHoldStore } from '../stores/queue-h
 import { useProjectStore } from '../stores/project-store';
 import { useSettingsStore } from '../stores/settings-store';
 import { WorktreeCleanupDialog } from './WorktreeCleanupDialog';
+import { MemoryReviewPanel } from './memory/MemoryReviewPanel';
+import { HumanWorkInbox } from './HumanWorkInbox';
 import { QueueUpdatesPanel } from './QueueUpdatesPanel';
 import { AutonomousBanner } from './AutonomousBanner';
 import type { Task, TaskStatus, TaskOrderState } from '../../shared/types';
@@ -269,7 +271,7 @@ const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskCli
       <div
         ref={setNodeRef}
         className={cn(
-          'flex flex-1 flex-col rounded-xl border border-border [.dark_&]:border-white/5 bg-(image:--column-bg) backdrop-blur-sm transition-all duration-200',
+          'flex min-w-0 flex-1 flex-col rounded-xl border border-border [.dark_&]:border-white/5 bg-(image:--column-bg) backdrop-blur-sm transition-all duration-200',
           getColumnBorderColor(),
           'border-t-(length:--column-top-width)',
           isOver && 'drop-zone-highlight'
@@ -371,7 +373,8 @@ const DroppableColumn = memo(function DroppableColumn({ status, tasks, onTaskCli
 
       {/* Task list */}
       <div className="flex-1 min-h-0">
-        <ScrollArea className="h-full px-3 pb-3 pt-2">
+        {/* Radix's display:table content wrapper otherwise grows to a card's intrinsic width. */}
+        <ScrollArea className="h-full px-3 pb-3 pt-2" viewportClassName="[&>div]:block!">
           <SortableContext
             items={taskIds}
             strategy={verticalListSortingStrategy}
@@ -830,6 +833,8 @@ export function KanbanBoard({ tasks, onTaskClick, onNewTaskClick, onRefresh, isR
       {projectId && <AutonomousBanner projectId={projectId} tasksSignature={autonomousSignature} />}
       {/* Changes a merged task proposes for the tickets in Planning and the Queue */}
       {projectId && <QueueUpdatesPanel projectId={projectId} tasks={tasks} />}
+      {projectId && <MemoryReviewPanel projectId={projectId} />}
+      <HumanWorkInbox tasks={tasks} onOpen={onTaskClick} />
       {/* Kanban columns */}
       <DndContext
         sensors={sensors}

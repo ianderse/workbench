@@ -73,7 +73,7 @@ export function TaskLogs({
   const logOrder = useSettingsStore((s) => s.settings.logOrder);
 
   const { items, entryCount, status } = useMemo(() => {
-    const all: LogItem[] = [];
+    const all: Array<LogItem & { rowKey: string }> = [];
     let count = 0;
     let lastStatus: string | undefined;
     for (const phase of LOG_PHASES) {
@@ -87,13 +87,14 @@ export function TaskLogs({
         ? phaseLog.entries.map((entry, i) =>
             i === phaseLog.entries.length - 1 && entry.type === 'phase_end' ? { ...entry, type: 'error' as const } : entry)
         : phaseLog.entries;
-      for (const item of groupToolCalls(entries)) {
-        all.push(item.kind === 'tool' ? { ...item, running: !item.end && phaseStatus === 'active' } : item);
+      for (const [index, item] of groupToolCalls(entries).entries()) {
+        // Assign identity before sorting: prepending new activity must preserve expanded rows.
+        all.push({ ...item, rowKey: `${phase}:${index}`, ...(item.kind === 'tool' ? { running: !item.end && phaseStatus === 'active' } : {}) });
       }
     }
     // One timeline across the steps (a rerun's steps follow the earlier run's)
     const time = (item: LogItem) =>
-      Date.parse((item.kind === 'tool' ? (item.start ?? item.end)! : item.entry).timestamp) || 0;
+      Date.parse((item.kind === 'tool' ? (logOrder === 'reverse-chronological' ? item.end ?? item.start : item.start ?? item.end)! : item.entry).timestamp) || 0;
     all.sort((a, b) => time(a) - time(b));
     return {
       items: logOrder === 'reverse-chronological' ? all.reverse() : all,
@@ -114,7 +115,9 @@ export function TaskLogs({
     return { durationMs: duration, costUsd: cost };
   }, [runPhases]);
 
-  const legacyLogs = !phaseLogs && legacyTaskLogs && legacyTaskLogs.length > 0 ? legacyTaskLogs : null;
+  const legacyLogs = !phaseLogs && legacyTaskLogs && legacyTaskLogs.length > 0
+    ? logOrder === 'reverse-chronological' ? [...legacyTaskLogs].reverse() : legacyTaskLogs
+    : null;
   const summaryParts = [
     entryCount > 0 ? t('tasks:logs.entries', { count: entryCount }) : null,
     durationMs !== undefined ? formatDurationMs(durationMs) : null,
@@ -150,18 +153,16 @@ export function TaskLogs({
       <CollapsibleContent>
         <div className="space-y-1 py-2">
           {items.length > 0 ? (
-            // The position is part of the key: several tool calls of one reply share its timestamp
-            // and tool name (OMP batches calls), and the log only grows, so positions are stable
-            items.map((item, index) =>
+            items.map((item) =>
               item.kind === 'tool' ? (
                 <ToolCallRow
-                  key={`${index}-${(item.start ?? item.end)!.timestamp}-tool-${(item.start ?? item.end)!.tool_name}`}
+                  key={item.rowKey}
                   start={item.start}
                   end={item.end}
                   isRunning={!!item.running}
                 />
               ) : (
-                <LogEntry key={`${index}-${item.entry.timestamp}-${item.entry.type}`} entry={item.entry} />
+                <LogEntry key={item.rowKey} entry={item.entry} />
               )
             )
           ) : (

@@ -8,7 +8,7 @@ export interface NotificationsAPI {
   setPhoneNotifyToken: (token: string) => Promise<IPCResult>;
   hasPhoneNotifyToken: () => Promise<IPCResult<boolean>>;
   sendPhoneTestNotification: (target: { baseUrl: string; service: string }) => Promise<IPCResult<{ status?: number }>>;
-  onNotificationOpen: (callback: (target: { projectId: string; taskId?: string }) => void) => () => void;
+  onNotificationOpen: (callback: (target: { projectId: string; taskId?: string; memoryReview?: boolean }) => void) => () => void;
 }
 
 export const createNotificationsAPI = (): NotificationsAPI => ({

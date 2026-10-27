@@ -1,3 +1,4 @@
+import { isHumanApprovalOverride } from '../../../../shared/utils/human-work';
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ChevronDown, ChevronUp } from 'lucide-react';
@@ -150,7 +151,9 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
   const { review, checks, findings, effort } = work;
   const reviewText =
     review.kind === 'passed'
-      ? t('workSummary.review.passed', { rounds: review.rounds, max: review.maxRounds })
+      ? isHumanApprovalOverride(task.claudeRun?.reviewVerdict?.humanApprovalOverride)
+        ? t('humanWork.reviewAcceptedOverride')
+        : t('workSummary.review.passed', { rounds: review.rounds, max: review.maxRounds })
       : review.kind === 'failed'
         ? t('workSummary.review.failed', { rounds: review.rounds, max: review.maxRounds })
         : t('workSummary.review.none');
@@ -277,6 +280,7 @@ export function WhatWasDonePanel({ task }: WhatWasDonePanelProps) {
 
       <ul className="mt-3 space-y-1 text-sm text-foreground">
         <li>{reviewText}</li>
+        {!!findings.overridden?.length && <li>{t('humanWork.overriddenFindings', { count: findings.overridden.length })}</li>}
         <li className="wrap-anywhere">{checksText}</li>
         <li>
           {findingParts.length > 0

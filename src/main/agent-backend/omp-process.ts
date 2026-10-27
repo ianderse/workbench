@@ -29,6 +29,8 @@ import type { ClaudeEffort } from '../../shared/types/claude-code';
 import { ompSubagentsPerTask, type OmpBackendSettings } from '../../shared/types/agent-backend';
 import { buildOmpAdvisorOverlay, buildOmpArgs, OMP_FOREGROUND_OVERLAY, OMP_FOREGROUND_RULE, resolveOmpAdvisor, resolveOmpSelection, type OmpRole } from './omp-args';
 import { resolveOmpCommand } from './omp-command';
+import { startWithOmpCooldownRecovery } from './omp-provider-recovery';
+import type { OmpFallbackChains } from './omp-roles';
 import { getOmpRoles } from './omp-roles';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
@@ -41,6 +43,8 @@ export { resolveOmpCommand };
 
 export interface OmpRunOptions {
   settings: OmpBackendSettings;
+  /** Host-filtered native fallback chains while providers are cooling down. */
+  cooldownFallbackChains?: OmpFallbackChains;
   cwd: string;
   /** Extra environment on top of the app's own */
   env?: Record<string, string>;
@@ -117,6 +121,10 @@ function splitPrompt(prompt: string | ClaudeUserContentBlock[]): { text: string;
  * (including a JSON repair run, if one was needed) is over.
  */
 export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudeProcessHandle> {
+  return startWithOmpCooldownRecovery(options, startOmpProcessOnce);
+}
+
+async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProcessHandle> {
   const command = await resolveOmpCommand(options.settings.command, options.env?.PATH ?? process.env.PATH);
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'workbench-omp-'));
   const cleanup = () => rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
@@ -164,7 +172,7 @@ export async function startOmpProcess(options: OmpRunOptions): Promise<ClaudePro
       await writeFile(foregroundOverlayFile, OMP_FOREGROUND_OVERLAY, 'utf-8');
     }
     let advisorOverlayFile: string | undefined;
-    const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.allowFallback === true, ompSubagentsPerTask(options.settings));
+    const advisorOverlay = buildOmpAdvisorOverlay(advisor, options.allowFallback === true, ompSubagentsPerTask(options.settings), options.cooldownFallbackChains);
     if (advisorOverlay) {
       advisorOverlayFile = path.join(tempDir, 'advisor-overlay.yml');
       await writeFile(advisorOverlayFile, advisorOverlay, 'utf-8');

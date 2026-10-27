@@ -131,3 +131,9 @@ describe('omp roles per job', () => {
     expect(ompMaxRetries({ retries: 3 })).toBe(3);
   });
 });
+
+it('overrides native fallback chains without allowing known exhausted providers back in', () => {
+  const overlay = buildOmpAdvisorOverlay({ mode: 'off' }, false, 3, { default: ['openai-codex/available'], 'anthropic/*': [] });
+  expect(overlay).toContain('fallbackOn: usage-limit');
+  expect(overlay).toContain('fallbackChains: {"default":["openai-codex/available"],"anthropic/*":[]}');
+});

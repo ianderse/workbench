@@ -18,6 +18,7 @@ interface NotificationOptions {
   body: string;
   projectId?: string;
   taskId?: string;
+  memoryReview?: boolean;
 }
 
 /** The same notification for the same task is shown once in this window (an error is reported by several paths) */
@@ -81,7 +82,8 @@ class NotificationService {
       title: content.title,
       body: content.body,
       projectId: content.route.projectId,
-      taskId: content.route.taskId
+      taskId: content.route.taskId,
+      memoryReview: content.route.memoryReview,
     });
   }
 
@@ -101,7 +103,7 @@ class NotificationService {
     if (route.phone) {
       const token = loadHaToken();
       void notifyPhone(
-        { kind: type, title: options.title, body: options.body, route: { projectId: options.projectId ?? '', taskId: options.taskId } },
+        { kind: type, title: options.title, body: options.body, route: { projectId: options.projectId ?? '', taskId: options.taskId, ...(options.memoryReview ? { memoryReview: true } : {}) } },
         { baseUrl: phone.baseUrl, service: phone.service, token }
       ).catch((error) => appLog.warn('[PhoneNotify] Unexpected failure:', error instanceof Error ? error.message : String(error)));
     }
@@ -125,7 +127,8 @@ class NotificationService {
         if (options.projectId && !window.isDestroyed()) {
           window.webContents.send(IPC_CHANNELS.NOTIFICATION_OPEN, {
             projectId: options.projectId,
-            taskId: options.taskId
+            taskId: options.taskId,
+            ...(options.memoryReview ? { memoryReview: true } : {})
           });
         }
       });

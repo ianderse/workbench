@@ -56,7 +56,7 @@ export function modelAliasOf(model: string | undefined): ClaudeModelAlias | unde
 }
 
 /** OMP model roles Workbench picks by job (`omp --model @<role>`) */
-export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny' | 'design';
+export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny' | 'design' | 'memory';
 
 /** Role name -> model selector, from the user's OMP config (`modelRoles`) */
 export type OmpRoleMap = Readonly<Record<string, string>>;
@@ -164,6 +164,7 @@ export function buildOmpAdvisorOverlay(
   allowFallback = false,
   /** Subagents a run may have at once (`task.maxConcurrency`); undefined leaves OMP's default (32) */
   subagents?: number,
+  fallbackChains?: Readonly<Record<string, readonly string[]>>,
 ): string | undefined {
   let advisorPart = '';
   if (advisor.mode === 'off') {
@@ -176,7 +177,7 @@ export function buildOmpAdvisorOverlay(
   // `retry.fallbackChains` after any error. Every other run switches only when its provider reports a usage
   // limit (`retry.fallbackOn: usage-limit`): retrying a model that is out of quota cannot succeed, while any
   // other failure (a local model that is busy or down) surfaces its own error and is retried on the same model
-  const fallbackPart = allowFallback ? '' : 'retry:\n  modelFallback: true\n  fallbackOn: usage-limit\n';
+  const fallbackPart = !allowFallback || fallbackChains ? `retry:\n  modelFallback: true\n${allowFallback ? '' : '  fallbackOn: usage-limit\n'}${fallbackChains ? `  fallbackChains: ${JSON.stringify(fallbackChains)}\n` : ''}` : '';
   // OMP runs up to 32 subagents at once by default, far more than a local model server can serve;
   // 0 (the agent works alone) still needs a cap of 1 so a stray task call can't fan out
   const taskPart = subagents === undefined ? '' : `task:\n  maxConcurrency: ${Math.max(1, subagents)}\n`;

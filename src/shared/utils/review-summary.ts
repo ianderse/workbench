@@ -1,3 +1,4 @@
+import { buildHumanApprovalOverridePrompt, isHumanApprovalOverride } from './human-work';
 /**
  * Pure helpers behind the reviewer summary: the one-shot call that turns a finished run into a
  * plain-language account for the person reviewing it. Holds the JSON schema, the system prompt, the
@@ -101,8 +102,9 @@ export function buildReviewSummaryPrompt(input: ReviewSummaryInput): string {
     }
     if (checks.length > CHECK_LIMIT) lines.push(`(${checks.length - CHECK_LIMIT} more checks)`);
     const all = validation.findings ?? [];
-    const open = all.filter((f) => !f.fixed);
-    lines.push(`Findings: ${open.length} open, ${all.length - open.length} fixed`);
+    const overridden = isHumanApprovalOverride(input.verdict?.humanApprovalOverride) ? all.filter((finding) => !finding.fixed && finding.requiresHuman) : [];
+    const open = all.filter((f) => !f.fixed && !overridden.includes(f));
+    lines.push(`Findings: ${open.length} open, ${all.filter((finding) => finding.fixed).length} fixed${overridden.length ? `, ${overridden.length} overridden by the owner (not fixed)` : ''}`);
     for (const finding of open.slice(0, FINDING_LIMIT)) {
       lines.push(`Open ${finding.severity} finding: ${clip(finding.description, FINDING_TEXT_LIMIT)}`);
     }
@@ -126,6 +128,8 @@ export function buildReviewSummaryPrompt(input: ReviewSummaryInput): string {
     parts.push(`<diff_stat note="paths are for your understanding only, do not repeat them">\n${lines.join('\n')}\n</diff_stat>`);
   }
 
+  const overridePrompt = buildHumanApprovalOverridePrompt(input.verdict?.humanApprovalOverride);
+  if (overridePrompt) parts.push(`${overridePrompt}\nFor this summary, describe the override honestly and do not list overridden approval gates as still blocking or needing a new decision.`);
   return parts.join('\n\n');
 }
 

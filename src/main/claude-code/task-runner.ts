@@ -1,3 +1,5 @@
+import type { HumanApprovalOverride } from '../../shared/types/human-work';
+import { buildHumanApprovalOverridePrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
 /**
  * Claude Code task runner
  * =======================
@@ -110,6 +112,9 @@ import type { AgentOverride } from '../../shared/types/task';
 import { OMP_READ_ONLY_TOOLS, ompMaxRetries, ompRoleForJob, resolveOmpSelection, modelAliasOf, type OmpRole } from '../agent-backend/omp-args';
 import { getOmpRoles } from '../agent-backend/omp-roles';
 import { buildOmpMemoryPrompt } from '../self-improve/nudge';
+import { recallProjectMemory, saveMemoryContext } from '../self-improve/project-memory';
+import { MEMORY_SERVER_NAME, MEMORY_TOOL_NAME, openTaskMemoryTools } from '../self-improve/task-memory';
+import { isSelfImproveEnabledForPath } from '../self-improve/setting';
 import { startOmpProcess } from '../agent-backend/omp-process';
 import { taskUsage } from '../usage/usage-record';
 import { isOmpNotice, isOmpProgress, isOmpTodos } from '../agent-backend/omp-translate';
@@ -159,6 +164,7 @@ export interface TaskAttachment {
 }
 
 export interface TaskRunConfig {
+  humanApprovalOverride?: HumanApprovalOverride;
   taskId: string;
   projectId?: string;
   specId: string;
@@ -316,6 +322,7 @@ const VALIDATION_SCHEMA = {
           severity: { type: 'string', enum: ['critical', 'major', 'minor'] },
           description: { type: 'string' },
           fixed: { type: 'boolean' },
+          requiresHuman: { type: 'boolean', description: 'True only when resolution requires a real human approval, decision or participant observations. Keep this finding unfixed; never manufacture that evidence.' },
           file: { type: 'string' },
           line: { type: 'integer' },
         },
@@ -420,6 +427,8 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
 - When the work is done, commit it in this worktree with a descriptive message. Don't push.
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
+  const humanOverride = buildHumanApprovalOverridePrompt(config.humanApprovalOverride);
+  if (humanOverride) sections.push(humanOverride);
   if (config.graphifyPrompt) sections.push(config.graphifyPrompt);
   if (config.selfImprovePrompt) sections.push(config.selfImprovePrompt);
   if (config.briefingPrompt) sections.push(config.briefingPrompt);
@@ -615,6 +624,8 @@ export class ClaudeTaskRun {
   private nativeSends = new Map<string, { to: string; text: string }>();
   /** Lines from the base branch the session's merge fix said must go (and why), for the last check */
   private resyncDropped: Array<{ file: string; line: string }> = [];
+  private memoryPrompt = '';
+  private memoryTools: Awaited<ReturnType<typeof openTaskMemoryTools>>;
 
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
     this.runFile = path.join(config.specDir, CLAUDE_RUN_FILE);
@@ -726,7 +737,7 @@ export class ClaudeTaskRun {
       && this.info.validation && !this.info.reviewVerdict
     ) {
       const report = this.info.validation;
-      this.loop = { round: (this.info.reviewRounds?.length ?? 1) + 1, max: this.reviewRoundsAllowed(), feedback: buildFixFeedback(evaluateReviewGate(report), report) };
+      this.loop = { round: (this.info.reviewRounds?.length ?? 1) + 1, max: this.reviewRoundsAllowed(), feedback: buildFixFeedback(evaluateReviewGate(report, this.config.humanApprovalOverride), report) };
       try {
         const fixed = await this.runSessionPhase('revise');
         if (fixed) return fixed;
@@ -1508,13 +1519,14 @@ export class ClaudeTaskRun {
         const stopped = await this.runSessionPhase('validate');
         if (stopped) return stopped;
         const report = this.info.validation ?? normalizeValidation(undefined);
-        const gate = evaluateReviewGate(report);
+        const gate = evaluateReviewGate(report, this.config.humanApprovalOverride);
         const counts = compareWithPreviousRound(previousOpen, gate);
         rounds.push({
           round,
           status: report.status,
           summary: report.summary,
           openFindings: gate.openFindings,
+          ...(gate.overriddenFindings?.length ? { overriddenFindings: gate.overriddenFindings } : {}),
           failingChecks: gate.failingChecks.map((c) => c.name),
           fixedCount: counts.fixedCount,
           newCount: counts.newCount,
@@ -1523,13 +1535,17 @@ export class ClaudeTaskRun {
         });
         previousOpen = gate.openFindings;
         // One round keeps today's rule: only a failed status counts as rejected
-        const passes = max === 1 ? report.status !== 'failed' : gate.passes;
-        if (passes || round >= max) {
+        const humanOnly = gate.openFindings.length > 0 && gate.openFindings.every((finding) => finding.requiresHuman) && gate.failingChecks.length === 0;
+        const hasOverride = isHumanApprovalOverride(this.config.humanApprovalOverride);
+        const passes = hasOverride ? gate.passes : !gate.openFindings.some((finding) => finding.requiresHuman) && (max === 1 ? report.status !== 'failed' : gate.passes);
+        if (passes || round >= max || humanOnly) {
           this.info.reviewVerdict = passes
             ? { status: 'passed', rounds: round, maxRounds: max }
-            : { status: 'failed', rounds: round, maxRounds: max, failure: buildReviewFailureSummary(rounds, report) };
+            : { status: 'failed', rounds: round, maxRounds: max, failure: buildReviewFailureSummary(rounds, report, this.config.humanApprovalOverride) };
+          if (hasOverride) this.info.reviewVerdict.humanApprovalOverride = { ...this.config.humanApprovalOverride! };
           this.saveInfo();
-          if (!passes) this.emitLog(`Still failing AI review after ${round} ${round === 1 ? 'round' : 'rounds'}`);
+          if (humanOnly) this.emitLog('Waiting for human input; ending the AI repair loop without approving the task.');
+          if (!passes && !humanOnly) this.emitLog(`Still failing AI review after ${round} ${round === 1 ? 'round' : 'rounds'}`);
           return null;
         }
         this.emitLog(`AI review round ${round}/${max}: ${gate.openFindings.length} blocker or major finding(s) and ${gate.failingChecks.length} failing check(s) open, sending the task back to fix them`);
@@ -1608,6 +1624,7 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
   ? this.reviewSection
   : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${this.config.backend === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
 3. Commit any remaining changes.${this.isUiWork(triage) && this.info.plan ? DESIGN_VALIDATION_PROMPT : ''}
+When an unfixed finding requires real human approval, a human decision, or participant observations, set requiresHuman: true. Keep it open, and never fabricate that evidence.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
       case 'spec_review':
@@ -1697,21 +1714,32 @@ no notes came with the request, so review the change against the task with fresh
   }): Promise<PhaseResult> {
     if (this.stopped) return { stopped: true };
     const { messaging } = this.config;
-    if (this.config.backend === 'omp') {
-      // The messaging extension (with the tools' token) is written to the phase's temp dir
-      const ompTempDir = messaging ? await mkdtemp(path.join(os.tmpdir(), 'workbench-task-')) : undefined;
-      try {
-        return await this.runOmp(params, ompTempDir);
-      } finally {
-        if (ompTempDir) await rm(ompTempDir, { recursive: true, force: true }).catch(() => undefined);
-      }
-    }
-    this.costIsPerRun = false;
-    // Support files of the phase (MCP config with the tools' token, the WSL bridge), removed after it
-    const tempDir = messaging ? await mkdtemp(path.join(os.tmpdir(), 'workbench-task-')) : undefined;
+    const memory = this.config.selfImprovePrompt && this.config.selfImproveDir && this.config.projectId
+      && await isSelfImproveEnabledForPath(path.dirname(path.dirname(this.config.selfImproveDir)));
+    const tempDir = messaging || memory ? await mkdtemp(path.join(os.tmpdir(), 'workbench-task-')) : undefined;
     try {
+      this.memoryPrompt = '';
+      if (memory && tempDir) {
+        const packet = await recallProjectMemory({
+          dir: this.config.selfImproveDir!, projectId: this.config.projectId!, taskId: this.config.specId,
+          phase: params.name, query: `${this.config.title}\n${this.config.description}\n${this.config.feedback ?? ''}`,
+        });
+        // Persist the exact supplied packet before starting the agent; never claim the model used it.
+        await saveMemoryContext(this.config.specDir, packet);
+        this.memoryPrompt = packet.prompt;
+        if (params.name !== 'plan' && params.name !== 'spec_review') {
+          this.memoryTools = await openTaskMemoryTools({
+            dir: this.config.selfImproveDir!, projectId: this.config.projectId!, specId: this.config.specId,
+            tempDir, omp: this.config.backend === 'omp',
+          });
+        }
+      }
+      if (this.config.backend === 'omp') return await this.runOmp(params, tempDir);
+      this.costIsPerRun = false;
       return await this.runClaudeProcess(params, tempDir);
     } finally {
+      this.memoryTools?.close();
+      this.memoryTools = undefined;
       if (tempDir) await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
   }
@@ -1775,7 +1803,7 @@ no notes came with the request, so review the change against the task with fresh
       '--model', params.model,
       '--effort', params.effort,
       '--permission-prompts', 'none',
-      '--append-system-prompt', buildSystemPrompt(this.config, specDirRelative, parallelTasksPrompt, false, messagingPrompt),
+      '--append-system-prompt', [buildSystemPrompt(this.config, specDirRelative, parallelTasksPrompt, false, messagingPrompt), this.memoryPrompt].filter(Boolean).join('\n\n'),
       // Addressable by other sessions (native SendMessage) and by Workbench (task-messaging.ts)
       '--name', sessionName,
     ];
@@ -1789,7 +1817,10 @@ no notes came with the request, so review the change against the task with fresh
       args.push('--replay-user-messages');
       if (workbenchServer) {
         // Pre-approved; plan mode runs them because the server marks them read-only (readOnlyHint)
-        args.push('--allowedTools', TASK_RUN_TOOL_NAMES.map((tool) => `mcp__${TASK_TOOLS_SERVER_NAME}__${tool}`).join(','));
+        args.push('--allowedTools', [
+          ...TASK_RUN_TOOL_NAMES.map((tool) => `mcp__${TASK_TOOLS_SERVER_NAME}__${tool}`),
+          ...(this.memoryTools ? [`mcp__${MEMORY_SERVER_NAME}__${MEMORY_TOOL_NAME}`] : []),
+        ].join(','));
       }
     }
     if (params.name === 'plan') {
@@ -1813,11 +1844,16 @@ no notes came with the request, so review the change against the task with fresh
     if (params.jsonSchema) args.push('--json-schema', JSON.stringify(params.jsonSchema));
     if (this.config.maxBudgetUsd && this.config.maxBudgetUsd > 0) args.push('--max-budget-usd', String(this.config.maxBudgetUsd));
     if (settings.fallbackModel?.trim()) args.push('--fallback-model', settings.fallbackModel.trim());
+    if (this.memoryTools && !workbenchServer) args.push('--allowedTools', `mcp__${MEMORY_SERVER_NAME}__${MEMORY_TOOL_NAME}`);
     const mcpConfig = buildMcpConfig(this.config.connectorIds, this.config.connectorSettings);
-    if (workbenchServer && tempDir) {
+    if ((workbenchServer || this.memoryTools) && tempDir) {
       // Through a file, so the tools' token isn't in the process list
       const mcpConfigFile = path.join(tempDir, 'mcp-config.json');
-      await writeFile(mcpConfigFile, JSON.stringify({ mcpServers: { ...mcpConfig.mcpServers, [TASK_TOOLS_SERVER_NAME]: workbenchServer } }), 'utf-8');
+      await writeFile(mcpConfigFile, JSON.stringify({ mcpServers: {
+        ...mcpConfig.mcpServers,
+        ...(workbenchServer ? { [TASK_TOOLS_SERVER_NAME]: workbenchServer } : {}),
+        ...(this.memoryTools ? { [MEMORY_SERVER_NAME]: this.memoryTools.server } : {}),
+      } }), 'utf-8');
       args.push('--mcp-config', mcpConfigFile);
     } else if (Object.keys(mcpConfig.mcpServers).length > 0) {
       args.push('--mcp-config', JSON.stringify(mcpConfig));
@@ -1935,16 +1971,8 @@ no notes came with the request, so review the change against the task with fresh
       true,
       messaging ? buildMessagingPrompt(messaging.sessionName, !!extensionFile, true, this.config.mergeBaseDuring) : undefined,
     );
-    if (this.config.selfImprovePrompt && this.config.selfImproveDir) {
-      // The memory index is read at every phase, so notes saved by an earlier phase are included
-      let memoryIndex = '';
-      try {
-        memoryIndex = readFileSync(path.join(this.config.selfImproveDir, 'MEMORY.md'), 'utf-8').slice(0, 25_000);
-      } catch {
-        // No memories yet
-      }
-      systemPrompt = `${systemPrompt}\n\n${buildOmpMemoryPrompt(this.config.selfImproveDir, memoryIndex)}`;
-    }
+    if (this.config.selfImprovePrompt && this.config.selfImproveDir) systemPrompt += `\n\n${buildOmpMemoryPrompt(this.config.selfImproveDir)}`;
+    if (this.memoryPrompt) systemPrompt += `\n\n${this.memoryPrompt}`;
     if (Object.keys(buildMcpConfig(this.config.connectorIds, this.config.connectorSettings).mcpServers).length > 0) {
       appLog.info('[OMP] Connectors (MCP servers) are not available with the OMP backend and are ignored');
     }
@@ -1986,7 +2014,7 @@ no notes came with the request, so review the change against the task with fresh
         tools: planning ? [...OMP_READ_ONLY_TOOLS, ...messagingTools]
           : reviewingSpec ? [...SPEC_REVIEW_OMP_TOOLS, ...messagingTools]
           : 'all',
-        extensions: extensionFile ? [extensionFile] : undefined,
+        extensions: [extensionFile, this.memoryTools?.extension].filter((file): file is string => !!file),
         // Messages reach the running step through OMP's RPC mode (steered in at its next turn)
         live: messaging ? {
           onInputRead: (id, text) => {
@@ -2039,6 +2067,7 @@ no notes came with the request, so review the change against the task with fresh
 
       if (this.stopped || outcome.aborted) return { stopped: true };
       const result = outcome.result;
+      if (result?.omp_cooldown) return { result: withCarried(result), stopped: false, rateLimit: { message: result.omp_cooldown.message, resetAt: result.omp_cooldown.resetAt } };
       const failed = !result || result.is_error || result.subtype !== 'success';
       const stderrTail = outcome.stderr.trim().split('\n').slice(-3).join(' ');
       if (!failed) return { result: withCarried(result), stopped: false };
@@ -2068,7 +2097,7 @@ no notes came with the request, so review the change against the task with fresh
       const reason = (result?.omp_errors?.find((e) => !e.fallback)?.text || result?.errors?.join('; ') || stderrTail || 'unknown error').slice(0, 300);
       if (useFallback) {
         fallbackAttempt = true;
-        this.noteLog(params.logPhase, `Temporary error (${reason}). Retries on the local model failed; trying once more with OMP fallback models allowed`);
+        this.noteLog(params.logPhase, `Temporary error (${reason}). Retries on the selected model failed; trying once more with OMP fallback models allowed`);
       } else {
         retries++;
         this.noteLog(params.logPhase, `Temporary error (${reason}). Retry ${retries}/${maxRetries} in ${formatDelay(delay!)}`);
@@ -2136,7 +2165,7 @@ no notes came with the request, so review the change against the task with fresh
     const started = Date.now();
     try {
       const result = await runClaudeText({
-        prompt: `${taskBlock(this.config)}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`,
+        prompt: `${taskBlock(this.config)}\n\n${buildHumanApprovalOverridePrompt(this.config.humanApprovalOverride)}${this.config.feedback ? `\n\nRecorded reviewer feedback / evidence (verify its references):\n${this.config.feedback}` : ''}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`,
         appendSystemPrompt: REVIEW_SYSTEM_PROMPT,
         model: reviewModel,
         ompRole: ompRoleForJob('review'),

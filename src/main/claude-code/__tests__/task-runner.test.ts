@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import type { ClaudeProcessOptions } from '../process';
 import type { ClaudeStreamMessage } from '../stream-types';
 import type { TaskTriage } from '../../../shared/types/claude-code';
 import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-code';
+import { mutateProjectMemory, readMemoryContexts } from '../../self-improve/project-memory';
+import { closeTaskToolsServer } from '../../insights/task-tools-server';
 
 vi.mock('../env', () => ({
   resolveClaudeEnv: vi.fn(async (options?: { extraEnv?: Record<string, string> }) => ({
@@ -282,6 +284,17 @@ describe('ClaudeTaskRun', () => {
     expect(hold?.[1].phase).toBe('coding');
   });
 
+  it('holds an OMP task at the exact provider reset when all configured fallbacks are unavailable', async () => {
+    const resetAt = '2026-10-30T11:00:00.000Z';
+    const cooldown = { provider: 'anthropic', resetAt, message: 'Anthropic cooling down; no configured fallback available.' };
+    scripts.push({ messages: [result('quota-session', { is_error: true, subtype: 'error_during_execution', omp_cooldown: cooldown })] });
+    const events: Array<[string, Record<string, unknown>]> = [];
+    const outcome = await makeRun({ backend: 'omp', settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, triage: 'fixed', planning: 'never', validation: false } }, { onTaskEvent: (type: string, payload: Record<string, unknown>) => events.push([type, payload]) }).run();
+    expect(outcome.status).toBe('rate_limited');
+    expect(events.find(([type]) => type === 'RATE_LIMIT_HOLD')?.[1]).toMatchObject({ resetAt, phase: 'coding' });
+    expect(ompSpawned).toHaveLength(1);
+  });
+
   it('continues an interrupted implementation in the same session', async () => {
     triageMock.mockResolvedValue({ triage: triage() });
     scripts.push({ messages: [result('s6', { is_error: true, subtype: 'error_during_execution', errors: ['crash'] })] });
@@ -412,6 +425,41 @@ describe('ClaudeTaskRun', () => {
         'Round 2: fixed 1, 1 still open',
         'Round 3: fixed 0, 1 still open',
       ]);
+    });
+
+    it('ends the repair loop immediately when only explicit human requirements remain, keeping the failed verdict', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('human-session')] }, failing('human-session', [finding('Real reviewer approval is required', { requiresHuman: true })], 'failed'));
+      const events: string[] = [];
+      await makeRun({}, { onTaskEvent: (type: string) => events.push(type) }).run();
+      expect(spawned).toHaveLength(2);
+      expect(events.at(-1)).toBe('QA_FAILED');
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict).toMatchObject({ status: 'failed', rounds: 1, maxRounds: 3, failure: { openFindings: [{ requiresHuman: true }] } });
+    });
+
+    it('honors the persisted owner override even when the model repeats a human blocker, retaining the raw report', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      const override = { scope: 'task-human-approval', approver: 'Ian', reason: 'Approve all current viewports; no renewed Research sign-off.', at: '2026-10-27T20:00:00Z', revision: 9 };
+      scripts.push({ messages: [result('override-session')] }, failing('override-session', [finding('Research still needs renewed human approval', { requiresHuman: true })], 'failed'));
+      const events: string[] = [];
+      await makeRun({ humanApprovalOverride: override }, { onTaskEvent: (type: string) => events.push(type) }).run();
+      expect(events.at(-1)).toBe('QA_PASSED');
+      expect(spawned).toHaveLength(2);
+      expect(argValue(spawned[0].args, '--append-system-prompt')).toContain('Owner override');
+      const info = loadClaudeRunInfo(specDir)!;
+      expect(info.validation?.status).toBe('failed');
+      expect(info.validation?.findings[0].fixed).toBe(false);
+      expect(info.reviewVerdict).toMatchObject({ status: 'passed', humanApprovalOverride: override });
+      expect(info.reviewRounds?.[0].overriddenFindings).toHaveLength(1);
+    });
+
+    it('does not override a failing test even with one AI review round allowed', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('override-tests')] }, { messages: [result('override-tests', { structured_output: { status: 'partial', summary: 'Approval pending and tests failed', findings: [finding('Human approval', { requiresHuman: true })], checks: [{ name: 'tests', passed: false }] } })] });
+      const events: string[] = [];
+      await makeRun({ humanApprovalOverride: { scope: 'task-human-approval', approver: 'Ian', reason: 'Approve human acceptance', at: '2026-10-27T20:00:00Z', revision: 1 }, settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, aiReviewRounds: 1 } }, { onTaskEvent: (type: string) => events.push(type) }).run();
+      expect(events.at(-1)).toBe('QA_FAILED');
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.status).toBe('failed');
     });
 
     it('does not loop for minor-only findings', async () => {
@@ -657,6 +705,35 @@ describe('ClaudeTaskRun', () => {
     const prompt = argValue(spawned[0].args, '--append-system-prompt') ?? '';
     expect(prompt).toContain('## Project memory');
     expect(prompt).toContain('type: feedback');
+  });
+
+  it.each(['claude', 'omp'] as const)('supplies accepted project memory to %s from outside the worktree and records the exact packet', async (backend) => {
+    const projectRoot = path.join(specDir, 'main-checkout');
+    const memoryDir = path.join(projectRoot, '.workbench', 'compeng');
+    mkdirSync(memoryDir, { recursive: true });
+    writeFileSync(path.join(projectRoot, '.workbench', 'settings.json'), JSON.stringify({ selfImprove: true }));
+    const draft = await mutateProjectMemory(memoryDir, 'memory-project', { action: 'propose', requestId: 'observed-failure', content: {
+      kind: 'lesson', title: 'Vitest workers', body: 'Inspect the observed worker output before repeating Vitest.',
+      source: { type: 'task', reference: '000-failure', evidence: 'An observed worker exit, not proof of a fix.' },
+    } });
+    await mutateProjectMemory(memoryDir, 'memory-project', { action: 'accept', id: draft.id, expectedRevision: draft.revision });
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push({ messages: [result('memory-session')] });
+    try {
+      const outcome = await makeRun({ backend, projectId: 'memory-project', title: 'Investigate Vitest workers',
+        selfImprovePrompt: SELF_IMPROVE_NUDGE, selfImproveDir: memoryDir,
+        settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false },
+      }).run();
+      expect(outcome.status).toBe('completed');
+      const receipts = await readMemoryContexts(specDir, 'memory-project', '001-task');
+      expect(receipts).toHaveLength(1);
+      expect(receipts[0].items.map((item) => item.id)).toEqual([draft.id]);
+      const prompt = backend === 'omp' ? String(ompSpawned[0].appendSystemPrompt) : argValue(spawned[0].args, '--append-system-prompt')!;
+      expect(prompt).toContain(receipts[0].prompt);
+      if (backend === 'omp') expect(ompExtensions.join('\n')).toContain('propose_project_memory');
+      else expect(mcpConfigs.join('\n')).toContain('workbench_memory');
+      expect(memoryDir.startsWith(worktree)).toBe(false);
+    } finally { await closeTaskToolsServer(); }
   });
 
   it("lists the other tasks' unmerged changes in each phase's system prompt", async () => {

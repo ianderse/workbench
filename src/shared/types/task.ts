@@ -2,6 +2,7 @@
  * Task-related types
  */
 
+import type { HumanWorkstream } from './human-work';
 import type { ThinkingLevel } from './settings';
 import type { ExecutionPhase as ExecutionPhaseType, CompletablePhase } from '../constants/phase-protocol';
 import type { ClaudeRunInfo, ClaudeRunPhase, ClaudeEffort } from './claude-code';
@@ -200,6 +201,8 @@ export interface TaskDecision {
 }
 
 export interface TaskMetadata {
+  /** Human-owned actions, evidence receipts and history; distinct from the AI verdict. */
+  humanWork?: HumanWorkstream;
   // The description the user entered (shown on the task card)
   userDescription?: string;
 
@@ -684,4 +687,6 @@ export interface TaskReviewOptions {
    * applying the feedback to what the session already built. Off by default.
    */
   startOver?: boolean;
+  /** Resume using this exact submitted human work revision. The host builds the feedback. */
+  humanWorkRevision?: number;
 }

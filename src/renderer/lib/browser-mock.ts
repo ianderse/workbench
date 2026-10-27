@@ -117,6 +117,13 @@ const browserMockAPI: ElectronAPI = {
   // Claude Code Operations
   // Graphify CLI (memory graph)
   detectOmp: async () => ({ success: true as const, data: { installed: false, models: [] } }),
+  onHumanWorkChanged: () => () => {},
+  mutateHumanWork: async () => ({ success: false, error: 'Human work requires the desktop app' }),
+  listProjectMemories: async () => ({ success: true as const, data: [] }),
+  onProjectMemoryChanged: () => () => {},
+  mutateProjectMemory: async () => ({ success: false as const, error: 'Project memory requires the desktop app' }),
+  getTaskMemoryContext: async () => ({ success: true as const, data: [] }),
+  readMemorySource: async () => ({ success: false as const, error: 'Memory sources require the desktop app' }),
 
   checkGraphifyVersion: async () => ({
     success: true,

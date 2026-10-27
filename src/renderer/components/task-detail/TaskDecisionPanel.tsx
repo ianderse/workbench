@@ -20,7 +20,7 @@ interface TaskDecisionPanelProps {
 }
 
 /**
- * "Your decision": where the person answers a ticket that needs a decision. Make tickets turns the
+ * "Your decision": where the person answers a ticket that needs a decision. Approve and queue turns the
  * answer into implementation tickets (one model call), Not now saves the note and keeps the ticket
  * in Planning, Reject archives it with the reason. Shown above the description.
  */
@@ -131,6 +131,9 @@ export function TaskDecisionPanel({ task }: TaskDecisionPanelProps) {
               'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60'
             )}
           />
+          <p className="mt-2 text-xs text-(--nav-label-color)">
+            {t('queueGrooming.decision.approveHelp')}
+          </p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button size="sm" disabled={busy !== null || suggesting} onClick={() => void submit('tickets')} className="gap-1.5">
               {busy === 'tickets' && <Loader2 className="h-4 w-4 animate-spin" />}

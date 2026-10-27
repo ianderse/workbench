@@ -46,6 +46,7 @@ import {
 } from '../ui/dialog-styles';
 import { stopTask, submitReview, deleteTask, useTaskStore, startTaskOrQueue, unarchiveTasks, taskHasErrors, taskWasStopped, retryTask, recoverStuckTask } from '../../stores/task-store';
 import { useProjectStore } from '../../stores/project-store';
+import { TaskMemoryPanel } from './TaskMemoryPanel';
 import { TASK_STATUS_LABELS, getTaskColumn, type TaskStatusColumn } from '../../../shared/constants';
 import { TaskEditDialog } from '../TaskEditDialog';
 import { useTaskDetail } from './hooks/useTaskDetail';
@@ -62,6 +63,7 @@ import { PreviousRuns } from './PreviousRuns';
 import { isTaskSessionActive } from '../../../shared/utils/claude-run';
 import { TaskAttachments } from './TaskAttachments';
 import { QAFeedbackSection } from './task-review/QAFeedbackSection';
+import { HumanWorkPanel } from './task-review/HumanWorkPanel';
 import { AIReviewFailedPanel } from './task-review/AIReviewFailedPanel';
 import { AutoMergePanel } from './task-review/AutoMergePanel';
 import { WhatWasDonePanel, shouldShowWhatWasDone } from './task-review/WhatWasDonePanel';
@@ -418,7 +420,8 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
                       {shouldShowWhatWasDone(task) && <WhatWasDonePanel task={task} />}
 
                       {/* Human Review after the last AI review round still failed: why, and how the rounds went */}
-                      {task.status === 'human_review' && <AIReviewFailedPanel claudeRun={task.claudeRun} />}
+                      {task.status === 'human_review' && <AIReviewFailedPanel claudeRun={task.claudeRun} task={task} />}
+                      {task.status === 'human_review' && task.claudeRun?.reviewVerdict?.status !== 'failed' && task.metadata?.humanWork?.approvalOverride && <HumanWorkPanel task={task} findings={[]} />}
 
                       {/* Merged by autonomous mode: where it went, and Revert this task */}
                       {task.status === 'human_review' && <AutoMergePanel task={task} />}
@@ -431,6 +434,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
 
                       {/* Notes added to this ticket after other tasks merged, with Undo */}
                       <TaskContextNotes task={task} />
+                      <TaskMemoryPanel key={task.projectId + task.id} task={task} />
 
                       {/* Metadata */}
                       <TaskMetadata

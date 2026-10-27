@@ -223,6 +223,13 @@ describe('AgentManager', () => {
     );
   });
 
+  it('passes only this task’s persisted human approval override into the run configuration', async () => {
+    const override = { scope: 'task-human-approval' as const, approver: 'Ian', reason: 'Approve current Research', at: '2026-10-27T20:00:00Z', revision: 3 };
+    const task = makeTask(); task.metadata = { ...task.metadata, humanWork: { revision: 3, items: [], approvalOverride: override } };
+    await manager.startTask(task.id, { project, task, mode: 'revise' });
+    expect((await nextRun(1)).config.humanApprovalOverride).toEqual(override);
+  });
+
   it('applies a pending local merge on start only to a task without a pull request', async () => {
     pendingResync.value = { ref: 'develop', into: 'develop', via: 'local', merged: [], at: '2026-10-01T00:00:00Z' };
     try {

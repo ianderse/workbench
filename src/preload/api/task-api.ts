@@ -1,3 +1,4 @@
+import type { HumanWorkMutation, HumanWorkstream } from '../../shared/types/human-work';
 import { ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import type { TaskBreakdown } from '../../shared/types/task-breakdown';
@@ -53,6 +54,8 @@ export interface TaskAPI {
   startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
   stopTask: (taskId: string, projectId?: string) => void;
   retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
+  mutateHumanWork: (projectId: string, taskId: string, mutation: HumanWorkMutation) => Promise<IPCResult<HumanWorkstream>>;
+  onHumanWorkChanged: (callback: (projectId: string) => void) => () => void;
   submitReview: (
     taskId: string,
     approved: boolean,
@@ -163,6 +166,13 @@ export const createTaskAPI = (): TaskAPI => ({
 
   retryTask: (taskId: string, projectId?: string): Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>> =>
     ipcRenderer.invoke(IPC_CHANNELS.TASK_RETRY, taskId, projectId),
+
+  mutateHumanWork: (projectId, taskId, mutation) => ipcRenderer.invoke(IPC_CHANNELS.TASK_HUMAN_WORK, projectId, taskId, mutation),
+  onHumanWorkChanged: (callback) => {
+    const handler = (_event: unknown, projectId: string) => callback(projectId);
+    ipcRenderer.on(IPC_CHANNELS.TASK_HUMAN_WORK_CHANGED, handler);
+    return () => { ipcRenderer.removeListener(IPC_CHANNELS.TASK_HUMAN_WORK_CHANGED, handler); };
+  },
 
   submitReview: (
     taskId: string,

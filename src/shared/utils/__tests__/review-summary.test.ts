@@ -131,3 +131,10 @@ describe('workflow status in needs-attention', () => {
     expect(REVIEW_SUMMARY_SYSTEM_PROMPT).toContain('Never describe where the work stands in the workflow');
   });
 });
+
+it('describes owner-overridden human findings separately instead of reopening the approval loop', () => {
+  const prompt = buildReviewSummaryPrompt({ title: 'Acceptance', request: 'Complete the task', validation: { status: 'failed', summary: 'Human sign-off missing', checks: [{ name: 'tests', passed: true }], findings: [{ severity: 'major', description: 'Research approval is missing', fixed: false, requiresHuman: true }] }, verdict: { status: 'passed', rounds: 1, maxRounds: 3, humanApprovalOverride: { scope: 'task-human-approval', approver: 'Ian', reason: 'Approve all current Research views', at: '2026-10-27T20:00:00Z', revision: 1 } } });
+  expect(prompt).toContain('0 open, 0 fixed, 1 overridden by the owner (not fixed)');
+  expect(prompt).not.toContain('Open major finding: Research approval is missing');
+  expect(prompt).toContain('do not list overridden approval gates as still blocking');
+});

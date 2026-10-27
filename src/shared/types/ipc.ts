@@ -1,3 +1,4 @@
+import type { HumanWorkMutation, HumanWorkstream } from './human-work';
 /**
  * IPC (Inter-Process Communication) types for Electron API
  */
@@ -174,6 +175,8 @@ export interface ElectronAPI {
   startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
   stopTask: (taskId: string, projectId?: string) => void;
   retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
+  mutateHumanWork: (projectId: string, taskId: string, mutation: HumanWorkMutation) => Promise<IPCResult<HumanWorkstream>>;
+  onHumanWorkChanged: (callback: (projectId: string) => void) => () => void;
   submitReview: (taskId: string, approved: boolean, feedback?: string, images?: ImageAttachment[], options?: TaskReviewOptions, projectId?: string) => Promise<IPCResult>;
   updateTaskStatus: (taskId: string, status: TaskStatus, options?: { forceCleanup?: boolean; keepWorktree?: boolean }, projectId?: string) => Promise<IPCResult & { worktreeExists?: boolean; worktreePath?: string }>;
   recoverStuckTask: (taskId: string, options?: TaskRecoveryOptions, projectId?: string) => Promise<IPCResult<TaskRecoveryResult>>;
@@ -522,6 +525,11 @@ export interface ElectronAPI {
   buildMemoryIndex: (projectId: string) => Promise<IPCResult<import('./cli').SelfImproveIndexInfo>>;
   /** Whether a memory index build is running for the project */
   isMemoryIndexBuilding: (projectId: string) => Promise<IPCResult<boolean>>;
+  listProjectMemories: (projectId: string) => Promise<IPCResult<import('./project-memory').ProjectMemory[]>>;
+  onProjectMemoryChanged: (callback: (projectId: string) => void) => () => void;
+  mutateProjectMemory: (projectId: string, mutation: import('./project-memory').MemoryMutation) => Promise<IPCResult<import('./project-memory').ProjectMemory>>;
+  getTaskMemoryContext: (projectId: string, taskId: string) => Promise<IPCResult<import('./project-memory').MemoryContextPacket[]>>;
+  readMemorySource: (projectId: string, source: import('./project-memory').MemorySource) => Promise<IPCResult<string>>;
 
   // Queue grooming (what a merged task means for the tickets in Planning and the Queue)
   /** Proposals waiting for the user (obsolete / duplicate tickets, new tasks) */
@@ -546,7 +554,7 @@ export interface ElectronAPI {
   setPhoneNotifyToken: (token: string) => Promise<IPCResult>;
   hasPhoneNotifyToken: () => Promise<IPCResult<boolean>>;
   sendPhoneTestNotification: (target: { baseUrl: string; service: string }) => Promise<IPCResult<{ status?: number }>>;
-  onNotificationOpen: (callback: (target: { projectId: string; taskId?: string }) => void) => () => void;
+  onNotificationOpen: (callback: (target: { projectId: string; taskId?: string; memoryReview?: boolean }) => void) => () => void;
 
   // Autonomous mode
   getAutonomousStatus: (projectId: string) => Promise<IPCResult<import('./autonomous').AutonomousStatus | null>>;

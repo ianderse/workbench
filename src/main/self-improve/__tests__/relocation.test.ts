@@ -16,6 +16,7 @@ const execFileAsync = promisify(execFile);
 import { getCompengDir, getMemoryIndexPath, getStashedCompengDir } from '../paths';
 import { writeMemories } from '../memory-writer';
 import { SELF_IMPROVE_MEMORY_FILENAME } from '../nudge';
+import { listProjectMemories, mutateProjectMemory } from '../project-memory';
 
 vi.mock('../../app-logger', () => ({
   appLog: { warn: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -46,6 +47,16 @@ const localSettings = (dir: string) => path.join(dir, '.claude', 'settings.local
 const readJson = async (file: string) => JSON.parse(await readFile(file, 'utf-8')) as Record<string, unknown>;
 
 let project: string;
+
+it('keeps managed records and their lock location stable across disable and restore', async () => {
+  const dir = getCompengDir(project);
+  const proposal = await mutateProjectMemory(dir, 'project-a', { action: 'propose', requestId: 'explicit-memory', content: { kind: 'lesson', title: 'Durable lesson', body: 'Keep source evidence.', source: { type: 'user', reference: 'Explicit instruction', evidence: 'The user requested evidence.' } } });
+  await removeProjectMemory(project);
+  expect((await listProjectMemories(dir, 'project-a'))[0].id).toBe(proposal.id);
+  await applyProjectMemory(project);
+  expect((await listProjectMemories(dir, 'project-a'))[0].id).toBe(proposal.id);
+  expect(await listProjectMemories(dir, 'project-a')).toHaveLength(1);
+});
 
 beforeEach(async () => {
   runtime.wsl = false;

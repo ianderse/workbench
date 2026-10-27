@@ -1,3 +1,4 @@
+import { buildHumanWorkFeedback } from '../../../shared/utils/human-work';
 import { handleIpc, onIpc } from '../ipc-registry';
 import { BrowserWindow } from 'electron';
 import { IPC_CHANNELS, AUTO_BUILD_PATHS, getSpecsDir, resolveGlobalMaxParallelTasks, resolveProjectMaxParallelTasks } from '../../../shared/constants';
@@ -666,6 +667,12 @@ export function registerTaskExecutionHandlers(
       const { task, project } = findTaskAndProject(taskId, projectId);
       if (!task || !project) {
         return { success: false, error: 'Task not found' };
+      }
+
+      if (options?.humanWorkRevision !== undefined) {
+        if (approved || options.startOver || task.status !== 'human_review') return { success: false, error: 'Human evidence must continue the existing task from Human Review' };
+        try { feedback = buildHumanWorkFeedback(task.metadata?.humanWork, options.humanWorkRevision, task.claudeRun?.reviewVerdict?.failure?.openFindings ?? []); }
+        catch (error) { return { success: false, error: error instanceof Error ? error.message : String(error) }; }
       }
 
       if (approved) {

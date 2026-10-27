@@ -49,7 +49,7 @@ export type OmpFailureKind = 'transient' | 'permanent';
 
 /** Classify one error text */
 export function classifyOmpErrorText(text: string): OmpFailureKind {
-  if (!text.trim()) return 'permanent';
+  if (!text.trim() || ompLongCooldownMs(text)) return 'permanent';
   if (PERMANENT_PATTERNS.some((p) => p.test(text))) return 'permanent';
   if (TRANSIENT_PATTERNS.some((p) => p.test(text))) return 'transient';
   return 'permanent';
@@ -76,4 +76,20 @@ export function classifyOmpFailure(input: {
   if (decisive) return classifyOmpErrorText(decisive.text);
   if (input.fallbackText?.trim()) return classifyOmpErrorText(input.fallbackText);
   return input.signal ? 'transient' : 'permanent';
+}
+
+/** Long provider-stated waits are quota holds, never ordinary exponential-backoff retries. */
+export const OMP_LONG_COOLDOWN_MS = 5 * 60_000;
+
+export function ompRetryAfterMs(text: string): number | undefined {
+  const delays = [...text.matchAll(/\bretry-after-ms\s*[=:]\s*["']?(\d+(?:\.\d+)?)/gi)].map((match) => Number(match[1]));
+  const seconds = [...text.matchAll(/["']?retry-after["']?\s*[:=]\s*["']?(\d+(?:\.\d+)?)/gi)].map((match) => Number(match[1]) * 1000);
+  const finite = [...delays, ...seconds].filter((delay) => Number.isFinite(delay) && delay > 0 && delay <= 366 * 24 * 60 * 60_000);
+  return finite.length ? Math.max(...finite) : undefined;
+}
+
+export function ompLongCooldownMs(text: string): number | undefined {
+  if (!/\b429\b|rate[-_ ]?limit|usage[-_ ]limit|quota/i.test(text)) return undefined;
+  const delay = ompRetryAfterMs(text);
+  return delay !== undefined && delay > OMP_LONG_COOLDOWN_MS ? delay : undefined;
 }

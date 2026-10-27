@@ -15,6 +15,18 @@ import { getAgentBackendSettings } from './settings';
 import { resolveOmpCommand } from './omp-command';
 import type { OmpRoleMap } from './omp-args';
 
+export type OmpFallbackChains = Readonly<Record<string, readonly string[]>>;
+
+export function parseOmpFallbackChains(output: string): OmpFallbackChains {
+  try {
+    const value = JSON.parse(output)?.['retry.fallbackChains']?.value;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+    return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, string[]] => Array.isArray(entry[1]) && entry[1].every((item) => typeof item === 'string')).map(([key, entries]) => [key, entries.map((item) => item.trim()).filter(Boolean)]));
+  } catch { return {}; }
+}
+
+let fallbackChains: OmpFallbackChains = {};
+
 const REFRESH_MS = 10 * 60 * 1000;
 const RETRY_AFTER_FAILURE_MS = 60 * 1000;
 const READ_TIMEOUT_MS = 20_000;
@@ -52,6 +64,7 @@ export function refreshOmpRoles(): Promise<Record<string, string> | undefined> {
         nextTryAt = Date.now() + RETRY_AFTER_FAILURE_MS;
         return cached?.roles;
       }
+      fallbackChains = parseOmpFallbackChains(stdout);
       cached = { roles, at: Date.now() };
       nextTryAt = Date.now() + REFRESH_MS;
       return roles;
@@ -76,8 +89,16 @@ export function getOmpRoles(): OmpRoleMap | undefined {
 }
 
 /** Test hook */
-export function resetOmpRolesForTests(roles?: Record<string, string>): void {
+export function resetOmpRolesForTests(roles?: Record<string, string>, chains: OmpFallbackChains = {}): void {
+  fallbackChains = chains;
   cached = roles ? { roles, at: Date.now() } : undefined;
   nextTryAt = roles ? Date.now() + REFRESH_MS : 0;
   loading = undefined;
+}
+
+/** Read alongside roles, with the same bounded config cache. */
+export async function getOmpFallbackPolicy(): Promise<{ roles: OmpRoleMap | undefined; chains: OmpFallbackChains }> {
+  if (loading) await loading;
+  else if (Date.now() >= nextTryAt) await refreshOmpRoles();
+  return { roles: cached?.roles, chains: fallbackChains };
 }

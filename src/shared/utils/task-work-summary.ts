@@ -1,3 +1,4 @@
+import { isHumanApprovalOverride } from './human-work';
 /**
  * Pure helpers behind the "What was done" panel of a task in Human Review: the AI review verdict,
  * check counts, open findings by severity, effort (time, cost, models) and per-file change stats.
@@ -20,6 +21,7 @@ export interface ChecksOutcome {
 }
 
 export interface FindingsOutcome {
+  overridden?: ValidationFinding[];
   /** Findings the agent left open, most severe first */
   open: ValidationFinding[];
   critical: number;
@@ -64,10 +66,12 @@ export function checksOutcome(run: ClaudeRunInfo | undefined): ChecksOutcome | n
 }
 
 export function findingsOutcome(run: ClaudeRunInfo | undefined): FindingsOutcome {
+  const overridden = isHumanApprovalOverride(run?.reviewVerdict?.humanApprovalOverride) ? (run?.validation?.findings ?? []).filter((finding) => !finding.fixed && finding.requiresHuman === true) : [];
   const open = (run?.validation?.findings ?? [])
-    .filter((finding) => !finding.fixed)
+    .filter((finding) => !finding.fixed && !overridden.includes(finding))
     .sort((a, b) => SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity]);
   return {
+    ...(overridden.length ? { overridden } : {}),
     open,
     critical: open.filter((f) => f.severity === 'critical').length,
     major: open.filter((f) => f.severity === 'major').length,

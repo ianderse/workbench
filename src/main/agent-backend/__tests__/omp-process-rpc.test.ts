@@ -8,7 +8,12 @@ import { encodeRpcCommand, isSessionSettled, parseRpcLine, readSteerId, rpcSteer
 import { buildOmpArgs, OMP_FOREGROUND_OVERLAY, OMP_FOREGROUND_RULE } from '../omp-args';
 import { startOmpProcess } from '../omp-process';
 
-vi.mock('../omp-roles', () => ({ getOmpRoles: () => undefined }));
+const recoveryFixture = vi.hoisted(() => ({ file: '', chains: {} as Record<string, string[]> }));
+vi.mock('../omp-roles', () => ({ getOmpRoles: () => undefined, getOmpFallbackPolicy: async () => ({ roles: undefined, chains: recoveryFixture.chains }) }));
+vi.mock('../omp-cooldown', async (original) => {
+  const actual = await original<typeof import('../omp-cooldown')>();
+  return { ...actual, getOmpCooldownStore: () => new actual.OmpCooldownStore(recoveryFixture.file) };
+});
 
 describe('omp rpc framing', () => {
   it('encodes a command as one JSON line', () => {
@@ -69,7 +74,11 @@ if (!rpc) {
   process.stdin.on('end', () => {
     out({ type: 'session', id: 'print-session', cwd: process.cwd() });
     out({ type: 'agent_start' });
-    finish('print answer: ' + input.trim());
+    const model = process.argv[process.argv.indexOf('--model') + 1];
+    if (mode === 'provider-cooldown' && model.startsWith('quota-fixture/')) {
+      out({ type: 'message_end', message: { role: 'assistant', provider: 'quota-fixture', model: 'limited', stopReason: 'error', usage, content: [], errorMessage: '429 rate_limit_error retry-after-ms=246899000' } });
+      out({ type: 'agent_end', messages: [] });
+    } else finish('print answer: ' + input.trim());
   });
 } else if (mode === 'rpc-exit') {
   process.stderr.write('unknown option --mode rpc\\n');
@@ -157,6 +166,8 @@ describe('startOmpProcess with live messages', () => {
 
   beforeEach(async () => {
     dir = await mkdtemp(path.join(os.tmpdir(), 'omp-rpc-test-'));
+    recoveryFixture.file = path.join(dir, 'cooldowns.json');
+    recoveryFixture.chains = {};
     fake = path.join(dir, 'omp');
     await writeFile(fake, FAKE_OMP, 'utf-8');
     await chmod(fake, 0o755);
@@ -185,6 +196,23 @@ describe('startOmpProcess with live messages', () => {
     return { messages, read, promise };
   };
   const text = (messages: ClaudeStreamMessage[]) => (messages.find((m) => m.type === 'result') as { result?: string } | undefined)?.result;
+
+  it('switches immediately through the real CLI transport, then skips the exhausted provider on the next run', async () => {
+    recoveryFixture.chains = { 'quota-fixture/*': ['available-fixture/model'] };
+    const argvFile = path.join(dir, 'cooldown-argv.json');
+    const messages: ClaudeStreamMessage[] = [];
+    const options = { settings: settings(), cwd: dir, env: { FAKE_MODE: 'provider-cooldown', FAKE_ARGV_OUT: argvFile }, model: 'quota-fixture/limited', prompt: 'Check the existing work before continuing', tools: [] as string[], session: { dir: path.join(dir, 'sessions') }, onMessage: (message: ClaudeStreamMessage) => messages.push(message) };
+    const first = await startOmpProcess(options);
+    expect((await first.done).result?.is_error).toBe(false);
+    const firstArgv = JSON.parse(await readFile(argvFile, 'utf8')).argv as string[];
+    expect(firstArgv[firstArgv.indexOf('--model') + 1]).toBe('available-fixture/model');
+    expect(firstArgv[firstArgv.indexOf('--resume') + 1]).toBe('print-session');
+    expect(messages).toContainEqual(expect.objectContaining({ text: expect.stringContaining('switching immediately') }));
+    const second = await startOmpProcess(options);
+    expect((await second.done).result?.is_error).toBe(false);
+    const secondArgv = JSON.parse(await readFile(argvFile, 'utf8')).argv as string[];
+    expect(secondArgv[secondArgv.indexOf('--model') + 1]).toBe('available-fixture/model');
+  });
 
   it('turns background bash off in the RPC run too', async () => {
     const argvFile = path.join(dir, 'argv.json');

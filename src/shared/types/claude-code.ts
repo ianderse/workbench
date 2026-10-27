@@ -1,3 +1,4 @@
+import type { HumanApprovalOverride } from './human-work';
 /**
  * Claude Code task execution types
  *
@@ -149,6 +150,8 @@ export interface ValidationFinding {
   severity: 'critical' | 'major' | 'minor';
   description: string;
   fixed: boolean;
+  /** Requires a real person's decision or observations; an agent cannot manufacture it. */
+  requiresHuman?: boolean;
   file?: string;
   line?: number;
 }
@@ -160,12 +163,14 @@ export const MAX_AI_REVIEW_ROUNDS = 5;
 export interface ReviewRoundFinding {
   severity: 'blocker' | 'major' | 'minor';
   description: string;
+  requiresHuman?: boolean;
   file?: string;
   line?: number;
 }
 
 /** One AI review round of the review loop */
 export interface ReviewRound {
+  overriddenFindings?: ReviewRoundFinding[];
   /** 1 = the first review */
   round: number;
   status: ValidationReport['status'];
@@ -194,6 +199,8 @@ export interface ReviewFailureSummary {
 
 /** The final verdict of the AI review loop */
 export interface ReviewVerdict {
+  /** Owner decision used by the host gate, separate from test results and the raw AI report. */
+  humanApprovalOverride?: HumanApprovalOverride;
   status: 'passed' | 'failed';
   /** Rounds that ran */
   rounds: number;

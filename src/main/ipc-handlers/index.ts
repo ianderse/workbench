@@ -91,7 +91,7 @@ export function setupIpcHandlers(
 
   // Agent backend handlers (OMP detection)
   registerAgentBackendHandlers();
-  registerSelfImproveHandlers();
+  registerSelfImproveHandlers(getMainWindow);
   // Updates to queued tickets after a merge (notes, proposals)
   registerQueueGroomingHandlers(getMainWindow);
   // Spec review loop: a review ticket when a spec's tickets are done, gap tickets after it

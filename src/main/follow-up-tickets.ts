@@ -1,3 +1,4 @@
+import { buildHumanApprovalOverridePrompt } from '../shared/utils/human-work';
 /**
  * Follow-up tickets
  * =================
@@ -218,7 +219,7 @@ async function run(projectId: string, taskId: string, deps: FollowUpDeps): Promi
       openTickets: open.map((t) => ({ id: t.id, title: t.title, status: t.status, description: t.description })),
       alreadySplitOff,
     }),
-    systemPrompt: FOLLOW_UP_SYSTEM_PROMPT,
+    systemPrompt: [FOLLOW_UP_SYSTEM_PROMPT, buildHumanApprovalOverridePrompt(source.metadata?.humanWork?.approvalOverride), source.metadata?.humanWork?.approvalOverride ? 'Do not create new tickets that reassert overridden human approval gates. Preserve explicitly deferred work as future scope, without blocking the current task.' : ''].filter(Boolean).join('\n\n'),
     jsonSchema: FOLLOW_UP_SCHEMA,
     cwd: project.path,
     profileId: project.settings?.claudeProfileId,

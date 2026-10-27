@@ -80,3 +80,17 @@ describe('classifyOmpFailure', () => {
     expect(classifyOmpFailure({ fallbackText: 'ECONNRESET', timedOut: true })).toBe('permanent');
   });
 });
+
+it('treats multi-hour provider cooldowns as permanent for the ordinary retry loop', () => {
+  expect(classifyOmpErrorText('429 rate_limit_error retry-after-ms=246899000')).toBe('permanent');
+});
+
+it('parses provider retry delays without confusing seconds and milliseconds', async () => {
+  const { ompRetryAfterMs, ompLongCooldownMs } = await import('../omp-retry');
+  expect(ompRetryAfterMs('429 retry-after-ms=246899000')).toBe(246899000);
+  expect(ompRetryAfterMs('429 {"retry-after":"246899"}')).toBe(246899000);
+  expect(ompLongCooldownMs('429 retry-after-ms=300000')).toBeUndefined();
+  expect(ompLongCooldownMs('429 retry-after-ms=300001')).toBe(300001);
+  expect(ompLongCooldownMs('503 retry-after-ms=246899000')).toBeUndefined();
+  expect(ompLongCooldownMs('429 retry-after-ms=9999999999999999999999')).toBeUndefined();
+});

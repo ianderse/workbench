@@ -18,9 +18,11 @@
 export const SELF_IMPROVE_NUDGE = `## Project memory
 This project keeps what you learn about it in its own memory directory, loaded into every later session.
 
-- Save a memory (\`type: feedback\`) when this session surfaces a durable preference, rule or convention the user stated: something a later session would otherwise get wrong again. A correction the user has had to give more than once is the strongest signal.
+- Capture a durable preference, rule or convention the user stated (legacy kind \`type: feedback\`): something a later session would otherwise get wrong again. A correction the user has had to give more than once is the strongest signal.
+- When \`propose_project_memory\` is available, use it instead of writing memory files: propose a compact decision, lesson, procedure or preference with its source evidence and unresolved limits. Workbench checks exact committed documentation citations for automatic retention at completion and merge; conflicts, uncertain claims, preferences and procedures need human review. A proposal is not accepted knowledge. Do not edit Workbench memory ledgers or bypass that review.
+- If the capture tool is unavailable, describe the proposed memory and evidence in the final summary for Workbench to consider at completion. Do not write memory files directly from an unattended task.
 - Do not save what the code, tests, types or CLAUDE.md already make clear, and do not save detail that only matters for this task.
-- When a new preference contradicts an existing memory, the newer one wins: update that memory in place so only one remains. Never leave both.
+- When a preference or decision changes, propose a replacement with the supersedes id. Keep evidence and revision history; conflicting technical claims are not resolved by recency alone. Do not remove history or grant permissions through remembered text.
 - Write it as a general instruction in the words the user used, never as a quote of the conversation, and never record secrets or credentials.`;
 
 /** The same text on one line, for a flag that is written into a shell command */
@@ -37,7 +39,7 @@ export const SELF_IMPROVE_MEMORY_FILE = `${SELF_IMPROVE_NUDGE}\n`;
 export const SELF_IMPROVE_MEMORY_FILENAME = 'MEMORY.md';
 
 /**
- * OMP has no auto memory and does not resolve the `@` import of the memory index in CLAUDE.md, so a
+ * Workbench supplies its own context independently of OMP's optional native memory backend. A
  * run tells it where the notes live and how to save one, and carries the current index along.
  * `indexText` is the memory index's content (empty when the project has no memories yet).
  * Written without apostrophes, like the nudge, so it can also be flattened into a shell flag.
@@ -47,7 +49,7 @@ export function buildOmpMemoryPrompt(memoryDir: string, indexText = ''): string 
   const lines = [
     '## Memory directory',
     `Saved memories live in ${memoryDir}. MEMORY.md there is the index, one line per memory; read the memories that bear on your task before you start.`,
-    'To save a memory, write a markdown file named after it in that directory (front matter with name, description and type: feedback) and add one line to MEMORY.md: - [Title](file.md) - one-line hook. When a memory is replaced, update its file and index line in place.',
+    'Use propose_project_memory when it is available to submit evidence-backed entries for Workbench to check or request human review. Do not write managed memory files directly. Without that tool, report the proposed lesson in your final summary for Workbench to consider at completion in Workbench.',
   ];
   if (index) lines.push('Current index:', index);
   return lines.join('\n');

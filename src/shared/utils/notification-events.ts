@@ -19,6 +19,18 @@ export type NotificationKind =
 export interface NotificationRoute {
   projectId: string;
   taskId?: string;
+  memoryReview?: boolean;
+}
+
+/** One grouped review alert; automatic source-backed saves stay quiet. */
+export function memoryReviewContent(projectId: string, projectName: string, entries: Array<{ reviewReason?: string }>): NotificationContent {
+  const conflicts = entries.filter((entry) => entry.reviewReason === 'conflict').length;
+  return {
+    kind: 'review-needed',
+    title: conflicts ? `Memory conflicts need review in ${projectName}` : `Memory proposals need review in ${projectName}`,
+    body: `${entries.length} ${entries.length === 1 ? 'memory' : 'memories'} waiting for review${conflicts ? `, including ${conflicts} ${conflicts === 1 ? 'conflict' : 'conflicts'}` : ''}`,
+    route: { projectId, memoryReview: true },
+  };
 }
 
 export interface NotificationContent {

@@ -117,6 +117,7 @@ export async function collectReviewDiff(cwd: string, baseBranch: string): Promis
 export type ReviewSeverity = 'blocker' | 'major' | 'minor';
 
 export interface ReviewFinding {
+  requiresHuman?: boolean;
   severity: ReviewSeverity;
   file?: string;
   line?: number;
@@ -143,6 +144,7 @@ export const REVIEW_SCHEMA = {
           file: { type: 'string' },
           line: { type: 'integer' },
           issue: { type: 'string' },
+          requiresHuman: { type: 'boolean' },
           fix: { type: 'string' },
         },
         required: ['severity', 'issue'],
@@ -164,6 +166,7 @@ export function normalizeReview(raw: unknown, fallbackText = ''): ReviewReport {
       findings.push({
         severity: f.severity === 'blocker' || f.severity === 'major' ? f.severity : 'minor',
         issue: f.issue.trim(),
+        ...(f.requiresHuman === true ? { requiresHuman: true } : {}),
         ...(typeof f.file === 'string' && f.file ? { file: f.file } : {}),
         ...(typeof f.line === 'number' && Number.isFinite(f.line) ? { line: f.line } : {}),
         ...(typeof f.fix === 'string' && f.fix.trim() ? { fix: f.fix.trim() } : {}),
@@ -187,13 +190,14 @@ export function formatReviewForValidation(report: ReviewReport): string {
   }
   const lines = report.findings.map((f, i) => {
     const where = f.file ? ` [${f.file}${f.line ? `:${f.line}` : ''}]` : '';
-    return `${i + 1}. ${f.severity.toUpperCase()}${where}: ${f.issue}${f.fix ? ` Suggested fix: ${f.fix}` : ''}`;
+    return `${i + 1}. ${f.severity.toUpperCase()}${where}: ${f.issue}${f.requiresHuman ? ' [requiresHuman: true — keep pending until actual human evidence exists]' : ''}${f.fix ? ` Suggested fix: ${f.fix}` : ''}`;
   });
   return `A separate reviewer with fresh context read the diff and found:\n${lines.join('\n')}\n\nReviewer summary: ${report.summary || '(none)'}\nCheck each blocker and major finding against the code: fix the ones that are real, and skip any that are mistaken. Minor findings are optional.`;
 }
 
 export const REVIEW_SYSTEM_PROMPT = `You are a code reviewer with fresh eyes. You see only the task and the diff of the change made for it; you did not write it.
 Look for real problems: bugs, missed requirements from the task, broken edge cases, security issues, and changes that break other code. Use your read, grep and glob tools to read the code around the changes and the code that uses them before you report a problem; do not report guesses.
+Flag requiresHuman: true for missing real human approvals, decisions or participant observations. Keep them as unmet requirements; an agent cannot fabricate them.
 Do not report style, naming, formatting or missing nice-to-haves. Do not modify any file.
 Severity: blocker = the change is broken or misses a core requirement; major = a real bug or gap that should be fixed before merging; minor = small and optional.
 Report at most 12 findings, most important first, each with the file and line when you know them. An empty findings list is the right answer for a correct change.`;

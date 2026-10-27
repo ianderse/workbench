@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../ui/button';
@@ -8,6 +8,7 @@ import { SettingsRow } from '../settings/SettingsRow';
 import { StatusIndicator } from '../settings/common/StatusIndicator';
 import { useProjectStore } from '../../stores/project-store';
 import { useSelfImproveStore } from '../../stores/self-improve-store';
+import { ProjectMemoryDialog } from '../memory/ProjectMemoryDialog';
 
 /**
  * The Memory index row: reads the project's past Claude Code sessions for the preferences the user
@@ -19,6 +20,8 @@ import { useSelfImproveStore } from '../../stores/self-improve-store';
  */
 export function CompengIndexRows({ projectId }: { projectId: string }) {
   const { t } = useTranslation('settings');
+  const { t: memoryText } = useTranslation('memory');
+  const [manage, setManage] = useState(false);
   const selfImprove = useProjectStore(
     (state) => state.projects.find((project) => project.id === projectId)?.settings.selfImprove === true
   );
@@ -61,6 +64,11 @@ export function CompengIndexRows({ projectId }: { projectId: string }) {
             : t('projectPages.context.buildCompengIndex')}
         </Button>
       </SettingsRow>
+
+      {typeof window.electronAPI.listProjectMemories === 'function' && <SettingsRow label={memoryText('title')} description={memoryText('manageDescription')}>
+        <Button size="sm" variant="outline" onClick={() => setManage(true)}>{memoryText('manage')}</Button>
+        <ProjectMemoryDialog key={projectId} projectId={projectId} open={manage} onOpenChange={setManage} />
+      </SettingsRow>}
 
       {error !== null && (
         <SettingsRow

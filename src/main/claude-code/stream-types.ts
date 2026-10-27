@@ -116,6 +116,8 @@ export interface ClaudeResultMessage {
   terminal_reason?: string;
   permission_denials?: unknown[];
   /** OMP: the failed model replies of the run, `fallback` for those of a model OMP switched to */
+  /** Workbench's provider cooldown when all configured alternatives are unavailable. */
+  omp_cooldown?: { provider: string; resetAt: string; message: string };
   omp_errors?: Array<{ text: string; model?: string; fallback: boolean }>;
   /** Claude Code: tokens per model of the run (keys are model ids) */
   modelUsage?: Record<string, ClaudeModelUsage>;

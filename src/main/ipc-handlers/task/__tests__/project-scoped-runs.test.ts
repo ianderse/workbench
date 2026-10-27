@@ -370,6 +370,38 @@ describe('TASK_CHECK_RUNNING', () => {
 describe('TASK_REVIEW', () => {
   const STILL_RUNNING = 'The task is still running. Stop it before requesting changes.';
 
+  it('hands submitted human evidence to the existing task without approving it', async () => {
+    setupProjects('project-a', 'project-b');
+    const task = mocks.tasksByProject.get('project-a')![0];
+    task.status = 'human_review';
+    task.metadata = { ...task.metadata, humanWork: { revision: 2, items: [{ id: 'human-item', revision: 2, finding: { severity: 'blocker', description: 'Human sign-off' }, owner: 'Ian', status: 'submitted', response: 'Image 2 was rejected by the reviewer.', evidence: 'docs/reviewer-notes.md', at: '2026-10-27T16:00:00Z', createdAt: '2026-10-27T15:00:00Z', history: [] }] } };
+    const result = await invokeIpcHandler<{ success: boolean }>(IPC_CHANNELS.TASK_REVIEW, TASK_ID, false, 'untrusted client feedback', undefined, { humanWorkRevision: 2 }, 'project-a');
+    expect(result.success).toBe(true);
+    expect(agentManager.startTask).toHaveBeenCalledWith(TASK_ID, expect.objectContaining({ mode: 'revise', feedback: expect.stringContaining('Image 2 was rejected by the reviewer.') }));
+    expect(mocks.stateManager.handleUiEvent).not.toHaveBeenCalledWith(TASK_ID, { type: 'MARK_DONE' }, expect.anything(), expect.anything());
+  });
+
+  it('hands off the owner override even when old human findings are unsubmitted or reworded', async () => {
+    setupProjects('project-a', 'project-b');
+    const task = mocks.tasksByProject.get('project-a')![0]; task.status = 'human_review';
+    const override = { scope: 'task-human-approval' as const, approver: 'Ian', reason: 'Research is approved; no further human sign-off required.', at: '2026-10-27T20:00:00Z', revision: 1 };
+    task.metadata = { ...task.metadata, humanWork: { revision: 1, items: [], approvalOverride: override } };
+    const result = await invokeIpcHandler<{ success: boolean }>(IPC_CHANNELS.TASK_REVIEW, TASK_ID, false, 'ignored client text', undefined, { humanWorkRevision: 1 }, 'project-a');
+    expect(result.success).toBe(true);
+    expect(agentManager.startTask).toHaveBeenCalledWith(TASK_ID, expect.objectContaining({ mode: 'revise', feedback: expect.stringContaining('Owner override') }));
+  });
+
+  it('rejects a stale or incomplete human handoff before launching an agent', async () => {
+    setupProjects('project-a', 'project-b');
+    const task = mocks.tasksByProject.get('project-a')![0];
+    task.status = 'human_review';
+    task.metadata = { ...task.metadata, humanWork: { revision: 1, items: [] } };
+    const result = await invokeIpcHandler<{ success: boolean; error?: string }>(IPC_CHANNELS.TASK_REVIEW, TASK_ID, false, undefined, undefined, { humanWorkRevision: 0 }, 'project-a');
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('changed');
+    expect(agentManager.startTask).not.toHaveBeenCalled();
+  });
+
   it('refuses to request changes while the sending project runs the task', async () => {
     setupProjects('project-a', 'project-b');
     agentManager.addRun(TASK_ID, 'project-b');

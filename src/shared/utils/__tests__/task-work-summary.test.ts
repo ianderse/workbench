@@ -100,3 +100,12 @@ describe('task-work-summary', () => {
     expect(more).toBe(2);
   });
 });
+
+it('shows human findings as overridden rather than still open when the host applied an owner override', () => {
+  const info = { validation: { status: 'failed', summary: 'Approval missing', checks: [], findings: [{ severity: 'major', description: 'Renewed approval required', requiresHuman: true, fixed: false }, { severity: 'critical', description: 'Actual code crash', fixed: false }] }, reviewVerdict: { status: 'failed', rounds: 1, maxRounds: 3, humanApprovalOverride: { scope: 'task-human-approval', approver: 'Ian', reason: 'Approve human acceptance', at: '2026-10-27T20:00:00Z', revision: 1 } } } as unknown as ClaudeRunInfo;
+  const result = findingsOutcome(info);
+  expect(result.overridden).toHaveLength(1);
+  expect(result.open).toHaveLength(1);
+  expect(result.open[0].description).toBe('Actual code crash');
+  expect(info.validation?.findings[0].fixed).toBe(false);
+});

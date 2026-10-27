@@ -198,6 +198,9 @@ async function moveMemories(from: string, to: string): Promise<number> {
 
   for (const name of entries) {
     if (name === SELF_IMPROVE_MEMORY_FILENAME) continue;
+    // Workbench's managed ledger has its own lock and revision history. The switch disables
+    // capture/recall, but these records stay viewable; never move them under an active writer.
+    if (name === 'records') continue;
     const source = path.join(from, name);
     try {
       if (name === INDEX_INFO_FILE) {
@@ -224,6 +227,9 @@ async function moveMemories(from: string, to: string): Promise<number> {
   }
 
   try {
+    // A managed ledger intentionally stays put when the legacy notes are set aside.
+    const remaining = await readdir(from);
+    if (remaining.length === 1 && remaining[0] === 'records') return moved;
     await rmdir(from);
   } catch (error) {
     appLog.warn(`[SelfImprove] ${from} still holds something that could not be moved, so it was kept:`, error);

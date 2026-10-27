@@ -1,3 +1,5 @@
+import type { HumanApprovalOverride } from '../types/human-work';
+import { isHumanApprovalOverride } from './human-work';
 /**
  * AI review loop: the pure rules
  * ==============================
@@ -17,6 +19,7 @@ import type {
 
 export interface ReviewGateResult {
   passes: boolean;
+  overriddenFindings?: ReviewRoundFinding[];
   /** Unfixed blocker and major findings (critical counts as blocker) */
   openFindings: ReviewRoundFinding[];
   /** Checks that did not pass */
@@ -36,26 +39,30 @@ function severityOf(raw: string): ReviewRoundFinding['severity'] {
  * The review gate. A report fails it when its status is `failed`, when a blocker or major finding
  * is still open, or when a check failed. `partial` with only minor findings passes.
  */
-export function evaluateReviewGate(report: ValidationReport): ReviewGateResult {
+export function evaluateReviewGate(report: ValidationReport, override?: HumanApprovalOverride): ReviewGateResult {
   const normalised = report.findings.map((f) => ({
     fixed: f.fixed === true,
     finding: {
       severity: severityOf(String(f.severity)),
       description: f.description,
+      ...(f.requiresHuman === true ? { requiresHuman: true } : {}),
       ...(f.file ? { file: f.file } : {}),
       ...(typeof f.line === 'number' ? { line: f.line } : {}),
     } satisfies ReviewRoundFinding,
   }));
   const serious = normalised.filter((f) => f.finding.severity !== 'minor');
-  const openFindings = serious.filter((f) => !f.fixed).map((f) => f.finding);
+  const allOpen = serious.filter((f) => !f.fixed).map((f) => f.finding);
+  const overriddenFindings = isHumanApprovalOverride(override) ? allOpen.filter((finding) => finding.requiresHuman === true) : [];
+  const openFindings = allOpen.filter((finding) => !overriddenFindings.includes(finding));
   const failingChecks = report.checks
     .filter((c) => !c.passed)
     .map((c) => ({ name: c.name, ...(c.command ? { command: c.command } : {}), ...(c.details ? { details: c.details } : {}) }));
   return {
-    passes: report.status !== 'failed' && openFindings.length === 0 && failingChecks.length === 0,
+    passes: (report.status !== 'failed' || overriddenFindings.length > 0) && openFindings.length === 0 && failingChecks.length === 0,
+    ...(overriddenFindings.length ? { overriddenFindings } : {}),
     openFindings,
     failingChecks,
-    fixedFindings: serious.length - openFindings.length,
+    fixedFindings: serious.length - allOpen.length,
   };
 }
 
@@ -85,10 +92,11 @@ export function compareWithPreviousRound(
 /** The feedback a fix round gets: the open findings and failing checks of the review */
 export function buildFixFeedback(gate: ReviewGateResult, report: ValidationReport): string {
   const lines: string[] = [];
-  gate.openFindings.forEach((f, i) => {
+  gate.openFindings.filter((finding) => !finding.requiresHuman).forEach((f, i) => {
     const where = formatFindingLocation(f);
     lines.push(`${i + 1}. ${f.severity.toUpperCase()}${where ? ` [${where}]` : ''}: ${f.description}`);
   });
+  if (gate.openFindings.some((finding) => finding.requiresHuman)) lines.push('Human-only requirements remain pending. Do not fabricate approvals or participant evidence; fix the agent-actionable findings only.');
   gate.failingChecks.forEach((c) => {
     lines.push(`- Failing check "${c.name}"${c.command ? ` (${c.command})` : ''}${c.details ? `: ${c.details}` : ''}`);
   });
@@ -121,8 +129,8 @@ export function describeReviewRound(round: ReviewRound): string {
 }
 
 /** What a person sees when the task still fails AI review after its last round */
-export function buildReviewFailureSummary(rounds: readonly ReviewRound[], lastReport: ValidationReport): ReviewFailureSummary {
-  const gate = evaluateReviewGate(lastReport);
+export function buildReviewFailureSummary(rounds: readonly ReviewRound[], lastReport: ValidationReport, override?: HumanApprovalOverride): ReviewFailureSummary {
+  const gate = evaluateReviewGate(lastReport, override);
   const last = rounds[rounds.length - 1];
   let reason = firstSentences(lastReport.summary, 3);
   if (!reason) {

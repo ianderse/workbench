@@ -70,6 +70,10 @@ export default defineConfig({
     },
     server: {
       watch: {
+        // Poll source changes so long-running dev servers invalidate cached module exports
+        // reliably. Generated worktrees and dependencies stay excluded below.
+        usePolling: true,
+        interval: 750,
         // Ignore directories to prevent HMR conflicts during merge operations
         // Using absolute paths and broader patterns
         ignored: [

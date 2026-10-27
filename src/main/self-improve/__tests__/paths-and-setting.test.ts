@@ -73,7 +73,9 @@ describe('isSelfImproveEnabled', () => {
 describe('the nudge', () => {
   it('states when to save, the bar, and what to do with a contradiction', () => {
     expect(SELF_IMPROVE_NUDGE).toContain('type: feedback');
-    expect(SELF_IMPROVE_NUDGE).toMatch(/newer one wins/i);
+    expect(SELF_IMPROVE_NUDGE).toMatch(/conflicting technical claims are not resolved by recency alone/i);
+    expect(SELF_IMPROVE_NUDGE).toMatch(/Keep evidence and revision history/);
+    expect(SELF_IMPROVE_NUDGE).toContain('propose_project_memory');
     expect(SELF_IMPROVE_NUDGE).toMatch(/CLAUDE\.md already make clear/i);
     expect(SELF_IMPROVE_NUDGE).toMatch(/never record secrets/i);
   });

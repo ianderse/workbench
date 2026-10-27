@@ -14,6 +14,8 @@ import {
 } from './components/ui/dialog';
 import { Sidebar, type SidebarView } from './components/Sidebar';
 import { MemoryGraph } from './components/memory/MemoryGraph';
+import { ProjectMemoryDialog } from './components/memory/ProjectMemoryDialog';
+import { useProjectMemoryStore } from './stores/project-memory-store';
 import { UsagePage } from './components/usage/UsagePage';
 import { useMemoryGraphStore } from './stores/memory-graph-store';
 import { KanbanBoard } from './components/KanbanBoard';
@@ -79,6 +81,23 @@ export function App() {
 
   // UI State
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  useEffect(() => window.electronAPI.onHumanWorkChanged?.((projectId) => {
+    const state = useProjectStore.getState();
+    if ((state.activeProjectId ?? state.selectedProjectId) === projectId) void loadTasks(projectId);
+  }), []);
+  const [memoryReviewProject, setMemoryReviewProject] = useState<string | null>(null);
+  useEffect(() => window.electronAPI.onProjectMemoryChanged?.((projectId) => {
+    const state = useProjectMemoryStore.getState();
+    if (state.entries[projectId] !== undefined) void state.refresh(projectId).catch(() => undefined);
+  }), []);
+  useEffect(() => {
+    const open = (event: Event) => {
+      const projectId = (event as CustomEvent<{ projectId?: string }>).detail?.projectId;
+      if (projectId) setMemoryReviewProject(projectId);
+    };
+    window.addEventListener('open-project-memory', open);
+    return () => window.removeEventListener('open-project-memory', open);
+  }, []);
   const [isNewTaskDialogOpen, setIsNewTaskDialogOpen] = useState(false);
   // A Break into tasks proposal chosen for review in the Queue updates panel opens the task dialog on it
   const pendingBreakdown = useBreakdownReviewStore((state) => state.pending);
@@ -213,6 +232,7 @@ export function App() {
     () =>
       window.electronAPI.onNotificationOpen((target) => {
         setActiveView('kanban');
+        if (target.memoryReview) setMemoryReviewProject(target.projectId);
         setPendingOpen(target);
         const { activeProjectId: current, selectedProjectId: selected } = useProjectStore.getState();
         if ((current ?? selected) !== target.projectId) setActiveProject(target.projectId);
@@ -804,6 +824,8 @@ export function App() {
           task={selectedTask}
           onOpenChange={(open) => !open && handleCloseTaskDetail()}
         />
+
+        {memoryReviewProject && <ProjectMemoryDialog key={memoryReviewProject} projectId={memoryReviewProject} open onOpenChange={(open) => { if (!open) setMemoryReviewProject(null); }} />}
 
         {/* Dialogs */}
         {(activeProjectId || selectedProjectId) && (

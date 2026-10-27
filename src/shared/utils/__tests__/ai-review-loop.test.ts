@@ -126,3 +126,19 @@ describe('failure summary', () => {
     expect(firstSentences('', 3)).toBe('');
   });
 });
+
+it('enforces an explicit owner override on reworded human gates while retaining code and check failures', () => {
+  const override = { scope: 'task-human-approval' as const, approver: 'Ian', reason: 'Approve current Research without another sign-off.', at: '2026-10-27T20:00:00Z', revision: 1 };
+  const human = { severity: 'major' as const, description: 'Research sign-off remains pending; obtain renewed human approval.', fixed: false, requiresHuman: true };
+  const raw = report({ status: 'failed', findings: [human] });
+  const gate = evaluateReviewGate(raw, override);
+  expect(gate.passes).toBe(true);
+  expect(gate.openFindings).toEqual([]);
+  expect(gate.overriddenFindings).toHaveLength(1);
+  expect(gate.fixedFindings).toBe(0);
+  expect(raw.findings[0].fixed).toBe(false);
+  expect(evaluateReviewGate({ ...raw, findings: [human, { severity: 'critical', description: 'The application crashes.', fixed: false }] }, override).passes).toBe(false);
+  expect(evaluateReviewGate({ ...raw, checks: [{ name: 'tests', passed: false }] }, override).passes).toBe(false);
+  expect(evaluateReviewGate(report({ status: 'failed' }), override).passes).toBe(false);
+  expect(evaluateReviewGate(raw, { ...override, approver: '' }).passes).toBe(false);
+});

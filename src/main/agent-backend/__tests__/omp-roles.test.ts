@@ -17,3 +17,9 @@ describe('parseOmpRoles', () => {
     expect(parseOmpRoles('{"modelRoles":{"value":{}}}')).toEqual({});
   });
 });
+
+it('reads configured fallback chains and rejects malformed entries', async () => {
+  const { parseOmpFallbackChains } = await import('../omp-roles');
+  expect(parseOmpFallbackChains(JSON.stringify({ 'retry.fallbackChains': { value: { plan: [' openai-codex/gpt-6-astra:medium '], 'anthropic/*': ['openai-codex/gpt-6.1-sol'], invalid: [2], bad: {} } } }))).toEqual({ plan: ['openai-codex/gpt-6-astra:medium'], 'anthropic/*': ['openai-codex/gpt-6.1-sol'] });
+  expect(parseOmpFallbackChains('broken')).toEqual({});
+});

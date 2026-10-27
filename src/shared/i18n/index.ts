@@ -12,6 +12,7 @@ import enTaskReview from './locales/en/taskReview.json';
 import enTerminal from './locales/en/terminal.json';
 import enErrors from './locales/en/errors.json';
 import enUsage from './locales/en/usage.json';
+import enMemory from './locales/en/memory.json';
 
 
 const defaultNS = 'common';
@@ -27,7 +28,8 @@ const resources = {
     taskReview: enTaskReview,
     terminal: enTerminal,
     errors: enErrors,
-    usage: enUsage
+    usage: enUsage,
+    memory: enMemory
   }
 } as const;
 
@@ -38,7 +40,7 @@ i18n
     lng: 'en',
     fallbackLng: 'en',
     defaultNS,
-    ns: ['common', 'navigation', 'settings', 'tasks', 'welcome', 'dialogs', 'taskReview', 'terminal', 'errors', 'usage'],
+    ns: ['common', 'navigation', 'settings', 'tasks', 'welcome', 'dialogs', 'taskReview', 'terminal', 'errors', 'usage', 'memory'],
     interpolation: {
       escapeValue: false, // React already escapes values
       // Agent backend names, available to every string as {{agent}} / {{agentCli}} (see setAgentBackendNames)
