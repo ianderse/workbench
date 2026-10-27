@@ -10,8 +10,14 @@ import { simulatedMoment, useUsageSimulatorStore } from '../../stores/usage-simu
 import { useUsageStore } from '../../stores/usage-store';
 import type { ClaudeUsageSnapshot } from '../../../shared/types/agent';
 
-/** The preview's own skin memory, so trying values here never changes the popover's Clawd */
+/**
+ * The previews' own skin memory, shared so both cards wear the same skin. Trying values here never
+ * changes the popover's Clawd.
+ */
 const previewSkin = createSkinPicker();
+
+/** The theme classes (globals.css) the two preview cards are forced into */
+const PREVIEW_THEMES = ['dark', 'light'] as const;
 
 /** Stands in for the real usage before any has arrived */
 const NO_USAGE: ClaudeUsageSnapshot = {
@@ -23,8 +29,8 @@ const NO_USAGE: ClaudeUsageSnapshot = {
 };
 
 /**
- * Development builds only (like the DEVELOPMENT BUILD strip): a live preview of the top of the
- * usage popover, at its real size, with a pretend date and time and 5-hour usage - to see the
+ * Development builds only (like the DEVELOPMENT BUILD strip): live previews of the top of the
+ * usage popover in the dark and the light theme, at its real size, with a pretend date and time and 5-hour usage - to see the
  * sky (day and night, the moon's phase, rain and winter snow) and Clawd's moods and seasonal
  * skins at any moment. Empty fields use the real values; the real popover is never affected.
  */
@@ -59,11 +65,19 @@ export function UsageSimulatorSettings() {
 
   return (
     <SettingsSection title={t('usageSimulator.title')}>
-      {/* The popover's own width, surface and padding, so the preview matches it pixel for pixel */}
-      <div className="w-[17rem] rounded-xl border border-border bg-popover text-xs text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.24)]">
-        <div className="space-y-2.5 p-3">
-          <UsageHero usage={usage} active pickSkin={previewSkin} pinned={pinned} />
-        </div>
+      {/* The popover in each theme side by side, whatever the app's theme, so both can be compared
+          at the same moment. Each card has the popover's own width, surface and padding. */}
+      <div className="flex flex-wrap gap-4">
+        {PREVIEW_THEMES.map((theme) => (
+          <div
+            key={theme}
+            className={`${theme} w-[17rem] rounded-xl border border-border bg-popover text-xs text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.24)]`}
+          >
+            <div className="space-y-2.5 p-3">
+              <UsageHero usage={usage} active pickSkin={previewSkin} pinned={pinned} />
+            </div>
+          </div>
+        ))}
       </div>
 
       <SettingsRows className="mt-4">
