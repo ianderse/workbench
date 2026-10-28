@@ -5,9 +5,8 @@
  * System prompt, conversation folding and task-suggestion parsing for the Insights chat.
  */
 
-import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { safeParseJson } from '../utils/json-repair';
+import { TASK_SUGGESTION_PREFIX } from '../../shared/utils/task-suggestions';
+import { SELF_IMPROVE_NUDGE } from '../self-improve/nudge';
 import { DATA_DIR_NAMES } from '../../shared/constants';
 
 /** A message in the insights conversation history */
@@ -16,33 +15,7 @@ export interface InsightsMessage {
   content: string;
 }
 
-/** A task suggestion extracted from the response */
-export interface TaskSuggestion {
-  title: string;
-  description: string;
-}
-
-/** Load project context for the system prompt */
-function loadProjectContext(projectDir: string): string {
-  const contextParts: string[] = [];
-
-  const tasksPath = join(projectDir, '.workbench', DATA_DIR_NAMES.tasks);
-  if (existsSync(tasksPath)) {
-    try {
-      const taskDirs = readdirSync(tasksPath, { withFileTypes: true })
-        .filter((d) => d.isDirectory())
-        .map((d) => d.name)
-        .slice(0, 10);
-      if (taskDirs.length > 0) {
-        contextParts.push(`## Existing Tasks\n- ${taskDirs.join('\n- ')}`);
-      }
-    } catch {
-      // Ignore read errors
-    }
-  }
-
-  return contextParts.length > 0 ? contextParts.join('\n\n') : 'No project context available yet.';
-}
+export type { TaskSuggestion } from '../../shared/utils/task-suggestions';
 
 /** Fold the conversation history into a single prompt (each turn is a fresh run) */
 export function buildConversationPrompt(message: string, history: InsightsMessage[] = []): string {
@@ -53,12 +26,33 @@ export function buildConversationPrompt(message: string, history: InsightsMessag
   return `Previous conversation:\n${conversationContext}\n\nCurrent question: ${message}`;
 }
 
-/** System prompt section for the insights chat (appended to Claude Code's own) */
 /** Git hosting CLIs Claude may use in the conversation (the GitHub and GitLab buttons) */
 export interface InsightsCliTools {
   github?: boolean;
   gitlab?: boolean;
 }
+
+/** What the chat's Claude Code run is given, which the system prompt describes */
+export interface InsightsPromptOptions {
+  /** The Kanban button: Workbench's task tools */
+  taskTools?: boolean;
+  /** The GitHub and GitLab buttons */
+  cliTools?: InsightsCliTools;
+  /** The project's memory graph: Bash for graphify searches (described in their own section) */
+  graphify?: boolean;
+  /** Names of the MCP servers chosen with the MCP button */
+  mcpServers?: string[];
+  /** Self-improve is on: Claude may save project memories, and only those */
+  memory?: boolean;
+}
+
+/** The suggestion line's format, as Claude must write it */
+const SUGGESTION_FORMAT = `${TASK_SUGGESTION_PREFIX}{"title": "Task title", "description": "What the task involves, with what Claude Code needs to do it"}`;
+
+/** How to suggest a task (the app turns the line into a card with a Create task button) */
+const SUGGESTING_TASKS = `Suggest a task with a line at the very end of your reply, one line per suggestion and at most three, in exactly this format:
+${SUGGESTION_FORMAT}
+Each line is one JSON object on a single line: write line breaks in the description as \\n. The app shows the line as a card with a Create task button and hides the line itself, so do not refer to it or repeat its text.`;
 
 /** What Claude can do with the git hosting CLIs turned on for the conversation */
 function cliToolsPrompt(cliTools: InsightsCliTools): string {
@@ -67,72 +61,68 @@ function cliToolsPrompt(cliTools: InsightsCliTools): string {
     ...(cliTools.gitlab ? ['the GitLab CLI (`glab`)'] : []),
   ];
   if (clis.length === 0) return '';
+  const heading = [...(cliTools.github ? ['GitHub'] : []), ...(cliTools.gitlab ? ['GitLab'] : [])].join(' and ');
   return `
 
-You can use ${clis.join(' and ')} through Bash for the project's repository: issues, pull or merge requests, reviews, CI runs, releases and the like. Every other shell command is denied.
+## ${heading}
+You can use ${clis.join(' and ')} through Bash for the project's repository: issues, pull or merge requests, reviews, CI runs, releases and the like.
 - Read freely; create, comment, close, merge or change anything only when the user asked for exactly that, and tell them what you did (with links or numbers).
 - Never delete repositories, branches, releases or other resources, and never change repository settings or secrets.
 - When a command fails (not installed, not signed in, no access), say so instead of trying something else.`;
 }
 
-export function buildSystemPrompt(
-  projectDir: string,
-  options: { taskTools?: boolean; cliTools?: InsightsCliTools } = {}
-): string {
-  const context = loadProjectContext(projectDir);
-  const suggestionFormat = `__TASK_SUGGESTION__:{"title": "Task title here", "description": "Detailed description of what the task involves"}`;
+/** The tools the turn has, so Claude neither reaches for missing ones nor overlooks given ones */
+function toolsPrompt(options: InsightsPromptOptions): string {
+  const commands = [
+    ...(options.graphify ? ['the graphify searches described below'] : []),
+    ...(options.cliTools?.github ? ['`gh`'] : []),
+    ...(options.cliTools?.gitlab ? ['`glab`'] : []),
+  ];
+  const servers = options.mcpServers ?? [];
+  return [
+    '## What you can use',
+    `- Read, Glob and Grep for the project's files. You can't change them${options.memory ? ' (except your project memory, below)' : ''}: code changes are made by tasks.`,
+    commands.length > 0
+      ? `- Bash, only for ${commands.join(' and ')}. Every other shell command is denied.`
+      : '- No shell commands.',
+    ...(servers.length > 0
+      ? [`- MCP servers the user turned on for this chat: ${servers.join(', ')} (tools named mcp__<server>__<tool>). Use them when they fit the question.`]
+      : []),
+    '- No web access.',
+    "- Files attached to the current message are part of it. Earlier messages note [User previously attached N file(s)]: those files aren't visible any more, so ask for them again when you need them.",
+  ].join('\n');
+}
 
-  // The Kanban button gives Claude the project's task tools; without it, tasks are only suggested
-  const tasks = options.taskTools
-    ? `5. Manage the project's tasks with the Workbench task tools (mcp__workbench__*): list and inspect tasks (status, plan, logs, validation, worktree changes), create and edit them, start, stop and retry them, move them between columns, request changes, create and merge their pull requests, archive and delete them
-
-You can read the project's files but not change them: code changes are made by tasks. To get something done, create a task whose description gives Claude Code everything it needs, and start it when the user wants it done now.
-
-Using the task tools:
+/** Working with the project's tasks: with the Kanban button's task tools, or by suggesting them */
+function tasksPrompt(options: InsightsPromptOptions): string {
+  const tasksDir = `.workbench/${DATA_DIR_NAMES.tasks}`;
+  if (options.taskTools) {
+    return `## Tasks
+You can manage the project's tasks with the Workbench task tools (mcp__workbench__*): list and inspect tasks (status, plan, logs, validation, worktree changes), create and edit them, start, stop and retry them, move them between columns, request changes, create and merge their pull requests, archive and delete them. To get something done, create a task whose description gives Claude Code everything it needs, and start it when the user wants it done now.
 - Act on what the user asks for, and tell them what you did (with the task ids). Look tasks up with list_tasks or get_task instead of guessing ids or states.
 - Delete tasks, retry them (it discards their changes) or merge pull requests only when the user asked for exactly that. When moving a task with a worktree to Done, ask whether to keep or delete the worktree.
 - When a tool fails, explain why instead of trying something else the user didn't ask for.
+- When you notice something worth doing that the user did not ask for (a bug you came across, a feature, a docs update, a refactor), don't create it. Suggest it instead so the user decides.
 
-Suggesting tasks: when you notice something worth doing that the user did not ask for (a bug you came across, a feature, a docs update, a refactor, anything a task could do), don't create it. Suggest it instead so the user decides, with this exact format on a SINGLE LINE:
-${suggestionFormat}`
-    : `
-You can read the project's files but not change them, and you can't create or change tasks yourself in this conversation (the user turns that on with the Kanban button).
+${SUGGESTING_TASKS}`;
+  }
+  return `## Tasks
+You can't create or change tasks in this conversation (the user turns that on with the Kanban button). The project's tasks are in ${tasksDir}/<id>/ (task_metadata.json, and implementation_plan.json with the status): look there before suggesting one, so you don't suggest a task that already exists.
 
-When the user asks you to create a task, wants to turn the conversation into a task, or when you believe a task would be useful (a bug you came across, a feature, a docs update, a refactor, anything a task could do), suggest it with this exact format on a SINGLE LINE:
-${suggestionFormat}`;
+When the user asks you to create a task or to turn the conversation into one, or when you believe a task would be useful (a bug you came across, a feature, a docs update, a refactor, anything a task could do), suggest it.
 
-  return `You are an AI assistant helping developers understand and work with their codebase, inside Workbench, a desktop app where Claude Code does coding tasks autonomously, each in its own git worktree, and the user follows them on a Kanban board (Planning, Queue, In Progress, AI Review, Human Review, Done).
-You have access to the following project context:
-
-${context}
-
-Your capabilities:
-1. Answer questions about the codebase structure, patterns, and architecture
-2. Suggest improvements, features, or bug fixes based on the code
-3. Help plan implementation of new features
-4. Provide code examples and explanations
-${tasks}${cliToolsPrompt(options.cliTools ?? {})}
-
-Be conversational and helpful. Focus on providing actionable insights and clear explanations.
-Keep responses concise but informative.`;
+${SUGGESTING_TASKS}`;
 }
 
-const TASK_SUGGESTION_PREFIX = '__TASK_SUGGESTION__:';
+/** System prompt of a Claude page turn (appended to Claude Code's own) */
+export function buildSystemPrompt(options: InsightsPromptOptions = {}): string {
+  return `You are the Claude page of Workbench, a desktop app where Claude Code does coding tasks autonomously, each in its own git worktree, while the user follows them on a Kanban board (Planning, Queue, In Progress, AI Review, Human Review, Done). Here the user talks with you about this project: its code and architecture, what to build next, and the state of its work.
 
-/** Extract a task suggestion from the response text if present */
-export function extractTaskSuggestion(text: string): TaskSuggestion | null {
-  const idx = text.indexOf(TASK_SUGGESTION_PREFIX);
-  if (idx === -1) return null;
+Your replies appear as Markdown in a narrow chat panel. Lead with the answer, keep it short, and use lists, tables and code blocks only where they make it clearer. Base answers on the project's actual code: look things up instead of guessing.
 
-  const afterPrefix = text.substring(idx + TASK_SUGGESTION_PREFIX.length);
-  const lineEnd = afterPrefix.indexOf('\n');
-  const jsonStr = (lineEnd === -1 ? afterPrefix : afterPrefix.substring(0, lineEnd)).trim();
+${toolsPrompt(options)}
 
-  const parsed = safeParseJson<Record<string, unknown>>(jsonStr);
-  if (!parsed || typeof parsed !== 'object') return null;
-  const title = typeof parsed.title === 'string' ? parsed.title.trim() : '';
-  const description = typeof parsed.description === 'string' ? parsed.description.trim() : '';
-  return title && description ? { title, description } : null;
+${tasksPrompt(options)}${cliToolsPrompt(options.cliTools ?? {})}${options.memory ? `\n\n${SELF_IMPROVE_NUDGE}` : ''}`;
 }
 
 /** Brief description of a tool call's arguments for UI display */

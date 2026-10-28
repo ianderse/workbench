@@ -30,6 +30,8 @@ import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-c
 import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
 import type { InsightsCliTools } from './prompts';
+import { extractTaskSuggestions, stripTaskSuggestions } from '../../shared/utils/task-suggestions';
+import { COMPENG_DIR_NAME } from '../self-improve/paths';
 import { MCP_STARTUP_TIMEOUT_MS, type ClaudeMcpConfig } from '../claude-code/mcp-config';
 import { TASK_TOOLS_SERVER_NAME, toBridgeServer, type TaskToolsMcpServer, type TaskToolsStdioServer } from './task-tools-mcp';
 // The bridge's source, bundled as text and written next to the turn's other temp files
@@ -38,7 +40,6 @@ import { buildMessageContent } from './message-content';
 import {
   buildConversationPrompt,
   buildSystemPrompt,
-  extractTaskSuggestion,
   extractToolInput,
   type InsightsMessage,
   type TaskSuggestion,
@@ -72,6 +73,8 @@ export interface InsightsRunConfig {
   mcpServers?: ClaudeMcpConfig['mcpServers'];
   /** Git hosting CLIs turned on for the chat (the GitHub and GitLab buttons) */
   cliTools?: InsightsCliTools;
+  /** The project's self-improve switch is on: Claude may save project memories (and only those) */
+  memory?: boolean;
 }
 
 /** Info about a tool call made during the turn */
@@ -82,8 +85,10 @@ interface ToolCallInfo {
 
 /** Result of an Insights turn */
 export interface InsightsResult {
+  /** The reply, without its task suggestion lines */
   text: string;
-  taskSuggestion: TaskSuggestion | null;
+  /** The tasks the reply suggests (each was a suggestion line) */
+  taskSuggestions: TaskSuggestion[];
   toolCalls: ToolCallInfo[];
 }
 
@@ -134,6 +139,9 @@ function toClaudeEffort(level: string | undefined): ClaudeEffort {
   return level && (CLAUDE_EFFORTS as readonly string[]).includes(level) ? (level as ClaudeEffort) : 'medium';
 }
 
+/** Where a chat may write: the project memory (self-improve), relative to the project */
+export const INSIGHTS_MEMORY_RULE = `Edit(.workbench/${COMPENG_DIR_NAME}/**)`;
+
 /** Bash rules for the git hosting CLIs (the GitHub and GitLab buttons) */
 export const INSIGHTS_GITHUB_RULE = 'Bash(gh:*)';
 export const INSIGHTS_GITLAB_RULE = 'Bash(glab:*)';
@@ -161,14 +169,21 @@ export function buildInsightsArgs(
   withGraphify = false,
   mcp?: InsightsMcpArgs,
   cliTools: InsightsCliTools = {},
+  memory = false,
 ): string[] {
   const cliRules = [
     ...(cliTools.github ? [INSIGHTS_GITHUB_RULE] : []),
     ...(cliTools.gitlab ? [INSIGHTS_GITLAB_RULE] : []),
   ];
   const withBash = withGraphify || cliRules.length > 0;
-  const tools = withBash ? [...INSIGHTS_READ_ONLY_TOOLS, 'Bash'] : [...INSIGHTS_READ_ONLY_TOOLS];
+  const tools = [
+    ...INSIGHTS_READ_ONLY_TOOLS,
+    ...(withBash ? ['Bash'] : []),
+    // Saving memories; every other write is denied (dontAsk allows only the rule below)
+    ...(memory ? ['Write', 'Edit'] : []),
+  ];
   const allowed = [
+    ...(memory ? [INSIGHTS_MEMORY_RULE] : []),
     ...(withGraphify ? INSIGHTS_GRAPHIFY_COMMANDS : []),
     ...cliRules,
     ...(mcp?.taskTools ? [INSIGHTS_TASK_TOOLS_RULE] : []),
@@ -373,9 +388,6 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     // System prompt goes through a file: no argument length or shell quoting limits
     const tempDir = await mkdtemp(join(tmpdir(), 'workbench-insights-'));
     const systemPromptFile = join(tempDir, 'system-prompt.md');
-    const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!offeredTaskTools, cliTools: config.cliTools });
-    const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;
-    await writeFile(systemPromptFile, systemPrompt, 'utf-8');
     // The MCP servers go through a file too, so the task tools' URL and token aren't in the
     // process list; the chat's own servers can't take the task tools' name
     let mcp: InsightsMcpArgs | undefined;
@@ -395,11 +407,22 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
       if (mcp.servers.length > 0 && !env.MCP_TIMEOUT) env.MCP_TIMEOUT = String(MCP_STARTUP_TIMEOUT_MS);
     }
 
+    // The system prompt describes exactly what the turn is given
+    const basePrompt = buildSystemPrompt({
+      taskTools: !!offeredTaskTools,
+      cliTools: config.cliTools,
+      graphify: !!graphify,
+      mcpServers: Object.keys(chatServers),
+      memory: config.memory,
+    });
+    const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;
+    await writeFile(systemPromptFile, systemPrompt, 'utf-8');
+
     const state = createStreamState();
     try {
       const handle = startClaudeProcess({
         command,
-        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcp, config.cliTools),
+        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcp, config.cliTools, config.memory),
         cwd: projectDir,
         env,
         // Document blocks (PDFs) are valid Anthropic content even though the shared type omits them
@@ -432,7 +455,8 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
       throw new Error(EMPTY_RESPONSE_ERROR);
     }
 
-    return { text, taskSuggestion: extractTaskSuggestion(text), toolCalls: state.toolCalls };
+    // Suggestion lines become cards: the reply keeps the rest
+    return { text: stripTaskSuggestions(text), taskSuggestions: extractTaskSuggestions(text), toolCalls: state.toolCalls };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     if (!(error instanceof Error && error.name === 'AbortError')) {

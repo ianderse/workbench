@@ -17,6 +17,8 @@ import { usableMcpConnectorIds } from '../mcp-availability';
 import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import { readSettingsFileAsync } from '../settings-utils';
 import { getToolInfoAsync } from '../cli-tool-manager';
+import { isSelfImproveEnabled } from '../self-improve/setting';
+import { stripTaskSuggestions } from '../../shared/utils/task-suggestions';
 import type { AppSettings } from '../../shared/types';
 
 /**
@@ -136,6 +138,8 @@ export class InsightsExecutor extends EventEmitter {
           profileId: projectSettings?.claudeProfileId,
           taskTools: taskTools?.mcpServer,
           // gh and glab with the GitHub and GitLab buttons, when they are installed
+          // Project memories can be saved when the project's self-improve switch is on
+          memory: isSelfImproveEnabled(projectSettings),
           cliTools: {
             github: modelConfig?.githubTools === true && (await getToolInfoAsync('gh')).found,
             gitlab: modelConfig?.gitlabTools === true && (await getToolInfoAsync('glab')).found,
@@ -188,16 +192,13 @@ export class InsightsExecutor extends EventEmitter {
 
       this.releaseController(projectId, controller);
 
-      // Extract task suggestion from the full result
-      if (result.taskSuggestion) {
-        const task = {
-          title: result.taskSuggestion.title,
-          description: result.taskSuggestion.description,
-        };
-        suggestedTasks.push(task);
+      // Each suggestion line of the reply becomes a card
+      if (result.taskSuggestions.length > 0) {
+        const tasks = result.taskSuggestions.map(({ title, description }) => ({ title, description }));
+        suggestedTasks.push(...tasks);
         this.emit('stream-chunk', projectId, {
           type: 'task_suggestion',
-          suggestedTasks: [task],
+          suggestedTasks: tasks,
         } as InsightsStreamChunk);
       }
 
@@ -210,7 +211,7 @@ export class InsightsExecutor extends EventEmitter {
       } as InsightsChatStatus);
 
       return {
-        fullResponse: result.text.trim() || accumulatedText.trim() || fullResponse,
+        fullResponse: result.text.trim() || stripTaskSuggestions(accumulatedText).trim() || fullResponse,
         suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
         toolsUsed,
       };
@@ -233,7 +234,7 @@ export class InsightsExecutor extends EventEmitter {
         }
         return {
           replaced,
-          fullResponse: accumulatedText.trim(),
+          fullResponse: stripTaskSuggestions(accumulatedText).trim(),
           suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
           toolsUsed,
           stopped: !replaced,

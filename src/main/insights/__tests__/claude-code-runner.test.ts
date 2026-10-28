@@ -93,6 +93,7 @@ import {
   INSIGHTS_GRAPHIFY_COMMANDS,
   INSIGHTS_TASK_TOOLS_RULE,
   INSIGHTS_GITHUB_RULE,
+  INSIGHTS_MEMORY_RULE,
   INSIGHTS_GITLAB_RULE,
   resetTaskToolsBridgeForTests,
   toClaudeModel,
@@ -177,7 +178,7 @@ describe('runInsights', () => {
     expect(args[args.indexOf('--effort') + 1]).toBe('high');
     expect(args).toContain('--strict-mcp-config');
     expect(args).toContain('--no-session-persistence');
-    expect(systemPrompt).toContain('helping developers understand');
+    expect(systemPrompt).toContain('You are the Claude page of Workbench');
     expect(configDir).toBe('/profiles/main');
     expect(apiKey).toBeNull();
   });
@@ -284,6 +285,28 @@ describe('runInsights', () => {
     expect(args).toContain(INSIGHTS_GITHUB_RULE);
     expect(args).not.toContain(INSIGHTS_GITLAB_RULE);
     expect(systemPrompt).not.toContain('glab');
+  });
+
+  it('lets Claude write only its project memory when self-improve is on', async () => {
+    setRun(conversation);
+    await (await run({ memory: true })).promise;
+    const { args, systemPrompt } = record();
+    const tools = args[args.indexOf('--tools') + 1].split(',');
+    expect(tools).toEqual(expect.arrayContaining(['Write', 'Edit']));
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toContain(INSIGHTS_MEMORY_RULE);
+    expect(INSIGHTS_MEMORY_RULE).toBe('Edit(.workbench/compeng/**)');
+    expect(systemPrompt).toContain('## Project memory');
+  });
+
+  it('takes suggestion lines out of the reply and returns each one', async () => {
+    setRun([
+      conversation[0],
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Two ideas.\n__TASK_SUGGESTION__:{"title": "A", "description": "Do A"}\n__TASK_SUGGESTION__:{"title": "B", "description": "Do B"}' } } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'x' },
+    ]);
+    const result = await (await run()).promise;
+    expect(result.text).toBe('Two ideas.');
+    expect(result.taskSuggestions).toEqual([{ title: 'A', description: 'Do A' }, { title: 'B', description: 'Do B' }]);
   });
 
   it('keeps Bash out without a memory graph', async () => {

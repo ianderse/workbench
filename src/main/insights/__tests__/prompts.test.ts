@@ -1,22 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConversationPrompt, buildSystemPrompt, extractTaskSuggestion, extractToolInput } from '../prompts';
-
-describe('extractTaskSuggestion', () => {
-  it('parses a suggestion line', () => {
-    const text = 'Sure.\n__TASK_SUGGESTION__:{"title": "Add login", "description": "Add a login page"}\nDone.';
-    expect(extractTaskSuggestion(text)).toEqual({ title: 'Add login', description: 'Add a login page' });
-  });
-
-  it('ignores extra fields such as the old category metadata', () => {
-    const text = '__TASK_SUGGESTION__:{"title": "T", "description": "D", "metadata": {"category": "feature"}}';
-    expect(extractTaskSuggestion(text)).toEqual({ title: 'T', description: 'D' });
-  });
-
-  it('returns null without a marker or with incomplete JSON fields', () => {
-    expect(extractTaskSuggestion('no suggestion here')).toBeNull();
-    expect(extractTaskSuggestion('__TASK_SUGGESTION__:{"title": "only title"}')).toBeNull();
-  });
-});
+import { buildConversationPrompt, buildSystemPrompt, extractToolInput } from '../prompts';
 
 describe('buildConversationPrompt', () => {
   it('uses the message directly without history', () => {
@@ -52,14 +35,41 @@ describe('extractToolInput', () => {
 
 describe('buildSystemPrompt', () => {
   it('describes the task tools only when the Kanban button is on', () => {
-    const withTools = buildSystemPrompt('/nonexistent-project', { taskTools: true });
+    const withTools = buildSystemPrompt({ taskTools: true });
     expect(withTools).toContain('mcp__workbench__');
     expect(withTools).toContain("don't create it. Suggest it instead");
 
-    const withoutTools = buildSystemPrompt('/nonexistent-project');
+    const withoutTools = buildSystemPrompt();
     expect(withoutTools).not.toContain('mcp__workbench__');
     expect(withoutTools).toContain('Kanban button');
     expect(withoutTools).toContain('When the user asks you to create a task');
-    expect(withoutTools).toContain('__TASK_SUGGESTION__:');
+    // Where the existing tasks are, instead of a list of folder names
+    expect(withoutTools).toContain('.workbench/tasks/<id>/');
+  });
+
+  it('asks for suggestion lines at the end, escaped, and says they become cards', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain('__TASK_SUGGESTION__:{"title"');
+    expect(prompt).toContain('at the very end of your reply');
+    expect(prompt).toContain('write line breaks in the description as \\n');
+    expect(prompt).toMatch(/hides the line itself/);
+  });
+
+  it('lists exactly the tools the turn has', () => {
+    const plain = buildSystemPrompt();
+    expect(plain).toContain('- No shell commands.');
+    expect(plain).toContain('- No web access.');
+    expect(plain).not.toContain('MCP servers the user turned on');
+    expect(plain).toContain("You can't change them: code changes are made by tasks.");
+
+    const full = buildSystemPrompt({ graphify: true, cliTools: { github: true }, mcpServers: ['context7', 'Ant_Design'], memory: true });
+    expect(full).toContain('- Bash, only for the graphify searches described below and `gh`.');
+    expect(full).toContain('MCP servers the user turned on for this chat: context7, Ant_Design');
+    expect(full).toContain('(except your project memory, below)');
+    expect(full).toContain('## Project memory');
+  });
+
+  it('has no project memory section while self-improve is off', () => {
+    expect(buildSystemPrompt()).not.toContain('## Project memory');
   });
 });

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { stripTaskSuggestions } from '../../shared/utils/task-suggestions';
 import type {
   InsightsSession,
   InsightsSessionSummary,
@@ -185,7 +186,8 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
 
   finalizeStreamingMessage: () =>
     set((state) => {
-      const content = state.streamingContent;
+      // Suggestion lines are the cards in suggestedTasks
+      const content = stripTaskSuggestions(state.streamingContent);
       const toolsUsed = state.toolsUsed.length > 0 ? [...state.toolsUsed] : undefined;
       const suggestedTasks = state.streamingTasks.length > 0 ? [...state.streamingTasks] : undefined;
 

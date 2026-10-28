@@ -28,6 +28,7 @@ import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn, formatLongRelativeTime } from '../lib/utils';
+import { stripTaskSuggestions } from '../../shared/utils/task-suggestions';
 import { GitHubIcon, GitLabIcon, GraphIcon, KanbanIcon, McpIcon } from './icons/app-icons';
 import { BUILTIN_CONNECTOR_META } from './settings/connector-meta';
 import {
@@ -723,7 +724,8 @@ export function Insights({ projectId }: InsightsProps) {
                 ))}
 
                 {/* Streaming message */}
-                {streamingContent && <MarkdownContent>{streamingContent}</MarkdownContent>}
+                {/* Suggestion lines become cards when the reply is done; they are hidden while it streams */}
+                {stripTaskSuggestions(streamingContent) && <MarkdownContent>{stripTaskSuggestions(streamingContent)}</MarkdownContent>}
 
                 {/* While Claude works: the spinning mark, with the tool being called, or "Thinking"
                     between tools (nothing next to it while text streams in) */}
@@ -932,10 +934,13 @@ function MessageBubble({
     );
   }
 
+  // Suggestion lines left in replies saved before they were taken out show as cards only
+  const content = stripTaskSuggestions(message.content);
+
   // Copy (the reply's markdown) and regenerate, before the tools used; the time shows on hover
-  const actions = message.content || onRegenerate ? (
+  const actions = content || onRegenerate ? (
     <div className="flex items-center gap-1">
-      {message.content && <CopyMessageButton text={message.content} />}
+      {content && <CopyMessageButton text={content} />}
       {onRegenerate && <RegenerateMessageButton onClick={onRegenerate} />}
     </div>
   ) : undefined;
@@ -943,7 +948,7 @@ function MessageBubble({
 
   return (
     <div className="group space-y-3" onMouseEnter={() => setNow(Date.now())}>
-      {message.content && <MarkdownContent>{message.content}</MarkdownContent>}
+      {content && <MarkdownContent>{content}</MarkdownContent>}
       {/* A stopped reply says so, under what it had written by then */}
       {message.stopped && (
         <p className="text-[0.9375rem] text-muted-foreground">{t('insights.stoppedByUser')}</p>
