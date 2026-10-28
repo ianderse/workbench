@@ -13,7 +13,8 @@ import {
   clearToolCache,
   getClaudeDetectionPaths,
   sortNvmVersionDirs,
-  buildClaudeDetectionResult
+  buildClaudeDetectionResult,
+  getNodeVersionManagerPaths
 } from '../cli-tool-manager';
 import {
   findWindowsExecutableViaWhere,
@@ -441,6 +442,34 @@ describe('cli-tool-manager - Claude CLI NVM detection', () => {
  * Unit tests for helper functions
  */
 describe('cli-tool-manager - Helper Functions', () => {
+  describe('getNodeVersionManagerPaths', () => {
+    it("looks in version managers' folders, newest version first", () => {
+      Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
+      const versions: Record<string, string[]> = {
+        '/home/me/.nvm/versions/node': ['v22.1.0', 'v20.0.0'],
+        '/home/me/.local/share/nvm': ['v24.3.0'],
+      };
+      const paths = getNodeVersionManagerPaths('/home/me', (dir) => versions[dir] ?? []);
+
+      expect(paths.slice(0, 3)).toEqual([
+        '/home/me/.nvm/versions/node/v22.1.0/bin/node',
+        '/home/me/.nvm/versions/node/v20.0.0/bin/node',
+        // nvm.fish
+        '/home/me/.local/share/nvm/v24.3.0/bin/node',
+      ]);
+      expect(paths).toContain('/home/me/.local/share/fnm/aliases/default/bin/node');
+      expect(paths).toContain('/home/me/.volta/bin/node');
+      expect(paths).toContain('/home/me/.asdf/shims/node');
+    });
+
+    it("looks in nvm-windows' and Volta's folders on Windows", () => {
+      Object.defineProperty(process, 'platform', { value: 'win32', writable: true });
+      const paths = getNodeVersionManagerPaths('C:\\Users\\me', () => []);
+      expect(paths.some((p) => p.includes('nvm') && p.endsWith('node.exe'))).toBe(true);
+      expect(paths.some((p) => p.includes('Volta'))).toBe(true);
+    });
+  });
+
   describe('getClaudeDetectionPaths', () => {
     it('should return homebrew paths on macOS', () => {
       Object.defineProperty(process, 'platform', {

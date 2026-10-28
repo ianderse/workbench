@@ -38,6 +38,7 @@ const LEGACY_PROVIDER_SETTING_KEYS = [
 function toolConfigFromSettings(settings: Partial<AppSettings>): ToolConfig {
   return {
     pythonPath: settings.pythonPath,
+    nodePath: settings.nodePath,
     gitPath: settings.gitPath,
     githubCLIPath: settings.githubCLIPath,
     gitlabCLIPath: settings.gitlabCLIPath,
@@ -182,7 +183,7 @@ export function registerSettingsHandlers(
       // Migration: Clear CLI tool paths that are from a different platform
       // Fixes issue where Windows paths persisted on macOS (and vice versa)
       // when settings were synced/transferred between platforms
-      const pathFields = ['pythonPath', 'gitPath', 'githubCLIPath', 'gitlabCLIPath', 'claudePath', 'autoBuildPath'] as const;
+      const pathFields = ['pythonPath', 'nodePath', 'gitPath', 'githubCLIPath', 'gitlabCLIPath', 'claudePath', 'autoBuildPath'] as const;
       for (const field of pathFields) {
         const pathValue = settings[field];
         if (pathValue && isPathFromWrongPlatform(pathValue)) {
@@ -255,6 +256,7 @@ export function registerSettingsHandlers(
         // Configure CLI tools if any paths changed
         if (
           settings.pythonPath !== undefined ||
+          settings.nodePath !== undefined ||
           settings.gitPath !== undefined ||
           settings.githubCLIPath !== undefined ||
           settings.gitlabCLIPath !== undefined ||
@@ -302,6 +304,7 @@ export function registerSettingsHandlers(
     IPC_CHANNELS.SETTINGS_GET_CLI_TOOLS_INFO,
     async (_event, options?: { refresh?: boolean }): Promise<IPCResult<{
       python: ReturnType<typeof getToolInfo>;
+      node: ReturnType<typeof getToolInfo>;
       git: ReturnType<typeof getToolInfo>;
       gh: ReturnType<typeof getToolInfo>;
       glab: ReturnType<typeof getToolInfo>;
@@ -313,14 +316,15 @@ export function registerSettingsHandlers(
         // the distribution again, which is what Claude Code runs and MCP checks use
         const refresh = options?.refresh === true;
         if (refresh) await reprobeWslTools();
-        const [python, git, gh, glab, claude] = await Promise.all([
+        const [python, node, git, gh, glab, claude] = await Promise.all([
           getToolInfoAsync('python', { refresh }),
+          getToolInfoAsync('node', { refresh }),
           getToolInfoAsync('git', { refresh }),
           getToolInfoAsync('gh', { refresh }),
           getToolInfoAsync('glab', { refresh }),
           getToolInfoAsync('claude', { refresh }),
         ]);
-        return { success: true, data: { python, git, gh, glab, claude } };
+        return { success: true, data: { python, node, git, gh, glab, claude } };
       } catch (error) {
         return {
           success: false,

@@ -116,6 +116,7 @@ const WSL_TOOL_NAMES: Record<RuntimeTool, WslProbeTool> = {
   gh: 'gh',
   glab: 'glab',
   python: 'python3',
+  node: 'node',
 };
 
 /**

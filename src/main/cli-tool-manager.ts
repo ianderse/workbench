@@ -58,7 +58,7 @@ import {
 /**
  * Supported CLI tools managed by this system
  */
-export type CLITool = 'python' | 'git' | 'gh' | 'glab' | 'claude';
+export type CLITool = 'python' | 'node' | 'git' | 'gh' | 'glab' | 'claude';
 
 /**
  * User configuration for CLI tool paths
@@ -66,6 +66,7 @@ export type CLITool = 'python' | 'git' | 'gh' | 'glab' | 'claude';
  */
 export interface ToolConfig {
   pythonPath?: string;
+  nodePath?: string;
   gitPath?: string;
   githubCLIPath?: string;
   gitlabCLIPath?: string;
@@ -77,6 +78,7 @@ export interface ToolConfig {
 /** Program name of each tool inside WSL (the startup probe looks these up) */
 const WSL_TOOL_NAMES: Record<CLITool, WslProbeTool> = {
   python: 'python3',
+  node: 'node',
   git: 'git',
   gh: 'gh',
   glab: 'glab',
@@ -85,6 +87,7 @@ const WSL_TOOL_NAMES: Record<CLITool, WslProbeTool> = {
 
 const TOOL_LABELS: Record<CLITool, string> = {
   python: 'Python',
+  node: 'Node.js',
   git: 'Git',
   gh: 'GitHub CLI',
   glab: 'GitLab CLI',
@@ -275,6 +278,101 @@ export function sortNvmVersionDirs(
       return 0;
     })
     .map((entry) => entry.name);
+}
+
+/**
+ * Where Node.js version managers keep `node`, newest version first: nvm, nvm.fish, fnm (its
+ * default alias, then its versions), Volta, asdf, mise and nodenv. A desktop-launched app doesn't
+ * get the shell's PATH, so these are looked at directly. `listVersions` reads a directory's
+ * version folders (sorted newest first)
+ */
+export function getNodeVersionManagerPaths(
+  homeDir: string,
+  listVersions: (dir: string) => string[]
+): string[] {
+  if (isWindows()) {
+    // nvm-windows and fnm keep their links in the user's folders; Program Files is on the PATH list
+    return [
+      joinPaths(homeDir, 'AppData', 'Roaming', 'nvm', 'nodejs', 'node.exe'),
+      joinPaths(homeDir, 'AppData', 'Local', 'Volta', 'bin', 'node.exe'),
+      joinPaths(homeDir, 'scoop', 'apps', 'nodejs', 'current', 'node.exe'),
+    ];
+  }
+  const nvmDir = joinPaths(homeDir, '.nvm', 'versions', 'node');
+  const nvmFishDir = joinPaths(homeDir, '.local', 'share', 'nvm');
+  const fnmDirs = [
+    joinPaths(homeDir, '.local', 'share', 'fnm'),
+    joinPaths(homeDir, '.fnm'),
+    joinPaths(homeDir, 'Library', 'Application Support', 'fnm'),
+  ];
+  return [
+    ...listVersions(nvmDir).map((version) => joinPaths(nvmDir, version, 'bin', 'node')),
+    ...listVersions(nvmFishDir).map((version) => joinPaths(nvmFishDir, version, 'bin', 'node')),
+    ...fnmDirs.flatMap((dir) => [
+      joinPaths(dir, 'aliases', 'default', 'bin', 'node'),
+      ...listVersions(joinPaths(dir, 'node-versions')).map((version) =>
+        joinPaths(dir, 'node-versions', version, 'installation', 'bin', 'node')),
+    ]),
+    joinPaths(homeDir, '.volta', 'bin', 'node'),
+    joinPaths(homeDir, '.asdf', 'shims', 'node'),
+    joinPaths(homeDir, '.local', 'share', 'mise', 'shims', 'node'),
+    joinPaths(homeDir, '.nodenv', 'shims', 'node'),
+  ];
+}
+
+/** Version folders (v20.1.0, ...) in a directory, newest first; none when it doesn't exist */
+function listNodeVersionsSync(dir: string): string[] {
+  try {
+    return sortNvmVersionDirs(readdirSync(dir, { withFileTypes: true }));
+  } catch {
+    return [];
+  }
+}
+
+async function listNodeVersionsAsync(dir: string): Promise<string[]> {
+  try {
+    return sortNvmVersionDirs(await fsPromises.readdir(dir, { withFileTypes: true }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * `node` as the user's login shell finds it (what a terminal would run, whichever version
+ * manager set it up). Not on Windows, where installers put Node on the system PATH
+ */
+async function findNodeInLoginShell(): Promise<string | null> {
+  if (isWindows()) return null;
+  const shell = process.env.SHELL || '/bin/sh';
+  try {
+    const { stdout } = await execFileAsync(shell, ['-ilc', 'command -v node'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      windowsHide: true,
+      cwd: os.homedir(),
+    });
+    // Interactive shells may print a greeting first: the path is the last absolute line
+    const found = stdout.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('/')).pop();
+    return found ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const NODE_NOT_FOUND: ToolDetectionResult = {
+  found: false,
+  source: 'fallback',
+  message: 'Node.js not found. Install it from https://nodejs.org (MCP servers like Context7 need npx)',
+};
+
+function nodeResult(nodePath: string, validation: ToolValidation, source: ToolDetectionResult['source']): ToolDetectionResult {
+  return {
+    found: true,
+    path: nodePath,
+    version: validation.version,
+    source,
+    message: `Using Node.js ${validation.version ?? ''}: ${nodePath}`,
+  };
 }
 
 /**
@@ -584,6 +682,8 @@ class CLIToolManager {
     switch (tool) {
       case 'python':
         return this.detectPython();
+      case 'node':
+        return this.detectNode();
       case 'git':
         return this.detectGit();
       case 'gh':
@@ -950,6 +1050,40 @@ class CLIToolManager {
    *
    * @returns Detection result for GitLab CLI
    */
+  /**
+   * Detect Node.js: the configured path, the (augmented) PATH, then version managers' folders.
+   * npx is the one next to it
+   */
+  private detectNode(): ToolDetectionResult {
+    const candidates: Array<{ path: string; source: ToolDetectionResult['source'] }> = [];
+    if (this.userConfig.nodePath && !isWrongPlatformPath(this.userConfig.nodePath)) {
+      candidates.push({ path: this.userConfig.nodePath, source: 'user-config' });
+    }
+    const onPath = findExecutable('node');
+    if (onPath) candidates.push({ path: onPath, source: 'system-path' });
+    for (const managed of getNodeVersionManagerPaths(os.homedir(), listNodeVersionsSync)) {
+      if (existsSync(managed)) candidates.push({ path: managed, source: 'nvm' });
+    }
+    for (const candidate of candidates) {
+      const validation = this.validateNode(candidate.path);
+      if (validation.valid) return nodeResult(candidate.path, validation, candidate.source);
+    }
+    return NODE_NOT_FOUND;
+  }
+
+  private validateNode(nodeCmd: string): ToolValidation {
+    try {
+      const version = execFileSync(nodeCmd, ['--version'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        windowsHide: true,
+      }).trim();
+      return { valid: true, version: version.replace(/^v/, ''), message: `Node.js ${version} is available` };
+    } catch (error) {
+      return { valid: false, message: `Failed to validate Node.js: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
   private detectGitLabCLI(): ToolDetectionResult {
     // 1. User configuration
     if (this.userConfig.gitlabCLIPath) {
@@ -1456,6 +1590,8 @@ class CLIToolManager {
         return this.detectClaudeAsync();
       case 'python':
         return this.detectPythonAsync();
+      case 'node':
+        return this.detectNodeAsync();
       case 'git':
         return this.detectGitAsync();
       case 'gh':
@@ -2129,6 +2265,56 @@ class CLIToolManager {
    *
    * @returns Promise resolving to detection result
    */
+  /**
+   * Detect Node.js asynchronously: the configured path, the (augmented) PATH, the login shell's
+   * `node`, then version managers' folders. npx is the one next to it
+   */
+  private async detectNodeAsync(): Promise<ToolDetectionResult> {
+    const candidates: Array<{ path: string; source: ToolDetectionResult['source'] }> = [];
+    if (this.userConfig.nodePath && !isWrongPlatformPath(this.userConfig.nodePath)) {
+      candidates.push({ path: this.userConfig.nodePath, source: 'user-config' });
+    }
+    const onPath = await findExecutableAsync('node');
+    if (onPath) candidates.push({ path: onPath, source: 'system-path' });
+    const fromShell = await findNodeInLoginShell();
+    if (fromShell) candidates.push({ path: fromShell, source: 'system-path' });
+    for (const managed of getNodeVersionManagerPaths(os.homedir(), () => [])) {
+      if (await existsAsync(managed)) candidates.push({ path: managed, source: 'nvm' });
+    }
+    // Version folders (nvm, nvm.fish, fnm) need a directory read each
+    const home = os.homedir();
+    for (const [dir, bin] of [
+      [joinPaths(home, '.nvm', 'versions', 'node'), ['bin', 'node']],
+      [joinPaths(home, '.local', 'share', 'nvm'), ['bin', 'node']],
+      [joinPaths(home, '.local', 'share', 'fnm', 'node-versions'), ['installation', 'bin', 'node']],
+      [joinPaths(home, '.fnm', 'node-versions'), ['installation', 'bin', 'node']],
+    ] as const) {
+      if (isWindows()) break;
+      for (const version of await listNodeVersionsAsync(dir)) {
+        candidates.push({ path: joinPaths(dir, version, ...bin), source: 'nvm' });
+      }
+    }
+    for (const candidate of candidates) {
+      const validation = await this.validateNodeAsync(candidate.path);
+      if (validation.valid) return nodeResult(candidate.path, validation, candidate.source);
+    }
+    return NODE_NOT_FOUND;
+  }
+
+  private async validateNodeAsync(nodeCmd: string): Promise<ToolValidation> {
+    try {
+      const { stdout } = await execFileAsync(nodeCmd, ['--version'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        windowsHide: true,
+      });
+      const version = stdout.trim();
+      return { valid: true, version: version.replace(/^v/, ''), message: `Node.js ${version} is available` };
+    } catch (error) {
+      return { valid: false, message: `Failed to validate Node.js: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
   private async detectGitLabCLIAsync(): Promise<ToolDetectionResult> {
     // 1. User configuration
     if (this.userConfig.gitlabCLIPath) {
@@ -2388,7 +2574,7 @@ export function getToolInfoAsync(tool: CLITool, options?: ToolInfoOptions): Prom
 }
 
 /** Tools shown in Settings > Developer > Paths */
-const PATHS_PAGE_TOOLS: CLITool[] = ['python', 'git', 'gh', 'glab', 'claude'];
+const PATHS_PAGE_TOOLS: CLITool[] = ['python', 'node', 'git', 'gh', 'glab', 'claude'];
 
 /** Detect the Paths page tools in the background (at app start), so the page opens instantly */
 export function warmToolInfo(): void {

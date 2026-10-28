@@ -347,6 +347,7 @@ export interface ElectronAPI {
 
   getCliToolsInfo: () => Promise<IPCResult<{
     python: import('./cli').ToolDetectionResult;
+    node: import('./cli').ToolDetectionResult;
     git: import('./cli').ToolDetectionResult;
     gh: import('./cli').ToolDetectionResult;
     glab: import('./cli').ToolDetectionResult;

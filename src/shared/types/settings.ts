@@ -92,6 +92,7 @@ export interface WslToolPaths {
   gh?: string;
   glab?: string;
   python?: string;
+  node?: string;
 }
 
 // Developer tools preferences - IDE and terminal selection
@@ -286,6 +287,8 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   colorTheme?: ColorTheme;
   pythonPath?: string;
+  // Node.js (npx starts MCP servers such as Context7); empty = detected
+  nodePath?: string;
   gitPath?: string;
   githubCLIPath?: string;
   gitlabCLIPath?: string;
