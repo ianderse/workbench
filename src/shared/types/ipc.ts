@@ -421,7 +421,7 @@ export interface ElectronAPI {
     metadata?: TaskMetadata
   ) => Promise<IPCResult<Task>>;
   listInsightsSessions: (projectId: string, includeArchived?: boolean) => Promise<IPCResult<InsightsSessionSummary[]>>;
-  newInsightsSession: (projectId: string) => Promise<IPCResult<InsightsSession>>;
+  newInsightsSession: (projectId: string) => Promise<IPCResult>;
   switchInsightsSession: (projectId: string, sessionId: string) => Promise<IPCResult<InsightsSession | null>>;
   deleteInsightsSession: (projectId: string, sessionId: string) => Promise<IPCResult>;
   deleteInsightsSessions: (projectId: string, sessionIds: string[]) => Promise<IPCResult<{ deletedIds: string[]; failedIds: string[] }>>;

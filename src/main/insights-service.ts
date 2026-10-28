@@ -89,6 +89,13 @@ class InsightsService extends EventEmitter {
   }
 
   /**
+   * Open a new chat; its conversation is created when the first message is sent
+   */
+  startNewChat(projectId: string, projectPath: string): void {
+    this.sessionManager.startNewChat(projectId, projectPath);
+  }
+
+  /**
    * Switch to a different session
    */
   switchSession(projectId: string, projectPath: string, sessionId: string): InsightsSession | null {
@@ -192,6 +199,8 @@ class InsightsService extends EventEmitter {
     if (modelConfig) session.modelConfig = modelConfig;
     session.updatedAt = new Date();
     this.sessionManager.saveSession(projectPath, session);
+    // The chat (and the history list) learn the conversation now, a new one included
+    this.emit('session-updated', projectId, session);
 
     // Build conversation history for context
     // Add notation when images are present so the AI has context

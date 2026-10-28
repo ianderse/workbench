@@ -310,14 +310,14 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
   // Create a new session
   ipcMain.handle(
     IPC_CHANNELS.INSIGHTS_NEW_SESSION,
-    async (_, projectId: string): Promise<IPCResult<InsightsSession>> => {
+    async (_, projectId: string): Promise<IPCResult> => {
       const project = projectStore.getProject(projectId);
       if (!project) {
         return { success: false, error: "Project not found" };
       }
 
-      const session = insightsService.createNewSession(projectId, project.path);
-      return { success: true, data: session };
+      insightsService.startNewChat(projectId, project.path);
+      return { success: true };
     }
   );
 

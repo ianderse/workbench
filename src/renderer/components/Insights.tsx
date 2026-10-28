@@ -27,7 +27,9 @@ import { cn } from '../lib/utils';
 import { GraphIcon, KanbanIcon } from './icons/app-icons';
 import {
   useInsightsStore,
+  DRAFT_SESSION_ID,
   loadInsightsSession,
+  openInsightsPage,
   sendMessage,
   newSession,
   switchSession,
@@ -136,9 +138,9 @@ export function Insights({ projectId }: InsightsProps) {
     }
   }, [viewportEl, handleScroll, checkIfAtBottom]);
 
-  // Load the project's session on mount (IPC listeners are registered app-wide in useIpcListeners)
+  // The page always opens on a new chat (IPC listeners are registered app-wide in useIpcListeners)
   useEffect(() => {
-    loadInsightsSession(projectId, showArchived);
+    openInsightsPage(projectId, showArchived);
   }, [projectId]);
 
   // Reload sessions when showArchived changes (skip first run to avoid duplicate load with mount effect)
@@ -257,7 +259,7 @@ export function Insights({ projectId }: InsightsProps) {
   const handleModelConfigChange = async (config: InsightsModelConfig) => {
     // Always apply locally so the choice sticks before the conversation exists on disk
     setDraftModelConfig(config);
-    if (session?.id) {
+    if (session?.id && session.id !== DRAFT_SESSION_ID) {
       await updateModelConfig(projectId, session.id, config);
     }
   };

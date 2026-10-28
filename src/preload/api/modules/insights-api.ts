@@ -27,7 +27,7 @@ export interface InsightsAPI {
     metadata?: TaskMetadata
   ) => Promise<IPCResult<Task>>;
   listInsightsSessions: (projectId: string, includeArchived?: boolean) => Promise<IPCResult<InsightsSessionSummary[]>>;
-  newInsightsSession: (projectId: string) => Promise<IPCResult<InsightsSession>>;
+  newInsightsSession: (projectId: string) => Promise<IPCResult>;
   switchInsightsSession: (projectId: string, sessionId: string) => Promise<IPCResult<InsightsSession | null>>;
   deleteInsightsSession: (projectId: string, sessionId: string) => Promise<IPCResult>;
   deleteInsightsSessions: (projectId: string, sessionIds: string[]) => Promise<IPCResult<{ deletedIds: string[]; failedIds: string[] }>>;
@@ -78,7 +78,7 @@ export const createInsightsAPI = (): InsightsAPI => ({
   listInsightsSessions: (projectId: string, includeArchived?: boolean): Promise<IPCResult<InsightsSessionSummary[]>> =>
     invokeIpc(IPC_CHANNELS.INSIGHTS_LIST_SESSIONS, projectId, includeArchived),
 
-  newInsightsSession: (projectId: string): Promise<IPCResult<InsightsSession>> =>
+  newInsightsSession: (projectId: string): Promise<IPCResult> =>
     invokeIpc(IPC_CHANNELS.INSIGHTS_NEW_SESSION, projectId),
 
   switchInsightsSession: (projectId: string, sessionId: string): Promise<IPCResult<InsightsSession | null>> =>

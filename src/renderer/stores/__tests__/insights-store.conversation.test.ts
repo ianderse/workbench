@@ -52,7 +52,7 @@ const electronAPI = {
   getInsightsSession: vi.fn(async (projectId: string) => ({ success: true, data: session(projectId) })),
   listInsightsSessions: vi.fn(async () => ({ success: true, data: [] })),
   sendInsightsMessage: vi.fn(),
-  newInsightsSession: vi.fn(async (projectId: string) => ({ success: true, data: session(projectId, { id: 'session-new' }) }))
+  newInsightsSession: vi.fn(async () => ({ success: true }))
 };
 
 // Emitters mirroring what InsightsExecutor/InsightsService send over IPC
@@ -185,7 +185,52 @@ describe('Insights mock conversations', () => {
 
     await store.newSession('project-a');
 
-    expect(state().session?.id).toBe('session-new');
+    expect(state().session).toBeNull();
     expect(state().status.phase).toBe('idle');
+  });
+
+  it('opens a new chat without a conversation, then takes the one its first message created', async () => {
+    await store.newSession('project-a');
+    expect(state().session).toBeNull();
+
+    store.sendMessage('project-a', 'hello');
+    expect(state().session?.id).toBe(store.DRAFT_SESSION_ID);
+
+    emit.session('project-a', session('project-a', {
+      id: 'session-created',
+      title: 'hello',
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: new Date() }]
+    }));
+
+    expect(state().session?.id).toBe('session-created');
+    expect(state().session?.title).toBe('hello');
+  });
+
+  it('opens the page on a new chat', async () => {
+    expect(state().session?.id).toBe('session-project-a');
+
+    await store.openInsightsPage('project-a');
+
+    expect(state().session).toBeNull();
+    expect(electronAPI.newInsightsSession).toHaveBeenCalledWith('project-a');
+  });
+
+  it('keeps a reply being written on screen when the page opens again', async () => {
+    store.sendMessage('project-a', 'hello');
+    emit.chunk('project-a', { type: 'text', content: 'partial' });
+
+    await store.openInsightsPage('project-a');
+
+    expect(state().session?.messages.map((m) => m.role)).toEqual(['user']);
+    expect(state().streamingContent).toBe('partial');
+    expect(electronAPI.newInsightsSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a new chat empty when another conversation is updated', async () => {
+    await store.newSession('project-a');
+
+    emit.session('project-a', session('project-a', { id: 'session-older' }));
+
+    expect(state().session).toBeNull();
   });
 });
