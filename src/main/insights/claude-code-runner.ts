@@ -29,6 +29,7 @@ import { CLAUDE_EFFORTS, CLAUDE_MODEL_ALIASES } from '../../shared/types/claude-
 import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-code';
 import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
+import type { ClaudeMcpConfig } from '../claude-code/mcp-config';
 import { TASK_TOOLS_SERVER_NAME, toBridgeServer, type TaskToolsMcpServer, type TaskToolsStdioServer } from './task-tools-mcp';
 // The bridge's source, bundled as text and written next to the turn's other temp files
 import TASK_TOOLS_BRIDGE_SOURCE from './task-tools-bridge.cjs?raw';
@@ -66,6 +67,8 @@ export interface InsightsRunConfig {
   profileId?: string;
   /** MCP server entry of the turn's task tools session */
   taskTools?: TaskToolsMcpServer;
+  /** MCP servers chosen for the chat (the MCP button), by server name */
+  mcpServers?: ClaudeMcpConfig['mcpServers'];
 }
 
 /** Info about a tool call made during the turn */
@@ -134,18 +137,28 @@ export const INSIGHTS_TASK_TOOLS_RULE = `mcp__${TASK_TOOLS_SERVER_NAME}`;
 /** How long a task tool may run (merging a PR with conflicts takes a while) */
 const TASK_TOOL_TIMEOUT_MS = 45 * 60 * 1000;
 
+/** The turn's MCP servers: the config file, and which of its servers Claude may use */
+export interface InsightsMcpArgs {
+  configFile: string;
+  /** Workbench's task tools are in the file */
+  taskTools: boolean;
+  /** Names of the chat's other MCP servers in the file */
+  servers: string[];
+}
+
 /** CLI arguments for a non-persistent headless turn that can't change files */
 export function buildInsightsArgs(
   model: string,
   effort: ClaudeEffort,
   systemPromptFile: string,
   withGraphify = false,
-  mcpConfigFile?: string,
+  mcp?: InsightsMcpArgs,
 ): string[] {
   const tools = withGraphify ? [...INSIGHTS_READ_ONLY_TOOLS, 'Bash'] : [...INSIGHTS_READ_ONLY_TOOLS];
   const allowed = [
     ...(withGraphify ? INSIGHTS_GRAPHIFY_COMMANDS : []),
-    ...(mcpConfigFile ? [INSIGHTS_TASK_TOOLS_RULE] : []),
+    ...(mcp?.taskTools ? [INSIGHTS_TASK_TOOLS_RULE] : []),
+    ...(mcp?.servers ?? []).map((server) => `mcp__${server}`),
   ];
   return [
     '-p',
@@ -159,7 +172,7 @@ export function buildInsightsArgs(
     ...(allowed.length ? ['--allowedTools', ...allowed] : []),
     '--permission-mode', 'dontAsk',
     '--strict-mcp-config',
-    ...(mcpConfigFile ? ['--mcp-config', mcpConfigFile] : []),
+    ...(mcp ? ['--mcp-config', mcp.configFile] : []),
     '--no-session-persistence',
     '--append-system-prompt-file', systemPromptFile,
   ];
@@ -349,22 +362,28 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!offeredTaskTools });
     const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;
     await writeFile(systemPromptFile, systemPrompt, 'utf-8');
-    // The task tools' URL and token go through a file too, so they aren't in the process list
-    let mcpConfigFile: string | undefined;
+    // The MCP servers go through a file too, so the task tools' URL and token aren't in the
+    // process list; the chat's own servers can't take the task tools' name
+    let mcp: InsightsMcpArgs | undefined;
     const taskTools = offeredTaskTools && taskToolsRoute !== 'off'
       ? await taskToolsEntry(offeredTaskTools, taskToolsRoute, tempDir)
       : undefined;
-    if (taskTools) {
-      mcpConfigFile = join(tempDir, 'mcp-config.json');
-      await writeFile(mcpConfigFile, JSON.stringify({ mcpServers: { [TASK_TOOLS_SERVER_NAME]: taskTools } }), 'utf-8');
-      env.MCP_TOOL_TIMEOUT = String(TASK_TOOL_TIMEOUT_MS);
+    const chatServers = Object.fromEntries(
+      Object.entries(config.mcpServers ?? {}).filter(([name]) => name !== TASK_TOOLS_SERVER_NAME)
+    );
+    if (taskTools || Object.keys(chatServers).length > 0) {
+      const configFile = join(tempDir, 'mcp-config.json');
+      const mcpServers = { ...chatServers, ...(taskTools ? { [TASK_TOOLS_SERVER_NAME]: taskTools } : {}) };
+      await writeFile(configFile, JSON.stringify({ mcpServers }), 'utf-8');
+      mcp = { configFile, taskTools: !!taskTools, servers: Object.keys(chatServers) };
+      if (taskTools) env.MCP_TOOL_TIMEOUT = String(TASK_TOOL_TIMEOUT_MS);
     }
 
     const state = createStreamState();
     try {
       const handle = startClaudeProcess({
         command,
-        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcpConfigFile),
+        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcp),
         cwd: projectDir,
         env,
         // Document blocks (PDFs) are valid Anthropic content even though the shared type omits them

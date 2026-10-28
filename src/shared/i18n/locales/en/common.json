@@ -231,6 +231,9 @@
       "unarchive_tasks": "Unarchiving tasks",
       "delete_task": "Deleting a task"
     },
+    "mcp": {
+      "label": "MCP servers"
+    },
     "kanbanTools": {
       "label": "Kanban",
       "off": "Let Claude manage this project's tasks",

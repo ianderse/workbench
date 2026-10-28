@@ -49,6 +49,9 @@ import { useImageUpload } from './task-form/useImageUpload';
 import { loadTasks } from '../stores/task-store';
 import { ChatHistorySidebar } from './ChatHistorySidebar';
 import { InsightsModelSelector } from './InsightsModelSelector';
+import { InsightsMcpMenu } from './InsightsMcpMenu';
+import { useSettingsStore } from '../stores/settings-store';
+import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import { AttachmentPreviewDialog } from './AttachmentPreviewDialog';
 import type { InsightsChatMessage, InsightsModelConfig, TaskMetadata, ImageAttachment } from '../../shared/types';
 import {
@@ -339,14 +342,14 @@ export function Insights({ projectId }: InsightsProps) {
   // Kanban button: gives Claude the project's task tools in this conversation (kept with the
   // conversation's model settings)
   const kanbanTools = effectiveModelConfig?.kanbanTools === true;
+  const balanced = DEFAULT_AGENT_PROFILES.find((profile) => profile.id === 'balanced');
+  const baseModelConfig: InsightsModelConfig = effectiveModelConfig ?? {
+    profileId: 'balanced',
+    model: balanced?.model ?? 'sonnet',
+    thinkingLevel: balanced?.thinkingLevel ?? 'medium',
+  };
   const toggleKanbanTools = () => {
-    const balanced = DEFAULT_AGENT_PROFILES.find((profile) => profile.id === 'balanced');
-    const base: InsightsModelConfig = effectiveModelConfig ?? {
-      profileId: 'balanced',
-      model: balanced?.model ?? 'sonnet',
-      thinkingLevel: balanced?.thinkingLevel ?? 'medium',
-    };
-    void handleModelConfigChange({ ...base, kanbanTools: !kanbanTools });
+    void handleModelConfigChange({ ...baseModelConfig, kanbanTools: !kanbanTools });
   };
   const kanbanButton = (
     <Tooltip>
@@ -369,6 +372,17 @@ export function Insights({ projectId }: InsightsProps) {
       </TooltipTrigger>
       <TooltipContent>{t(kanbanTools ? 'insights.kanbanTools.on' : 'insights.kanbanTools.off')}</TooltipContent>
     </Tooltip>
+  );
+
+  // MCP button: the conversation's MCP servers, starting from the Connectors defaults (kept with
+  // the conversation's model settings)
+  const connectorSettings = useSettingsStore((state) => state.settings.mcpConnectors);
+  const mcpButton = (
+    <InsightsMcpMenu
+      value={effectiveModelConfig?.mcpConnectors ?? getDefaultMcpConnectorIds(connectorSettings)}
+      onChange={(mcpConnectors) => void handleModelConfigChange({ ...baseModelConfig, mcpConnectors })}
+      disabled={isLoading}
+    />
   );
 
   const modelSelector = (
@@ -482,7 +496,7 @@ export function Insights({ projectId }: InsightsProps) {
         {isEmpty ? (
           /* Toolbar (new chat): attach on the left; the model and send on the right */
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
-            <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
+            <div className="flex items-center gap-1">{attachButton}{mcpButton}{kanbanButton}</div>
             <div className="flex min-w-0 items-center gap-1.5">
               {modelSelector}
               {/* Send button only appears once there is something to send; it turns into stop while Claude works */}
@@ -700,7 +714,7 @@ export function Insights({ projectId }: InsightsProps) {
                 {composer}
                 {/* Under the field: attach, disclaimer, model */}
                 <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                  <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
+                  <div className="flex items-center gap-1">{attachButton}{mcpButton}{kanbanButton}</div>
                   <span className="truncate text-xs text-muted-foreground">{t('insights.disclaimer')}</span>
                   <div className="flex justify-end">{modelSelector}</div>
                 </div>

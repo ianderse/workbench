@@ -12,6 +12,9 @@ import { runInsights } from './claude-code-runner';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { projectStore } from '../project-store';
 import { openTaskToolsSession } from './task-tools-server';
+import { buildMcpConfig } from '../claude-code/mcp-config';
+import { readSettingsFileAsync } from '../settings-utils';
+import type { AppSettings } from '../../shared/types';
 
 /**
  * Message processor result
@@ -122,6 +125,11 @@ export class InsightsExecutor extends EventEmitter {
           graphify,
           profileId: projectSettings?.claudeProfileId,
           taskTools: taskTools?.mcpServer,
+          // The MCP servers chosen with the chat's MCP button (Connectors defaults until changed)
+          mcpServers: buildMcpConfig(
+            modelConfig?.mcpConnectors,
+            ((await readSettingsFileAsync()) as Partial<AppSettings> | undefined)?.mcpConnectors
+          ).mcpServers,
         },
         (event) => {
           switch (event.type) {

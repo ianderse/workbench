@@ -18,6 +18,8 @@ export interface InsightsModelConfig {
   thinkingLevel: ThinkingLevel;
   /** The Kanban button: Claude gets the project's task tools in this conversation */
   kanbanTools?: boolean;
+  /** The MCP button: connector ids for this conversation; unset = the Connectors defaults */
+  mcpConnectors?: string[];
 }
 
 type InsightsChatRole = 'user' | 'assistant';

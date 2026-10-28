@@ -231,6 +231,32 @@ describe('runInsights', () => {
     expect(systemPrompt).toContain('__TASK_SUGGESTION__');
   });
 
+  it("gives the CLI the chat's MCP servers next to the task tools", async () => {
+    setRun(conversation);
+    const taskTools = { type: 'http' as const, url: 'http://127.0.0.1:4567/mcp' };
+    const context7 = { type: 'stdio' as const, command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'] };
+    await (await run({ taskTools, mcpServers: { context7, workbench: context7 } })).promise;
+    const { args, mcpConfig } = record();
+
+    // A chat server can't replace the task tools
+    expect(mcpConfig).toEqual({ mcpServers: { context7, workbench: taskTools } });
+    const allowed = args.slice(args.indexOf('--allowedTools') + 1);
+    expect(allowed).toContain('mcp__context7');
+    expect(allowed).toContain(INSIGHTS_TASK_TOOLS_RULE);
+  });
+
+  it("gives the CLI the chat's MCP servers without the task tools", async () => {
+    setRun(conversation);
+    const context7 = { type: 'stdio' as const, command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'] };
+    await (await run({ mcpServers: { context7 } })).promise;
+    const { args, mcpConfig, mcpToolTimeout } = record();
+
+    expect(mcpConfig).toEqual({ mcpServers: { context7 } });
+    expect(args).toContain('mcp__context7');
+    expect(args).not.toContain(INSIGHTS_TASK_TOOLS_RULE);
+    expect(mcpToolTimeout).toBeNull();
+  });
+
   it('keeps Bash out without a memory graph', async () => {
     setRun(conversation);
     await (await run()).promise;

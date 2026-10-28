@@ -1,5 +1,5 @@
 /**
- * Connectors (app settings): the default MCP servers for new tasks. Built-in servers have on/off
+ * Connectors (app settings): the default MCP servers for new tasks and chats. Built-in servers have on/off
  * switches; custom servers are added here, must pass a connection test, then switch on/off.
  * Tasks copy these defaults when created and can change them per task.
  */
@@ -13,7 +13,6 @@ import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
 import { BUILTIN_CONNECTOR_META, ConnectorRow, customServerIcon } from './ConnectorRow';
 import { CustomMcpDialog } from '../CustomMcpDialog';
-import { getDefaultMcpConnectorIds } from '../../../shared/utils/mcp-connectors';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import type { AppSettings, CustomMcpServer, McpConnectorSettings, McpHealthCheckResult } from '../../../shared/types';
 
@@ -168,9 +167,6 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
     }
   }, [handleSaveCustomServer, rememberHealth]);
 
-  // Enabled count includes Workbench's own server, which is always on
-  const enabledCount = getDefaultMcpConnectorIds(connectors).length + 1;
-
   const renderCustomServerStatus = (server: CustomMcpServer) => {
     const health = serverHealthStatus[server.id];
     if (testingServers.has(server.id) || health?.status === 'checking') {
@@ -186,7 +182,7 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
     <>
       <SettingsSection title={t('settings:projectPages.mcp.serversTitle')}>
         <p className="-mt-2 mb-1 text-sm text-(--nav-label-color)">
-          {t('settings:mcp.serversEnabled', { count: enabledCount })} · {t('settings:mcp.defaultsHint')}
+          {t('settings:mcp.defaultsHint')}
         </p>
         <SettingsRows>
           {BUILTIN_CONNECTOR_META.map(({ id, icon, defaultOff }) => {
