@@ -25,6 +25,7 @@ vi.mock('../platform/runtime-exec', () => ({
   toRuntimeArg: (arg: string) => arg,
 }));
 vi.mock('../platform', () => ({ isWindows: () => false }));
+vi.mock('../cli-utils', () => ({ getToolEnvAsync: async () => ({ PATH: '/usr/bin' }) }));
 vi.mock('../app-logger', () => ({ appLog: { warn: vi.fn() } }));
 
 let getMcpAvailability: typeof import('../mcp-availability').getMcpAvailability;

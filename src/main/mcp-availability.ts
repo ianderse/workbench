@@ -20,6 +20,7 @@ import type { McpConnectorSettings } from '../shared/types/settings';
 import type { McpAvailability } from '../shared/types/project';
 import { mcpServerEntry, type McpServerEntry } from './claude-code/mcp-config';
 import { findWslCommand, isCommandAvailable } from './mcp-commands';
+import { getToolEnvAsync } from './cli-utils';
 import { getWslInfo, whenShellRuntimeReady } from './platform/shell-runtime';
 import { killRuntimeProcess, spawnTool } from './platform/runtime-exec';
 
@@ -117,7 +118,10 @@ async function probeEntry(entry: McpServerEntry, verify?: VerifyCall): Promise<M
   } else if (!(await isCommandAvailable(entry.command))) {
     return { state: 'unavailable', missingCommand: entry.command };
   }
-  return startAndInitialize(command, entry.args ?? [], entry.env, verify);
+  // Natively with the PATH Claude Code runs get (Node.js found through version managers too);
+  // in WSL the distribution's login PATH applies
+  const baseEnv = getWslInfo() ? process.env : await getToolEnvAsync();
+  return startAndInitialize(command, entry.args ?? [], entry.env, baseEnv, verify);
 }
 
 async function probeHttp(url: string, headers: Record<string, string> | undefined): Promise<McpAvailability> {
@@ -150,6 +154,7 @@ function startAndInitialize(
   command: string,
   args: string[],
   env: Record<string, string> | undefined,
+  baseEnv: NodeJS.ProcessEnv,
   verify?: VerifyCall
 ): Promise<McpAvailability> {
   return new Promise((resolve) => {
@@ -158,7 +163,7 @@ function startAndInitialize(
       proc = spawnTool('python', args, {
         command,
         stdio: ['pipe', 'pipe', 'pipe'],
-        ...(env ? { env: { ...process.env, ...env } } : {}),
+        env: { ...baseEnv, ...env },
       });
     } catch (error) {
       resolve({ state: 'unavailable', message: error instanceof Error ? error.message : String(error) });

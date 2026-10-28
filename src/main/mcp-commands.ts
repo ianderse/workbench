@@ -8,12 +8,16 @@
  */
 
 import { execFile } from 'child_process';
+import { existsSync } from 'fs';
+import path from 'path';
 import { promisify } from 'util';
 import { isWindows } from './platform';
 import { getWslInfo, whenShellRuntimeReady } from './platform/shell-runtime';
 import { execInWsl } from './platform/wsl-exec-basic';
 import { isUnderMountRoot } from './platform/wsl-detect';
 import { getWhereExePath } from './utils/windows-paths';
+import { getToolInfoAsync } from './cli-tool-manager';
+import { getToolEnvAsync } from './cli-utils';
 
 const execFileAsync = promisify(execFile);
 
@@ -41,10 +45,17 @@ export async function findWslCommand(command: string): Promise<{ path: string | 
 async function lookUp(command: string): Promise<boolean> {
   await whenShellRuntimeReady();
   if (getWslInfo()) return (await findWslCommand(command)).path !== null;
+  // node and npx come from the Node.js detection (version managers included): npx sits next to node
+  if (command === 'node' || command === 'npx') {
+    const node = await getToolInfoAsync('node');
+    if (!node.found || !node.path) return false;
+    return command === 'node' || existsSync(path.join(path.dirname(node.path), isWindows() ? 'npx.cmd' : 'npx'));
+  }
   try {
     const { stdout } = await execFileAsync(isWindows() ? getWhereExePath() : 'which', [command], {
       timeout: 5000,
       windowsHide: true,
+      env: await getToolEnvAsync(),
     });
     return stdout.trim().length > 0;
   } catch {

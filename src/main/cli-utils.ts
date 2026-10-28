@@ -1,6 +1,6 @@
 import path from 'path';
 import { getAugmentedEnv, getAugmentedEnvAsync } from './env-utils';
-import { getToolPath, getToolPathAsync } from './cli-tool-manager';
+import { getToolInfoAsync, getToolPath, getToolPathAsync } from './cli-tool-manager';
 import { isWindows, getPathDelimiter } from './platform';
 import { isWslRuntime, whenShellRuntimeReady } from './platform/shell-runtime';
 
@@ -81,11 +81,21 @@ export async function getClaudeCliInvocationAsync(): Promise<ClaudeCliInvocation
   // Run both detections in parallel for efficiency
   const [command, env] = await Promise.all([
     getToolPathAsync('claude'),
-    getAugmentedEnvAsync(),
+    getToolEnvAsync(),
   ]);
 
   return {
     command,
     env: ensureCommandDirInPath(command, env),
   };
+}
+
+/**
+ * The environment the app's tools and MCP servers run with: the augmented PATH plus the detected
+ * Node.js directory, so npx (and the node its script runs with) is found even when the app was
+ * started from the desktop, which doesn't get the shell's PATH (nvm, fnm, Volta...)
+ */
+export async function getToolEnvAsync(): Promise<Record<string, string>> {
+  const [env, node] = await Promise.all([getAugmentedEnvAsync(), getToolInfoAsync('node')]);
+  return node.found && node.path ? ensureCommandDirInPath(node.path, env) : env;
 }

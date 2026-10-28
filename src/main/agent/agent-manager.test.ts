@@ -15,6 +15,8 @@ interface MockRun {
 
 const runs: MockRun[] = [];
 
+// Runs leave out MCP servers that can't start; tests don't start any
+vi.mock('../mcp-availability', () => ({ usableMcpConnectorIds: (ids: string[]) => ids }));
 vi.mock('../claude-code/task-runner', () => ({
   ClaudeTaskRun: class {
     private resolve!: (outcome: TaskRunOutcome) => void;
