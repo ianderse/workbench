@@ -102,7 +102,9 @@ const topNavItemsConfig: TopNavItem[] = [
   { kind: 'app', id: 'connectors', icon: Blocks },
   { kind: 'app', id: 'devtools', icon: CodeXml },
   // Development builds only (the previews it holds are)
-  ...(IS_DEV_BUILD ? [{ kind: 'app', id: 'simulation', icon: SimulationIcon } as const] : []),
+  // Its artwork fills its box, so it reads large next to the others: 2px smaller, with a pixel of
+  // margin on each side so the label stays in line
+  ...(IS_DEV_BUILD ? [{ kind: 'app', id: 'simulation', icon: SimulationIcon, iconClassName: 'h-[16px] w-[16px] mx-px' } as const] : []),
   { kind: 'app', id: 'updates', icon: Download }
 ];
 
