@@ -246,8 +246,16 @@ enters (state machine transitions and manual moves) and on the files its Claude 
 MultiEdit, NotebookEdit tool calls). `src/main/task-changelog-writer.ts` turns them into the project's
 `.workbench/changelog.jsonl` (one JSON entry per line; state entries carry every file the task's branch changes).
 At every phase, `buildParallelTasksPrompt()` (`src/main/task-changelog.ts`) adds a "Parallel tasks" section to the
-task's system prompt: the other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
-them and avoid merge conflicts.
+task's system prompt: a snapshot of other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
+them and avoid merge conflicts. The whole section is capped at 6,000 characters, prioritizing known overlaps and active work.
+`list_parallel_tasks` supports exact `file`, id/title `task`, `offset` and `limit` filters; its pretty JSON result is capped
+at 8,000 characters, with explicit pagination and omission metadata. Agents should use scoped lookups rather than read
+the full historical changelog.
+
+OMP size diagnostics (`agent-backend/omp-prompt-diagnostics.ts`) write `[OMP prompt]` metadata to the app log: Workbench
+launch/component bytes, per-reply usage counters, and compaction boundaries, correlated by run and attempt. They store
+no prompt or tool-result bodies. Launch sizes exclude OMP's loaded context, tools and retained history; usage-ledger totals
+remain cumulative. See `docs/omp-prompt-sizes.md` for the local evidence and coverage limits.
 
 Only real repo-relative files are recorded: OMP's tools also name pseudo targets (`agent:/IntCli040`, `conflict:/1`,
 `conflict:/*`), so `sanitizeChangedFiles()` (`shared/utils/changed-files.ts`) filters them in the `files-edited` hook

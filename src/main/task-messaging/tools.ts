@@ -24,6 +24,11 @@ export const TASK_RUN_TOOL_NAMES = ['message_task', 'list_parallel_tasks'] as co
 
 const PARALLEL_STATUSES = new Set<TaskStatus>(['queue', 'in_progress', 'ai_review', 'human_review', 'pr_created', 'error']);
 const MAX_FILES = 40;
+export const PARALLEL_TASKS_RESULT_MAX_CHARS = 8_000;
+
+function shortText(value: string, limit: number): string {
+  return value.length > limit ? `${value.slice(0, limit - 1)}…` : value;
+}
 
 export interface TaskRunTool {
   name: (typeof TASK_RUN_TOOL_NAMES)[number];
@@ -48,33 +53,82 @@ async function messageTask(context: TaskRunToolContext, args: Record<string, unk
   return outcome.detail;
 }
 
-async function listParallelTasks(context: TaskRunToolContext): Promise<unknown> {
+async function listParallelTasks(context: TaskRunToolContext, args: Record<string, unknown>): Promise<unknown> {
   const env = getTaskMessagingEnv();
   const project = env?.getProject(context.projectId);
   if (!env || !project) return { tasks: [], note: 'The project is not open in Workbench' };
-  const fold = project.autoBuildPath
-    ? foldTaskChangelog(await readTaskChangelog(getTaskChangelogPath(project.path, project.autoBuildPath)))
-    : new Map();
-  const tasks = env.getTasks(context.projectId)
-    .filter((t) => t.specId !== context.specId && PARALLEL_STATUSES.has(t.status) && !t.metadata?.archivedAt)
+  const fold = foldTaskChangelog(await readTaskChangelog(getTaskChangelogPath(project.path, project.autoBuildPath)));
+  const allTasks = env.getTasks(context.projectId);
+  const me = allTasks.find((t) => t.specId === context.specId);
+  const dependencies = new Set(me?.metadata?.dependsOnTaskIds ?? []);
+  const isDependency = (t: (typeof allTasks)[number]) => dependencies.has(t.id) || dependencies.has(t.specId);
+  const ownFiles = new Set<string>(fold.get(context.specId)?.files ?? []);
+  const fileFilter = typeof args.file === 'string' ? args.file : '';
+  const taskFilter = typeof args.task === 'string' ? args.task.toLowerCase() : '';
+  const offset = typeof args.offset === 'number' && Number.isFinite(args.offset) ? Math.max(0, Math.floor(args.offset)) : 0;
+  const limit = typeof args.limit === 'number' && Number.isFinite(args.limit) ? Math.max(1, Math.min(20, Math.floor(args.limit))) : 10;
+  const filesOf = (specId: string): string[] => fold.get(specId)?.files ?? [];
+  const overlaps = (specId: string) => filesOf(specId).some((file) => ownFiles.has(file));
+  const active = (specId: string, status: TaskStatus) => isTaskLive(context.projectId, specId) || status === 'in_progress' || status === 'ai_review';
+  const matching = allTasks
+    .filter((t) => t.specId !== context.specId && PARALLEL_STATUSES.has(t.status) && !t.metadata?.archivedAt &&
+      fold.get(t.specId)?.state !== 'auto_merged' &&
+      (!fileFilter || filesOf(t.specId).includes(fileFilter)) &&
+      (!taskFilter || t.specId.toLowerCase().includes(taskFilter) || t.title.toLowerCase().includes(taskFilter)))
+    .sort((a, b) => Number(isDependency(b)) - Number(isDependency(a)) ||
+      Number(overlaps(b.specId)) - Number(overlaps(a.specId)) ||
+      Number(active(b.specId, b.status)) - Number(active(a.specId, a.status)) ||
+      Number(filesOf(b.specId).length > 0) - Number(filesOf(a.specId).length > 0) ||
+      new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || a.specId.localeCompare(b.specId));
+  const candidates = matching.slice(offset, offset + limit)
     .map((t) => {
-      const files: string[] = fold.get(t.specId)?.files ?? [];
+      const files = [...filesOf(t.specId)].sort((a, b) => Number(b === fileFilter) - Number(a === fileFilter) ||
+        Number(ownFiles.has(b)) - Number(ownFiles.has(a)));
+      const shown: string[] = [];
+      for (const file of files.slice(0, MAX_FILES)) {
+        // Preserve exact paths: omit oversized entries rather than presenting a truncated path.
+        if (JSON.stringify([...shown, file], null, 2).length <= 1_200) shown.push(file);
+      }
+      const baseBranch = t.metadata?.baseBranch || project.settings?.mainBranch;
       return {
         task: t.specId,
-        title: t.title,
+        title: shortText(t.title, 160),
         status: statusLabel(t.status),
         session: taskSessionName(context.projectId, t.specId),
         runningNow: isTaskLive(context.projectId, t.specId),
-        baseBranch: t.metadata?.baseBranch || project.settings?.mainBranch || undefined,
-        files: files.slice(0, MAX_FILES),
-        ...(files.length > MAX_FILES ? { moreFiles: files.length - MAX_FILES } : {}),
+        baseBranch: baseBranch && baseBranch.length <= 240 ? baseBranch : undefined,
+        ...(baseBranch && baseBranch.length > 240 ? { baseBranchOmitted: true } : {}),
+        files: shown,
+        ...(files.length > shown.length ? { moreFiles: files.length - shown.length } : {}),
       };
     });
-  return {
+  const result = (tasks: typeof candidates, consumed: number, oversizedTasksOmitted: number) => ({
     you: { task: context.specId, session: taskSessionName(context.projectId, context.specId) },
     tasks,
-    ...(tasks.length === 0 ? { note: 'No other task has unmerged changes right now' } : {}),
-  };
+    total: matching.length,
+    offset,
+    hasMore: offset + consumed < matching.length,
+    ...(offset + consumed < matching.length ? { nextOffset: offset + consumed } : {}),
+    ...(oversizedTasksOmitted ? { oversizedTasksOmitted, note: 'Oversized task records could not fit the response budget and were skipped' } : {}),
+    ...(matching.length === 0 ? { note: fileFilter || taskFilter ? 'No unmerged tasks match the filters' : 'No other task has unmerged changes right now' } : {}),
+  });
+  const shown: typeof candidates = [];
+  let consumed = 0;
+  let oversizedTasksOmitted = 0;
+  for (const task of candidates) {
+    // Match the pretty JSON sent by the tools server, including pagination metadata.
+    if (JSON.stringify(result([...shown, task], consumed + 1, oversizedTasksOmitted), null, 2).length > PARALLEL_TASKS_RESULT_MAX_CHARS) {
+      if (shown.length) break;
+      // A malformed or unusually long exact task ID must not create a stuck pagination cursor.
+      // Omit this record explicitly and advance; shown IDs and paths are never truncated.
+      consumed++;
+      oversizedTasksOmitted++;
+      continue;
+    }
+    shown.push(task);
+    consumed++;
+  }
+  return result(shown, consumed, oversizedTasksOmitted);
 }
 
 export const TASK_RUN_TOOLS: TaskRunTool[] = [
@@ -102,10 +156,20 @@ export const TASK_RUN_TOOLS: TaskRunTool[] = [
     name: 'list_parallel_tasks',
     description:
       "The project's other tasks whose changes are not merged yet: id, title, status, session name, whether it runs right now, its base branch " +
-      'and the files its branch changes. Check it before editing files another task may touch.',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      'and the files its branch changes. Results are bounded and paginated; use file for an exact repo-relative path or task to search an id/title. ' +
+      'Check relevant files before editing. Follow nextOffset only when you need more tasks; moreFiles means some paths were omitted. Dependencies and known overlaps come first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: { type: 'string', description: 'Only tasks changing this exact repo-relative file path' },
+        task: { type: 'string', description: 'Only tasks whose id or title contains this text (case insensitive)' },
+        offset: { type: 'integer', minimum: 0, description: 'Pagination offset; use nextOffset from the previous result' },
+        limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Maximum tasks to return, default 10; the size budget may return fewer' },
+      },
+      additionalProperties: false,
+    },
     readOnly: true,
-    run: (context) => listParallelTasks(context),
+    run: listParallelTasks,
   },
 ];
 

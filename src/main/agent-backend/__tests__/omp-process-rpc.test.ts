@@ -7,6 +7,7 @@ import { DEFAULT_OMP_BACKEND_SETTINGS, type OmpBackendSettings } from '../../../
 import { encodeRpcCommand, isSessionSettled, parseRpcLine, readSteerId, rpcSteer, sessionIdOf, steerText } from '../omp-rpc';
 import { buildOmpArgs, OMP_FOREGROUND_OVERLAY, OMP_FOREGROUND_RULE } from '../omp-args';
 import { startOmpProcess } from '../omp-process';
+import { appLog } from '../../app-logger';
 
 const recoveryFixture = vi.hoisted(() => ({ file: '', chains: {} as Record<string, string[]> }));
 vi.mock('../omp-roles', () => ({ getOmpRoles: () => undefined, getOmpFallbackPolicy: async () => ({ roles: undefined, chains: recoveryFixture.chains }) }));
@@ -185,6 +186,7 @@ describe('startOmpProcess with live messages', () => {
     }
   });
   afterEach(async () => {
+    vi.restoreAllMocks();
     delete process.env.FAKE_MODE;
     await rm(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
@@ -236,6 +238,7 @@ describe('startOmpProcess with live messages', () => {
   });
 
   it('keeps both the tool-free utility and its JSON repair isolated through the CLI transport', async () => {
+    const log = vi.spyOn(appLog, 'info');
     const history = path.join(dir, 'argv-history.jsonl');
     const handle = await startOmpProcess({ settings: settings(), cwd: dir, model: 'fixture/small', tools: [], oneShot: true,
       systemPrompt: 'Extract project memories.', prompt: 'Outcome', jsonSchema: { type: 'object', required: ['memories'], properties: { memories: { type: 'array' } } },
@@ -253,6 +256,16 @@ describe('startOmpProcess with live messages', () => {
     }
     expect(calls[0].extensions[0]).toContain('Extract project memories.');
     expect(calls[1].extensions[0]).toContain('Format the supplied answer');
+    const diagnostics = log.mock.calls.filter(call => call[0] === '[OMP prompt]').map(call => JSON.parse(call[1] as string));
+    expect(diagnostics.filter(row => row.event === 'launch')).toEqual([
+      expect.objectContaining({ attempt: 1, purpose: 'run', transport: 'print', tools: 'none', resumed: false }),
+      expect.objectContaining({ attempt: 2, purpose: 'json-repair', transport: 'print', tools: 'none', resumed: false, systemPrompt: { chars: 0, bytes: 0 } }),
+    ]);
+    expect(diagnostics.filter(row => row.event === 'reply-usage')).toEqual([
+      expect.objectContaining({ attempt: 1, input: 1, output: 1 }),
+      expect.objectContaining({ attempt: 2, input: 1, output: 1 }),
+    ]);
+    expect(JSON.stringify(diagnostics)).not.toContain('Extract project memories.');
   });
 
   it('steers a message into the running step, reports it read and ends the process', async () => {
@@ -336,6 +349,7 @@ describe('startOmpProcess with live messages', () => {
   });
 
   it.each(['rpc-exit', 'rpc-silent', 'rpc-garbage'])('falls back to omp -p when the RPC process misbehaves (%s)', async (mode) => {
+    const log = vi.spyOn(appLog, 'info');
     const { messages, promise } = run(mode, { rpcWaitsMs: { ready: 400, start: 400, settle: 400, state: 400 } });
     const handle = await promise;
     const early = handle.send('early message', 'wbm-test3');
@@ -345,10 +359,16 @@ describe('startOmpProcess with live messages', () => {
     // A message taken while the RPC process was starting goes back to the inbox with the unread ones
     if (early) expect(outcome.unread).toEqual([{ id: 'wbm-test3', text: 'early message' }]);
     expect(handle.send('after the fallback')).toBe(false);
+    const launches = log.mock.calls.filter(call => call[0] === '[OMP prompt]').map(call => JSON.parse(call[1] as string)).filter(row => row.event === 'launch');
+    expect(launches).toEqual([
+      expect.objectContaining({ attempt: 1, transport: 'rpc' }),
+      expect.objectContaining({ attempt: 2, transport: 'print' }),
+    ]);
     // Ending the RPC process and starting the print-mode one is two process launches (through cmd.exe and node on Windows)
   }, 30_000);
 
   it.each(['rpc-slow-start', 'rpc-compact'])('does not fall back when agent_start is slow after the prompt was accepted (%s)', async (mode) => {
+    const log = vi.spyOn(appLog, 'info');
     const { messages, promise } = run(mode);
     const handle = await promise;
     const outcome = await handle.done;
@@ -356,6 +376,11 @@ describe('startOmpProcess with live messages', () => {
     expect(text(messages)).toBe('final answer');
     expect(outcome.exitCode).toBe(0);
     expect(messages.find((m) => m.type === 'system')).toMatchObject({ session_id: 'rpc-session' });
+    const diagnostics = log.mock.calls.filter(call => call[0] === '[OMP prompt]').map(call => JSON.parse(call[1] as string));
+    expect(diagnostics.filter(row => row.event === 'reply-usage')).toEqual([expect.objectContaining({ attempt: 1, input: 1, output: 1 })]);
+    if (mode === 'rpc-compact') {
+      expect(diagnostics.map(row => row.event)).toEqual(['launch', 'auto_compaction_start', 'auto_compaction_end', 'reply-usage']);
+    }
   });
 
   it('keeps messages sent during the compaction and delivers them after agent_start', async () => {

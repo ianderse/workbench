@@ -400,8 +400,12 @@ Your session is named \`${sessionName}\`. Other tasks of this project run at the
 - When a message asks you something, answer it with \`message_task\` (task: the sender's id).` : ''}`;
 }
 
-function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string, omp = false, messagingPrompt?: string): string {
-  if (config.specReview) return buildSpecReviewSystemPrompt(config, specDirRelative, omp);
+function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, parallelTasksPrompt?: string, omp = false, messagingPrompt?: string, componentBytes?: Record<string, number>): string {
+  if (config.specReview) {
+    const prompt = buildSpecReviewSystemPrompt(config, specDirRelative, omp);
+    if (componentBytes) componentBytes.standingInstructions = Buffer.byteLength(prompt, 'utf8');
+    return prompt;
+  }
   const sections = [
     `You are running autonomously inside Workbench, a desktop app that hands coding tasks to ${omp ? 'a coding agent' : 'Claude Code'}. Nobody watches this session live and nobody can answer questions: make reasonable assumptions, state them in your final summary, and keep going.`,
     config.isolated === false
@@ -423,17 +427,29 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
 - Use skills and MCP tools when they fit the task.
 `}- Verify your work with the project's own checks (tests, type checker, linter, build) for the code you changed, and fix failures you caused. Show evidence rather than asserting success.
 - While working, run the tests that cover what you changed; run the full suite once before you commit, not after every edit.
+- Keep file reads and command output focused: search symbols or document headings first, then read relevant ranges. Use concise test output and inspect failure details as needed.
 - Keep generated folders (node_modules, build output, virtual environments) out of commits: if the project has no .gitignore for them, create or extend one before installing dependencies or committing.
 - When the work is done, commit it in this worktree with a descriptive message. Don't push.
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
+  if (componentBytes) componentBytes.standingInstructions = Buffer.byteLength(sections.join('\n\n'), 'utf8');
   const humanOverride = buildHumanApprovalOverridePrompt(config.humanApprovalOverride);
-  if (humanOverride) sections.push(humanOverride);
-  if (config.graphifyPrompt) sections.push(config.graphifyPrompt);
-  if (config.selfImprovePrompt) sections.push(config.selfImprovePrompt);
-  if (config.briefingPrompt) sections.push(config.briefingPrompt);
-  if (parallelTasksPrompt) sections.push(parallelTasksPrompt);
-  if (messagingPrompt) sections.push(messagingPrompt);
+  if (humanOverride) {
+    sections.push(humanOverride);
+    if (componentBytes) componentBytes.standingInstructions += Buffer.byteLength(humanOverride, 'utf8');
+  }
+  const optionalSections: Array<[string, string | undefined]> = [
+    ['graphify', config.graphifyPrompt],
+    ['projectMemoryInstructions', config.selfImprovePrompt],
+    ['briefing', config.briefingPrompt],
+    ['parallelTasks', parallelTasksPrompt],
+    ['messaging', messagingPrompt],
+  ];
+  for (const [name, text] of optionalSections) {
+    if (!text) continue;
+    sections.push(text);
+    if (componentBytes) componentBytes[name] = Buffer.byteLength(text, 'utf8');
+  }
   return sections.join('\n\n');
 }
 
@@ -1960,19 +1976,36 @@ no notes came with the request, so review the change against the task with fresh
     this.costIsPerRun = true;
     const specDirRelative = (getWslInfo() ? path.posix : path).join('.workbench', DATA_DIR_NAMES.tasks, this.config.specId);
     const parallelTasksPrompt = this.config.changelogPath
-      ? await buildParallelTasksPrompt(this.config.changelogPath, this.config.specId, path.dirname(this.config.specDir), toRuntimePath(this.config.changelogPath))
+      ? await buildParallelTasksPrompt(
+        this.config.changelogPath,
+        this.config.specId,
+        path.dirname(this.config.specDir),
+        toRuntimePath(this.config.changelogPath),
+        messaging && this.config.projectId ? { projectId: this.config.projectId, tools: !!extensionFile, mergeBaseDuring: this.config.mergeBaseDuring } : undefined,
+      )
       : undefined;
     const planning = params.name === 'plan';
     const reviewingSpec = params.name === 'spec_review';
+    const componentBytes: Record<string, number> = {};
     let systemPrompt = buildSystemPrompt(
       this.config,
       specDirRelative,
       parallelTasksPrompt,
       true,
       messaging ? buildMessagingPrompt(messaging.sessionName, !!extensionFile, true, this.config.mergeBaseDuring) : undefined,
+      componentBytes,
     );
-    if (this.config.selfImprovePrompt && this.config.selfImproveDir) systemPrompt += `\n\n${buildOmpMemoryPrompt(this.config.selfImproveDir)}`;
-    if (this.memoryPrompt) systemPrompt += `\n\n${this.memoryPrompt}`;
+    if (this.config.selfImprovePrompt && this.config.selfImproveDir) {
+      const prompt = buildOmpMemoryPrompt(this.config.selfImproveDir);
+      systemPrompt += `\n\n${prompt}`;
+      componentBytes.projectMemoryInstructions = (componentBytes.projectMemoryInstructions ?? 0) + Buffer.byteLength(prompt, 'utf8');
+    }
+    if (this.memoryPrompt) {
+      systemPrompt += `\n\n${this.memoryPrompt}`;
+      componentBytes.memoryPacket = Buffer.byteLength(this.memoryPrompt, 'utf8');
+    }
+    const planningRule = 'You are in planning mode: do not modify files, run only read-only commands, and finish with the implementation plan.';
+    if (planning) componentBytes.planningRule = Buffer.byteLength(planningRule, 'utf8');
     if (Object.keys(buildMcpConfig(this.config.connectorIds, this.config.connectorSettings).mcpServers).length > 0) {
       appLog.info('[OMP] Connectors (MCP servers) are not available with the OMP backend and are ignored');
     }
@@ -2026,8 +2059,9 @@ no notes came with the request, so review the change against the task with fresh
         } : undefined,
         autoApprove: !planning,
         appendSystemPrompt: planning
-          ? `${systemPrompt}\n\nYou are in planning mode: do not modify files, run only read-only commands, and finish with the implementation plan.`
+          ? `${systemPrompt}\n\n${planningRule}`
           : systemPrompt,
+        appendSystemPromptComponents: componentBytes,
         session: { dir: path.join(this.config.specDir, 'omp-sessions'), resume },
         jsonSchema: params.jsonSchema,
         maxTimeMinutes: omp.maxPhaseMinutes,

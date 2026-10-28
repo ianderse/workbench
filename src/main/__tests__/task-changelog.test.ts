@@ -18,7 +18,7 @@ vi.mock('../worktree-paths', () => ({ findTaskWorktree: (_projectPath: string, s
 
 import { taskHooks } from '../task-hooks';
 import { taskSessionName } from '../../shared/utils/task-messaging';
-import { buildParallelTasksPrompt, foldTaskChangelog, parseTaskChangelog, type TaskChangelogEntry } from '../task-changelog';
+import { buildParallelTasksPrompt, foldTaskChangelog, parseTaskChangelog, PARALLEL_TASKS_PROMPT_MAX_CHARS, type TaskChangelogEntry } from '../task-changelog';
 import { flushTaskChangelog, registerTaskChangelog } from '../task-changelog-writer';
 
 let tmp: string;
@@ -115,6 +115,46 @@ describe('buildParallelTasksPrompt', () => {
   it('says so when no other task has unmerged changes, also without a changelog yet', async () => {
     const prompt = await buildParallelTasksPrompt(path.join(tmp, 'missing.jsonl'), '001-self', tmp);
     expect(prompt).toContain('No other task has unmerged changes right now.');
+  });
+
+  it('bounds the whole snapshot and prioritizes known overlaps and active tasks over a large queue', async () => {
+    const specsDir = path.join(tmp, 'tasks');
+    const entries: TaskChangelogEntry[] = Array.from({ length: 100 }, (_, i) => ({
+      at: at(1), task: `queue-${i}`, event: 'state', status: 'queue', files: [],
+    }));
+    entries.push(
+      { at: at(2), task: '001-self', event: 'state', status: 'in_progress', files: ['src/shared.ts'] },
+      { at: at(3), task: 'active', event: 'state', status: 'in_progress', files: ['src/active.ts'] },
+      { at: at(4), task: 'overlap', event: 'state', status: 'human_review', files: ['src/shared.ts'] },
+    );
+    for (const entry of entries) mkdirSync(path.join(specsDir, entry.task), { recursive: true });
+    const changelog = path.join(tmp, 'changelog.jsonl');
+    writeFileSync(changelog, entries.map((entry) => JSON.stringify(entry)).join('\n'));
+
+    const prompt = await buildParallelTasksPrompt(changelog, '001-self', specsDir, changelog, { projectId: 'p1', tools: true });
+    expect(prompt.length).toBeLessThanOrEqual(PARALLEL_TASKS_PROMPT_MAX_CHARS);
+    expect(prompt.indexOf('- `overlap`')).toBeLessThan(prompt.indexOf('- `active`'));
+    expect(prompt.indexOf('- `active`')).toBeLessThan(prompt.indexOf('- `queue-'));
+    const shown = (prompt.match(/^- `/gm) ?? []).length;
+    expect(prompt).toContain(`${102 - shown} additional unmerged tasks omitted`);
+    expect(prompt).toContain('Use its `file` filter');
+    expect(prompt).toContain('do not read the whole file');
+    expect(prompt).not.toContain('re-read the changelog');
+  });
+
+  it('keeps long titles, states, paths and large diffs within the budget while retaining coordination instructions', async () => {
+    const specsDir = path.join(tmp, 'tasks');
+    mkdirSync(path.join(specsDir, 'other'), { recursive: true });
+    const changelog = path.join(tmp, 'changelog.jsonl');
+    writeFileSync(changelog, JSON.stringify({ at: at(1), task: 'other', title: 'title'.repeat(20_000),
+      event: 'state', status: 'in_progress', state: 'state'.repeat(20_000),
+      files: Array.from({ length: 100 }, (_, i) => `src/${i}-${'long'.repeat(1_000)}.ts`) }));
+    const prompt = await buildParallelTasksPrompt(changelog, '001-self', specsDir, '/long/'.repeat(10_000), { projectId: 'p1', tools: true });
+    expect(prompt.length).toBeLessThanOrEqual(PARALLEL_TASKS_PROMPT_MAX_CHARS);
+    expect(prompt).toContain('- `other`');
+    expect(prompt).toContain('100 files omitted from this bounded snapshot');
+    expect(prompt).toContain('Workbench merges the base branch into your branch once, before validation');
+    expect(prompt).toContain('mention the overlap in your final summary');
   });
 });
 

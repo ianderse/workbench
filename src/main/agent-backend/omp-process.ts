@@ -37,6 +37,7 @@ import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutpu
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
 import { hasPendingAsyncWork, isSessionSettled, isWorkingEvent, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PENDING_ID, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
 import { recordOmpUsage, type UsageContext } from '../usage/usage-record';
+import { ompEventDiagnostic, ompLaunchDiagnostic } from './omp-prompt-diagnostics';
 
 type OmpProcessOutcome = Awaited<ClaudeProcessHandle['done']>;
 
@@ -64,6 +65,8 @@ export interface OmpRunOptions {
   systemPrompt?: string;
   /** Appended to OMP's system prompt */
   appendSystemPrompt?: string;
+  /** UTF-8 bytes of named Workbench append sections, for size-only launch diagnostics. */
+  appendSystemPromptComponents?: Record<string, number>;
   /** Persist the session in `dir`; `resume` continues the session with that id. Unset = no session */
   session?: { dir: string; resume?: string };
   /** JSON Schema the final answer must match (put into the prompt, parsed from the answer) */
@@ -139,6 +142,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     foregroundOverlayFile?: string;
     extensionPaths: string[];
     repairExtensionPath?: string;
+    appendText: string;
+    attachmentBytes: number;
   };
   // One-shot utility calls never use the advisor; the setting applies to the other runs
   const advisor = resolveOmpAdvisor(options.settings, options.oneShot);
@@ -151,9 +156,12 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     if (options.session) await mkdir(options.session.dir, { recursive: true });
     const { text, files } = splitPrompt(options.prompt);
     const attachmentPaths: string[] = [];
+    let attachmentBytes = 0;
     for (const [index, file] of files.entries()) {
       const target = path.join(tempDir, `attachment-${index + 1}${extensionFor(file.mediaType)}`);
-      await writeFile(target, Buffer.from(file.data, 'base64'));
+      const data = Buffer.from(file.data, 'base64');
+      attachmentBytes += data.byteLength;
+      await writeFile(target, data);
       attachmentPaths.push(target);
     }
     let systemPromptFile: string | undefined;
@@ -193,6 +201,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
       extensionPaths.push(utilityFile);
     }
     setup = {
+      appendText,
+      attachmentBytes,
       extensionPaths,
       repairExtensionPath,
       advisorOverlayFile,
@@ -249,6 +259,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     return messageId;
   };
   const label = options.label ?? path.basename(options.cwd);
+  const diagnosticRunId = randomBytes(6).toString('hex');
+  let diagnosticAttempt = 0;
   const waits = { ready: 20_000, start: 30_000, settle: 8_000, state: 5_000, hang: 10 * 60_000, poll: 30_000, ...(options.rpcWaitsMs ?? {}) };
 
   interface RunOnceResult {
@@ -265,11 +277,24 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
    * is a `prompt` command and stdin stays open for `steer` commands until the session settled. An RPC process
    * that never gets a run going resolves with `fallback` so the caller can run the step in print mode.
    */
-  const runOnce = (args: string[], input: string, holdResult: boolean, resumeNote?: string, rpc = false) => {
+  const runOnce = (args: string[], input: string, holdResult: boolean, resumeNote?: string, rpc = false, repair = false) => {
     // `spawnTool` names only the tools cli-tool-manager knows; `command` is what runs
     // (inside WSL it must be an absolute Linux path)
     const child = spawnTool('claude', args, { command, cwd: options.cwd, env, windowsHide: true, stdio: 'pipe', processGroup: true });
     current = child;
+    const attempt = ++diagnosticAttempt;
+    const diagnosticContext = { runId: diagnosticRunId, attempt };
+    appLog.info('[OMP prompt]', JSON.stringify({ ...diagnosticContext, ...ompLaunchDiagnostic({
+      label, job: options.usage?.job, args, input, purpose: repair ? 'json-repair' : 'run',
+      systemPrompt: repair ? undefined : options.systemPrompt,
+      appendSystemPrompt: repair ? undefined : setup.appendText,
+      components: repair ? undefined : {
+        ...options.appendSystemPromptComponents,
+        foregroundRule: setup.appendText && (options.tools === 'all' || options.tools.includes('bash')) ? Buffer.byteLength(OMP_FOREGROUND_RULE, 'utf8') : 0,
+      },
+      attachmentCount: repair ? 0 : setup.attachmentPaths.length,
+      attachmentBytes: repair ? 0 : setup.attachmentBytes,
+    }) }));
     if (resumeNote) appLog.info(`[OMP] ${resumeNote}`);
     return new Promise<RunOnceResult>((resolve) => {
       const translator = createOmpTranslator({ model: selection.concrete ?? selection.selector, emitDeltas: options.emitDeltas, emitProgress: options.emitProgress });
@@ -327,6 +352,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
         }
       };
       const emit = (event: unknown) => {
+        const diagnostic = ompEventDiagnostic(event);
+        if (diagnostic) appLog.info('[OMP prompt]', JSON.stringify({ ...diagnosticContext, ...diagnostic }));
         for (const message of translator.translate(event)) {
           if (isOmpNotice(message)) {
             if (options.oneShot) appLog.warn(`[OMP] Notice (${message.source}): ${message.text}`);
@@ -662,6 +689,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
             buildJsonRepairPrompt(schema, resumeSession ? undefined : run.text),
             true,
             'The answer had no valid JSON, asking once more for the JSON alone',
+            false,
+            true,
           );
           outcome = { ...repair.outcome, unread: outcome.unread };
           if (repair.result && !repair.result.is_error) {

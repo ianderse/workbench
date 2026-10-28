@@ -730,7 +730,13 @@ describe('ClaudeTaskRun', () => {
       expect(receipts[0].items.map((item) => item.id)).toEqual([draft.id]);
       const prompt = backend === 'omp' ? String(ompSpawned[0].appendSystemPrompt) : argValue(spawned[0].args, '--append-system-prompt')!;
       expect(prompt).toContain(receipts[0].prompt);
-      if (backend === 'omp') expect(ompExtensions.join('\n')).toContain('propose_project_memory');
+      if (backend === 'omp') {
+        expect(ompExtensions.join('\n')).toContain('propose_project_memory');
+        const sizes = ompSpawned[0].appendSystemPromptComponents as Record<string, number>;
+        expect(sizes.memoryPacket).toBe(Buffer.byteLength(receipts[0].prompt, 'utf8'));
+        expect(sizes.projectMemoryInstructions).toBeGreaterThan(Buffer.byteLength(SELF_IMPROVE_NUDGE, 'utf8'));
+        expect(sizes.standingInstructions).toBeGreaterThan(0);
+      }
       else expect(mcpConfigs.join('\n')).toContain('workbench_memory');
       expect(memoryDir.startsWith(worktree)).toBe(false);
     } finally { await closeTaskToolsServer(); }
@@ -1055,7 +1061,9 @@ describe('ClaudeTaskRun', () => {
         result('o1'),
       ] });
       const { value, calls } = messaging(inbox);
-      await makeRun({ settings, projectId: 'p1', messaging: value, backend: 'omp' }).run();
+      const changelogPath = path.join(worktree, 'changelog.jsonl');
+      writeFileSync(changelogPath, '');
+      await makeRun({ settings, projectId: 'p1', messaging: value, backend: 'omp', changelogPath }).run();
 
       const options = ompSpawned[0] as { live?: unknown; extensions: string[]; tools: string[]; appendSystemPrompt: string; prompt: Array<{ text?: string }> };
       expect(options.extensions).toHaveLength(1);
@@ -1066,6 +1074,10 @@ describe('ClaudeTaskRun', () => {
       expect(existsSync(options.extensions[0])).toBe(false);
       expect(options.appendSystemPrompt).toContain('Your session is named `wb-abc123-001-task`');
       expect(options.appendSystemPrompt).not.toContain('Claude Code session');
+      expect(options.appendSystemPrompt).toContain('`list_parallel_tasks`');
+      const sizes = ompSpawned[0].appendSystemPromptComponents as Record<string, number>;
+      expect(sizes.parallelTasks).toBeGreaterThan(0);
+      expect(sizes.messaging).toBeGreaterThan(0);
       const last = options.prompt[options.prompt.length - 1].text ?? '';
       expect(last).toContain('[Workbench] Task 002 started.');
       expect(calls.markRead).toHaveBeenCalledWith(['wbm-5']);
