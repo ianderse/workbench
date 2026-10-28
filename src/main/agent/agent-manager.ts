@@ -15,6 +15,8 @@ import { isClaudeRunFinished, loadClaudeRunInfo, resetClaudeRunInfo } from '../c
 import { detectClaudeLimitMessage } from '../claude-code/limit';
 import { createOrGetWorktree } from '../worktree';
 import { addToWorktree } from '../live-agent/project-setup';
+import { usableMcpConnectorIds } from '../mcp-availability';
+import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import { readSettingsFile } from '../settings-utils';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { isSelfImproveEnabled, SELF_IMPROVE_NUDGE } from '../self-improve';
@@ -515,7 +517,11 @@ export class AgentManager extends EventEmitter {
       title: task.title || task.specId,
       description: task.description?.trim() || task.title || task.specId,
       attachments,
-      connectorIds: Array.isArray(task.metadata?.mcpConnectors) ? task.metadata.mcpConnectors : undefined,
+      // The task's connectors (or the defaults), without servers that can't start
+      connectorIds: usableMcpConnectorIds(
+        Array.isArray(task.metadata?.mcpConnectors) ? task.metadata.mcpConnectors : getDefaultMcpConnectorIds(settings.mcpConnectors),
+        settings.mcpConnectors
+      ),
       connectorSettings: settings.mcpConnectors,
       settings: taskSettings,
       maxBudgetUsd: project.settings?.maxBudgetUsd,

@@ -530,6 +530,8 @@ export interface ElectronAPI {
   // MCP Server health check operations
   checkMcpHealth: (server: CustomMcpServer) => Promise<IPCResult<McpHealthCheckResult>>;
   testMcpConnection: (server: CustomMcpServer) => Promise<IPCResult<McpTestConnectionResult>>;
+  getMcpAvailability: (ids: string[]) => Promise<IPCResult<Record<string, import('./project').McpAvailability>>>;
+  onMcpAvailabilityChanged: (callback: (id: string, availability: import('./project').McpAvailability) => void) => () => void;
 
   // Project windows (one project per window)
   /** Project this window was opened for (null for the first window) */

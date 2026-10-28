@@ -300,6 +300,8 @@ export const IPC_CHANNELS = {
   // MCP Server health checks
   MCP_CHECK_HEALTH: 'mcp:checkHealth',           // Quick connectivity check
   MCP_TEST_CONNECTION: 'mcp:testConnection',     // Full MCP protocol test
+  MCP_GET_AVAILABILITY: 'mcp:getAvailability',   // Whether connectors' servers can start (checks unknown ones)
+  MCP_AVAILABILITY_CHANGED: 'mcp:availabilityChanged', // Event: a connector's availability changed (main -> renderer)
 
 
   // Spell check

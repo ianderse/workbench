@@ -1,6 +1,9 @@
 import { Globe } from 'lucide-react';
 import { Context7Icon, ElectronIcon, McpIcon } from '../icons/app-icons';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
+import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 import type { CustomMcpServer } from '../../../shared/types';
 
 /** Leading icon tile used by connector rows (claude.ai Connectors style) */
@@ -50,4 +53,42 @@ export function customServerIcon(_server: CustomMcpServer): React.ElementType {
 export function customServerSummary(server: CustomMcpServer): string {
   return server.description?.trim()
     || (server.type === 'command' ? `${server.command} ${server.args?.join(' ') || ''}`.trim() : server.url || '');
+}
+
+/** Why a connector can't be used: the command its server needs isn't installed */
+export function commandMissingText(t: (key: string, options?: Record<string, unknown>) => string, command: string): string {
+  return t('settings:mcp.commandMissing', { command: command === 'npx' ? t('settings:mcp.npxCommand') : command });
+}
+
+/**
+ * A connector's switch; while it is disabled, hovering it shows why (`reason`, where the row
+ * doesn't say it already) and the command that makes it usable (the wrapper keeps the tooltip on
+ * the disabled switch)
+ */
+export function ConnectorSwitchTip({ reason, fixCommand, children }: {
+  reason?: string;
+  fixCommand?: string;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation(['settings']);
+  if (!reason && !fixCommand) return <>{children}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{children}</span>
+      </TooltipTrigger>
+      {/* Rendered at the top of the page, so the disabled row's fading doesn't show through */}
+      <TooltipPrimitive.Portal>
+        <TooltipContent className="max-w-xs">
+          {reason && <p>{reason}</p>}
+          {fixCommand && (
+            <>
+              <p className={cn(reason && 'mt-1.5')}>{t('settings:mcp.fixHint')}</p>
+              <code className="mt-1 block font-mono text-xs">{fixCommand}</code>
+            </>
+          )}
+        </TooltipContent>
+      </TooltipPrimitive.Portal>
+    </Tooltip>
+  );
 }

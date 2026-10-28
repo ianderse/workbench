@@ -398,6 +398,11 @@
   },
   "mcp": {
     "defaultsHint": "Defaults for new tasks and chats; each can change them",
+    "commandMissing": "Needs {{command}}, which isn't installed",
+    "npxCommand": "npx (Node.js)",
+    "preparing": "Getting ready; the first start downloads it",
+    "unavailable": "Can't start: {{reason}}",
+    "fixHint": "Run this to enable it:",
     "addServer": "Add server",
     "servers": {
       "context7": {

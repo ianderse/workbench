@@ -13,6 +13,8 @@ import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { projectStore } from '../project-store';
 import { openTaskToolsSession } from './task-tools-server';
 import { buildMcpConfig } from '../claude-code/mcp-config';
+import { usableMcpConnectorIds } from '../mcp-availability';
+import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import { readSettingsFileAsync } from '../settings-utils';
 import { getToolInfoAsync } from '../cli-tool-manager';
 import type { AppSettings } from '../../shared/types';
@@ -28,6 +30,13 @@ interface ProcessorResult {
   stopped?: boolean;
   /** A newer message or regenerate stopped the reply; that run owns the conversation */
   replaced?: boolean;
+}
+
+/** The chat's MCP servers: its own choice or the Connectors defaults, without unavailable ones */
+async function chatMcpServers(ids: string[] | undefined) {
+  const connectorSettings = ((await readSettingsFileAsync()) as Partial<AppSettings> | undefined)?.mcpConnectors;
+  const chosen = ids ?? getDefaultMcpConnectorIds(connectorSettings);
+  return buildMcpConfig(usableMcpConnectorIds(chosen, connectorSettings), connectorSettings).mcpServers;
 }
 
 /**
@@ -132,10 +141,8 @@ export class InsightsExecutor extends EventEmitter {
             gitlab: modelConfig?.gitlabTools === true && (await getToolInfoAsync('glab')).found,
           },
           // The MCP servers chosen with the chat's MCP button (Connectors defaults until changed)
-          mcpServers: buildMcpConfig(
-            modelConfig?.mcpConnectors,
-            ((await readSettingsFileAsync()) as Partial<AppSettings> | undefined)?.mcpConnectors
-          ).mcpServers,
+          // (leaving out servers that can't start)
+          mcpServers: await chatMcpServers(modelConfig?.mcpConnectors),
         },
         (event) => {
           switch (event.type) {

@@ -18,7 +18,7 @@ import { getWslInfo } from '../platform/shell-runtime';
 import { isWindows } from '../platform';
 import { toRuntimeArg } from '../platform/runtime-exec';
 
-type McpServerEntry =
+export type McpServerEntry =
   | { type: 'stdio'; command: string; args?: string[]; env?: Record<string, string> }
   | { type: 'http'; url: string; headers?: Record<string, string> };
 
@@ -86,6 +86,14 @@ function warnWhenNpxMissingInWsl(): void {
     `[MCP] npx isn't installed in WSL (${wsl.distro}), so the built-in connectors (Context7, Electron, Puppeteer) ` +
     "can't start in Claude Code runs there. Install Node.js inside WSL to use them"
   );
+}
+
+/** One connector's server entry, as a Claude Code run would start it (null when it can't be) */
+export function mcpServerEntry(id: string, connectorSettings: McpConnectorSettings | undefined): McpServerEntry | null {
+  const builtin = builtinServer(id);
+  if (builtin) return builtin;
+  const server = getUsableCustomServers(connectorSettings).find((s) => s.id === id);
+  return server ? customServerEntry(server) : null;
 }
 
 /**

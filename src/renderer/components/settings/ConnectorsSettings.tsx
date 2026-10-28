@@ -11,7 +11,8 @@ import { Switch } from '../ui/switch';
 import { Button } from '../ui/button';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
-import { BUILTIN_CONNECTOR_META, ConnectorRow, customServerIcon } from './ConnectorRow';
+import { BUILTIN_CONNECTOR_META, ConnectorRow, ConnectorSwitchTip, customServerIcon } from './ConnectorRow';
+import { useMcpUnavailableReason } from '../../hooks/useMcpAvailability';
 import { CustomMcpDialog } from '../CustomMcpDialog';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import type { AppSettings, CustomMcpServer, McpConnectorSettings, McpHealthCheckResult } from '../../../shared/types';
@@ -42,6 +43,8 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
   settingsRef.current = settings;
   const connectors = settings.mcpConnectors ?? {};
   const customServers = connectors.customServers ?? [];
+  // A server that can't start yet (being prepared, command missing, failing) is off and disabled
+  const unavailableReason = useMcpUnavailableReason();
 
   const updateConnectors = useCallback((update: (current: McpConnectorSettings) => McpConnectorSettings) => {
     const latest = settingsRef.current;
@@ -189,19 +192,24 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
             const key = BUILTIN_SETTING_KEY[id];
             // Context7 and Memory default on; browser automation defaults off
             const checked = defaultOff ? connectors[key] === true : connectors[key] !== false;
-            const description = t(`settings:mcp.servers.${id}.description`);
+            const unavailable = unavailableReason(id);
+            const description = unavailable?.reason ?? t(`settings:mcp.servers.${id}.description`);
             return (
               <ConnectorRow
                 key={id}
                 icon={icon}
                 name={t(`settings:mcp.servers.${id}.name`)}
                 description={description}
+                disabled={!!unavailable}
               >
-                <Switch
-                  checked={checked}
-                  onCheckedChange={(value) => updateConnectors((current) => ({ ...current, [key]: value }))}
-                  aria-label={t(`settings:mcp.servers.${id}.name`)}
-                />
+                <ConnectorSwitchTip fixCommand={unavailable?.fixCommand}>
+                  <Switch
+                    checked={checked && !unavailable}
+                    disabled={!!unavailable}
+                    onCheckedChange={(value) => updateConnectors((current) => ({ ...current, [key]: value }))}
+                    aria-label={t(`settings:mcp.servers.${id}.name`)}
+                  />
+                </ConnectorSwitchTip>
               </ConnectorRow>
             );
           })}
@@ -213,10 +221,12 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
           {customServers.map((server) => {
             const health = serverHealthStatus[server.id];
             const isTesting = testingServers.has(server.id);
+            const unavailable = unavailableReason(server.id);
 
             return (
               <ConnectorRow
                 key={server.id}
+                disabled={!!unavailable}
                 icon={customServerIcon(server)}
                 name={
                   <span className="flex items-center gap-2">
@@ -229,6 +239,7 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
                 }
                 // The server's own description when set, otherwise its status or connection
                 description={
+                  unavailable?.reason ||
                   server.description?.trim() ||
                   health?.message ||
                   (server.type === 'command' ? `${server.command} ${server.args?.join(' ') || ''}` : server.url)
@@ -258,11 +269,14 @@ export function ConnectorsSettings({ settings, onSettingsChange }: ConnectorsSet
                 </div>
                 {/* Untested servers need a passing test first; after that, an on/off switch */}
                 {server.verified ? (
-                  <Switch
-                    checked={server.enabled !== false}
-                    onCheckedChange={(checked) => handleSaveCustomServer({ ...server, enabled: checked })}
-                    aria-label={server.name}
-                  />
+                  <ConnectorSwitchTip fixCommand={unavailable?.fixCommand}>
+                    <Switch
+                      checked={server.enabled !== false && !unavailable}
+                      disabled={!!unavailable}
+                      onCheckedChange={(checked) => handleSaveCustomServer({ ...server, enabled: checked })}
+                      aria-label={server.name}
+                    />
+                  </ConnectorSwitchTip>
                 ) : (
                   <Button
                     variant="outline"
