@@ -28,7 +28,7 @@ import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn } from '../lib/utils';
-import { GraphIcon, KanbanIcon } from './icons/app-icons';
+import { GitHubIcon, GitLabIcon, GraphIcon, KanbanIcon } from './icons/app-icons';
 import {
   useInsightsStore,
   DRAFT_SESSION_ID,
@@ -357,6 +357,42 @@ export function Insights({ projectId }: InsightsProps) {
   const toggleKanbanTools = () => {
     void handleModelConfigChange({ ...baseModelConfig, kanbanTools: !kanbanTools });
   };
+
+  // GitHub and GitLab buttons: Claude can use the gh or glab CLI in this conversation (kept with
+  // the conversation's model settings). A CLI that isn't installed leaves its button off and
+  // disabled
+  const detectedClis = useDetectedClis();
+  const cliToggle = (key: 'githubTools' | 'gitlabTools', cli: 'gh' | 'glab', Icon: React.ElementType, label: string) => {
+    const installed = detectedClis[cli];
+    const on = installed && effectiveModelConfig?.[key] === true;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* The wrapper keeps the tooltip on a disabled button */}
+          <span className="inline-flex">
+            <button
+              type="button"
+              onClick={() => void handleModelConfigChange({ ...baseModelConfig, [key]: !on })}
+              disabled={isLoading || !installed}
+              aria-pressed={on}
+              aria-label={label}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:pointer-events-none disabled:opacity-40',
+                on
+                  ? 'bg-primary/15 text-primary hover:bg-primary/20'
+                  : 'text-muted-foreground hover:bg-nav-hover hover:text-foreground'
+              )}
+            >
+              <Icon className="h-4 w-4" />
+            </button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{installed ? label : t('insights.cliNotFound', { name: label })}</TooltipContent>
+      </Tooltip>
+    );
+  };
+  const githubButton = cliToggle('githubTools', 'gh', GitHubIcon, t('insights.githubTools'));
+  const gitlabButton = cliToggle('gitlabTools', 'glab', GitLabIcon, t('insights.gitlabTools'));
   const kanbanButton = (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -502,7 +538,7 @@ export function Insights({ projectId }: InsightsProps) {
         {isEmpty ? (
           /* Toolbar (new chat): attach on the left; the model and send on the right */
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
-            <div className="flex items-center gap-1">{attachButton}{mcpButton}{kanbanButton}</div>
+            <div className="flex items-center gap-1">{attachButton}{mcpButton}{githubButton}{gitlabButton}{kanbanButton}</div>
             <div className="flex min-w-0 items-center gap-1.5">
               {modelSelector}
               {/* Send button only appears once there is something to send; it turns into stop while Claude works */}
@@ -732,7 +768,7 @@ export function Insights({ projectId }: InsightsProps) {
                 {composer}
                 {/* Under the field: attach, disclaimer, model */}
                 <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                  <div className="flex items-center gap-1">{attachButton}{mcpButton}{kanbanButton}</div>
+                  <div className="flex items-center gap-1">{attachButton}{mcpButton}{githubButton}{gitlabButton}{kanbanButton}</div>
                   <span className="truncate text-xs text-muted-foreground">{t('insights.disclaimer')}</span>
                   <div className="flex justify-end">{modelSelector}</div>
                 </div>
@@ -771,6 +807,26 @@ function SparkMark({ className, animate }: SparkMarkProps) {
       <path d={CLAUDE_SYMBOL_PATH} />
     </svg>
   );
+}
+
+/** Detected gh and glab CLIs; the main process detects them once at startup */
+let detectedClisCache: { gh: boolean; glab: boolean } | null = null;
+
+function useDetectedClis(): { gh: boolean; glab: boolean } {
+  const [clis, setClis] = useState(detectedClisCache ?? { gh: false, glab: false });
+  useEffect(() => {
+    if (detectedClisCache) return;
+    let cancelled = false;
+    window.electronAPI.getCliToolsInfo().then((result) => {
+      if (!result.success || !result.data) return;
+      detectedClisCache = { gh: result.data.gh.found, glab: result.data.glab.found };
+      if (!cancelled) setClis(detectedClisCache);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return clis;
 }
 
 interface MessageBubbleProps {

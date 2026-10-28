@@ -20,6 +20,10 @@ export interface InsightsModelConfig {
   kanbanTools?: boolean;
   /** The MCP button: connector ids for this conversation; unset = the Connectors defaults */
   mcpConnectors?: string[];
+  /** The GitHub button: Claude can use the GitHub CLI (gh) in this conversation */
+  githubTools?: boolean;
+  /** The GitLab button: Claude can use the GitLab CLI (glab) in this conversation */
+  gitlabTools?: boolean;
 }
 
 type InsightsChatRole = 'user' | 'assistant';

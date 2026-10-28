@@ -236,6 +236,9 @@
     "mcp": {
       "label": "MCP servers"
     },
+    "githubTools": "GitHub",
+    "gitlabTools": "GitLab",
+    "cliNotFound": "{{name}} CLI not detected",
     "kanbanTools": {
       "label": "Kanban",
       "off": "Let Claude manage this project's tasks",

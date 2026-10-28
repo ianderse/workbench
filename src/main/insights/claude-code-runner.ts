@@ -29,6 +29,7 @@ import { CLAUDE_EFFORTS, CLAUDE_MODEL_ALIASES } from '../../shared/types/claude-
 import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-code';
 import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
+import type { InsightsCliTools } from './prompts';
 import type { ClaudeMcpConfig } from '../claude-code/mcp-config';
 import { TASK_TOOLS_SERVER_NAME, toBridgeServer, type TaskToolsMcpServer, type TaskToolsStdioServer } from './task-tools-mcp';
 // The bridge's source, bundled as text and written next to the turn's other temp files
@@ -69,6 +70,8 @@ export interface InsightsRunConfig {
   taskTools?: TaskToolsMcpServer;
   /** MCP servers chosen for the chat (the MCP button), by server name */
   mcpServers?: ClaudeMcpConfig['mcpServers'];
+  /** Git hosting CLIs turned on for the chat (the GitHub and GitLab buttons) */
+  cliTools?: InsightsCliTools;
 }
 
 /** Info about a tool call made during the turn */
@@ -131,6 +134,10 @@ function toClaudeEffort(level: string | undefined): ClaudeEffort {
   return level && (CLAUDE_EFFORTS as readonly string[]).includes(level) ? (level as ClaudeEffort) : 'medium';
 }
 
+/** Bash rules for the git hosting CLIs (the GitHub and GitLab buttons) */
+export const INSIGHTS_GITHUB_RULE = 'Bash(gh:*)';
+export const INSIGHTS_GITLAB_RULE = 'Bash(glab:*)';
+
 /** MCP tools rule for Workbench's task tools (every tool of the server) */
 export const INSIGHTS_TASK_TOOLS_RULE = `mcp__${TASK_TOOLS_SERVER_NAME}`;
 
@@ -153,10 +160,17 @@ export function buildInsightsArgs(
   systemPromptFile: string,
   withGraphify = false,
   mcp?: InsightsMcpArgs,
+  cliTools: InsightsCliTools = {},
 ): string[] {
-  const tools = withGraphify ? [...INSIGHTS_READ_ONLY_TOOLS, 'Bash'] : [...INSIGHTS_READ_ONLY_TOOLS];
+  const cliRules = [
+    ...(cliTools.github ? [INSIGHTS_GITHUB_RULE] : []),
+    ...(cliTools.gitlab ? [INSIGHTS_GITLAB_RULE] : []),
+  ];
+  const withBash = withGraphify || cliRules.length > 0;
+  const tools = withBash ? [...INSIGHTS_READ_ONLY_TOOLS, 'Bash'] : [...INSIGHTS_READ_ONLY_TOOLS];
   const allowed = [
     ...(withGraphify ? INSIGHTS_GRAPHIFY_COMMANDS : []),
+    ...cliRules,
     ...(mcp?.taskTools ? [INSIGHTS_TASK_TOOLS_RULE] : []),
     ...(mcp?.servers ?? []).map((server) => `mcp__${server}`),
   ];
@@ -359,7 +373,7 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     // System prompt goes through a file: no argument length or shell quoting limits
     const tempDir = await mkdtemp(join(tmpdir(), 'workbench-insights-'));
     const systemPromptFile = join(tempDir, 'system-prompt.md');
-    const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!offeredTaskTools });
+    const basePrompt = buildSystemPrompt(projectDir, { taskTools: !!offeredTaskTools, cliTools: config.cliTools });
     const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;
     await writeFile(systemPromptFile, systemPrompt, 'utf-8');
     // The MCP servers go through a file too, so the task tools' URL and token aren't in the
@@ -383,7 +397,7 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     try {
       const handle = startClaudeProcess({
         command,
-        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcp),
+        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcp, config.cliTools),
         cwd: projectDir,
         env,
         // Document blocks (PDFs) are valid Anthropic content even though the shared type omits them

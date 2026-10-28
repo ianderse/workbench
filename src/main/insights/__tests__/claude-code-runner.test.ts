@@ -91,6 +91,8 @@ import {
   INSIGHTS_READ_ONLY_TOOLS,
   INSIGHTS_GRAPHIFY_COMMANDS,
   INSIGHTS_TASK_TOOLS_RULE,
+  INSIGHTS_GITHUB_RULE,
+  INSIGHTS_GITLAB_RULE,
   resetTaskToolsBridgeForTests,
   toClaudeModel,
   type InsightsStreamEvent,
@@ -255,6 +257,30 @@ describe('runInsights', () => {
     expect(args).toContain('mcp__context7');
     expect(args).not.toContain(INSIGHTS_TASK_TOOLS_RULE);
     expect(mcpToolTimeout).toBeNull();
+  });
+
+  it('lets Claude use gh and glab, and no other command, when their buttons are on', async () => {
+    setRun(conversation);
+    await (await run({ cliTools: { github: true, gitlab: true } })).promise;
+    const { args, systemPrompt } = record();
+
+    expect(args[args.indexOf('--tools') + 1]).toContain('Bash');
+    const allowed = args.slice(args.indexOf('--allowedTools') + 1);
+    expect(allowed).toContain(INSIGHTS_GITHUB_RULE);
+    expect(allowed).toContain(INSIGHTS_GITLAB_RULE);
+    expect(allowed.some((rule: string) => rule.startsWith('Bash(graphify'))).toBe(false);
+    expect(systemPrompt).toContain('GitHub CLI (`gh`)');
+    expect(systemPrompt).toContain('GitLab CLI (`glab`)');
+  });
+
+  it('offers only gh with just the GitHub button on', async () => {
+    setRun(conversation);
+    await (await run({ cliTools: { github: true } })).promise;
+    const { args, systemPrompt } = record();
+
+    expect(args).toContain(INSIGHTS_GITHUB_RULE);
+    expect(args).not.toContain(INSIGHTS_GITLAB_RULE);
+    expect(systemPrompt).not.toContain('glab');
   });
 
   it('keeps Bash out without a memory graph', async () => {

@@ -14,6 +14,7 @@ import { projectStore } from '../project-store';
 import { openTaskToolsSession } from './task-tools-server';
 import { buildMcpConfig } from '../claude-code/mcp-config';
 import { readSettingsFileAsync } from '../settings-utils';
+import { getToolInfoAsync } from '../cli-tool-manager';
 import type { AppSettings } from '../../shared/types';
 
 /**
@@ -125,6 +126,11 @@ export class InsightsExecutor extends EventEmitter {
           graphify,
           profileId: projectSettings?.claudeProfileId,
           taskTools: taskTools?.mcpServer,
+          // gh and glab with the GitHub and GitLab buttons, when they are installed
+          cliTools: {
+            github: modelConfig?.githubTools === true && (await getToolInfoAsync('gh')).found,
+            gitlab: modelConfig?.gitlabTools === true && (await getToolInfoAsync('glab')).found,
+          },
           // The MCP servers chosen with the chat's MCP button (Connectors defaults until changed)
           mcpServers: buildMcpConfig(
             modelConfig?.mcpConnectors,

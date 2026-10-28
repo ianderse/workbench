@@ -54,7 +54,31 @@ export function buildConversationPrompt(message: string, history: InsightsMessag
 }
 
 /** System prompt section for the insights chat (appended to Claude Code's own) */
-export function buildSystemPrompt(projectDir: string, options: { taskTools?: boolean } = {}): string {
+/** Git hosting CLIs Claude may use in the conversation (the GitHub and GitLab buttons) */
+export interface InsightsCliTools {
+  github?: boolean;
+  gitlab?: boolean;
+}
+
+/** What Claude can do with the git hosting CLIs turned on for the conversation */
+function cliToolsPrompt(cliTools: InsightsCliTools): string {
+  const clis = [
+    ...(cliTools.github ? ['the GitHub CLI (`gh`)'] : []),
+    ...(cliTools.gitlab ? ['the GitLab CLI (`glab`)'] : []),
+  ];
+  if (clis.length === 0) return '';
+  return `
+
+You can use ${clis.join(' and ')} through Bash for the project's repository: issues, pull or merge requests, reviews, CI runs, releases and the like. Every other shell command is denied.
+- Read freely; create, comment, close, merge or change anything only when the user asked for exactly that, and tell them what you did (with links or numbers).
+- Never delete repositories, branches, releases or other resources, and never change repository settings or secrets.
+- When a command fails (not installed, not signed in, no access), say so instead of trying something else.`;
+}
+
+export function buildSystemPrompt(
+  projectDir: string,
+  options: { taskTools?: boolean; cliTools?: InsightsCliTools } = {}
+): string {
   const context = loadProjectContext(projectDir);
   const suggestionFormat = `__TASK_SUGGESTION__:{"title": "Task title here", "description": "Detailed description of what the task involves"}`;
 
@@ -87,7 +111,7 @@ Your capabilities:
 2. Suggest improvements, features, or bug fixes based on the code
 3. Help plan implementation of new features
 4. Provide code examples and explanations
-${tasks}
+${tasks}${cliToolsPrompt(options.cliTools ?? {})}
 
 Be conversational and helpful. Focus on providing actionable insights and clear explanations.
 Keep responses concise but informative.`;
