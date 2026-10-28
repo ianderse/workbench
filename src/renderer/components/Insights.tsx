@@ -27,7 +27,7 @@ import { MarkdownContent } from './ui/markdown-content';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { cn } from '../lib/utils';
+import { cn, formatLongRelativeTime } from '../lib/utils';
 import { GitHubIcon, GitLabIcon, GraphIcon, KanbanIcon } from './icons/app-icons';
 import {
   useInsightsStore,
@@ -847,6 +847,9 @@ function MessageBubble({
   const { t } = useTranslation('common');
   const isUser = message.role === 'user';
   const [editing, setEditing] = useState(false);
+  // The time shown on hover is worked out again each time the message is hovered
+  const [now, setNow] = useState(() => Date.now());
+  const time = <MessageTime timestamp={message.timestamp} now={now} />;
   // Editing ends when editing is no longer possible (Claude started replying)
   useEffect(() => {
     if (!onEdit) setEditing(false);
@@ -855,7 +858,7 @@ function MessageBubble({
   if (isUser) {
     const attachments = message.images || [];
     return (
-      <div className="group flex flex-col items-end gap-1.5">
+      <div className="group flex flex-col items-end gap-1.5" onMouseEnter={() => setNow(Date.now())}>
         {attachments.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
             {attachments.map((file) =>
@@ -907,6 +910,7 @@ function MessageBubble({
             {/* Copy and edit appear on hover (edit only while Claude isn't replying) */}
             {(message.content || onEdit) && (
               <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                <span className="mr-1 flex items-center">{time}</span>
                 {onEdit && (
                   <button
                     type="button"
@@ -927,16 +931,17 @@ function MessageBubble({
     );
   }
 
-  // Copy (the reply's markdown) and regenerate, before the tools used
+  // Copy (the reply's markdown) and regenerate, before the tools used; the time shows on hover
   const actions = message.content || onRegenerate ? (
     <div className="flex items-center gap-1">
       {message.content && <CopyMessageButton text={message.content} />}
       {onRegenerate && <RegenerateMessageButton onClick={onRegenerate} />}
     </div>
   ) : undefined;
+  const hoverTime = <span className="flex items-center opacity-0 transition-opacity group-hover:opacity-100">{time}</span>;
 
   return (
-    <div className="space-y-3">
+    <div className="group space-y-3" onMouseEnter={() => setNow(Date.now())}>
       {message.content && <MarkdownContent>{message.content}</MarkdownContent>}
       {/* A stopped reply says so, under what it had written by then */}
       {message.stopped && (
@@ -944,8 +949,13 @@ function MessageBubble({
       )}
 
       {message.toolsUsed && message.toolsUsed.length > 0 ? (
-        <ToolUsageHistory tools={message.toolsUsed} actions={actions} />
-      ) : actions}
+        <ToolUsageHistory tools={message.toolsUsed} actions={actions} trailing={hoverTime} />
+      ) : (
+        <div className="flex items-center gap-2">
+          {actions}
+          {hoverTime}
+        </div>
+      )}
 
       {/* Task suggestion cards */}
       {message.suggestedTasks && message.suggestedTasks.length > 0 && (
@@ -1041,6 +1051,19 @@ interface ToolUsageHistoryProps {
   }>;
   /** Shown before the toggle (e.g., the copy button) */
   actions?: React.ReactNode;
+  /** Shown after the toggle (the message's time) */
+  trailing?: React.ReactNode;
+}
+
+/** When a message was sent, relative to `now` ("2 hours ago"); the exact date on hover */
+function MessageTime({ timestamp, now }: { timestamp: Date | string; now: number }) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return (
+    <time dateTime={date.toISOString()} title={date.toLocaleString()} className="whitespace-nowrap text-[0.6875rem] leading-none text-muted-foreground/70">
+      {formatLongRelativeTime(date, now)}
+    </time>
+  );
 }
 
 // How long the copy button shows that the reply was copied
@@ -1166,7 +1189,7 @@ function RegenerateMessageButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
+function ToolUsageHistory({ tools, actions, trailing }: ToolUsageHistoryProps) {
   const { t } = useTranslation('common');
   const [expanded, setExpanded] = useState(false);
 
@@ -1185,6 +1208,7 @@ function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
           <span>{t('insights.tools.toolsUsed', { count: tools.length })}</span>
           <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
         </button>
+        {trailing}
       </div>
 
       {expanded && (

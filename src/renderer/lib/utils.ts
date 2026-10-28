@@ -30,6 +30,30 @@ export function formatRelativeTime(date: Date): string {
   return new Date(date).toLocaleDateString();
 }
 
+const LONG_UNITS: Array<{ limit: number; per: number; unit: Intl.RelativeTimeFormatUnit }> = [
+  { limit: 60, per: 1, unit: 'second' },
+  { limit: 3600, per: 60, unit: 'minute' },
+  { limit: 86400, per: 3600, unit: 'hour' },
+  { limit: 604800, per: 86400, unit: 'day' },
+  { limit: 2592000, per: 604800, unit: 'week' },
+  { limit: 31536000, per: 2592000, unit: 'month' },
+];
+
+/**
+ * How long ago something happened, in words of the app's language: "2 hours ago", "yesterday",
+ * "3 weeks ago" (Intl.RelativeTimeFormat)
+ */
+export function formatLongRelativeTime(date: Date | string | number, now: number = Date.now()): string {
+  const time = new Date(date).getTime();
+  if (Number.isNaN(time)) return i18n.t('common:relativeTime.unknown');
+  const format = new Intl.RelativeTimeFormat(i18n.language || 'en', { numeric: 'auto' });
+  const seconds = Math.max(0, Math.floor((now - time) / 1000));
+  for (const { limit, per, unit } of LONG_UNITS) {
+    if (seconds < limit) return format.format(-Math.floor(seconds / per), unit);
+  }
+  return format.format(-Math.floor(seconds / 31536000), 'year');
+}
+
 const SHORT_UNITS: Array<{ limit: number; per: number; key: string }> = [
   { limit: 60, per: 1, key: 'common:relativeTime.secondsAgo' },
   { limit: 3600, per: 60, key: 'common:relativeTime.minutesAgo' },
