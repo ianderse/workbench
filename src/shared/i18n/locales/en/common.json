@@ -167,6 +167,7 @@
     "thinking": "Thinking…",
     "disclaimer": "Claude is AI and can make mistakes.",
     "copyResponse": "Copy response",
+    "copyMessage": "Copy message",
     "copied": "Copied",
     "tools": {
       "readingFile": "Reading file",

@@ -854,16 +854,22 @@ function MessageBubble({
                 {message.content}
               </div>
             )}
-            {onEdit && (
-              <button
-                type="button"
-                onClick={() => setEditing(true)}
-                className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color,background-color] hover:bg-nav-hover hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-                aria-label={t('insights.editMessage')}
-                title={t('insights.editMessage')}
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+            {/* Copy and edit appear on hover (edit only while Claude isn't replying) */}
+            {(message.content || onEdit) && (
+              <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                {onEdit && (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
+                    aria-label={t('insights.editMessage')}
+                    title={t('insights.editMessage')}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {message.content && <CopyMessageButton text={message.content} label={t('insights.copyMessage')} />}
+              </div>
             )}
           </>
         )}
@@ -982,7 +988,7 @@ interface ToolUsageHistoryProps {
 const COPIED_RESET_MS = 1500;
 
 /** Copies an assistant reply's original markdown */
-function CopyMessageButton({ text }: { text: string }) {
+function CopyMessageButton({ text, label: idleLabel }: { text: string; /** Defaults to "Copy response" */ label?: string }) {
   const { t } = useTranslation('common');
   const [copied, setCopied] = useState(false);
 
@@ -992,7 +998,7 @@ function CopyMessageButton({ text }: { text: string }) {
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const label = copied ? t('insights.copied') : t('insights.copyResponse');
+  const label = copied ? t('insights.copied') : idleLabel ?? t('insights.copyResponse');
   return (
     <button
       type="button"
