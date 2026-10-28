@@ -10,6 +10,7 @@
   "updated": "Updated {{time}}",
   "loading": "Reading the usage ledger",
   "error": "Could not read usage: {{error}}",
+  "incompatible": "Restart Workbench, then refresh Usage to load updated calculations",
   "empty": {
     "title": "No usage recorded yet",
     "description": "Every model run from now on is counted here. Rebuild from history to import what earlier tasks spent."
@@ -46,6 +47,7 @@
     "rate": "{{cost}} / 1M",
     "fallback": "Fallback rates: {{model}}",
     "unpriced": "Unpriced",
+    "unavailable": "Unavailable",
     "partialCost": "{{cost}} (partial)",
     "calculation": "Input, output, cache reads, and cache writes are calculated separately at each model's rates. Uses base API rates; built-in Claude cache writes use the five-minute rate. Subscription charges and long-context premiums may differ",
     "tokensPerSecond": "{{rate}} tok/s",

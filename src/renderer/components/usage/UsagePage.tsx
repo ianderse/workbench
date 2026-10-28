@@ -19,6 +19,7 @@ import { formatCostUsd } from '../../../shared/utils/claude-run';
 import { formatTokens } from '../../../shared/utils/format-tokens';
 import { formatDay, niceCeil } from '../settings/UsageCostChart';
 import { CalculatedCost, ModelUsageCosts } from './ModelUsageCosts';
+import { isUsageSummary } from './usage-summary-compat';
 import type { UsageSummary, UsageTotals } from '../../../shared/types/usage';
 
 const CACHE_PREFIX = 'usage-summary:v3:';
@@ -147,6 +148,7 @@ interface UsageViewProps {
 /** The dashboard for a summary with at least one entry */
 export function UsageView({ summary, onOpenTask }: UsageViewProps) {
   const { t } = useTranslation('usage');
+  if (!isUsageSummary(summary)) return <p role="alert" className="text-sm text-muted-foreground">{t('incompatible')}</p>;
   const { totals, locality, facts } = summary;
   const localPercent = Math.round(locality.localShare * 100);
   const topTasks = summary.byTask.slice(0, TOP_TASKS);
@@ -297,16 +299,25 @@ interface CachedUsage {
   checkedAt: string;
 }
 
+function readCachedUsage(projectId: string): CachedUsage | undefined {
+  const cached = readRefreshCache<Partial<CachedUsage>>(CACHE_PREFIX + projectId);
+  return cached && typeof cached.checkedAt === 'string' && Number.isFinite(Date.parse(cached.checkedAt)) && isUsageSummary(cached.summary)
+    ? { summary: cached.summary, checkedAt: cached.checkedAt }
+    : undefined;
+}
+
 export function UsagePage({ projectId, onOpenTask }: UsagePageProps) {
   const { t } = useTranslation('usage');
   const projectName = useProjectStore((state) => state.projects.find((p) => p.id === projectId)?.name ?? '');
-  const [cached, setCached] = useState<CachedUsage | undefined>(() => readRefreshCache<CachedUsage>(CACHE_PREFIX + projectId));
+  const [cached, setCached] = useState<CachedUsage | undefined>(() => readCachedUsage(projectId));
   const [busy, setBusy] = useState<'load' | 'refresh' | 'rebuild' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [incompatible, setIncompatible] = useState(false);
 
   const load = useCallback(async (kind: 'load' | 'refresh' | 'rebuild') => {
     setBusy(kind);
     setError(null);
+    setIncompatible(false);
     try {
       const api = window.electronAPI;
       const result = kind === 'rebuild'
@@ -315,6 +326,11 @@ export function UsagePage({ projectId, onOpenTask }: UsagePageProps) {
           ? await api.refreshUsageSummary(projectId)
           : await api.getUsageSummary(projectId);
       if (result.success && result.data) {
+        if (!isUsageSummary(result.data.summary)) {
+          setIncompatible(true);
+          setCached(undefined);
+          return;
+        }
         const next = { summary: result.data.summary, checkedAt: new Date().toISOString() };
         writeRefreshCache(CACHE_PREFIX + projectId, next);
         setCached(next);
@@ -330,13 +346,15 @@ export function UsagePage({ projectId, onOpenTask }: UsagePageProps) {
 
   // Switching project shows that project's last summary; nothing is read when there is one
   useEffect(() => {
-    const stored = readRefreshCache<CachedUsage>(CACHE_PREFIX + projectId);
+    const stored = readCachedUsage(projectId);
     setCached(stored);
     setError(null);
+    setIncompatible(false);
     if (!stored) void load('load');
   }, [projectId, load]);
 
-  const summary = cached?.summary;
+  const summary = isUsageSummary(cached?.summary) ? cached.summary : undefined;
+  const needsRestart = incompatible || (cached !== undefined && summary === undefined);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -362,6 +380,7 @@ export function UsagePage({ projectId, onOpenTask }: UsagePageProps) {
         </header>
 
         {error && <p role="alert" className="text-sm text-destructive">{t('error', { error })}</p>}
+        {needsRestart && <p role="alert" className="text-sm text-muted-foreground">{t('incompatible')}</p>}
 
         {!summary ? (
           busy ? <p className="py-10 text-center text-sm text-muted-foreground">{t('loading')}</p> : null
