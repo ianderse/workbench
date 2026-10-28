@@ -652,8 +652,10 @@
   },
   "usageSimulator": {
     "title": "Usage popover",
-    "clockLabel": "Date and time",
-    "clockDescription": "The moment the preview shows; empty uses the current time",
+    "dateLabel": "Date",
+    "dateDescription": "The day the previews show; empty uses today",
+    "timeLabel": "Time",
+    "timeDescription": "The top previews show this time in the morning, the bottom ones in the evening",
     "percentLabel": "5-hour usage",
     "percentDescription": "The percentage the preview shows; empty uses the real value",
     "percentPlaceholder": "Real"
