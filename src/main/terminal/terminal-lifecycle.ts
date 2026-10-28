@@ -394,14 +394,23 @@ export async function destroyAllTerminals(
 }
 
 /**
- * Handle terminal exit event
- * Note: We don't remove sessions here because terminal exit might be due to app shutdown.
- * Sessions are only removed when explicitly destroyed by user action via destroyTerminal().
+ * Handle terminal exit event.
+ *
+ * The shell ended on its own while the app runs (`exit` typed, or Claude Code exited with
+ * `/exit` in an agent window): its window closes, so its saved session goes too, or the next
+ * launch would open it again. The window's own request to destroy it can't do that: by then
+ * the exited terminal is no longer in `terminals`, so destroyTerminal() finds nothing.
+ *
+ * Sessions that must stay are never removed here: exits during app shutdown don't reach this
+ * (PtyManager's shutdown guard), so those windows come back next launch; and a terminal
+ * destroyed or replaced on purpose (closed with its button, moved to another worktree) has
+ * already left `terminals`, its session handled where that happened.
  */
-function handleTerminalExit(
-  _terminal: TerminalProcess,
-  _terminals: Map<string, TerminalProcess>
+export function handleTerminalExit(
+  terminal: TerminalProcess,
+  terminals: Map<string, TerminalProcess>
 ): void {
-  // Don't remove session - let it persist for restoration
+  if (terminals.get(terminal.id) !== terminal) return;
+  SessionHandler.removePersistedSession(terminal);
 }
 
