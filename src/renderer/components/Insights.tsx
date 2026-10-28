@@ -887,11 +887,11 @@ function MessageBubble({
 
   return (
     <div className="space-y-3">
-      {message.content ? (
-        <MarkdownContent>{message.content}</MarkdownContent>
-      ) : message.stopped ? (
+      {message.content && <MarkdownContent>{message.content}</MarkdownContent>}
+      {/* A stopped reply says so, under what it had written by then */}
+      {message.stopped && (
         <p className="text-[0.9375rem] text-muted-foreground">{t('insights.stoppedByUser')}</p>
-      ) : null}
+      )}
 
       {message.toolsUsed && message.toolsUsed.length > 0 ? (
         <ToolUsageHistory tools={message.toolsUsed} actions={actions} />
