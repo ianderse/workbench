@@ -15,6 +15,7 @@ import type { McpConnectorSettings } from '../../shared/types/settings';
 import { getDefaultMcpConnectorIds, getUsableCustomServers } from '../../shared/utils/mcp-connectors';
 import { appLog } from '../app-logger';
 import { getWslInfo } from '../platform/shell-runtime';
+import { isWindows } from '../platform';
 import { toRuntimeArg } from '../platform/runtime-exec';
 
 type McpServerEntry =
@@ -25,12 +26,32 @@ export interface ClaudeMcpConfig {
   mcpServers: Record<string, McpServerEntry>;
 }
 
+/**
+ * electron-mcp-server's executable has no `#!/usr/bin/env node` line, so on Linux and macOS (and
+ * in WSL) the shell runs it as a script and it fails at once; there npx runs it with node.
+ * Windows starts it through npm's .cmd shim, which already uses node
+ */
+function electronServer(): McpServerEntry {
+  const posix = !isWindows() || !!getWslInfo();
+  return posix
+    ? { type: 'stdio', command: 'npx', args: ['-y', '-p', 'electron-mcp-server', '-c', 'node "$(command -v electron-mcp-server)"'] }
+    : { type: 'stdio', command: 'npx', args: ['-y', 'electron-mcp-server'] };
+}
+
 /** Built-in connectors (Settings > Connectors) */
-const BUILTIN_SERVERS: Record<string, McpServerEntry> = {
-  context7: { type: 'stdio', command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'] },
-  electron: { type: 'stdio', command: 'npx', args: ['-y', 'electron-mcp-server'] },
-  puppeteer: { type: 'stdio', command: 'npx', args: ['-y', '@anthropic-ai/puppeteer-mcp-server'] },
-};
+function builtinServer(id: string): McpServerEntry | undefined {
+  switch (id) {
+    case 'context7':
+      return { type: 'stdio', command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'] };
+    case 'electron':
+      return electronServer();
+    case 'puppeteer':
+      // The MCP project's Puppeteer server (downloads Chromium the first time)
+      return { type: 'stdio', command: 'npx', args: ['-y', '@modelcontextprotocol/server-puppeteer'] };
+    default:
+      return undefined;
+  }
+}
 
 function customServerEntry(server: CustomMcpServer): McpServerEntry | null {
   if (server.type === 'command') {
@@ -41,6 +62,13 @@ function customServerEntry(server: CustomMcpServer): McpServerEntry | null {
   }
   return server.url ? { type: 'http', url: server.url, headers: server.headers } : null;
 }
+
+/**
+ * How long Claude Code waits for MCP servers to start (MCP_TIMEOUT). Its 30 second default is too
+ * short for a server's first start, when npx downloads it (Puppeteer also downloads Chromium);
+ * later starts come from npx's cache
+ */
+export const MCP_STARTUP_TIMEOUT_MS = 3 * 60 * 1000;
 
 /** MCP server key accepted by Claude Code (letters, digits, `_` and `-`) */
 function serverKey(id: string): string {
@@ -69,7 +97,7 @@ export function buildMcpConfig(ids: string[] | undefined, connectorSettings: Mcp
   const custom = getUsableCustomServers(connectorSettings);
   const mcpServers: Record<string, McpServerEntry> = {};
   for (const id of enabled) {
-    const builtin = BUILTIN_SERVERS[id];
+    const builtin = builtinServer(id);
     if (builtin) {
       warnWhenNpxMissingInWsl();
       mcpServers[id] = builtin;

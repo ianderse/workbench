@@ -27,7 +27,7 @@ import os from 'os';
 import path from 'path';
 import { resolveClaudeEnv } from './env';
 import { INITIAL_INPUT_ID, startClaudeProcess, type ClaudeProcessHandle, type TurnOrigin } from './process';
-import { buildMcpConfig } from './mcp-config';
+import { buildMcpConfig, MCP_STARTUP_TIMEOUT_MS } from './mcp-config';
 import { TASK_TOOLS_SERVER_NAME } from '../insights/task-tools-mcp';
 import { formatInboxSection, formatMessage } from '../task-messaging/broker';
 import { TASK_RUN_TOOL_NAMES } from '../task-messaging/tools';
@@ -1181,6 +1181,8 @@ no notes came with the request, so review the change against the task with fresh
     if (this.config.maxBudgetUsd && this.config.maxBudgetUsd > 0) args.push('--max-budget-usd', String(this.config.maxBudgetUsd));
     if (settings.fallbackModel?.trim()) args.push('--fallback-model', settings.fallbackModel.trim());
     const mcpConfig = buildMcpConfig(this.config.connectorIds, this.config.connectorSettings);
+    // Time for a connector's first start, when npx downloads it (unless the user set their own)
+    if (Object.keys(mcpConfig.mcpServers).length > 0 && !env.MCP_TIMEOUT) env.MCP_TIMEOUT = String(MCP_STARTUP_TIMEOUT_MS);
     if (workbenchServer && tempDir) {
       // Through a file, so the tools' token isn't in the process list
       const mcpConfigFile = path.join(tempDir, 'mcp-config.json');

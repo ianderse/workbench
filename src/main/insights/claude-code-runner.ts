@@ -30,7 +30,7 @@ import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-c
 import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
 import type { InsightsCliTools } from './prompts';
-import type { ClaudeMcpConfig } from '../claude-code/mcp-config';
+import { MCP_STARTUP_TIMEOUT_MS, type ClaudeMcpConfig } from '../claude-code/mcp-config';
 import { TASK_TOOLS_SERVER_NAME, toBridgeServer, type TaskToolsMcpServer, type TaskToolsStdioServer } from './task-tools-mcp';
 // The bridge's source, bundled as text and written next to the turn's other temp files
 import TASK_TOOLS_BRIDGE_SOURCE from './task-tools-bridge.cjs?raw';
@@ -391,6 +391,8 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
       await writeFile(configFile, JSON.stringify({ mcpServers }), 'utf-8');
       mcp = { configFile, taskTools: !!taskTools, servers: Object.keys(chatServers) };
       if (taskTools) env.MCP_TOOL_TIMEOUT = String(TASK_TOOL_TIMEOUT_MS);
+      // Time for a connector's first start, when npx downloads it (unless the user set their own)
+      if (mcp.servers.length > 0 && !env.MCP_TIMEOUT) env.MCP_TIMEOUT = String(MCP_STARTUP_TIMEOUT_MS);
     }
 
     const state = createStreamState();

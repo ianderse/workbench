@@ -29,6 +29,7 @@ process.stdin.on('end', () => {
     graphifyOut: process.env.GRAPHIFY_OUT ?? null,
     mcpConfig: args.includes('--mcp-config') ? JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')) : null,
     mcpToolTimeout: process.env.MCP_TOOL_TIMEOUT ?? null,
+    mcpTimeout: process.env.MCP_TIMEOUT ?? null,
     bridgeSource: (() => {
       if (!args.includes('--mcp-config')) return null;
       const server = JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.workbench;
@@ -251,9 +252,11 @@ describe('runInsights', () => {
     setRun(conversation);
     const context7 = { type: 'stdio' as const, command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'] };
     await (await run({ mcpServers: { context7 } })).promise;
-    const { args, mcpConfig, mcpToolTimeout } = record();
+    const { args, mcpConfig, mcpToolTimeout, mcpTimeout } = record();
 
     expect(mcpConfig).toEqual({ mcpServers: { context7 } });
+    // Time for the server's first start, when npx downloads it
+    expect(Number(mcpTimeout)).toBeGreaterThan(60 * 1000);
     expect(args).toContain('mcp__context7');
     expect(args).not.toContain(INSIGHTS_TASK_TOOLS_RULE);
     expect(mcpToolTimeout).toBeNull();
