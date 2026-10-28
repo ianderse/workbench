@@ -1,5 +1,5 @@
-import type { HumanApprovalOverride } from '../../shared/types/human-work';
-import { buildHumanApprovalOverridePrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
+import type { HumanApprovalOverride, HumanWorkstream } from '../../shared/types/human-work';
+import { buildHumanApprovalOverridePrompt, buildHumanWorkPrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
 /**
  * Claude Code task runner
  * =======================
@@ -165,6 +165,8 @@ export interface TaskAttachment {
 
 export interface TaskRunConfig {
   humanApprovalOverride?: HumanApprovalOverride;
+  /** Persisted scoped human decisions; carried separately from one revision's feedback. */
+  humanWork?: HumanWorkstream;
   taskId: string;
   projectId?: string;
   specId: string;
@@ -359,7 +361,7 @@ function buildSpecReviewSystemPrompt(config: TaskRunConfig, specDirRelative: str
 - Judge each spec section from evidence you saw: files you read, tests you ran, behaviour you observed. Do not assume a section is done because a ticket exists for it.
 - A gap needs the spec section it comes from and concrete evidence (a missing test, observed behaviour that differs from the spec, a missing file). Do not list opinions, style, or ideas beyond the spec. Write each gap's description so a coding agent with no other context can build it: what to build, the spec section to follow, acceptance criteria.
 - Answer with the structured report only.`,
-    ...(config.selfImprovePrompt ? [config.selfImprovePrompt] : []),
+    ...[humanDecisionPrompt(config), config.selfImprovePrompt].filter(Boolean),
   ].join('\n\n');
 }
 
@@ -433,10 +435,10 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
   ];
   if (componentBytes) componentBytes.standingInstructions = Buffer.byteLength(sections.join('\n\n'), 'utf8');
-  const humanOverride = buildHumanApprovalOverridePrompt(config.humanApprovalOverride);
-  if (humanOverride) {
-    sections.push(humanOverride);
-    if (componentBytes) componentBytes.standingInstructions += Buffer.byteLength(humanOverride, 'utf8');
+  const humanDecisions = humanDecisionPrompt(config);
+  if (humanDecisions) {
+    sections.push(humanDecisions);
+    if (componentBytes) componentBytes.standingInstructions += Buffer.byteLength(humanDecisions, 'utf8');
   }
   const optionalSections: Array<[string, string | undefined]> = [
     ['graphify', config.graphifyPrompt],
@@ -451,6 +453,27 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
     if (componentBytes) componentBytes[name] = Buffer.byteLength(text, 'utf8');
   }
   return sections.join('\n\n');
+}
+
+function humanDecisionPrompt(config: TaskRunConfig, context: 'task' | 'triage' = 'task'): string {
+  const receiptPath = toRuntimePath(path.join(config.specDir, 'task_metadata.json'));
+  return [buildHumanApprovalOverridePrompt(config.humanApprovalOverride), buildHumanWorkPrompt(config.humanWork, receiptPath, context)].filter(Boolean).join('\n\n');
+}
+
+/** Only an exact generated handoff is redundant with the durable system context. */
+function isRecordedHumanFeedback(config: TaskRunConfig): boolean {
+  const feedback = config.feedback?.trim();
+  if (!feedback || !config.humanWork) return false;
+  const receiptPath = toRuntimePath(path.join(config.specDir, 'task_metadata.json'));
+  const receipts = [buildHumanWorkPrompt(config.humanWork), buildHumanWorkPrompt(config.humanWork, receiptPath)];
+  const override = buildHumanApprovalOverridePrompt(config.humanApprovalOverride);
+  return receipts.some((prompt) => feedback === prompt || feedback === [override, prompt].filter(Boolean).join('\n\n'));
+}
+
+function feedbackText(config: TaskRunConfig): string | undefined {
+  return isRecordedHumanFeedback(config)
+    ? 'Apply the recorded human work and scoped decisions supplied in the system instructions.'
+    : config.feedback?.trim();
 }
 
 function taskBlock(config: TaskRunConfig): string {
@@ -472,7 +495,7 @@ function taskBlock(config: TaskRunConfig): string {
  */
 function restartNotes(config: TaskRunConfig, images: number): string {
   if (config.mode !== 'start') return '';
-  const feedback = config.feedback?.trim();
+  const feedback = feedbackText(config);
   if (!feedback && images === 0) return '';
   const opening = `\n\nAn earlier attempt at this task was discarded and you are starting it over. The reviewer's notes on that attempt:`;
   if (!feedback) {
@@ -501,13 +524,13 @@ ${feedback}
  * instruction left.
  */
 function reviewerFeedback(config: TaskRunConfig, images: number): string {
-  const feedback = config.feedback?.trim();
+  const feedback = feedbackText(config);
   if (feedback) {
     return `
 
 <feedback>
 ${feedback}
-</feedback>`;
+</feedback>${isRecordedHumanFeedback(config) && images > 0 ? `\n\n${images === 1 ? 'see the attached image' : `see the ${images} attached images`}.` : ''}`;
   }
   if (images === 0) return '';
   return `\n\n${images === 1 ? 'see the attached image' : `see the ${images} attached images`}.`;
@@ -991,7 +1014,7 @@ export class ClaudeTaskRun {
             targetRef: target.ref,
             targetName: target.ref,
             taskTitle: this.config.title,
-            taskDescription: this.config.description,
+            taskDescription: [this.config.description, humanDecisionPrompt(this.config)].filter(Boolean).join('\n\n'),
             verificationCommands: this.info.triage?.verification,
             profileId: this.config.profileId,
             // The task's own backend (Claude Code or OMP), not the app-wide one
@@ -1089,11 +1112,11 @@ export class ClaudeTaskRun {
       const named = this.config.feedbackAttachments?.length ?? 0;
       try {
         ({ triage, costUsd: triageCost } = await triageTask({
-          description: revision
+          description: [revision
             // Triage sizes the follow-up from the same statement of it the revise turn gets, with
             // the image filenames it already lists standing in for feedback the reviewer drew
             ? `${this.config.description}\n\nThis task was already implemented. Assess only the follow-up change the reviewer requested:${reviewerFeedback(this.config, named) || '\n\nthey left no notes with the request.'}`
-            : `${this.config.description}${restartNotes(this.config, named)}`,
+            : `${this.config.description}${restartNotes(this.config, named)}`, humanDecisionPrompt(this.config, 'triage')].filter(Boolean).join('\n\n'),
           cwd: this.config.worktreePath,
           attachmentNames: (revision ? this.config.feedbackAttachments ?? [] : this.config.attachments).map((a) => a.filename),
           settings,
@@ -1638,9 +1661,9 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
 1. Run ${verificationHint(triage)}. Fix failures your change caused.
 2. ${this.reviewSection && this.config.backend === 'omp'
   ? this.reviewSection
-  : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${this.config.backend === 'omp' ? 'Read the diff carefully as a reviewer who sees only the diff and the task.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees only the diff and the task."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
+  : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${this.config.backend === 'omp' ? 'Read the diff carefully as a reviewer who sees the diff, task and recorded human decisions.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees the diff, task and recorded human decisions."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
 3. Commit any remaining changes.${this.isUiWork(triage) && this.info.plan ? DESIGN_VALIDATION_PROMPT : ''}
-When an unfixed finding requires real human approval, a human decision, or participant observations, set requiresHuman: true. Keep it open, and never fabricate that evidence.
+Apply recorded human decisions within their stated scope before deciding what remains unresolved. When an unfixed finding still requires real human approval, a human decision, or participant observations, set requiresHuman: true. Keep it open, and never fabricate that evidence.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
       case 'spec_review':
@@ -2199,8 +2222,8 @@ no notes came with the request, so review the change against the task with fresh
     const started = Date.now();
     try {
       const result = await runClaudeText({
-        prompt: `${taskBlock(this.config)}\n\n${buildHumanApprovalOverridePrompt(this.config.humanApprovalOverride)}${this.config.feedback ? `\n\nRecorded reviewer feedback / evidence (verify its references):\n${this.config.feedback}` : ''}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`,
-        appendSystemPrompt: REVIEW_SYSTEM_PROMPT,
+        prompt: `${taskBlock(this.config)}${this.config.feedback && !isRecordedHumanFeedback(this.config) ? `\n\nRecorded reviewer feedback / evidence (verify its references):\n${this.config.feedback}` : ''}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`,
+        appendSystemPrompt: [REVIEW_SYSTEM_PROMPT, humanDecisionPrompt(this.config)].filter(Boolean).join('\n\n'),
         model: reviewModel,
         ompRole: ompRoleForJob('review'),
         effort: reviewEffort,

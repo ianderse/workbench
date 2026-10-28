@@ -195,7 +195,7 @@ export function formatReviewForValidation(report: ReviewReport): string {
   return `A separate reviewer with fresh context read the diff and found:\n${lines.join('\n')}\n\nReviewer summary: ${report.summary || '(none)'}\nCheck each blocker and major finding against the code: fix the ones that are real, and skip any that are mistaken. Minor findings are optional.`;
 }
 
-export const REVIEW_SYSTEM_PROMPT = `You are a code reviewer with fresh eyes. You see only the task and the diff of the change made for it; you did not write it.
+export const REVIEW_SYSTEM_PROMPT = `You are a code reviewer with fresh eyes. You see the task, the diff of the change made for it, and any recorded human decisions supplied with them; you did not write it.
 Look for real problems: bugs, missed requirements from the task, broken edge cases, security issues, and changes that break other code. Use your read, grep and glob tools to read the code around the changes and the code that uses them before you report a problem; do not report guesses.
 Flag requiresHuman: true for missing real human approvals, decisions or participant observations. Keep them as unmet requirements; an agent cannot fabricate them.
 Do not report style, naming, formatting or missing nice-to-haves. Do not modify any file.

@@ -103,10 +103,11 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
   const incomplete = stream?.items.filter((item) => { const fields = draftFor(item); return !(fields.owner.trim() && fields.response.trim() && fields.evidence.trim()); }).length ?? 0;
   const ready = overrideActive || !!stream?.items.length && incomplete === 0;
   const needsSubmission = stream?.items.some((item) => item.status !== 'submitted' || edited(item));
+  const responsesRecorded = !overrideActive && !!stream?.items.length && !needsSubmission && remaining.length === 0;
   return <section className="mt-4 space-y-3 rounded-lg border border-warning/50 bg-warning/5 p-4" aria-label={t('humanWork.title')}>
-    <h3 className="text-sm font-medium">{t(overrideActive ? 'humanWork.recordedDecisionTitle' : 'humanWork.checklistTitle')}</h3>
-    <p className="text-xs text-muted-foreground">{t(overrideActive ? 'humanWork.recordedDecisionHelp' : 'humanWork.checklistHelp')}</p>
-    {!overrideActive && <ol className="list-decimal space-y-2 pl-5 text-sm">
+    <h3 className="text-sm font-medium">{t(overrideActive ? 'humanWork.recordedDecisionTitle' : responsesRecorded ? 'humanWork.recordedResponsesTitle' : 'humanWork.checklistTitle')}</h3>
+    <p className="text-xs text-muted-foreground">{t(overrideActive ? 'humanWork.recordedDecisionHelp' : responsesRecorded ? 'humanWork.recordedResponsesHelp' : 'humanWork.checklistHelp')}</p>
+    {!overrideActive && !responsesRecorded && <ol className="list-decimal space-y-2 pl-5 text-sm">
       <li>{t('humanWork.stepOpen')}</li>
       {topics.has('study') && <li>{t('humanWork.stepStudy')}</li>}
       {topics.has('visual') && <li>{t('humanWork.stepVisual')}</li>}
@@ -125,7 +126,13 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
     </form>}
     <HumanReviewMaterials key={`${task.projectId}:${task.id}`} task={cached ?? task} />
     {!overrideActive && remaining.map((finding) => <div key={humanFindingKey(finding)} className="space-y-2 rounded border p-3"><p className="text-sm wrap-anywhere">{finding.description}</p><Button size="sm" variant="outline" disabled={!available || busy || handedBack} onClick={() => void mutate({ action: 'create', expectedRevision: stream?.revision ?? 0, finding })}>{t('humanWork.track')}</Button></div>)}
-    {groups.map(group => { const item = group.at(-1)!; return <HumanAction key={`${item.id}:${item.revision}`} item={item} related={group.filter(note => note.id !== item.id)} draft={draftFor(item)} change={(fields) => setDrafts(current => ({ ...current, ...Object.fromEntries(group.map(note => [note.id, { revision: note.revision, fields }])) }))} disabled={!available || busy || handedBack || overrideActive} save={fields => void mutate({ action: 'update', expectedRevision: stream!.revision, ...fields })} />; })}
+    {groups.map(group => {
+      const item = group.at(-1)!;
+      const action = <HumanAction item={item} related={group.filter(note => note.id !== item.id)} draft={draftFor(item)} change={(fields) => setDrafts(current => ({ ...current, ...Object.fromEntries(group.map(note => [note.id, { revision: note.revision, fields }])) }))} disabled={!available || busy || handedBack || overrideActive} save={fields => void mutate({ action: 'update', expectedRevision: stream!.revision, ...fields })} />;
+      return item.status === 'submitted' && !edited(item)
+        ? <details key={`${item.id}:${item.revision}`} className="rounded border p-3 text-sm"><summary>{t('humanWork.recordedResponse', { owner: item.owner, count: group.length })}</summary><p className="mt-2 whitespace-pre-wrap wrap-anywhere">{item.response}</p><div className="mt-3">{action}</div></details>
+        : <div key={`${item.id}:${item.revision}`}>{action}</div>;
+    })}
     {(!!stream?.items.length || overrideActive) && <><p className="text-xs text-muted-foreground">{t(overrideActive ? 'humanWork.overrideHandoffHelp' : 'humanWork.handoffHelp')}</p>{!overrideActive && incomplete > 0 && <p className="text-xs text-muted-foreground">{t('humanWork.completeFields')}</p>}{!overrideActive && remaining.length > 0 && <p className="text-xs text-muted-foreground">{t('humanWork.trackRemaining', { count: remaining.length })}</p>}<Button size="sm" disabled={!ready || busy || handedBack || !available || (!overrideActive && remaining.length > 0)} onClick={() => void handBack()}>{t(overrideActive ? 'humanWork.continueOverride' : needsSubmission ? 'humanWork.submitAndContinue' : 'humanWork.handBack')}</Button></>}
     {handedBack && <p role="status" className="text-sm">{t('humanWork.handedBack')}</p>}
   </section>;

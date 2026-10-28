@@ -558,6 +558,7 @@ export class AgentManager extends EventEmitter {
     const config: TaskRunConfig = {
       taskId,
       ...(task.metadata?.humanWork?.approvalOverride ? { humanApprovalOverride: task.metadata.humanWork.approvalOverride } : {}),
+      ...(task.metadata?.humanWork ? { humanWork: structuredClone(task.metadata.humanWork) } : {}),
       projectId: project.id,
       specId: task.specId,
       specDir,

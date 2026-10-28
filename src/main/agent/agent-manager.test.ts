@@ -230,6 +230,23 @@ describe('AgentManager', () => {
     expect((await nextRun(1)).config.humanApprovalOverride).toEqual(override);
   });
 
+  it('passes an independent snapshot of named human receipts into ordinary starts and revisions', async () => {
+    const humanWork = { revision: 13, items: [{ id: 'art-receipt', revision: 2, owner: 'Ian', status: 'submitted' as const,
+      response: 'Reviewed the art asset, approved as is.', evidence: 'docs/art-review.md', at: '2026-10-28T16:00:00Z', createdAt: '2026-10-27T16:00:00Z',
+      finding: { severity: 'major' as const, description: 'Human art approval required', file: 'docs/art.md', line: 7, requiresHuman: true }, history: [] }] };
+    for (const mode of ['start', 'revise'] as const) {
+      const task = makeTask({ id: `receipt-${mode}`, specId: `receipt-${mode}` });
+      task.metadata = { ...task.metadata, humanWork: structuredClone(humanWork) };
+      await manager.startTask(task.id, { project, task, mode });
+      const run = await nextRun(mode === 'start' ? 1 : 2);
+      expect(run.config.humanWork).toEqual(humanWork);
+      expect(run.config.humanWork).not.toBe(task.metadata.humanWork);
+      expect(run.config.humanApprovalOverride).toBeUndefined();
+      task.metadata.humanWork!.items[0].response = 'A later revision';
+      expect(run.config.humanWork!.items[0].response).toBe('Reviewed the art asset, approved as is.');
+    }
+  });
+
   it('applies a pending local merge on start only to a task without a pull request', async () => {
     pendingResync.value = { ref: 'develop', into: 'develop', via: 'local', merged: [], at: '2026-10-01T00:00:00Z' };
     try {

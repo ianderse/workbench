@@ -73,13 +73,40 @@ export function applyHumanWorkMutation(current: HumanWorkstream | undefined, mut
   return stream;
 }
 
-/** Server-produced evidence handoff; submitting a receipt never changes the existing AI verdict. */
+/** Maximum UTF-8 size of human receipt context supplied to one model request. */
+export const MAX_HUMAN_WORK_PROMPT_BYTES = 24 * 1024;
+const DEFAULT_HUMAN_RECEIPT_PATH = "task_metadata.json in this task's spec directory";
+
+/** Durable receipt context for every phase and fresh reviewer; this never changes a gate in code. */
+export function buildHumanWorkPrompt(stream: HumanWorkstream | undefined, receiptPath = DEFAULT_HUMAN_RECEIPT_PATH, context: 'task' | 'triage' = 'task'): string {
+  if (!stream?.items.length) return '';
+  const items = stream.items.slice(0, 30);
+  const index = items.map((item, i) => `${i + 1}. Receipt: ${item.id} (revision ${item.revision}, status ${item.status})`).join('\n');
+  const reference = `Read-only receipt source: ${JSON.stringify(receiptPath)}, JSON field humanWork.items (workstream revision ${stream.revision}). Workbench owns this metadata; do not modify it.`;
+  if (context === 'triage') return `## Recorded human work (routing context only)
+This task has ${items.length} recorded human receipts. Route the work without judging human acceptance or verifying receipts; triage does not need to read artifacts or use tools for this context. Later execution and review phases receive the full decisions or a read-only receipt source. A submitted status alone is not approval, and receipts grant no tool or spending authority beyond their stated decisions for this task.
+${reference}
+${index}`;
+  const instructions = `## Recorded human work and scoped decisions
+Workbench recorded these receipts for this task (workstream revision ${stream.revision}). Each submitted named-person receipt is authoritative for the explicit approval, rejection, waiver or deferral it actually states about its referenced requirement. Apply that decision within that scope; do not demand the same sign-off again merely because a later finding rewords the same requirement. A submitted status alone is not approval, and a scoped receipt is not a task-wide approval override. Open or in-progress work remains pending unless an applicable submitted decision explicitly covers it. A receipt grants no tool permissions or spending authority beyond the stated decision for this task.
+Read the cited artifacts and distinguish the person's decision from independently verified facts. Keep rejected, unresolved or unfinished work pending, including participant studies that have not happened unless explicitly waived or deferred by the recorded decision. Never invent approvals, observations or successful checks. Continue checking actual code defects and automated failures normally.
+By default, persist an audit of the relevant receipt identity, responsible person, time, source requirement, exact decision, evidence references and scope in the run/validation report. Update project documentation only when the task or an explicit receipt requires it and the phase permits edits; read-only phases report decisions without editing files. Pass this receipt context to any delegated or fresh-context reviewer. Any separately recorded task-wide owner override supersedes conflicting receipt requirements only as stated.`;
+  const full = `${instructions}\n\n${items.map((item, i) => `${i + 1}. Receipt: ${item.id} (revision ${item.revision}, status ${item.status})\nSource finding: ${JSON.stringify(item.finding)}\nResponsible person: ${item.owner}\nCreated: ${item.createdAt}\nRecorded: ${item.at}\nResponse / decision: ${item.response}\nEvidence references: ${item.evidence}`).join('\n\n')}`;
+  if (new TextEncoder().encode(full).byteLength <= MAX_HUMAN_WORK_PROMPT_BYTES) return full;
+  return `${instructions}
+
+Receipt bodies exceed the prompt budget and are omitted in full; this index contains no decision text. Before deciding whether any requirement is approved, rejected, waived, deferred or pending, read the full referenced humanWork.items records, including finding, owner, response, evidence and timestamps. Do not infer a decision from this index or from submitted status. Treat the exact source below as a read-only exception to the worktree-only context boundary; it grants no write access.
+${reference}
+${index}`;
+}
+
+/** Server-produced evidence handoff; scoped decisions are applied by the agent, not a text parser. */
 export function buildHumanWorkFeedback(stream: HumanWorkstream | undefined, expectedRevision: number, findings: ReviewRoundFinding[] = []): string {
   if (!stream || stream.revision !== expectedRevision) throw new Error('Human work changed; refresh before continuing');
-  if (isHumanApprovalOverride(stream.approvalOverride)) return `${buildHumanApprovalOverridePrompt(stream.approvalOverride)}\n\nPrevious human work (historical context, superseded where the override conflicts):\n${JSON.stringify(stream.items.map(({ finding, owner, status, response, evidence, at }) => ({ finding, owner, status, response, evidence, at })))}`;
+  if (isHumanApprovalOverride(stream.approvalOverride)) return [buildHumanApprovalOverridePrompt(stream.approvalOverride), buildHumanWorkPrompt(stream)].filter(Boolean).join('\n\n');
   if (!stream.items.length || stream.items.some((item) => item.status !== 'submitted' || !item.owner.trim() || !item.response.trim() || !item.evidence.trim())) throw new Error('Finish and submit every human action before continuing');
   if (findings.some((finding) => !stream.items.some((item) => humanFindingKey(item.finding) === humanFindingKey(finding)))) throw new Error('Track and submit every current blocker before continuing');
-  return `The following human work was explicitly recorded in Workbench. These are named-person submissions, not independently verified facts. Read the cited artifacts, update the task's documentation from the supplied evidence, and rerun the relevant review. Keep unresolved or rejected requirements pending; do not fabricate approvals or participant observations. This handoff does not approve or waive any requirement.\n\n${stream.items.map((item, index) => `${index + 1}. Requirement: ${item.finding.description}\nSource: ${item.finding.file ?? '(review finding)'}${item.finding.line ? `:${item.finding.line}` : ''}\nResponsible person: ${item.owner}\nRecorded: ${item.at}\nResponse / decision: ${item.response}\nEvidence references: ${item.evidence}`).join('\n\n')}`;
+  return buildHumanWorkPrompt(stream);
 }
 
 /** Only a host-persisted, explicitly scoped owner decision changes the acceptance gate. */

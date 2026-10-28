@@ -32,8 +32,8 @@ it('tracks a legacy review blocker, requires a complete receipt, and hands off t
   fireEvent.change(screen.getByLabelText('Response, decision or participant observations'), { target: { value: 'Reviewer rejected image 2.' } });
   fireEvent.change(screen.getByLabelText('Evidence references (report paths, review notes, artifact URLs)'), { target: { value: 'docs/reviewer-notes.md' } });
   fireEvent.click(screen.getByRole('button', { name: 'Save human work' }));
-  await waitFor(() => expect(screen.getByRole('button', { name: 'Continue with submitted evidence' })).toBeEnabled());
-  fireEvent.click(screen.getByRole('button', { name: 'Continue with submitted evidence' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Continue with recorded decisions' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: 'Continue with recorded decisions' }));
   await waitFor(() => expect(review).toHaveBeenCalledWith('001-human', false, undefined, undefined, { humanWorkRevision: 2 }, 'p'));
   expect(await screen.findByRole('status')).toHaveTextContent('existing work and session are preserved');
 });
@@ -76,14 +76,14 @@ it('saves unsaved complete fields before continuing and never launches if a save
 
 it('records an explicit task override and continues without forcing additional approval evidence', async () => {
   render(<HumanWorkPanel task={task} findings={[finding]} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Override human approval for this task' }));
-  expect(screen.getByRole('button', { name: 'Apply override and continue' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Approve human requirements for this task' }));
+  expect(screen.getByRole('button', { name: 'Record approval and continue' })).toBeDisabled();
   fireEvent.change(screen.getByLabelText('Approver'), { target: { value: 'Ian Andersen' } });
-  fireEvent.change(screen.getByLabelText('Override decision and reason'), { target: { value: 'Approve all current viewports including Research. Defer the participant study until Spec 7.' } });
-  fireEvent.click(screen.getByRole('button', { name: 'Apply override and continue' }));
+  fireEvent.change(screen.getByLabelText('Approval, waiver or deferral'), { target: { value: 'Approve all current viewports including Research. Defer the participant study until Spec 7.' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Record approval and continue' }));
   await waitFor(() => expect(review).toHaveBeenCalledWith('001-human', false, undefined, undefined, { humanWorkRevision: 1 }, 'p'));
   expect(mutate).toHaveBeenCalledWith('p', '001-human', expect.objectContaining({ action: 'override', expectedRevision: 0, approver: 'Ian Andersen' }));
-  expect(screen.getByText('Human approval overridden by Ian Andersen')).toBeInTheDocument();
+  expect(screen.getByText('Human approval recorded by Ian Andersen')).toBeInTheDocument();
   expect(screen.getByRole('heading', { name: 'Recorded human approval decision' })).toBeInTheDocument();
   expect(screen.queryByRole('heading', { name: 'What needs your input' })).not.toBeInTheDocument();
   expect(useTaskStore.getState().tasks[0].metadata?.humanWork?.items).toEqual([]);
@@ -94,10 +94,25 @@ it('can continue with a persisted override even when historic human actions are 
   const overridden = applyHumanWorkMutation(humanWork, { action: 'override', expectedRevision: 1, approver: 'Ian', reason: 'Waive renewed approval for this task.' }, [finding], '', '2026-10-27T16:01:00Z');
   useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork: overridden } }] });
   render(<HumanWorkPanel task={task} findings={[finding]} />);
-  expect(screen.getByRole('button', { name: 'Continue with override' })).toBeEnabled();
-  fireEvent.click(screen.getByRole('button', { name: 'Continue with override' }));
+  expect(screen.getByRole('button', { name: 'Continue with recorded approval' })).toBeEnabled();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue with recorded approval' }));
   await waitFor(() => expect(review).toHaveBeenCalledWith('001-human', false, undefined, undefined, { humanWorkRevision: 2 }, 'p'));
   expect(mutate).not.toHaveBeenCalled();
+});
+
+it.each(['Reviewed the art asset, approved as is.', 'Image 2 is rejected; replace it.'])('reuses the recorded decision without requesting another submission: %s', async (response) => {
+  const created = applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding }, [finding], 'action-1', '2026-10-27T16:00:00Z');
+  const submitted = applyHumanWorkMutation(created, { action: 'update', expectedRevision: 1, id: 'action-1', owner: 'Ian', status: 'submitted', response, evidence: 'Recorded owner decision' }, [finding], '', '2026-10-27T16:01:00Z');
+  useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork: submitted } }] });
+  render(<HumanWorkPanel task={task} findings={[finding]} />);
+  expect(screen.getByRole('heading', { name: 'Your responses are recorded' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'What needs your input' })).not.toBeInTheDocument();
+  expect(screen.getByText('Recorded response from Ian').closest('details')).not.toHaveAttribute('open');
+  fireEvent.click(screen.getByRole('button', { name: 'Continue with recorded decisions' }));
+  await waitFor(() => expect(review).toHaveBeenCalledWith('001-human', false, undefined, undefined, { humanWorkRevision: 2 }, 'p'));
+  expect(mutate).not.toHaveBeenCalled();
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork?.items[0].response).toBe(response);
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork?.approvalOverride).toBeUndefined();
 });
 
 it('records a shared response once for related notes and hands back every original requirement', async () => {

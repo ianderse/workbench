@@ -201,6 +201,28 @@ describe('ClaudeTaskRun resync', () => {
     expect(info.summary).toBe('Still works');
   });
 
+  it('retains persisted human receipts in a resumed resync and its validation without one-off feedback', async () => {
+    runInfo([done('triage'), done('implement'), done('validate')]);
+    const request = mergeIntoMain();
+    scripts.push(
+      { effect: () => git(worktree, 'merge', '--no-edit', 'main'), messages: [result()] },
+      { messages: [validated()] },
+    );
+    const humanWork = { revision: 13, items: [{ id: 'art-receipt', revision: 2, owner: 'Ian', status: 'submitted',
+      response: 'Reviewed the art asset, approved as is.', evidence: 'docs/art-review.md',
+      at: '2026-10-28T16:00:00Z', createdAt: '2026-10-27T16:00:00Z', history: [],
+      finding: { severity: 'major', description: 'Human art approval required', file: 'docs/art.md', line: 7, requiresHuman: true } }] };
+    await makeRun(request, {}, { humanWork }).run();
+    expect(spawned).toHaveLength(2);
+    for (const options of spawned) {
+      const prompt = argValue(options.args, '--append-system-prompt');
+      expect(prompt).toContain('Receipt: art-receipt');
+      expect(prompt).toContain('Reviewed the art asset, approved as is.');
+      expect(prompt).toContain('do not demand the same sign-off again merely because a later finding rewords');
+      expect(prompt).toContain('Evidence references: docs/art-review.md');
+    }
+  });
+
   it('gives the session one more pass when its merge lost changes from the base branch', async () => {
     runInfo([done('triage'), done('implement'), done('validate')]);
     commitFile(worktree, 'a.txt', 'one\nTWO FROM B\nthree\n', 'task b changes a');

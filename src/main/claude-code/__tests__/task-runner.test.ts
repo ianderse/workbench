@@ -5,6 +5,10 @@ import path from 'path';
 import type { ClaudeProcessOptions } from '../process';
 import type { ClaudeStreamMessage } from '../stream-types';
 import type { TaskTriage } from '../../../shared/types/claude-code';
+import type { HumanWorkstream } from '../../../shared/types/human-work';
+import { buildHumanApprovalOverridePrompt, buildHumanWorkFeedback, buildHumanWorkPrompt } from '../../../shared/utils/human-work';
+import * as reviewDiff from '../review-diff';
+import * as runText from '../run-text';
 import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-code';
 import { mutateProjectMemory, readMemoryContexts } from '../../self-improve/project-memory';
 import { closeTaskToolsServer } from '../../insights/task-tools-server';
@@ -135,6 +139,23 @@ function argValue(args: string[], flag: string): string | undefined {
   return index === -1 ? undefined : args[index + 1];
 }
 
+const humanReceipts: HumanWorkstream = { revision: 13, items: [{
+  id: 'art-receipt', revision: 2, owner: 'Ian', status: 'submitted', response: 'Reviewed the art asset, approved as is.',
+  evidence: 'docs/art-review.md', at: '2026-10-28T16:00:00Z', createdAt: '2026-10-27T16:00:00Z', history: [],
+  finding: { severity: 'major', description: 'Human art approval required', file: 'docs/art.md', line: 7, requiresHuman: true },
+}, {
+  id: 'study-receipt', revision: 1, owner: 'Ian', status: 'submitted', response: 'Study rejected; no participant sessions have run.',
+  evidence: 'docs/study-review.md', at: '2026-10-28T16:01:00Z', createdAt: '2026-10-27T16:00:00Z', history: [],
+  finding: { severity: 'major', description: 'Participant sessions and observations required', file: 'docs/study.md', requiresHuman: true },
+}] };
+
+function largeHumanReceipts(): HumanWorkstream {
+  const stream = structuredClone(humanReceipts);
+  stream.items[0].response += `\n${'界'.repeat(7900)}`;
+  stream.items[0].evidence = 'E'.repeat(4000);
+  return stream;
+}
+
 describe('ClaudeTaskRun', () => {
   let specDir: string;
   let worktree: string;
@@ -175,6 +196,103 @@ describe('ClaudeTaskRun', () => {
       ...overrides,
     }, callbacks);
   }
+
+  it.each(['claude', 'omp'])('carries persisted scoped receipts in every %s phase and triage without revision feedback', async (backend) => {
+    triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+    scripts.push(
+      { messages: [result('receipts', { structured_output: { plan: '# Plan\nBuild the task' } })] },
+      { messages: [result('receipts')] },
+      { messages: [result('receipts', { structured_output: { status: 'passed', summary: 'Checked', checks: [], findings: [] } })] },
+    );
+    await makeRun({ backend, humanWork: humanReceipts }).run();
+    expect(triageMock.mock.calls[0][0].description).toContain('Receipt: art-receipt');
+    const prompts = backend === 'omp'
+      ? ompSpawned.map((options) => String(options.appendSystemPrompt))
+      : spawned.map((options) => argValue(options.args, '--append-system-prompt')!);
+    expect(prompts).toHaveLength(3);
+    for (const prompt of prompts) {
+      expect(prompt).toContain('Receipt: art-receipt');
+      expect(prompt).toContain('Reviewed the art asset, approved as is.');
+      expect(prompt).toContain('Study rejected; no participant sessions have run.');
+      expect(prompt).toContain('Keep rejected, unresolved or unfinished work pending');
+      expect(prompt).not.toContain('Owner override:');
+    }
+  });
+
+  it.each([false, true])('passes bounded receipt context once to the fresh OMP reviewer and keeps test failures authoritative (large: %s)', async (large) => {
+    const diff = vi.spyOn(reviewDiff, 'collectReviewDiff').mockResolvedValue('diff --git a/art.ts b/art.ts\n+art');
+    const review = vi.spyOn(runText, 'runClaudeText').mockResolvedValue({ text: 'Reviewed', structured: { summary: 'Reviewed decisions', findings: [] } });
+    try {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push(
+        { messages: [result('receipts-review')] },
+        { messages: [result('receipts-review', { structured_output: { status: 'failed', summary: 'Tests failed', checks: [{ name: 'npm test', passed: false }], findings: [] } })] },
+      );
+      const events: string[] = [];
+      const humanWork = large ? largeHumanReceipts() : humanReceipts;
+      await makeRun({ backend: 'omp', humanWork, feedback: buildHumanWorkFeedback(humanWork, 13),
+        settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, aiReviewRounds: 1 } }, { onTaskEvent: (type: string) => events.push(type) }).run();
+      const prompt = `${review.mock.calls[0][0].appendSystemPrompt}\n${String(review.mock.calls[0][0].prompt)}`;
+      expect(prompt.match(/Receipt: art-receipt/g)).toHaveLength(1);
+      if (large) {
+        expect(review.mock.calls[0][0].appendSystemPrompt).toContain(path.join(specDir, 'task_metadata.json'));
+        expect(prompt).toContain('read the full referenced humanWork.items records');
+        expect(prompt).not.toContain('Response / decision:');
+      } else {
+        expect(prompt).toContain('Responsible person: Ian');
+        expect(prompt).toContain('Recorded: 2026-10-28T16:00:00Z');
+        expect(prompt).toContain('"file":"docs/art.md","line":7');
+        expect(prompt).toContain('Reviewed the art asset, approved as is.');
+        expect(prompt).toContain('Study rejected; no participant sessions have run.');
+        expect(prompt).toContain('Evidence references: docs/art-review.md');
+      }
+      expect(prompt).toContain('persist an audit');
+      expect(events.at(-1)).toBe('QA_FAILED');
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.status).toBe('failed');
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.humanApprovalOverride).toBeUndefined();
+    } finally {
+      diff.mockRestore();
+      review.mockRestore();
+    }
+  });
+
+  it.each([
+    { withOverride: false, configuredPath: false }, { withOverride: true, configuredPath: false },
+    { withOverride: false, configuredPath: true }, { withOverride: true, configuredPath: true },
+  ])('deduplicates exact bounded receipt handoffs with default/configured paths and preserves attachments (%j)', async ({ withOverride, configuredPath }) => {
+    const humanWork = largeHumanReceipts();
+    if (withOverride) humanWork.approvalOverride = { scope: 'task-human-approval', approver: 'Ian', reason: 'Approve only the current task human requirements', at: '2026-10-28T16:00:00Z', revision: 13 };
+    triageMock.mockResolvedValue({ triage: triage() });
+    writeFileSync(path.join(specDir, 'human-review.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    scripts.push({ messages: [result('human-handoff')] });
+    await makeRun({ mode: 'revise', humanWork, humanApprovalOverride: humanWork.approvalOverride,
+      feedback: configuredPath
+        ? [buildHumanApprovalOverridePrompt(humanWork.approvalOverride), buildHumanWorkPrompt(humanWork, path.join(specDir, 'task_metadata.json'))].filter(Boolean).join('\n\n')
+        : buildHumanWorkFeedback(humanWork, 13),
+      feedbackAttachments: [{ path: path.join(specDir, 'human-review.png'), filename: 'human-review.png', mimeType: 'image/png' }],
+      settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false },
+    }).run();
+    const input = spawned[0].input as Array<{ type: string; text?: string }>;
+    const system = argValue(spawned[0].args, '--append-system-prompt')!;
+    const wholePrompt = `${system}\n${input.map((block) => block.text ?? '').join('\n')}`;
+    expect(wholePrompt.match(/Receipt: art-receipt/g)).toHaveLength(1);
+    expect(input[0].text).toContain('Apply the recorded human work and scoped decisions supplied in the system instructions');
+    expect(input[0].text).toContain('see the attached image');
+    expect(input.some((block) => block.type === 'image')).toBe(true);
+    expect(triageMock.mock.calls[0][0].attachmentNames).toEqual(['human-review.png']);
+    expect(triageMock.mock.calls[0][0].description.match(/Receipt: art-receipt/g)).toHaveLength(1);
+    expect(system.includes('## Owner override:')).toBe(withOverride);
+  });
+
+  it('keeps additional reviewer notes instead of stripping text that contains a receipt handoff', async () => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    scripts.push({ messages: [result('human-notes')] });
+    const feedback = `${buildHumanWorkFeedback(humanReceipts, 13)}\n\nAlso fix the input validation.`;
+    await makeRun({ mode: 'revise', humanWork: humanReceipts, feedback,
+      settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, validation: false } }).run();
+    const input = spawned[0].input as Array<{ text?: string }>;
+    expect(input[0].text).toContain(feedback);
+  });
 
   it('triages, plans, implements and validates in one resumed session', async () => {
     triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }), costUsd: 0.01 });
@@ -435,6 +553,16 @@ describe('ClaudeTaskRun', () => {
       expect(spawned).toHaveLength(2);
       expect(events.at(-1)).toBe('QA_FAILED');
       expect(loadClaudeRunInfo(specDir)?.reviewVerdict).toMatchObject({ status: 'failed', rounds: 1, maxRounds: 3, failure: { openFindings: [{ requiresHuman: true }] } });
+    });
+
+    it('does not turn submitted art approval receipts into a blanket pass for an unfinished study', async () => {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('receipt-scope')] }, failing('receipt-scope', [finding('Participant study remains unfinished', { requiresHuman: true })], 'failed'));
+      const events: string[] = [];
+      await makeRun({ humanWork: humanReceipts }, { onTaskEvent: (type: string) => events.push(type) }).run();
+      expect(events.at(-1)).toBe('QA_FAILED');
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict).toMatchObject({ status: 'failed', failure: { openFindings: [{ description: 'Participant study remains unfinished', requiresHuman: true }] } });
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.humanApprovalOverride).toBeUndefined();
     });
 
     it('honors the persisted owner override even when the model repeats a human blocker, retaining the raw report', async () => {

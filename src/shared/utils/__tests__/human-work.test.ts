@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { applyHumanWorkMutation, buildHumanWorkFeedback, groupHumanWorkItems } from '../human-work';
+import { applyHumanWorkMutation, buildHumanWorkFeedback, buildHumanWorkPrompt, groupHumanWorkItems, MAX_HUMAN_WORK_PROMPT_BYTES } from '../human-work';
 import type { ReviewRoundFinding } from '../../types/claude-code';
 const finding: ReviewRoundFinding = { severity: 'blocker', description: 'A real reviewer must approve the committed images.', file: 'docs/report.md', line: 7 };
 const at = '2026-10-27T16:00:00.000Z';
@@ -17,7 +17,8 @@ describe('human work records', () => {
     expect(submitted.items[0].history).toHaveLength(2);
     const feedback = buildHumanWorkFeedback(submitted, 3, [finding]);
     expect(feedback).toContain('Reviewer rejected image 2');
-    expect(feedback).toContain('does not approve or waive');
+    expect(feedback).toContain('Keep rejected, unresolved or unfinished work pending');
+    expect(feedback).toContain('A submitted status alone is not approval');
     expect(feedback).toContain('Responsible person: Ian');
     expect(submitted.items[0].finding).toEqual(finding);
   });
@@ -31,6 +32,69 @@ describe('human work records', () => {
     expect(() => buildHumanWorkFeedback(submitted, 2, [finding, { ...finding, description: 'Three participants need to be observed.' }])).toThrow('every current blocker');
     expect(() => buildHumanWorkFeedback(submitted, 1)).toThrow('changed');
   });
+});
+
+it('carries actual scoped approvals with their audit identity without turning rejection or unfinished study into approval', () => {
+  const approved = applyHumanWorkMutation(create(), { action: 'update', expectedRevision: 1, id: 'human-1', owner: 'Ian', status: 'submitted', response: 'Reviewed the art asset, approved as is.', evidence: 'docs/art-review.md' }, [finding], '', at);
+  const before = structuredClone(approved);
+  const text = buildHumanWorkFeedback(approved, 2, [finding]);
+  expect(text).toContain('authoritative for the explicit approval, rejection, waiver or deferral it actually states');
+  expect(text).toContain('Reviewed the art asset, approved as is.');
+  expect(text).toContain('Receipt: human-1 (revision 2, status submitted)');
+  expect(text).toContain(`Source finding: ${JSON.stringify(finding)}`);
+  expect(text).toContain('Responsible person: Ian');
+  expect(text).toContain(`Recorded: ${at}`);
+  expect(text).toContain('Evidence references: docs/art-review.md');
+  expect(text).toContain('do not demand the same sign-off again merely because a later finding rewords');
+  expect(text).toContain('persist an audit');
+  expect(text).toContain('in the run/validation report');
+  expect(text).toContain('Update project documentation only when the task or an explicit receipt requires it');
+  expect(text).toContain('Continue checking actual code defects and automated failures normally');
+  expect(text).toContain('grants no tool permissions or spending authority beyond the stated decision for this task');
+  expect(text).not.toContain('This handoff does not approve or waive');
+  expect(approved).toEqual(before);
+  expect(approved.approvalOverride).toBeUndefined();
+  const rejected = structuredClone(approved);
+  rejected.items[0].response = 'Rejected the art; the participant study has not happened.';
+  expect(buildHumanWorkPrompt(rejected)).toContain('Rejected the art; the participant study has not happened.');
+  expect(buildHumanWorkPrompt(rejected)).toContain('Keep rejected, unresolved or unfinished work pending');
+  expect(buildHumanWorkPrompt(rejected)).toContain('including participant studies that have not happened unless explicitly waived or deferred');
+});
+
+it('bounds maximal saved receipt bodies without partially quoting or changing their decisions', () => {
+  const stream = create();
+  stream.revision = 60;
+  stream.items = Array.from({ length: 30 }, (_, i) => ({ ...structuredClone(stream.items[0]), id: `receipt-${String(i).padStart(2, '0')}`,
+    owner: 'N'.repeat(160), status: 'submitted' as const, response: `${i % 2 ? 'Rejected' : 'Approved'}${'界'.repeat(7992)}`.slice(0, 8000), evidence: 'E'.repeat(4000) }));
+  const before = structuredClone(stream);
+  const receiptPath = '/project/.workbench/tasks/151-art/task_metadata.json';
+  const prompt = buildHumanWorkPrompt(stream, receiptPath);
+  expect(new TextEncoder().encode(prompt).byteLength).toBeLessThanOrEqual(MAX_HUMAN_WORK_PROMPT_BYTES);
+  expect(buildHumanWorkPrompt(stream, receiptPath)).toBe(prompt);
+  expect(prompt.match(/Receipt: receipt-/g)).toHaveLength(30);
+  expect(prompt).toContain(receiptPath);
+  expect(prompt).toContain('JSON field humanWork.items');
+  expect(prompt).toContain('read the full referenced humanWork.items records');
+  expect(prompt).toContain('finding, owner, response, evidence and timestamps');
+  expect(prompt).toContain('omitted in full; this index contains no decision text');
+  expect(prompt).toContain('Do not infer a decision from this index or from submitted status');
+  expect(prompt).toContain('grants no write access');
+  expect(prompt).not.toContain('界');
+  expect(prompt).not.toContain('Response / decision:');
+  expect(stream).toEqual(before);
+  expect(buildHumanWorkPrompt(stream)).toContain("task_metadata.json in this task's spec directory");
+});
+
+it('uses bounded routing-only receipt context without requiring tools during triage', () => {
+  const stream = create();
+  stream.items[0].response = 'Approved this specific asset only';
+  const prompt = buildHumanWorkPrompt(stream, '/project/task_metadata.json', 'triage');
+  expect(new TextEncoder().encode(prompt).byteLength).toBeLessThanOrEqual(MAX_HUMAN_WORK_PROMPT_BYTES);
+  expect(prompt).toContain('routing context only');
+  expect(prompt).toContain('triage does not need to read artifacts or use tools');
+  expect(prompt).toContain('Receipt: human-1');
+  expect(prompt).not.toContain('Approved this specific asset only');
+  expect(prompt).not.toContain('Before deciding');
 });
 
 it('groups related reworded gates for display and submits one response without deleting any source finding', () => {
