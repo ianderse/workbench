@@ -11,7 +11,9 @@ import { createRelay, type Relay } from '../relay/relay';
 
 const SESSION_ID = '11111111-2222-3333-4444-555555555555';
 
-describe('relay', () => {
+// A test waits on up to two transcript reads of up to 5 s each: where fs.watch is late (macOS's
+// FSEvents), a read can wait for the relay's 3 s poll, so the default 5 s per test isn't enough
+describe('relay', { timeout: 20_000 }, () => {
   let root: string;
   let workspace: string;
   let otherDir: string;
