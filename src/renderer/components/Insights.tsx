@@ -149,23 +149,26 @@ export function Insights({ projectId }: InsightsProps) {
 
   useEffect(() => {
     if (!viewportEl) return;
-    const handleScroll = () => {
+    const updatePosition = () => {
       const atBottom = checkIfAtBottom(viewportEl);
       stickToBottomRef.current = atBottom;
       setIsAwayFromBottom(!atBottom);
     };
-    viewportEl.addEventListener('scroll', handleScroll, { passive: true });
-    // Content grows while a reply streams and while messages, code and images lay out
+    viewportEl.addEventListener('scroll', updatePosition, { passive: true });
+    // Content grows while a reply streams and while messages, code and images lay out; a chat
+    // that becomes too short to scroll is at its bottom without a scroll event
     const content = viewportEl.firstElementChild;
     const observer = new ResizeObserver(() => {
       if (stickToBottomRef.current) scrollToBottom();
+      updatePosition();
     });
     if (content) observer.observe(content);
+    observer.observe(viewportEl);
     stickToBottomRef.current = true;
     setIsAwayFromBottom(false);
     scrollToBottom();
     return () => {
-      viewportEl.removeEventListener('scroll', handleScroll);
+      viewportEl.removeEventListener('scroll', updatePosition);
       observer.disconnect();
     };
   }, [viewportEl, checkIfAtBottom, scrollToBottom]);
@@ -188,6 +191,7 @@ export function Insights({ projectId }: InsightsProps) {
   // Opening a chat from the history shows its latest messages
   useLayoutEffect(() => {
     stickToBottomRef.current = true;
+    setIsAwayFromBottom(false);
     scrollToBottom();
   }, [session?.id, scrollToBottom]);
 
@@ -576,7 +580,8 @@ export function Insights({ projectId }: InsightsProps) {
         <ChatHistorySidebar
           sessions={sessions}
           currentSessionId={session?.id || null}
-          isLoading={isLoadingSessions}
+          // Reloads (new chat, model or MCP changes) keep the list on screen; the spinner is for the first load
+          isLoading={isLoadingSessions && sessions.length === 0}
           onNewSession={handleNewSession}
           onSelectSession={handleSelectSession}
           onDeleteSession={handleDeleteSession}

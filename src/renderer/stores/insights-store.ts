@@ -89,6 +89,7 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
         ? state
         : {
             projectId,
+            sessions: [],
             status: initialStatus,
             streamingContent: '',
             streamingTasks: [],
