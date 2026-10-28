@@ -14,6 +14,7 @@ import {
   PanelLeft,
   SquarePen,
   ArrowUp,
+  ArrowDown,
   RotateCcw,
   Square,
   CornerDownLeft,
@@ -74,7 +75,6 @@ export function Insights({ projectId }: InsightsProps) {
   const [taskCreated, setTaskCreated] = useState<Set<string>>(new Set());
   const [showSidebar, setShowSidebar] = useState(true);
   const showArchived = useInsightsStore((state) => state.showArchived);
-  const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [viewportEl, setViewportEl] = useState<HTMLElement | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
 
@@ -135,22 +135,37 @@ export function Insights({ projectId }: InsightsProps) {
     return scrollHeight - scrollTop - clientHeight <= SCROLL_BOTTOM_THRESHOLD;
   }, []);
 
-  // Handle scroll events to track user position
-  const handleScroll = useCallback(() => {
-    if (viewportEl) {
-      setIsUserAtBottom(checkIfAtBottom(viewportEl));
-    }
-  }, [viewportEl, checkIfAtBottom]);
+  // The chat stays pinned to the bottom (an opened chat starts there, a reply being written is
+  // followed) until the user scrolls up; scrolling back down pins it again
+  const stickToBottomRef = useRef(true);
+  // Shows the scroll-to-bottom button while the user is away from the latest messages
+  const [isAwayFromBottom, setIsAwayFromBottom] = useState(false);
+  const scrollToBottom = useCallback(() => {
+    if (viewportEl) viewportEl.scrollTop = viewportEl.scrollHeight;
+  }, [viewportEl]);
 
-  // Set up scroll listener and check initial position when viewport becomes available
   useEffect(() => {
-    if (viewportEl) {
-      // Check initial scroll position
-      setIsUserAtBottom(checkIfAtBottom(viewportEl));
-      viewportEl.addEventListener('scroll', handleScroll, { passive: true });
-      return () => viewportEl.removeEventListener('scroll', handleScroll);
-    }
-  }, [viewportEl, handleScroll, checkIfAtBottom]);
+    if (!viewportEl) return;
+    const handleScroll = () => {
+      const atBottom = checkIfAtBottom(viewportEl);
+      stickToBottomRef.current = atBottom;
+      setIsAwayFromBottom(!atBottom);
+    };
+    viewportEl.addEventListener('scroll', handleScroll, { passive: true });
+    // Content grows while a reply streams and while messages, code and images lay out
+    const content = viewportEl.firstElementChild;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scrollToBottom();
+    });
+    if (content) observer.observe(content);
+    stickToBottomRef.current = true;
+    setIsAwayFromBottom(false);
+    scrollToBottom();
+    return () => {
+      viewportEl.removeEventListener('scroll', handleScroll);
+      observer.disconnect();
+    };
+  }, [viewportEl, checkIfAtBottom, scrollToBottom]);
 
   // The page always opens on a new chat (IPC listeners are registered app-wide in useIpcListeners)
   useEffect(() => {
@@ -167,14 +182,11 @@ export function Insights({ projectId }: InsightsProps) {
     loadInsightsSessions(projectId, showArchived);
   }, [showArchived]);
 
-  // Smart auto-scroll: only scroll if user is already at bottom
-  // This allows users to scroll up to read previous messages without being
-  // yanked back down during streaming responses
-  useEffect(() => {
-    if (isUserAtBottom && viewportEl) {
-      viewportEl.scrollTop = viewportEl.scrollHeight;
-    }
-  }, [isUserAtBottom, viewportEl]);
+  // Opening a chat from the history shows its latest messages
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true;
+    scrollToBottom();
+  }, [session?.id, scrollToBottom]);
 
   // Focus textarea on mount
   useEffect(() => {
@@ -196,7 +208,8 @@ export function Insights({ projectId }: InsightsProps) {
     sendMessage(projectId, message, effectiveModelConfig, hasImages ? pendingImages : undefined);
     setPendingImages([]);
     setImageError(null);
-    setIsUserAtBottom(true); // Resume auto-scroll when user sends a message
+    stickToBottomRef.current = true; // Follow the reply to a message just sent
+    scrollToBottom();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -669,6 +682,20 @@ export function Insights({ projectId }: InsightsProps) {
             {/* Composer pinned to the bottom */}
             <div className="relative shrink-0 px-4 pb-3">
               <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
+              <button
+                type="button"
+                onClick={() => viewportEl?.scrollTo({ top: viewportEl.scrollHeight, behavior: 'smooth' })}
+                className={cn(
+                  'absolute -top-12 left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-md transition-opacity hover:text-foreground',
+                  isAwayFromBottom ? 'opacity-100' : 'pointer-events-none opacity-0'
+                )}
+                aria-label={t('insights.scrollToBottom')}
+                title={t('insights.scrollToBottom')}
+                aria-hidden={!isAwayFromBottom}
+                tabIndex={isAwayFromBottom ? 0 : -1}
+              >
+                <ArrowDown className="h-4 w-4" />
+              </button>
               <div className="mx-auto max-w-3xl">
                 {composer}
                 {/* Under the field: attach, disclaimer, model */}

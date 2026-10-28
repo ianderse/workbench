@@ -159,6 +159,7 @@
     "hideHistory": "Hide chat history",
     "send": "Send message",
     "stop": "Stop response",
+    "scrollToBottom": "Scroll to bottom",
     "regenerate": "Regenerate response",
     "stoppedByUser": "You stopped this response",
     "sending": "Sending…",
