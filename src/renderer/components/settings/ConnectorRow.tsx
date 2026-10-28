@@ -1,4 +1,5 @@
-import { Globe, Monitor, Search, Terminal } from 'lucide-react';
+import { Globe } from 'lucide-react';
+import { Context7Icon, ElectronIcon, McpIcon } from '../icons/app-icons';
 import { cn } from '../../lib/utils';
 import type { CustomMcpServer } from '../../../shared/types';
 
@@ -35,14 +36,14 @@ export function ConnectorRow({ icon, name, description, children, disabled = fal
 
 /** Built-in connectors that can be switched on or off: icon and translation keys (settings ns) */
 export const BUILTIN_CONNECTOR_META: { id: 'context7' | 'electron' | 'puppeteer'; icon: React.ElementType; /** Off unless switched on (browser automation) */ defaultOff?: boolean }[] = [
-  { id: 'context7', icon: Search },
-  { id: 'electron', icon: Monitor, defaultOff: true },
+  { id: 'context7', icon: Context7Icon },
+  { id: 'electron', icon: ElectronIcon, defaultOff: true },
   { id: 'puppeteer', icon: Globe, defaultOff: true },
 ];
 
-/** Icon for a custom server (command or HTTP) */
-export function customServerIcon(server: CustomMcpServer): React.ElementType {
-  return server.type === 'command' ? Terminal : Globe;
+/** Icon for a custom server: the MCP mark */
+export function customServerIcon(_server: CustomMcpServer): React.ElementType {
+  return McpIcon;
 }
 
 /** A custom server's own description, otherwise its command or URL */
