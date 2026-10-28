@@ -1,5 +1,15 @@
 /** What Settings > Agents knows about the OMP CLI on this machine */
 
+/** OMP catalog rates in USD per million tokens, not a recorded charge */
+export interface OmpModelCost {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+export type OmpModelPricingStatus = 'fixed' | 'free' | 'included' | 'variable' | 'unknown';
+
 export interface OmpModelInfo {
   /** Provider name in OMP (ollama, lmstudio, openai...) */
   provider: string;
@@ -7,6 +17,10 @@ export interface OmpModelInfo {
   id: string;
   /** Value for `omp --model` (provider/id) */
   selector: string;
+  name?: string;
+  /** Base rates reported by `omp models --json`; unknown pricing can contain zeroes */
+  cost?: OmpModelCost;
+  pricingStatus?: OmpModelPricingStatus;
 }
 
 export interface OmpDetection {

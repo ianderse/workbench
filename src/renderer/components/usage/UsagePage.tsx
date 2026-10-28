@@ -18,9 +18,10 @@ import { useProjectStore } from '../../stores/project-store';
 import { formatCostUsd } from '../../../shared/utils/claude-run';
 import { formatTokens } from '../../../shared/utils/format-tokens';
 import { formatDay, niceCeil } from '../settings/UsageCostChart';
+import { LocalSavingsEstimate } from './LocalSavingsEstimate';
 import type { UsageSummary, UsageTotals } from '../../../shared/types/usage';
 
-const CACHE_PREFIX = 'usage-summary:';
+const CACHE_PREFIX = 'usage-summary:v2:';
 const TOP_TASKS = 8;
 
 /** Segment colors: design tokens, so light and dark follow the theme */
@@ -186,16 +187,10 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
         <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-muted" role="img" aria-label={t('locality.share', { percent: localPercent })}>
           <div className="bg-success" style={{ width: `${locality.localShare * 100}%` }} />
         </div>
-        <p className="mt-3 text-sm text-foreground">
-          {locality.local.total > 0
-            ? t('locality.avoided', { cost: formatCostUsd(locality.avoidedCostUsd) })
-            : t('locality.none')}
-        </p>
-        {locality.local.total > 0 && (
-          <p className="mt-0.5 text-xs text-(--nav-label-color)">
-            {t('locality.share', { percent: localPercent })}. {t('locality.pricedAs', { model: locality.pricedAs.label })}
-          </p>
-        )}
+        <p className="mt-3 text-xs text-(--nav-label-color)">{t('locality.share', { percent: localPercent })}</p>
+        {locality.local.total > 0
+          ? <LocalSavingsEstimate summary={summary} />
+          : <p className="mt-2 text-sm text-foreground">{t('locality.none')}</p>}
       </Card>
 
       {/* 3. By model and by job */}

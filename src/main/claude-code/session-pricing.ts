@@ -95,9 +95,6 @@ export function requestCostUsd(model: string | undefined, usage: RequestUsage | 
   );
 }
 
-/** The model "what it would have cost" figures are priced as (Usage page) */
-export const REFERENCE_PRICING_MODEL = { id: 'claude-sonnet-5-5', label: 'Sonnet 5.5' } as const;
-
 /** Tokens of any backend, to be priced at a Claude model's list rates */
 export interface TokenCounts {
   input: number;
@@ -117,4 +114,12 @@ export function tokensCostUsd(model: string, tokens: TokenCounts): number {
     cache_read_input_tokens: tokens.cacheRead,
     cache_creation_input_tokens: tokens.cacheWrite,
   });
+}
+
+/** Stored Claude rates used when the OMP catalog has no provider-specific price. */
+export function claudePricingModels(): Array<{ model: string; rates: TokenCounts }> {
+  return PRICES.map(([model, rate]) => ({
+    model,
+    rates: { input: rate.input, output: rate.output, cacheRead: rate.cacheRead, cacheWrite: rate.cacheWrite5m },
+  }));
 }

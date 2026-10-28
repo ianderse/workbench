@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { summarizeUsage } from '../usage-summary';
 import { classifyProvider, isLocalHost, parseModelsYmlBaseUrls } from '../provider-locality';
-import { REFERENCE_PRICING_MODEL, tokensCostUsd } from '../../claude-code/session-pricing';
+import { tokensCostUsd } from '../../claude-code/session-pricing';
 import { formatTokens } from '../../../shared/utils/format-tokens';
 import type { UsageEntry } from '../../../shared/types/usage';
 
@@ -60,8 +60,7 @@ describe('classifyProvider', () => {
 });
 
 describe('pricing estimate', () => {
-  it('prices tokens at the reference model list rates', () => {
-    expect(REFERENCE_PRICING_MODEL.id).toBe('claude-sonnet-5-5');
+  it('prices tokens at a model list rate', () => {
     // Sonnet 5.5: $2 in, $10 out, $0.20 cache read, 1.25x input for cache writes, per million
     const cost = tokensCostUsd('claude-sonnet-5-5', { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000 });
     expect(cost).toBeCloseTo(2 + 10 + 0.2 + 2.5, 6);
@@ -97,13 +96,16 @@ describe('summarizeUsage', () => {
     expect(summary.byTask.some((row) => row.taskId === 't2' && row.title === undefined)).toBe(true);
   });
 
-  it('splits local and cloud and prices the local tokens as Sonnet 5.5', () => {
+  it('splits local and cloud and offers model-specific comparisons', () => {
     expect(summary.locality.local.total).toBe(3600 + 1000 + 15);
     expect(summary.locality.cloud.total).toBe(1000);
     expect(summary.locality.localShare).toBeCloseTo(4615 / 5615, 6);
     const expected = tokensCostUsd('claude-sonnet-5-5', { input: 1510, output: 1005, cacheRead: 2000, cacheWrite: 100 });
-    expect(summary.locality.avoidedCostUsd).toBeCloseTo(expected, 8);
-    expect(summary.locality.pricedAs.label).toBe('Sonnet 5.5');
+    const sonnet = summary.locality.comparisons.find((row) => row.model === 'claude-sonnet-5-5')!;
+    expect(sonnet.cloudCostUsd).toBeCloseTo(expected, 8);
+    expect(sonnet.savingsUsd).toBeCloseTo(expected, 8);
+    expect(sonnet.source).toBe('builtin');
+    expect(summary.locality.comparisons.some((row) => row.model === 'claude-opus-5-5')).toBe(true);
   });
 
   it('covers the last 30 days, quiet days included', () => {

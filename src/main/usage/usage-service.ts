@@ -14,6 +14,7 @@ import { backfillUsage, isUsageBackfilled } from './usage-backfill';
 import { classifyProvider, readProviderBaseUrls } from './provider-locality';
 import { onUsageLedgerChanged, readUsageEntries, usageLedgerPath } from './usage-ledger';
 import { summarizeUsage } from './usage-summary';
+import { readOmpPricingModels } from './omp-pricing';
 
 export interface UsageProject {
   id: string;
@@ -71,12 +72,16 @@ export async function getUsageSummary(project: UsageProject, mode: UsageSummaryM
   const cached = cache.get(cacheKey);
   if (cached && mode === 'cached') return { summary: cached, backfilled };
 
-  const entries = await readUsageEntries(usageLedgerPath(project.path, project.autoBuildPath));
-  const baseUrls = await readProviderBaseUrls();
+  const [entries, baseUrls, pricingModels] = await Promise.all([
+    readUsageEntries(usageLedgerPath(project.path, project.autoBuildPath)),
+    readProviderBaseUrls(),
+    readOmpPricingModels(mode !== 'cached'),
+  ]);
   const taskIds = [...new Set(entries.map((entry) => entry.taskId).filter((id): id is string => !!id))];
   const summary = summarizeUsage(entries, {
     classify: (provider) => classifyProvider(provider, baseUrls),
     tasks: await readTaskInfo(project, taskIds),
+    pricingModels,
   });
   cache.set(cacheKey, summary);
   return { summary, backfilled };

@@ -31,8 +31,21 @@
     "local": "Local",
     "cloud": "Cloud",
     "share": "{{percent}}% of tokens ran locally",
-    "avoided": "Cloud bill you didn't pay: {{cost}}",
-    "pricedAs": "Local tokens priced as {{model}} at list rates",
+    "compareWith": "Compare local usage with",
+    "estimatedSavings": "Estimated cloud savings: {{cost}}",
+    "noPricing": "No comparison pricing available. Refresh to load model rates",
+    "breakdown": "Estimated cloud cost using {{model}}",
+    "tokenKind": "Token type",
+    "tokens": "Local tokens",
+    "rate": "USD / 1M tokens",
+    "estimatedCost": "Cloud estimate",
+    "costComparison": "Cloud estimate {{cloud}} minus reported local cost {{local}}",
+    "sources": {
+      "omp": "Rates from the OMP model catalog",
+      "builtin": "Rates from the built-in Claude price table"
+    },
+    "assumptions": "Same token mix at base API rates. Excludes long-context premiums, subscription fees, and local hardware and power costs",
+    "cacheWriteAssumption": "Cache writes use the five-minute rate",
     "none": "No local tokens yet"
   },
   "byModel": {

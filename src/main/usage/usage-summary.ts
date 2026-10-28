@@ -4,7 +4,8 @@
  * `summarizeUsage()` turns a project's ledger entries into everything the Usage page shows. Pure:
  * the caller supplies the provider classifier, task titles and the clock.
  */
-import { REFERENCE_PRICING_MODEL, tokensCostUsd } from '../claude-code/session-pricing';
+import type { OmpModelInfo } from '../../shared/types/omp-detection';
+import { compareLocalUsage } from './model-pricing';
 import type {
   UsageDayRow, UsageEntry, UsageJob, UsageJobRow, UsageLocality, UsageModelRow, UsageProviderRow,
   UsageSummary, UsageTaskRow, UsageTotals,
@@ -19,6 +20,8 @@ export interface SummarizeOptions {
   classify?: (provider: string | undefined) => UsageLocality;
   /** Title and AI review rounds per task id */
   tasks?: ReadonlyMap<string, { title?: string; reviewRounds?: number }>;
+  /** Provider-qualified base prices from the OMP model catalog; stored Claude rates are fallback. */
+  pricingModels?: readonly OmpModelInfo[];
 }
 
 function emptyTotals(): UsageTotals {
@@ -134,13 +137,6 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
   }
   const byModel = [...models.values()].sort(byTotalDesc);
 
-  // Local tokens priced as the reference model would have charged for them
-  let avoidedCostUsd = 0;
-  for (const entry of entries) {
-    if (classify(entry.provider) !== 'local') continue;
-    avoidedCostUsd += tokensCostUsd(REFERENCE_PRICING_MODEL.id, entry);
-  }
-
   let chattiest: UsageSummary['facts']['chattiest'];
   let fastest: UsageSummary['facts']['fastest'];
   for (const model of byModel) {
@@ -168,8 +164,7 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
       local,
       cloud,
       localShare: totals.total > 0 ? local.total / totals.total : 0,
-      avoidedCostUsd,
-      pricedAs: { model: REFERENCE_PRICING_MODEL.id, label: REFERENCE_PRICING_MODEL.label },
+      comparisons: compareLocalUsage(local, options.pricingModels ?? [], classify),
     },
     byJob: [...jobs.values()].sort(byTotalDesc),
     byTask,

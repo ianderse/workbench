@@ -96,6 +96,31 @@ export interface UsageDayRow {
   costUsd: number;
 }
 
+/** Base rates in USD per million tokens. Cache writes use the model catalog's base rate. */
+export interface UsagePricingRates {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+}
+
+/** One provider-qualified cloud model that local token usage can be compared against. */
+export interface UsagePricingModel {
+  model: string;
+  provider: string;
+  label: string;
+  rates: UsagePricingRates;
+  source: 'omp' | 'builtin';
+}
+
+export interface UsageCostComparison extends UsagePricingModel {
+  /** The same local token mix priced at this cloud model's base rates. */
+  cloudCostUsd: number;
+  /** Cloud equivalent minus the local usage's reported cost; excludes hardware and power. */
+  savingsUsd: number;
+  breakdownUsd: UsagePricingRates;
+}
+
 export interface UsageSummary {
   generatedAt: string;
   entryCount: number;
@@ -107,9 +132,8 @@ export interface UsageSummary {
     cloud: UsageTotals;
     /** Share of all tokens that ran locally, 0..1 */
     localShare: number;
-    /** What the local tokens would have cost at the reference model's list prices */
-    avoidedCostUsd: number;
-    pricedAs: { model: string; label: string };
+    /** Model-specific estimates using the same local input, output and cache token counts. */
+    comparisons: UsageCostComparison[];
   };
   byJob: UsageJobRow[];
   byTask: UsageTaskRow[];
