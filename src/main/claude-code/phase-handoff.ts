@@ -151,7 +151,9 @@ async function preserveFile(source: string, directory: string, relative: string,
   await fs.copyFile(source, target);
   const [sourceHash, targetHash, after] = await Promise.all([fileHash(source), fileHash(target), fs.stat(source)]);
   if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || sourceHash !== targetHash) throw new Error('A session changed while its preservation receipt was being prepared');
-  const handle = await fs.open(target, 'r');
+  // Flush the owned archive copy through a writable handle: Windows rejects fsync
+  // on a read-only handle. Never open or change the source transcript for writing.
+  const handle = await fs.open(target, 'r+');
   try { await handle.sync(); } finally { await handle.close(); }
   files.push({ path: relative, bytes: after.size, sha256: targetHash });
 }
@@ -251,9 +253,9 @@ export async function preparePhaseHandoff(options: PreparePhaseHandoffOptions): 
     worktreePath: path.resolve(options.worktreePath), git: gitState, files,
   };
   const manifestText = JSON.stringify(manifest, null, 2);
-  await fs.writeFile(path.join(temporary, 'manifest.json'), manifestText, { flag: 'wx' });
-  const manifestHandle = await fs.open(path.join(temporary, 'manifest.json'), 'r');
-  try { await manifestHandle.sync(); } finally { await manifestHandle.close(); }
+  const manifestHandle = await fs.open(path.join(temporary, 'manifest.json'), 'wx');
+  try { await manifestHandle.writeFile(manifestText); await manifestHandle.sync(); }
+  finally { await manifestHandle.close(); }
   const receipt: PhaseHandoffReceipt = {
     version: 1, id, boundaryKey: options.boundaryKey, path: directory, manifestPath: path.join(directory, 'manifest.json'),
     digest: hash(manifestText), createdAt, nextPhase: options.nextPhase, reason: options.reason,

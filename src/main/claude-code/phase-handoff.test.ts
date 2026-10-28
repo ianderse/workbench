@@ -43,6 +43,43 @@ afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
 const prepare = () => preparePhaseHandoff({ specDir, worktreePath: repo, runInfo, nextPhase: 'validate', reason: 'before-validation', boundaryKey: 'implement-1', baseRef: 'main' });
 
 describe('phase handoff preservation', () => {
+  it('preserves originals while durably flushing archive copies on systems that reject read-only file fsync', async () => {
+    const originalOpen = fs.open.bind(fs);
+    const before = await fingerprintWorktree(repo, 'main');
+    const open = vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await originalOpen(...args);
+      if (args[1] === 'r' && (await handle.stat()).isFile()) {
+        handle.sync = async () => { throw Object.assign(new Error('Read-only file handles cannot be flushed'), { code: 'EPERM' }); };
+      }
+      return handle;
+    });
+    try {
+      const receipt = await prepare();
+      await verifyPhaseHandoff(receipt, { worktreePath: repo, requireCurrentWorktree: true });
+      expect(await fingerprintWorktree(repo, 'main')).toBe(before);
+      expect(await fs.readFile(path.join(receipt.path, 'sessions', '0', 'omp-sessions', 'old-session.jsonl'), 'utf8')).toBe(await fs.readFile(path.join(specDir, 'omp-sessions', 'old-session.jsonl'), 'utf8'));
+    } finally { open.mockRestore(); }
+  });
+
+  it('does not publish preservation when flushing an owned archive copy fails', async () => {
+    const originalOpen = fs.open.bind(fs);
+    const open = vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await originalOpen(...args);
+      if (String(args[0]).endsWith(path.join('untracked', 'untracked.txt'))) {
+        handle.sync = async () => { throw Object.assign(new Error('Archive flush failed'), { code: 'EIO' }); };
+      }
+      return handle;
+    });
+    try {
+      await expect(prepare()).rejects.toMatchObject({ code: 'EIO' });
+      const entries = await fs.readdir(path.join(specDir, 'phase-handoffs'));
+      expect(entries.length).toBeGreaterThan(0);
+      expect(entries.every((name) => name.includes('.preparing-'))).toBe(true);
+      expect(await fs.readFile(path.join(repo, 'untracked.txt'), 'utf8')).toBe('untracked work\n');
+      expect(await fs.readFile(path.join(specDir, 'omp-sessions', 'old-session.jsonl'), 'utf8')).toContain('old-session');
+    } finally { open.mockRestore(); }
+  });
+
   it('preserves staged, dirty, untracked and raw child transcripts without moving or modifying originals', async () => {
     const before = await fingerprintWorktree(repo, 'main');
     const status = git('status', '--porcelain=v1');
