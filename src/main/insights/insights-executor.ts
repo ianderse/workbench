@@ -5,10 +5,11 @@ import type {
   InsightsStreamChunk,
   InsightsToolUsage,
   InsightsModelConfig,
-  ImageAttachment
+  ImageAttachment,
+  ClaudeSessionRef
 } from '../../shared/types';
 import { detectRateLimit, createSDKRateLimitInfo } from '../rate-limit-detector';
-import { runInsights } from './claude-code-runner';
+import { runInsights, type InsightsSessionPlan } from './claude-code-runner';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { projectStore } from '../project-store';
 import { openTaskToolsSession } from './task-tools-server';
@@ -32,6 +33,14 @@ interface ProcessorResult {
   stopped?: boolean;
   /** A newer message or regenerate stopped the reply; that run owns the conversation */
   replaced?: boolean;
+  /** Where the reply ends in its Claude Code session (replies that ended normally) */
+  claudeRef?: ClaudeSessionRef;
+}
+
+/** How a turn runs in Claude Code: the session to resume or fork, and the chat's title */
+export interface InsightsTurnOptions {
+  session?: InsightsSessionPlan;
+  title?: string;
 }
 
 /** The chat's MCP servers: its own choice or the Connectors defaults, without unavailable ones */
@@ -79,7 +88,8 @@ export class InsightsExecutor extends EventEmitter {
     message: string,
     conversationHistory: Array<{ role: string; content: string }>,
     modelConfig?: InsightsModelConfig,
-    images?: ImageAttachment[]
+    images?: ImageAttachment[],
+    turn: InsightsTurnOptions = {}
   ): Promise<ProcessorResult> {
     // Cancel any existing session
     this.cancelSession(projectId);
@@ -134,6 +144,8 @@ export class InsightsExecutor extends EventEmitter {
           thinkingLevel,
           abortSignal: controller.signal,
           attachments: images,
+          session: turn.session,
+          title: turn.title,
           graphify,
           profileId: projectSettings?.claudeProfileId,
           taskTools: taskTools?.mcpServer,
@@ -214,6 +226,7 @@ export class InsightsExecutor extends EventEmitter {
         fullResponse: result.text.trim() || stripTaskSuggestions(accumulatedText).trim() || fullResponse,
         suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
         toolsUsed,
+        claudeRef: result.claudeRef,
       };
     } catch (error) {
       this.releaseController(projectId, controller);

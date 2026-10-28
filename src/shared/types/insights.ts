@@ -52,6 +52,19 @@ export interface InsightsChatMessage {
   toolsUsed?: InsightsToolUsage[];
   // The user stopped this reply (assistant messages only); content is what was written by then
   stopped?: boolean;
+  /** Where this reply ends in Claude Code's session (assistant messages only) */
+  claudeRef?: ClaudeSessionRef;
+}
+
+/**
+ * A point in a Claude Code session: the session and its last assistant message at the end of a
+ * reply, and the account whose config dir holds the session's transcript
+ */
+export interface ClaudeSessionRef {
+  sessionId: string;
+  messageUuid: string;
+  /** Claude profile the session ran on (unset for API profiles) */
+  profileId?: string;
 }
 
 export interface InsightsSession {
@@ -60,6 +73,12 @@ export interface InsightsSession {
   title?: string; // Auto-generated from first message or user-set
   messages: InsightsChatMessage[];
   modelConfig?: InsightsModelConfig; // Per-session model configuration
+  /**
+   * The Claude Code session's latest point (the last reply that ended normally): a message that
+   * follows a reply ending here resumes the session, one that follows an earlier reply (after an
+   * edit or regenerate) forks it there
+   */
+  claudeHead?: ClaudeSessionRef;
   createdAt: Date;
   updatedAt: Date;
   archivedAt?: Date;

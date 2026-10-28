@@ -19,6 +19,11 @@ let stdin = '';
 process.stdin.on('data', (d) => (stdin += d));
 process.stdin.on('end', () => {
   const args = process.argv.slice(2);
+  fs.appendFileSync(process.env.FAKE_RECORD + '.runs', JSON.stringify(args) + '\\n');
+  if (process.env.FAKE_RESUME_FAILS && args.includes('--resume')) {
+    process.stderr.write('No conversation found with session ID: ' + args[args.indexOf('--resume') + 1]);
+    process.exit(1);
+  }
   const promptFile = args[args.indexOf('--append-system-prompt-file') + 1];
   fs.writeFileSync(process.env.FAKE_RECORD, JSON.stringify({
     args,
@@ -122,6 +127,8 @@ const conversation = [
 ];
 
 function setRun(events: unknown[], exitCode = 0, stderr = '') {
+  rmSync(`${recordFile}.runs`, { force: true });
+  delete process.env.FAKE_RESUME_FAILS;
   process.env.FAKE_EVENTS = JSON.stringify(events);
   process.env.FAKE_EXIT = String(exitCode);
   process.env.FAKE_STDERR = stderr;
@@ -129,6 +136,8 @@ function setRun(events: unknown[], exitCode = 0, stderr = '') {
 }
 
 const record = () => JSON.parse(readFileSync(recordFile, 'utf8'));
+/** The arguments of every run of the turn, in order */
+const runs = (): string[][] => readFileSync(`${recordFile}.runs`, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 
 async function run(overrides: Record<string, unknown> = {}) {
   const events: InsightsStreamEvent[] = [];
@@ -177,7 +186,9 @@ describe('runInsights', () => {
     expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-4-6');
     expect(args[args.indexOf('--effort') + 1]).toBe('high');
     expect(args).toContain('--strict-mcp-config');
-    expect(args).toContain('--no-session-persistence');
+    // A new session (no session given): a fresh id, the conversation folded into the prompt
+    expect(args[args.indexOf('--session-id') + 1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(args).not.toContain('--resume');
     expect(systemPrompt).toContain('You are the Claude page of Workbench');
     expect(configDir).toBe('/profiles/main');
     expect(apiKey).toBeNull();
@@ -307,6 +318,79 @@ describe('runInsights', () => {
     const result = await (await run()).promise;
     expect(result.text).toBe('Two ideas.');
     expect(result.taskSuggestions).toEqual([{ title: 'A', description: 'Do A' }, { title: 'B', description: 'Do B' }]);
+  });
+
+  describe('Claude Code sessions', () => {
+    const withIds = [
+      { type: 'system', subtype: 'init', session_id: 'sess-1', tools: [] },
+      { type: 'assistant', uuid: 'msg-a', session_id: 'sess-1', message: { content: [] } },
+      blockStart(0, { type: 'text', text: '' }),
+      delta(0, { type: 'text_delta', text: 'Done.' }),
+      blockStop(0),
+      { type: 'assistant', uuid: 'msg-b', session_id: 'sess-1', message: { content: [] } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: 'sess-1' },
+    ];
+    const history = [{ role: 'user' as const, content: 'Earlier question' }, { role: 'assistant' as const, content: 'Earlier answer' }];
+
+    it('starts a named session with the conversation folded in, and says where the reply ends', async () => {
+      setRun(withIds);
+      const result = await (await run({ history, title: 'Auth' })).promise;
+      const { args, stdin } = record();
+      expect(args[args.indexOf('--name') + 1]).toBe('Workbench chat: Auth');
+      expect(stdin).toContain('Earlier answer');
+      expect(result.claudeRef).toEqual({ sessionId: 'sess-1', messageUuid: 'msg-b', profileId: 'main' });
+    });
+
+    it('resumes the session with the new message only', async () => {
+      setRun(withIds);
+      await (await run({ history, session: { mode: 'resume', sessionId: 'sess-1', profileId: 'main' } })).promise;
+      const { args, stdin } = record();
+      expect(args[args.indexOf('--resume') + 1]).toBe('sess-1');
+      expect(args).not.toContain('--fork-session');
+      expect(args).not.toContain('--session-id');
+      expect(stdin).not.toContain('Earlier answer');
+      expect(stdin).toContain('How does auth work?');
+    });
+
+    it('forks the session at an earlier reply, leaving the original as it was', async () => {
+      setRun(withIds);
+      await (await run({ history, session: { mode: 'fork', sessionId: 'sess-1', atMessageUuid: 'msg-a', profileId: 'main' } })).promise;
+      const { args, stdin } = record();
+      expect(args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 5)).toEqual([
+        '--resume', 'sess-1', '--resume-session-at', 'msg-a', '--fork-session',
+      ]);
+      expect(stdin).not.toContain('Earlier answer');
+    });
+
+    it("gives a resumed session only this turn's tools and MCP servers", async () => {
+      setRun(withIds);
+      await (await run({ session: { mode: 'resume', sessionId: 'sess-1', profileId: 'main' } })).promise;
+      const { args, mcpConfig } = record();
+      expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
+      expect(args).not.toContain('--allowedTools');
+      expect(args).toContain('--strict-mcp-config');
+      expect(mcpConfig).toBeNull();
+    });
+
+    it('starts a new session when the session belongs to another account', async () => {
+      setRun(withIds);
+      await (await run({ history, session: { mode: 'resume', sessionId: 'sess-1', profileId: 'other' } })).promise;
+      const { args, stdin } = record();
+      expect(args).not.toContain('--resume');
+      expect(stdin).toContain('Earlier answer');
+    });
+
+    it('starts a new session when the session can no longer be resumed', async () => {
+      setRun(withIds);
+      process.env.FAKE_RESUME_FAILS = '1';
+      const result = await (await run({ history, session: { mode: 'resume', sessionId: 'gone', profileId: 'main' } })).promise;
+      const [first, second] = runs();
+      expect(first).toContain('--resume');
+      expect(second).not.toContain('--resume');
+      expect(second).toContain('--session-id');
+      expect(record().stdin).toContain('Earlier answer');
+      expect(result.text).toBe('Done.');
+    });
   });
 
   it('keeps Bash out without a memory graph', async () => {

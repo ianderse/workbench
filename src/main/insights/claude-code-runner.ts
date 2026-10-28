@@ -30,8 +30,10 @@ import type { ClaudeEffort, ClaudeModelAlias } from '../../shared/types/claude-c
 import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
 import type { InsightsCliTools } from './prompts';
+import { randomUUID } from 'node:crypto';
 import { extractTaskSuggestions, stripTaskSuggestions } from '../../shared/utils/task-suggestions';
 import { COMPENG_DIR_NAME } from '../self-improve/paths';
+import type { ClaudeSessionRef } from '../../shared/types';
 import { MCP_STARTUP_TIMEOUT_MS, type ClaudeMcpConfig } from '../claude-code/mcp-config';
 import { TASK_TOOLS_SERVER_NAME, toBridgeServer, type TaskToolsMcpServer, type TaskToolsStdioServer } from './task-tools-mcp';
 // The bridge's source, bundled as text and written next to the turn's other temp files
@@ -75,7 +77,25 @@ export interface InsightsRunConfig {
   cliTools?: InsightsCliTools;
   /** The project's self-improve switch is on: Claude may save project memories (and only those) */
   memory?: boolean;
+  /** Which Claude Code session the turn runs in (a new one unless given) */
+  session?: InsightsSessionPlan;
+  /** The chat's title, shown in Claude Code's session list for a new session */
+  title?: string;
 }
+
+/**
+ * The Claude Code session a turn runs in:
+ * - new: a fresh session, with the conversation so far folded into the prompt (the first message,
+ *   or when the earlier session can't be continued)
+ * - resume: the chat's session, continued from its end
+ * - fork: a copy of the chat's session cut at an earlier reply (after an edit or regenerate
+ *   dropped what followed it); the original session is left as it was
+ * Resume and fork run on the account that holds the session's transcript.
+ */
+export type InsightsSessionPlan =
+  | { mode: 'new' }
+  | { mode: 'resume'; sessionId: string; profileId?: string }
+  | { mode: 'fork'; sessionId: string; atMessageUuid: string; profileId?: string };
 
 /** Info about a tool call made during the turn */
 interface ToolCallInfo {
@@ -89,6 +109,8 @@ export interface InsightsResult {
   text: string;
   /** The tasks the reply suggests (each was a suggestion line) */
   taskSuggestions: TaskSuggestion[];
+  /** Where the reply ends in its Claude Code session, for the next turn to resume or fork */
+  claudeRef?: ClaudeSessionRef;
   toolCalls: ToolCallInfo[];
 }
 
@@ -161,7 +183,18 @@ export interface InsightsMcpArgs {
   servers: string[];
 }
 
-/** CLI arguments for a non-persistent headless turn that can't change files */
+/**
+ * The session flags of a turn. A fork uses `--resume-session-at`, which the Agent SDK uses for
+ * its resumeSessionAt option (not listed by `claude --help`): the session up to and including
+ * that assistant message, copied to a new session by `--fork-session`
+ */
+export function sessionArgs(plan: InsightsSessionPlan, newSessionId: string, title?: string): string[] {
+  if (plan.mode === 'resume') return ['--resume', plan.sessionId];
+  if (plan.mode === 'fork') return ['--resume', plan.sessionId, '--resume-session-at', plan.atMessageUuid, '--fork-session'];
+  return ['--session-id', newSessionId, ...(title ? ['--name', `Workbench chat: ${title}`] : [])];
+}
+
+/** CLI arguments for a headless turn that can't change the project's files */
 export function buildInsightsArgs(
   model: string,
   effort: ClaudeEffort,
@@ -170,6 +203,7 @@ export function buildInsightsArgs(
   mcp?: InsightsMcpArgs,
   cliTools: InsightsCliTools = {},
   memory = false,
+  session: string[] = [],
 ): string[] {
   const cliRules = [
     ...(cliTools.github ? [INSIGHTS_GITHUB_RULE] : []),
@@ -202,7 +236,7 @@ export function buildInsightsArgs(
     '--permission-mode', 'dontAsk',
     '--strict-mcp-config',
     ...(mcp ? ['--mcp-config', mcp.configFile] : []),
-    '--no-session-persistence',
+    ...session,
     '--append-system-prompt-file', systemPromptFile,
   ];
 }
@@ -219,6 +253,10 @@ interface StreamState {
   /** Content block index → in-progress tool call */
   pendingTools: Map<number, { id: string; name: string; json: string }>;
   result?: { isError: boolean; subtype?: string; text?: string };
+  /** The Claude Code session the turn ran in (from its init or result message) */
+  sessionId?: string;
+  /** The turn's last assistant message, where a later fork can cut the session */
+  lastAssistantUuid?: string;
 }
 
 function createStreamState(): StreamState {
@@ -232,7 +270,12 @@ function handleInsightsEvent(
   onStream?: InsightsStreamCallback,
 ): void {
   const raw = event as Record<string, unknown>;
+  if (typeof raw.session_id === 'string' && (raw.type === 'system' || raw.type === 'result')) state.sessionId = raw.session_id;
   switch (raw.type) {
+    case 'assistant': {
+      if (typeof raw.uuid === 'string') state.lastAssistantUuid = raw.uuid;
+      break;
+    }
     case 'stream_event': {
       const inner = raw.event as Record<string, unknown> | undefined;
       const index = inner?.index as number | undefined;
@@ -377,7 +420,12 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     const taskToolsRoute = getTaskToolsRoute();
     const offeredTaskTools = taskToolsRoute === 'off' ? undefined : config.taskTools;
 
-    const { command, env } = await resolveClaudeEnv({ profileId: config.profileId });
+    // A resumed or forked session runs on the account that holds its transcript; when the
+    // project's account is set to another one, or that account can't be used, a new session starts
+    let plan: InsightsSessionPlan = config.session ?? { mode: 'new' };
+    if (plan.mode !== 'new' && config.profileId && config.profileId !== plan.profileId) plan = { mode: 'new' };
+    const { command, env, profileId } = await resolveClaudeEnv({ profileId: plan.mode === 'new' ? config.profileId : plan.profileId });
+    if (plan.mode !== 'new' && profileId !== plan.profileId) plan = { mode: 'new' };
     if (graphify) {
       // graphify commands find the project's graph (GRAPHIFY_OUT, translated for WSL when the
       // run starts) and run without a full path (natively; in WSL from the login PATH)
@@ -385,11 +433,10 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
       if (!wsl) env.PATH = [dirname(graphify.cli), env.PATH].filter(Boolean).join(getPathDelimiter());
     }
 
-    // System prompt goes through a file: no argument length or shell quoting limits
     const tempDir = await mkdtemp(join(tmpdir(), 'workbench-insights-'));
-    const systemPromptFile = join(tempDir, 'system-prompt.md');
-    // The MCP servers go through a file too, so the task tools' URL and token aren't in the
-    // process list; the chat's own servers can't take the task tools' name
+    // The MCP servers go through a file, so the task tools' URL and token aren't in the process
+    // list; the chat's own servers can't take the task tools' name. Tools and MCP servers are
+    // given to every turn afresh: a resumed session has only what this turn passes
     let mcp: InsightsMcpArgs | undefined;
     const taskTools = offeredTaskTools && taskToolsRoute !== 'off'
       ? await taskToolsEntry(offeredTaskTools, taskToolsRoute, tempDir)
@@ -407,7 +454,9 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
       if (mcp.servers.length > 0 && !env.MCP_TIMEOUT) env.MCP_TIMEOUT = String(MCP_STARTUP_TIMEOUT_MS);
     }
 
-    // The system prompt describes exactly what the turn is given
+    // The system prompt describes exactly what the turn is given (through a file: no argument
+    // length or shell quoting limits)
+    const systemPromptFile = join(tempDir, 'system-prompt.md');
     const basePrompt = buildSystemPrompt({
       taskTools: !!offeredTaskTools,
       cliTools: config.cliTools,
@@ -418,36 +467,63 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     const systemPrompt = graphify ? `${basePrompt}\n\n${graphify.commandPrompt}` : basePrompt;
     await writeFile(systemPromptFile, systemPrompt, 'utf-8');
 
-    const state = createStreamState();
-    try {
+    // One run of the turn: a session that is resumed or forked gets the new message only, a new
+    // one the conversation so far folded into its prompt
+    const attempt = async (turnPlan: InsightsSessionPlan) => {
+      const state = createStreamState();
+      const prompt = turnPlan.mode === 'new' ? buildConversationPrompt(message, history) : message;
       const handle = startClaudeProcess({
         command,
-        args: buildInsightsArgs(toClaudeModel(config.model), toClaudeEffort(config.thinkingLevel), systemPromptFile, !!graphify, mcp, config.cliTools, config.memory),
+        args: buildInsightsArgs(
+          toClaudeModel(config.model),
+          toClaudeEffort(config.thinkingLevel),
+          systemPromptFile,
+          !!graphify,
+          mcp,
+          config.cliTools,
+          config.memory,
+          sessionArgs(turnPlan, randomUUID(), config.title),
+        ),
         cwd: projectDir,
         env,
         // Document blocks (PDFs) are valid Anthropic content even though the shared type omits them
-        input: buildMessageContent(buildConversationPrompt(message, history), attachments) as ClaudeUserContentBlock[],
+        input: buildMessageContent(prompt, attachments) as ClaudeUserContentBlock[],
         onMessage: (event) => {
           if (taskTools?.type === 'stdio') noteBridgeFailure(event);
           handleInsightsEvent(event, state, onStream);
         },
         abortSignal,
       });
-      const outcome = await handle.done;
+      return { state, outcome: await handle.done };
+    };
 
-      if (outcome.aborted || abortSignal?.aborted) {
-        const abortError = new Error('Insights request was cancelled');
-        abortError.name = 'AbortError';
-        throw abortError;
-      }
-      if (state.result?.isError) {
-        throw new Error(state.result.text?.trim() || `Claude Code failed (${state.result.subtype ?? 'error'})`);
-      }
-      if (outcome.exitCode !== 0 && !state.result) {
-        throw new Error(outcome.stderr.trim() || `Claude Code exited with code ${outcome.exitCode}`);
+    let run: Awaited<ReturnType<typeof attempt>>;
+    try {
+      run = await attempt(plan);
+      // The session couldn't be continued (its transcript is gone, or Claude Code refused to cut
+      // it there): the turn runs again in a new session, which gets the conversation as text
+      const nothingRan = !run.state.text && run.state.toolCalls.length === 0;
+      const failed = run.outcome.exitCode !== 0 || run.state.result?.isError === true;
+      if (plan.mode !== 'new' && nothingRan && failed && !run.outcome.aborted && !abortSignal?.aborted) {
+        appLog.warn(`[Insights] Could not ${plan.mode} Claude Code session ${plan.sessionId}, starting a new one: ${run.state.result?.text ?? run.outcome.stderr.trim()}`);
+        plan = { mode: 'new' };
+        run = await attempt(plan);
       }
     } finally {
       await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+    }
+    const { state, outcome } = run;
+
+    if (outcome.aborted || abortSignal?.aborted) {
+      const abortError = new Error('Insights request was cancelled');
+      abortError.name = 'AbortError';
+      throw abortError;
+    }
+    if (state.result?.isError) {
+      throw new Error(state.result.text?.trim() || `Claude Code failed (${state.result.subtype ?? 'error'})`);
+    }
+    if (outcome.exitCode !== 0 && !state.result) {
+      throw new Error(outcome.stderr.trim() || `Claude Code exited with code ${outcome.exitCode}`);
     }
 
     const text = state.text.trim() ? state.text : (state.result?.text ?? '');
@@ -456,7 +532,14 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
     }
 
     // Suggestion lines become cards: the reply keeps the rest
-    return { text: stripTaskSuggestions(text), taskSuggestions: extractTaskSuggestions(text), toolCalls: state.toolCalls };
+    return {
+      text: stripTaskSuggestions(text),
+      taskSuggestions: extractTaskSuggestions(text),
+      toolCalls: state.toolCalls,
+      claudeRef: state.sessionId && state.lastAssistantUuid
+        ? { sessionId: state.sessionId, messageUuid: state.lastAssistantUuid, profileId }
+        : undefined,
+    };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     if (!(error instanceof Error && error.name === 'AbortError')) {

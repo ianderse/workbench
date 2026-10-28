@@ -50,10 +50,11 @@ describe('InsightsService.editMessage', () => {
     ]);
     // The edited first message names the conversation now
     expect(session.title).toBe('edited question');
-    // Claude sees the edited message as the latest one, without the dropped turns
+    // Claude gets the edited message, without the dropped turns (nothing came before it); the
+    // message itself is sent on its own, not repeated in the history
     const [, , message, history] = execute.mock.calls.at(-1)!;
     expect(message).toBe('edited question');
-    expect(history).toEqual([{ role: 'user', content: 'edited question' }]);
+    expect(history).toEqual([]);
   });
 
   it('keeps a title the user gave', async () => {
@@ -77,5 +78,67 @@ describe('InsightsService.editMessage', () => {
 
     expect(execute).toHaveBeenCalledTimes(1);
     expect(service.loadSession(pid, projectDir)!.messages).toHaveLength(2);
+  });
+});
+
+describe('Claude Code sessions of a chat', () => {
+  let turn = 0;
+  /** A reply that ended at a new point of session `sessionId` */
+  function answerIn(sessionId: string, text = 'Reply') {
+    turn += 1;
+    execute.mockResolvedValueOnce({ fullResponse: text, toolsUsed: [], claudeRef: { sessionId, messageUuid: `uuid-${turn}`, profileId: 'main' } });
+  }
+  const planOf = (call: number) => (execute.mock.calls[call][6] as { session: unknown }).session;
+
+  it('starts a session, resumes it, and forks it where an edit cuts the chat', async () => {
+    answerIn('s1');
+    await service.sendMessage(pid, projectDir, 'first');
+    answerIn('s1');
+    await service.sendMessage(pid, projectDir, 'second');
+    answerIn('s1');
+    await service.sendMessage(pid, projectDir, 'third');
+
+    expect(planOf(0)).toEqual({ mode: 'new' });
+    expect(planOf(1)).toEqual({ mode: 'resume', sessionId: 's1', profileId: 'main' });
+    expect(planOf(2)).toEqual({ mode: 'resume', sessionId: 's1', profileId: 'main' });
+
+    // Editing the second message keeps the first reply: the session is forked there
+    const messages = service.loadSession(pid, projectDir)!.messages;
+    const firstReply = messages[1];
+    answerIn('s2');
+    await service.editMessage(pid, projectDir, messages[2].id, 'second, edited');
+    expect(planOf(3)).toEqual({ mode: 'fork', sessionId: 's1', atMessageUuid: firstReply.claudeRef!.messageUuid, profileId: 'main' });
+
+    // The fork is the chat's session from then on
+    answerIn('s2');
+    await service.sendMessage(pid, projectDir, 'fourth');
+    expect(planOf(4)).toEqual({ mode: 'resume', sessionId: 's2', profileId: 'main' });
+  });
+
+  it('forks at the reply before the one being regenerated', async () => {
+    answerIn('s1');
+    await service.sendMessage(pid, projectDir, 'first');
+    answerIn('s1');
+    await service.sendMessage(pid, projectDir, 'second');
+    const firstReply = service.loadSession(pid, projectDir)!.messages[1];
+
+    answerIn('s3');
+    await service.regenerate(pid, projectDir);
+    expect(planOf(2)).toEqual({ mode: 'fork', sessionId: 's1', atMessageUuid: firstReply.claudeRef!.messageUuid, profileId: 'main' });
+  });
+
+  it('starts anew after editing the first message or after a stopped reply', async () => {
+    answerIn('s1');
+    await service.sendMessage(pid, projectDir, 'first');
+    const first = service.loadSession(pid, projectDir)!.messages[0];
+    answerIn('s4');
+    await service.editMessage(pid, projectDir, first.id, 'first, edited');
+    expect(planOf(1)).toEqual({ mode: 'new' });
+
+    execute.mockResolvedValueOnce({ fullResponse: 'Part', toolsUsed: [], stopped: true, claudeRef: { sessionId: 's4', messageUuid: 'x' } });
+    await service.sendMessage(pid, projectDir, 'stopped one');
+    answerIn('s5');
+    await service.sendMessage(pid, projectDir, 'after the stop');
+    expect(planOf(3)).toEqual({ mode: 'new' });
   });
 });

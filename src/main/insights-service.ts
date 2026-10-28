@@ -14,6 +14,26 @@ import { InsightsPaths } from './insights/paths';
 import { SessionStorage } from './insights/session-storage';
 import { SessionManager } from './insights/session-manager';
 import { InsightsExecutor } from './insights/insights-executor';
+import type { InsightsSessionPlan } from './insights/claude-code-runner';
+
+/**
+ * The Claude Code session a new message runs in, from the reply before it:
+ * - that reply is the session's latest point: resume the session
+ * - an earlier reply of the session (an edit or regenerate dropped what came after it): fork the
+ *   session there, so the dropped turns stay out of it and the original session is kept
+ * - no reply before it (the first message), or a reply without a session (a stopped one, or one
+ *   from before chats had sessions): a new session, with the conversation folded into its prompt
+ */
+export function planClaudeSession(session: InsightsSession): InsightsSessionPlan {
+  const previous = session.messages.at(-2);
+  const ref = previous?.role === 'assistant' ? previous.claudeRef : undefined;
+  if (!ref) return { mode: 'new' };
+  const head = session.claudeHead;
+  if (head?.sessionId === ref.sessionId && head.messageUuid === ref.messageUuid) {
+    return { mode: 'resume', sessionId: ref.sessionId, profileId: ref.profileId };
+  }
+  return { mode: 'fork', sessionId: ref.sessionId, atMessageUuid: ref.messageUuid, profileId: ref.profileId };
+}
 
 /**
  * Service for AI-powered codebase insights chat
@@ -292,37 +312,32 @@ class InsightsService extends EventEmitter {
     modelConfig?: InsightsModelConfig,
     images?: ImageAttachment[]
   ): Promise<void> {
-    // Build conversation history for context (replies stopped before any text are left out)
-    // Add notation when images are present so the AI has context
-    // For historical messages (all but the last), use past tense to avoid confusion
-    const messages = session.messages.filter((m) => !(m.role === 'assistant' && m.stopped && !m.content));
-    const conversationHistory = messages.map((m, index) => {
+    // The conversation before this message, for a turn that starts a new Claude Code session
+    // (replies stopped before any text are left out; the message itself is sent separately, with
+    // its attachments)
+    const messages = session.messages
+      .slice(0, -1)
+      .filter((m) => !(m.role === 'assistant' && m.stopped && !m.content));
+    const conversationHistory = messages.map((m) => {
       const imageCount = m.images?.length ?? 0;
-      const isLastMessage = index === messages.length - 1;
-      let imageNotation = '';
-      if (imageCount > 0 && m.role === 'user') {
-        imageNotation = isLastMessage
-          ? `\n[User attached ${imageCount} file(s)]`
-          : `\n[User previously attached ${imageCount} file(s) - not visible in this context]`;
-      }
-      return {
-        role: m.role,
-        content: imageNotation ? m.content + imageNotation : m.content
-      };
+      const imageNotation = imageCount > 0 && m.role === 'user'
+        ? `\n[User previously attached ${imageCount} file(s) - not visible in this context]`
+        : '';
+      return { role: m.role, content: m.content + imageNotation };
     });
 
     // Use provided modelConfig or fall back to session's config
     const configToUse = modelConfig || session.modelConfig;
 
     try {
-      // Execute insights query
       const result = await this.executor.execute(
         projectId,
         projectPath,
         message,
         conversationHistory,
         configToUse,
-        images
+        images,
+        { session: planClaudeSession(session), title: session.title }
       );
 
       if (result.replaced) return;
@@ -339,10 +354,14 @@ class InsightsService extends EventEmitter {
         timestamp: new Date(),
         suggestedTasks: result.suggestedTasks,
         toolsUsed: result.toolsUsed.length > 0 ? result.toolsUsed : undefined,
-        stopped: result.stopped || undefined
+        stopped: result.stopped || undefined,
+        // Where the next message resumes (or, after an edit, forks) Claude Code's session
+        claudeRef: result.stopped ? undefined : result.claudeRef
       };
 
       session.messages.push(assistantMessage);
+      // A stopped reply leaves the session in the middle of a turn: the next message starts anew
+      session.claudeHead = assistantMessage.claudeRef;
       session.updatedAt = new Date();
       this.sessionManager.saveSession(projectPath, session);
 
