@@ -47,6 +47,24 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
     }
   );
 
+  // Send an edited message in place of the original and everything after it
+  ipcMain.on(
+    IPC_CHANNELS.INSIGHTS_EDIT_MESSAGE,
+    async (_, projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig) => {
+      const project = projectStore.getProject(projectId);
+      if (!project) {
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, "Project not found");
+        return;
+      }
+      try {
+        await insightsService.editMessage(projectId, project.path, messageId, content, { ...getInsightsFeatureSettings(), ...modelConfig });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, `Failed to send message: ${errorMessage}`);
+      }
+    }
+  );
+
   // Stop the reply Claude is writing and write it again
   ipcMain.on(
     IPC_CHANNELS.INSIGHTS_REGENERATE,

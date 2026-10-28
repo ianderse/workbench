@@ -97,6 +97,8 @@ export const insightsMock = {
 
   regenerateInsightsMessage: () => {},
 
+  editInsightsMessage: () => {},
+
   clearInsightsSession: async () => ({ success: true }),
 
   createTaskFromInsights: async (_projectId: string, title: string, description: string) => ({

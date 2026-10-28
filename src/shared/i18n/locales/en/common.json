@@ -161,6 +161,7 @@
     "stop": "Stop response",
     "scrollToBottom": "Scroll to bottom",
     "regenerate": "Regenerate response",
+    "editMessage": "Edit message",
     "stoppedByUser": "You stopped this response",
     "sending": "Sending…",
     "thinking": "Thinking…",

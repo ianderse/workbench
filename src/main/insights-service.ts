@@ -230,11 +230,55 @@ class InsightsService extends EventEmitter {
     this.sessionManager.saveSession(projectPath, session);
     this.emit('session-updated', projectId, session);
 
-    const images = (userMessage.images ?? []).flatMap((img) => {
+    await this.reply(projectId, projectPath, session, userMessage.content, modelConfig, this.loadAttachments(projectPath, userMessage));
+  }
+
+  /**
+   * Send an edited message: the conversation from that message on is dropped, and the edited
+   * text (with the message's attachments) is sent in its place
+   */
+  async editMessage(
+    projectId: string,
+    projectPath: string,
+    messageId: string,
+    content: string,
+    modelConfig?: InsightsModelConfig
+  ): Promise<void> {
+    this.executor.cancelSession(projectId);
+
+    const session = this.sessionManager.loadSession(projectId, projectPath);
+    const index = session?.messages.findIndex((m) => m.id === messageId && m.role === 'user') ?? -1;
+    if (!session || index < 0) return;
+    const original = session.messages[index];
+
+    // A title made from the first message follows its edit; a title the user gave stays
+    if (index === 0 && session.title === this.storage.generateTitle(original.content)) {
+      session.title = this.storage.generateTitle(content);
+    }
+    const userMessage: InsightsChatMessage = {
+      ...original,
+      id: `msg-${Date.now()}`,
+      content,
+      timestamp: new Date()
+    };
+    session.messages = [...session.messages.slice(0, index), userMessage];
+    if (modelConfig) session.modelConfig = modelConfig;
+    session.updatedAt = new Date();
+    this.sessionManager.saveSession(projectPath, session);
+    this.emit('session-updated', projectId, session);
+
+    await this.reply(projectId, projectPath, session, content, modelConfig, this.loadAttachments(projectPath, userMessage));
+  }
+
+  /**
+   * A sent message's attachments with their data, read back from the attachments directory
+   */
+  private loadAttachments(projectPath: string, message: InsightsChatMessage): ImageAttachment[] | undefined {
+    const images = (message.images ?? []).flatMap((img) => {
       const data = img.path ? this.readAttachmentData(projectPath, img.path) : null;
       return data ? [{ ...img, data }] : [];
     });
-    await this.reply(projectId, projectPath, session, userMessage.content, modelConfig, images.length > 0 ? images : undefined);
+    return images.length > 0 ? images : undefined;
   }
 
   /**

@@ -372,6 +372,26 @@ export function regenerateMessage(projectId: string, modelConfig?: InsightsModel
   window.electronAPI.regenerateInsightsMessage(projectId, modelConfig ?? session?.modelConfig);
 }
 
+/**
+ * Send an edited message: the chat from that message on is replaced by the edited message,
+ * and its reply streams in
+ */
+export function editMessage(projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig): void {
+  const store = useInsightsStore.getState();
+  const session = store.session;
+  const index = session?.messages.findIndex((m) => m.id === messageId) ?? -1;
+  if (!session || index < 0) return;
+  store.setSession({
+    ...session,
+    messages: [...session.messages.slice(0, index), { ...session.messages[index], content, timestamp: new Date() }],
+  });
+  store.clearStreamingContent();
+  store.clearToolsUsed();
+  store.setCurrentTool(null);
+  store.setStatus({ phase: 'thinking', message: 'Processing your message...' });
+  window.electronAPI.editInsightsMessage(projectId, messageId, content, modelConfig ?? session.modelConfig);
+}
+
 export async function openInsightsPage(projectId: string, includeArchived?: boolean): Promise<void> {
   useInsightsStore.getState().setProjectId(projectId);
   const { phase } = useInsightsStore.getState().status;

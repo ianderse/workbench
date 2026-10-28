@@ -53,6 +53,7 @@ const electronAPI = {
   listInsightsSessions: vi.fn(async () => ({ success: true, data: [] })),
   sendInsightsMessage: vi.fn(),
   regenerateInsightsMessage: vi.fn(),
+  editInsightsMessage: vi.fn(),
   newInsightsSession: vi.fn(async () => ({ success: true }))
 };
 
@@ -243,6 +244,22 @@ describe('Insights mock conversations', () => {
     emit.chunk('project-a', { type: 'text', content: 'Second answer' });
     emit.chunk('project-a', { type: 'done' });
     expect(state().session?.messages.at(-1)?.content).toBe('Second answer');
+  });
+
+  it('replaces the chat from an edited message on and sends the edit', () => {
+    store.sendMessage('project-a', 'first');
+    emit.chunk('project-a', { type: 'text', content: 'Answer one' });
+    emit.chunk('project-a', { type: 'done' });
+    store.sendMessage('project-a', 'second');
+    emit.chunk('project-a', { type: 'text', content: 'Answer two' });
+    emit.chunk('project-a', { type: 'done' });
+    const firstId = state().session!.messages[0].id;
+
+    store.editMessage('project-a', firstId, 'first, edited');
+
+    expect(state().session?.messages.map((m) => m.content)).toEqual(['first, edited']);
+    expect(state().status.phase).toBe('thinking');
+    expect(electronAPI.editInsightsMessage).toHaveBeenCalledWith('project-a', firstId, 'first, edited', undefined);
   });
 
   it('keeps a new chat empty when another conversation is updated', async () => {

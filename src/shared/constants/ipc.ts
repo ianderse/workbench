@@ -201,6 +201,7 @@ export const IPC_CHANNELS = {
   INSIGHTS_SEND_MESSAGE: 'insights:sendMessage',
   INSIGHTS_STOP: 'insights:stop',
   INSIGHTS_REGENERATE: 'insights:regenerate',
+  INSIGHTS_EDIT_MESSAGE: 'insights:editMessage',
   INSIGHTS_CLEAR_SESSION: 'insights:clearSession',
   INSIGHTS_CREATE_TASK: 'insights:createTask',
   INSIGHTS_LIST_SESSIONS: 'insights:listSessions',

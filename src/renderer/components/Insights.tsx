@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Pencil,
   Search,
   FileText,
   FolderSearch,
@@ -36,6 +37,7 @@ import {
   sendMessage,
   stopMessage,
   regenerateMessage,
+  editMessage,
   newSession,
   switchSession,
   deleteSession,
@@ -665,6 +667,17 @@ export function Insights({ projectId }: InsightsProps) {
                         }
                         : undefined
                     }
+                    onEdit={
+                      // A sent message can be edited once Claude is done; the chat after it is
+                      // replaced by the edited message's reply
+                      message.role === 'user' && !isLoading
+                        ? (content) => {
+                          setTaskCreated(new Set());
+                          stickToBottomRef.current = true; // Follow the edited message's reply
+                          editMessage(projectId, message.id, content, effectiveModelConfig);
+                        }
+                        : undefined
+                    }
                     onCreateTask={handleCreateTask}
                     creatingTask={creatingTask}
                     taskCreated={taskCreated}
@@ -768,11 +781,14 @@ interface MessageBubbleProps {
   onPreviewImage: (image: ImageAttachment) => void;
   /** Writes this reply again (the latest reply only) */
   onRegenerate?: () => void;
+  /** Sends an edited version of this message (user messages, while Claude isn't replying) */
+  onEdit?: (content: string) => void;
 }
 
 function MessageBubble({
   message,
   onRegenerate,
+  onEdit,
   onPreviewImage,
   onCreateTask,
   creatingTask,
@@ -780,11 +796,16 @@ function MessageBubble({
 }: MessageBubbleProps) {
   const { t } = useTranslation('common');
   const isUser = message.role === 'user';
+  const [editing, setEditing] = useState(false);
+  // Editing ends when editing is no longer possible (Claude started replying)
+  useEffect(() => {
+    if (!onEdit) setEditing(false);
+  }, [onEdit]);
 
   if (isUser) {
     const attachments = message.images || [];
     return (
-      <div className="flex flex-col items-end gap-1.5">
+      <div className="group flex flex-col items-end gap-1.5">
         {attachments.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
             {attachments.map((file) =>
@@ -815,10 +836,36 @@ function MessageBubble({
             )}
           </div>
         )}
-        {message.content && (
-          <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-muted px-4 py-2.5 text-[0.9375rem] [.dark_&]:bg-[#202020] leading-relaxed text-foreground">
-            {message.content}
-          </div>
+        {editing ? (
+          <MessageEditor
+            initial={message.content}
+            canBeEmpty={attachments.length > 0}
+            onCancel={() => setEditing(false)}
+            onSave={(content) => {
+              setEditing(false);
+              // Saving without changes is the same as cancelling
+              if (content !== message.content.trim()) onEdit?.(content);
+            }}
+          />
+        ) : (
+          <>
+            {message.content && (
+              <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-muted px-4 py-2.5 text-[0.9375rem] [.dark_&]:bg-[#202020] leading-relaxed text-foreground">
+                {message.content}
+              </div>
+            )}
+            {onEdit && (
+              <button
+                type="button"
+                onClick={() => setEditing(true)}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-[opacity,color,background-color] hover:bg-nav-hover hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                aria-label={t('insights.editMessage')}
+                title={t('insights.editMessage')}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </>
         )}
       </div>
     );
@@ -960,6 +1007,81 @@ function CopyMessageButton({ text }: { text: string }) {
     >
       {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
+  );
+}
+
+/**
+ * A sent message being edited in place: the bubble keeps its look and place and its text
+ * becomes editable. Enter (or Save) sends it, Escape (or Cancel) leaves it as it was
+ */
+function MessageEditor({ initial, canBeEmpty, onCancel, onSave }: {
+  initial: string;
+  /** The message has attachments, so it can be sent without text */
+  canBeEmpty: boolean;
+  onCancel: () => void;
+  onSave: (content: string) => void;
+}) {
+  const { t } = useTranslation('common');
+  const [value, setValue] = useState(initial);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Save turns on once the text changed (and isn't empty, unless the message has attachments)
+  const changed = value.trim() !== initial.trim();
+  const canSave = changed && (canBeEmpty || value.trim().length > 0);
+
+  // The caret starts at the end of the text
+  useEffect(() => {
+    const el = textareaRef.current;
+    el?.focus();
+    el?.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
+  return (
+    <>
+      {/* The hidden copy of the text sizes the bubble like the read-only one; the field sits on top */}
+      <div className="ml-auto grid max-w-[85%] rounded-xl bg-muted px-4 py-2.5 text-[0.9375rem] [.dark_&]:bg-[#202020] leading-relaxed text-foreground focus-within:shadow-(--shadow-focus)">
+        <span aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words">
+          {`${value}\u200b`}
+        </span>
+        <textarea
+          ref={textareaRef}
+          // One column and row: the field takes the hidden text's size, not a default width
+          rows={1}
+          cols={1}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              onCancel();
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+              // Enter without changes closes the editor, like Cancel
+              e.preventDefault();
+              if (canSave) onSave(value.trim());
+              else if (!changed) onCancel();
+            }
+          }}
+          aria-label={t('insights.editMessage')}
+          className="col-start-1 row-start-1 h-full w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 [font:inherit] text-foreground whitespace-pre-wrap break-words focus:outline-none"
+        />
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-8 rounded-lg px-3 text-sm text-foreground transition-colors hover:bg-nav-hover"
+        >
+          {t('buttons.cancel')}
+        </button>
+        <button
+          type="button"
+          onClick={() => onSave(value.trim())}
+          disabled={!canSave}
+          className="h-8 rounded-lg bg-foreground px-3 text-sm text-background transition-colors hover:bg-foreground/90 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+        >
+          {t('buttons.save')}
+        </button>
+      </div>
+    </>
   );
 }
 
