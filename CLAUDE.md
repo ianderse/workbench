@@ -216,6 +216,13 @@ A task can pin its own backend, model and effort (`TaskMetadata.agentOverride`, 
 
 ### Resume and Start over
 
+Task throughput settings add phase-boundary advisor checkpoints (the default task schedule), preserved fresh context
+before validation, and bounded stalled-progress recovery at completed phase boundaries. **Continue with fresh context**
+is available for eligible stopped/failed unfinished tasks; it retains the existing worktree and records a replacement
+session through a verified handoff and durable epoch. It is distinct from Start over. Never replay an uncertain prompt
+or treat failed preservation/checkpoint advice as success. See [the operational lessons](docs/railhouse-rewrite-lessons.md)
+for evidence, activation limits, and the independent Railhouse handoff.
+
 A stopped (Human Review, reason `stopped`) or failed (Error) task whose run has an unfinished step shows **Resume**
 (`canResumeTask()`, `shared/utils/task-resume.ts`): it is `TASK_START`, which keeps the worktree and continues the saved
 session at the first unfinished step. **Start over** (`TASK_RETRY`, confirmation dialog) discards the worktree and branch,

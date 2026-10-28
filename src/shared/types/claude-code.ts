@@ -1,4 +1,5 @@
 import type { HumanApprovalOverride } from './human-work';
+import type { PhaseProgressEvidence, PhaseProgressState, PhaseRecoveryIntent, SessionEpoch } from './task-throughput';
 /**
  * Claude Code task execution types
  *
@@ -44,6 +45,10 @@ export interface ClaudeCodeTaskSettings {
    * many reviews in total. 1 = a single pass. Ignored while `validation` is off.
    */
   aiReviewRounds: number;
+  /** Continue in a preserved replacement session before validation; default before-validation. */
+  freshContext?: 'off' | 'before-validation';
+  /** Recover repeated no-progress phases at safe boundaries; default recover. */
+  stallRecovery?: 'off' | 'recover';
   /** Let triage pick Fable for the hardest tasks (Fable may bill to usage credits) */
   allowFable: boolean;
   /** Fallback model chain when the chosen model is overloaded (`--fallback-model`) */
@@ -64,6 +69,8 @@ export const DEFAULT_CLAUDE_CODE_TASK_SETTINGS: ClaudeCodeTaskSettings = {
   planning: 'auto',
   validation: true,
   aiReviewRounds: 3,
+  freshContext: 'before-validation',
+  stallRecovery: 'recover',
   allowFable: false,
   taskMessaging: true,
 };
@@ -111,6 +118,9 @@ export interface ClaudeRunPhase {
   numTurns?: number;
   isError?: boolean;
   error?: string;
+  /** Durable baseline and recovery identity for replay-safe phase-boundary observations. */
+  progressBefore?: PhaseProgressEvidence;
+  recoveryId?: string;
   /** resync: what was merged in, and whether the step also carried on with unfinished work */
   resync?: { ref: string; into: string; continued: boolean };
 }
@@ -238,6 +248,10 @@ export interface ReviewSummary {
 /** Persisted run state of a task (`<specDir>/claude_run.json`) */
 export interface ClaudeRunInfo {
   version: 1;
+  sessionEpoch?: SessionEpoch;
+  freshContextConsumedRequestId?: string;
+  phaseProgress?: PhaseProgressState;
+  phaseRecovery?: PhaseRecoveryIntent;
   /** Claude Code session that holds the task's conversation (resumable) */
   sessionId?: string;
   /**

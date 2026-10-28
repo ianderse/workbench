@@ -52,6 +52,7 @@ export interface TaskAPI {
     projectId?: string
   ) => Promise<IPCResult<Task>>;
   startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
+  continueTaskWithFreshContext: (taskId: string, projectId: string) => Promise<IPCResult<{ action: 'started' | 'queued' | 'pending'; warning?: string }>>;
   stopTask: (taskId: string, projectId?: string) => void;
   retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
   mutateHumanWork: (projectId: string, taskId: string, mutation: HumanWorkMutation) => Promise<IPCResult<HumanWorkstream>>;
@@ -164,6 +165,8 @@ export const createTaskAPI = (): TaskAPI => ({
 
   startTask: (taskId: string, options?: TaskStartOptions, projectId?: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_START, taskId, options, projectId),
+  continueTaskWithFreshContext: (taskId: string, projectId: string): Promise<IPCResult<{ action: 'started' | 'queued' | 'pending'; warning?: string }>> =>
+    ipcRenderer.invoke(IPC_CHANNELS.TASK_FRESH_CONTEXT, taskId, projectId),
 
   stopTask: (taskId: string, projectId?: string): void =>
     ipcRenderer.send(IPC_CHANNELS.TASK_STOP, taskId, projectId),

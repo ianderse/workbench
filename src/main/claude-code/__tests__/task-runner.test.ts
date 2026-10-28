@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import path from 'path';
 import type { ClaudeProcessOptions } from '../process';
@@ -9,6 +9,8 @@ import type { HumanWorkstream } from '../../../shared/types/human-work';
 import { buildHumanApprovalOverridePrompt, buildHumanWorkFeedback, buildHumanWorkPrompt } from '../../../shared/utils/human-work';
 import * as reviewDiff from '../review-diff';
 import * as runText from '../run-text';
+import * as backendSettings from '../../agent-backend/settings';
+import * as handoffs from '../phase-handoff';
 import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-code';
 import { mutateProjectMemory, readMemoryContexts } from '../../self-improve/project-memory';
 import { closeTaskToolsServer } from '../../insights/task-tools-server';
@@ -101,7 +103,7 @@ vi.mock('../review-summary', async (importOriginal) => {
 });
 
 import { ClaudeTaskRun, loadClaudeRunInfo, ompSubagentGuidance, pickPhaseResult, wrapWorkbenchMessages } from '../task-runner';
-import { ompSubagentsPerTask } from '../../../shared/types/agent-backend';
+import { DEFAULT_OMP_BACKEND_SETTINGS, ompSubagentsPerTask } from '../../../shared/types/agent-backend';
 import type { TaskMessage, TaskRunMessaging } from '../../task-messaging/types';
 import { SELF_IMPROVE_NUDGE } from '../../self-improve/nudge';
 import { resetOmpRolesForTests } from '../../agent-backend/omp-roles';
@@ -196,6 +198,88 @@ describe('ClaudeTaskRun', () => {
       ...overrides,
     }, callbacks);
   }
+
+  describe('phase advisor checkpoints', () => {
+    it.each([
+      { kind: 'plan', result: undefined }, { kind: 'diff', result: undefined },
+      { kind: 'plan', result: { summary: 'Legacy', issues: [] } }, { kind: 'diff', result: { summary: 'Legacy', issues: [] } },
+      { kind: 'plan', result: { summary: 'Corrupt', findings: [null] } }, { kind: 'diff', result: { summary: 'Corrupt', findings: [null] } },
+    ])('rejects malformed completed checkpoint caches without treating them as advice (%j)', async ({ kind, result: corrupt }) => {
+      resetOmpRolesForTests({ default: 'omlx/worker', advisor: 'omlx/advisor', judge: 'omlx/judge' }, {}, true);
+      const settings = vi.spyOn(backendSettings, 'getAgentBackendSettings').mockReturnValue({ kind: 'omp', omp: { ...DEFAULT_OMP_BACKEND_SETTINGS, advisor: 'on', advisorSchedule: 'phase-boundaries' } });
+      const fingerprint = vi.spyOn(handoffs, 'fingerprintWorktree').mockResolvedValue('same-worktree');
+      const diff = vi.spyOn(reviewDiff, 'collectReviewDiff').mockResolvedValue('diff --git a/a.ts b/a.ts\n+fixed');
+      const review = vi.spyOn(runText, 'runClaudeText').mockResolvedValue({ text: '', structured: { summary: 'No defects found', findings: [] } });
+      try {
+        const run = makeRun({ backend: 'omp' }) as unknown as { info: { plan: string }; runOmpPlanCheckpoint(): Promise<void>; runOmpReview(): Promise<void>; planAdvice?: string; reviewSection?: string };
+        run.info.plan = '# Plan';
+        const check = () => kind === 'plan' ? run.runOmpPlanCheckpoint() : run.runOmpReview();
+        await check();
+        const checkpoint = path.join(specDir, 'checkpoints', readdirSync(path.join(specDir, 'checkpoints'))[0], 'checkpoint.json');
+        const stored = JSON.parse(readFileSync(checkpoint, 'utf8'));
+        stored.result = corrupt;
+        writeFileSync(checkpoint, JSON.stringify(stored));
+        writeFileSync(path.join(path.dirname(checkpoint), 'attempt-1.completed.json'), JSON.stringify(stored));
+        await check();
+        expect(review).toHaveBeenCalledTimes(1);
+        expect(run.planAdvice).toBeUndefined();
+        expect(run.reviewSection).toBeUndefined();
+      } finally { review.mockRestore(); diff.mockRestore(); fingerprint.mockRestore(); settings.mockRestore(); }
+    });
+    it('uses only an enabled configured advisor and reuses the same durable plan result', async () => {
+      resetOmpRolesForTests({ default: 'omlx/worker', advisor: 'omlx/advisor' }, {}, true);
+      const settings = vi.spyOn(backendSettings, 'getAgentBackendSettings').mockReturnValue({ kind: 'omp', omp: { ...DEFAULT_OMP_BACKEND_SETTINGS, advisor: 'inherit', advisorSchedule: 'phase-boundaries' } });
+      const fingerprint = vi.spyOn(handoffs, 'fingerprintWorktree').mockResolvedValue('same-worktree');
+      const review = vi.spyOn(runText, 'runClaudeText').mockResolvedValue({ text: '', structured: { summary: 'Check the parser boundary', findings: [{ severity: 'major', issue: 'Add a malformed-input check' }] }, costUsd: 0.25 });
+      try {
+        const run = makeRun({ backend: 'omp' }) as unknown as { info: { plan: string }; planAdvice?: string; runOmpPlanCheckpoint(): Promise<void> };
+        run.info.plan = '# Plan\nImplement parser';
+        await run.runOmpPlanCheckpoint();
+        await run.runOmpPlanCheckpoint();
+        expect(review).toHaveBeenCalledTimes(1);
+        expect(review.mock.calls[0][0]).toMatchObject({ model: 'omlx/advisor', ompRole: 'advisor', backend: 'omp', tools: ['Read', 'Glob', 'Grep'] });
+        expect(run.planAdvice).toContain('Add a malformed-input check');
+        expect(run.planAdvice).toContain('not proof of implementation or test success');
+        run.info.plan = '# Plan\nImplement a different boundary';
+        await run.runOmpPlanCheckpoint();
+        expect(review).toHaveBeenCalledTimes(2);
+      } finally { review.mockRestore(); fingerprint.mockRestore(); settings.mockRestore(); }
+    });
+
+    it('never treats an inherited disabled advisor as enabled merely because its model exists', async () => {
+      resetOmpRolesForTests({ advisor: 'openai-codex/advisor' }, {}, false);
+      const settings = vi.spyOn(backendSettings, 'getAgentBackendSettings').mockReturnValue({ kind: 'omp', omp: { ...DEFAULT_OMP_BACKEND_SETTINGS, advisor: 'inherit', advisorSchedule: 'phase-boundaries' } });
+      const review = vi.spyOn(runText, 'runClaudeText');
+      try {
+        const run = makeRun({ backend: 'omp' }) as unknown as { info: { plan: string }; runOmpPlanCheckpoint(): Promise<void> };
+        run.info.plan = '# Plan';
+        await run.runOmpPlanCheckpoint();
+        expect(review).not.toHaveBeenCalled();
+      } finally { review.mockRestore(); settings.mockRestore(); }
+    });
+
+    it('deduplicates a successful diff review and never reuses failed checkpoints as approval', async () => {
+      resetOmpRolesForTests({ default: 'omlx/worker', judge: 'omlx/judge' });
+      const fingerprint = vi.spyOn(handoffs, 'fingerprintWorktree').mockResolvedValue('same-worktree');
+      const diff = vi.spyOn(reviewDiff, 'collectReviewDiff').mockResolvedValue('diff --git a/a.ts b/a.ts\n+fixed');
+      const review = vi.spyOn(runText, 'runClaudeText').mockResolvedValue({ text: '', structured: { summary: 'No defects found', findings: [] } });
+      try {
+        const run = makeRun({ backend: 'omp' }) as unknown as { runOmpReview(): Promise<void>; reviewSection?: string };
+        await run.runOmpReview();
+        await run.runOmpReview();
+        expect(review).toHaveBeenCalledTimes(1);
+        expect(run.reviewSection).toContain('found no issues');
+        diff.mockResolvedValue('diff --git a/a.ts b/a.ts\n+different');
+        review.mockRejectedValue(new Error('Provider unavailable'));
+        const failed = makeRun({ backend: 'omp' }) as unknown as { runOmpReview(): Promise<void>; reviewSection?: string };
+        await failed.runOmpReview();
+        await failed.runOmpReview();
+        await failed.runOmpReview();
+        expect(review).toHaveBeenCalledTimes(3);
+        expect(failed.reviewSection).toBeUndefined();
+      } finally { review.mockRestore(); diff.mockRestore(); fingerprint.mockRestore(); }
+    });
+  });
 
   it.each(['claude', 'omp'])('carries persisted scoped receipts in every %s phase and triage without revision feedback', async (backend) => {
     triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });

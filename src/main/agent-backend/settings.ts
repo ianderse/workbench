@@ -16,6 +16,9 @@ export function resolveAgentBackendSettings(stored: Partial<AgentBackendSettings
     omp: {
       ...DEFAULT_OMP_BACKEND_SETTINGS,
       ...omp,
+      advisorSchedule: ['continuous', 'phase-boundaries', 'off'].includes(omp.advisorSchedule ?? '')
+        ? omp.advisorSchedule
+        : DEFAULT_OMP_BACKEND_SETTINGS.advisorSchedule,
       command: omp.command?.trim() || DEFAULT_OMP_BACKEND_SETTINGS.command,
       models: { ...(omp.models ?? {}) },
       thinking: { ...DEFAULT_OMP_BACKEND_SETTINGS.thinking, ...(omp.thinking ?? {}) },

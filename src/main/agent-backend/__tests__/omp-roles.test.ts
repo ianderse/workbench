@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { parseOmpRoles } from '../omp-roles';
+import { describe, expect, it, vi } from 'vitest';
+import { getOmpAdvisorPolicy, parseOmpAdvisorEnabled, parseOmpRoles, refreshOmpRoles, resetOmpRolesForTests } from '../omp-roles';
+import * as runtime from '../../platform/runtime-exec';
+import * as command from '../omp-command';
 
 describe('parseOmpRoles', () => {
   it('reads modelRoles.value from `omp config list --json`', () => {
@@ -16,6 +18,43 @@ describe('parseOmpRoles', () => {
     expect(parseOmpRoles('{"modelRoles":{"value":[]}}')).toBeUndefined();
     expect(parseOmpRoles('{"modelRoles":{"value":{}}}')).toEqual({});
   });
+});
+
+it('reads effective advisor enablement without guessing from the configured advisor model', async () => {
+  expect(parseOmpAdvisorEnabled('{"advisor.enabled":{"value":true}}')).toBe(true);
+  expect(parseOmpAdvisorEnabled('{"advisor.enabled":{"value":false}}')).toBe(false);
+  expect(parseOmpAdvisorEnabled('{}')).toBeUndefined();
+  expect(parseOmpAdvisorEnabled('{"advisor.enabled":{"value":"true"}}')).toBeUndefined();
+  expect(parseOmpAdvisorEnabled('bad')).toBeUndefined();
+  resetOmpRolesForTests({ default: 'omlx/worker', advisor: 'openai-codex/advisor' }, {}, false);
+  expect(await getOmpAdvisorPolicy()).toEqual({ enabled: false, model: 'openai-codex/advisor' });
+});
+
+it.each(['failed', 'malformed'])('drops inherited advisor authorization after a %s refresh while retaining cached worker routes', async (mode) => {
+  resetOmpRolesForTests({ default: 'omlx/worker', advisor: 'cloud/advisor' }, {}, true);
+  const resolve = vi.spyOn(command, 'resolveOmpCommand').mockResolvedValue('omp');
+  const run = vi.spyOn(runtime, 'runTool');
+  if (mode === 'failed') run.mockRejectedValue(new Error('CLI unavailable'));
+  else run.mockResolvedValue({ stdout: 'not json', stderr: '' });
+  try {
+    expect(await refreshOmpRoles()).toEqual({ default: 'omlx/worker', advisor: 'cloud/advisor' });
+    expect(await getOmpAdvisorPolicy()).toEqual({ enabled: undefined, model: 'cloud/advisor' });
+  } finally { run.mockRestore(); resolve.mockRestore(); }
+});
+
+it('does not overwrite a replacement role snapshot when an earlier config read finishes late', async () => {
+  resetOmpRolesForTests({ default: 'old/model' }, {}, true);
+  const resolve = vi.spyOn(command, 'resolveOmpCommand').mockResolvedValue('omp');
+  let release!: (value: { stdout: string; stderr: string }) => void;
+  const run = vi.spyOn(runtime, 'runTool').mockImplementation(() => new Promise((done) => { release = done; }));
+  try {
+    const pending = refreshOmpRoles();
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    resetOmpRolesForTests({ default: 'fixture/worker', advisor: 'fixture/advisor' }, {}, false);
+    release({ stdout: JSON.stringify({ modelRoles: { value: { default: 'late/live-model' } }, 'advisor.enabled': { value: true } }), stderr: '' });
+    await pending;
+    expect(await getOmpAdvisorPolicy()).toEqual({ enabled: false, model: 'fixture/advisor' });
+  } finally { run.mockRestore(); resolve.mockRestore(); }
 });
 
 it('reads configured fallback chains and rejects malformed entries', async () => {

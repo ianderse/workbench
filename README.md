@@ -10,6 +10,8 @@
 
 **Workbench OMP** is an intentional fork of [Workbench](https://github.com/proactive-agent/workbench) ([ianderse/workbench-omp](https://github.com/ianderse/workbench-omp)). It runs tasks on local models through [OMP](https://github.com/can1357/oh-my-pi) as well as Claude Code, and adds a more autonomous task pipeline: breaking specs into tickets, AI review rounds, automatic merges and spec reviews. Upstream changes are merged in daily; where a feature overlaps, this fork's version is kept unless decided otherwise (see `docs/upstream-sync/`). It installs next to upstream Workbench with its own settings, and it copies your Workbench settings on first launch. Project `.workbench` folders stay compatible.
 
+[Operational lessons for the independent Railhouse rewrite](docs/railhouse-rewrite-lessons.md) record the pricing, approval, throughput, context, and recovery safeguards learned while operating this fork.
+
 ## What's new in this fork
 
 Entries are dated so changes can be tracked; commit hashes point at the change. Upstream Workbench's own description follows the changelog.

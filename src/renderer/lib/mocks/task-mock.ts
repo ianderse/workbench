@@ -54,6 +54,7 @@ export const taskMock = {
   },
 
   retryTask: async () => ({ success: true, data: { action: 'started' as const } }),
+  continueTaskWithFreshContext: async () => ({ success: false, error: 'Fresh-context continuation requires the desktop runner' }),
 
   submitReview: async () => ({ success: true }),
 

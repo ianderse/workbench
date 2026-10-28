@@ -626,6 +626,10 @@
       "validation": "Validation",
       "validationDescription": "Run the project's checks and a fresh review of the changes before handing a task to you",
       "aiReviewRounds": "AI review rounds",
+      "freshContext": "Fresh context before validation",
+      "freshContextDescription": "Preserve the task's work and transcript, then give validation a compact handoff in a new session",
+      "stallRecovery": "Recover stalled work",
+      "stallRecoveryDescription": "At completed phase boundaries, detect repeated lack of progress and try a preserved fresh session, then an allowed configured fallback",
       "aiReviewRoundsDescription": "How many times AI review can send a task back to fix its findings before it goes to human review",
       "taskMessaging": "Task messaging",
       "taskMessagingDescription": "Tasks running at the same time can message each other, and Workbench tells them when another task starts, finishes, is merged or edits the same files",
@@ -729,7 +733,14 @@
     "ompDefaultRole": "OMP default role",
     "modelPlaceholder": "provider/model",
     "advisorTitle": "Advisor",
-    "advisorDescription": "A stronger model reviews each turn and adds notes for the model that does the work. Applies to tasks, Insights and agent terminals. Utility calls such as titles and commit messages skip it. It uses the advisor model's quota and billing",
+    "advisorDescription": "A configured advisor adds notes for the model doing the work. Task scheduling is controlled below; Insights and agent terminals retain their advisor mode. Advisor calls use the selected model's quota and billing",
+    "advisorSchedule": "Task advisor schedule",
+    "advisorScheduleDescription": "Phase boundaries checks a completed plan once and keeps the independent review before validation. The advisor must be enabled and configured; repeated unchanged inputs reuse their checkpoint",
+    "advisorSchedules": {
+      "continuous": "Continuous",
+      "phase-boundaries": "Phase boundaries",
+      "off": "Off"
+    },
     "advisor": "Advisor",
     "advisorModeDescription": "Use OMP setting follows ~/.omp/agent/config.yml",
     "advisorModes": {

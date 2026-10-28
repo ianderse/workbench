@@ -201,6 +201,8 @@ export interface TaskDecision {
 }
 
 export interface TaskMetadata {
+  /** Host-owned request consumed once by the preserved session transition journal. */
+  freshContextRequestId?: string;
   /** Human-owned actions, evidence receipts and history; distinct from the AI verdict. */
   humanWork?: HumanWorkstream;
   // The description the user entered (shown on the task card)

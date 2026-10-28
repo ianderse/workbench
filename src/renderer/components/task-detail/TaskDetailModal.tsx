@@ -115,6 +115,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
   const uiWork = isUiTask(task);
   const [isUnarchiving, setIsUnarchiving] = useState(false);
   const [isRetrying, setIsRetrying] = useState(false);
+  const [isRefreshingContext, setIsRefreshingContext] = useState(false);
   // Why the last footer action failed, shown in the footer (cleared by the next action)
   const [actionError, setActionError] = useState<string | null>(null);
   // Start over asks first: it discards the worktree (a backup branch keeps the work)
@@ -132,6 +133,19 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
     if (!result.success) setActionError(t('tasks:actions.unarchiveFailed', { error: result.error ?? '' }));
   };
   const activeProject = useProjectStore(s => s.getActiveProject());
+  const handleFreshContext = async () => {
+    setIsRefreshingContext(true);
+    setActionError(null);
+    try {
+      if (typeof window.electronAPI.continueTaskWithFreshContext !== 'function') throw new Error(t('tasks:actions.freshContextRestart'));
+      const result = await window.electronAPI.continueTaskWithFreshContext(task.id, task.projectId);
+      if (!result.success) throw new Error(result.error ?? t('tasks:detail.resumeFailedDescription'));
+      setNotice(t(result.data?.action === 'pending' ? 'tasks:actions.freshContextPending' : 'tasks:actions.freshContextPreserved'));
+      if (result.data?.warning) setActionError(result.data.warning);
+    } catch (error) {
+      setActionError(/No handler registered/.test(String(error)) ? t('tasks:actions.freshContextRestart') : String(error));
+    } finally { setIsRefreshingContext(false); }
+  };
 
   // Event Handlers
   const handleStartStop = async () => {
@@ -604,7 +618,12 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
               )}
               {/* Stopped or failed with an unfinished step: continue in the same worktree and session */}
               {canResumeTask(task, validationOn) && !state.isRunning && !state.isStuck && (
-                <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => void handleStartStop()}>
+                <Button variant="ghost" size="sm" disabled={isRefreshingContext || isRetrying} onClick={() => void handleFreshContext()}>
+                  {t('tasks:actions.freshContext')}
+                </Button>
+              )}
+              {canResumeTask(task, validationOn) && !state.isRunning && !state.isStuck && (
+                <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRefreshingContext || isRetrying} onClick={() => void handleStartStop()}>
                   <Play className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
                   {t('tasks:actions.resume')}
                 </Button>
@@ -625,7 +644,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
               {/* Failed, stopped or stuck (marked running without a run): start over from a clean
                   worktree, discarding the previous run (after a confirmation; the work is backed up) */}
               {(state.isStuck || ((taskHasErrors(task) || taskWasStopped(task)) && !state.isRunning)) && (
-                <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRetrying} onClick={() => setConfirmStartOver(true)}>
+                <Button variant="ghost" size="sm" className="gap-1.5" disabled={isRetrying || isRefreshingContext} onClick={() => setConfirmStartOver(true)}>
                   {isRetrying ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
@@ -656,7 +675,7 @@ function TaskDetailModalContent({ open, task, onOpenChange }: { open: boolean; t
               </Button>
               {/* Start a task waiting in Planning (Backlog) */}
               {task.status === 'backlog' && !isAwaitingDecision(task.metadata) && (
-                <Button size="sm" className="gap-1.5" onClick={() => void handleStartStop()}>
+                <Button size="sm" className="gap-1.5" disabled={isRefreshingContext || isRetrying} onClick={() => void handleStartStop()}>
                   <Play className="h-4 w-4" strokeWidth={DIALOG_CLOSE_ICON_STROKE} />
                   {t('tasks:actions.start')}
                 </Button>

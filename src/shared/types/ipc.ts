@@ -173,6 +173,7 @@ export interface ElectronAPI {
   deleteTask: (taskId: string, projectId?: string) => Promise<IPCResult>;
   updateTask: (taskId: string, updates: { title?: string; description?: string; metadata?: Partial<TaskMetadata> }, projectId?: string) => Promise<IPCResult<Task>>;
   startTask: (taskId: string, options?: TaskStartOptions, projectId?: string) => void;
+  continueTaskWithFreshContext: (taskId: string, projectId: string) => Promise<IPCResult<{ action: 'started' | 'queued' | 'pending'; warning?: string }>>;
   stopTask: (taskId: string, projectId?: string) => void;
   retryTask: (taskId: string, projectId?: string) => Promise<IPCResult<{ action: 'started' | 'queued'; backupBranch?: string }>>;
   mutateHumanWork: (projectId: string, taskId: string, mutation: HumanWorkMutation) => Promise<IPCResult<HumanWorkstream>>;

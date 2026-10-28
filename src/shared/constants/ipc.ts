@@ -36,6 +36,7 @@ export const IPC_CHANNELS = {
   TASK_DELETE: 'task:delete',
   TASK_UPDATE: 'task:update',
   TASK_START: 'task:start',
+  TASK_FRESH_CONTEXT: 'task:freshContext',
   TASK_STOP: 'task:stop',
   TASK_RETRY: 'task:retry',  // Start a task over: revert its worktree, reset its spec files, start (or queue) it
   TASK_REVIEW: 'task:review',

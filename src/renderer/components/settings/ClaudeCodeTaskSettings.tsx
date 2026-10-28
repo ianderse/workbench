@@ -213,6 +213,12 @@ export function ClaudeCodeTaskSettings({ settings, onSettingsChange }: ClaudeCod
             />
           </SettingsRow>
 
+          <SettingsRow label={t('claudeCode.execution.freshContext')} description={t('claudeCode.execution.freshContextDescription')}>
+            <Switch checked={current.freshContext !== 'off'} onCheckedChange={(enabled) => update({ freshContext: enabled ? 'before-validation' : 'off' })} aria-label={t('claudeCode.execution.freshContext')} />
+          </SettingsRow>
+          <SettingsRow label={t('claudeCode.execution.stallRecovery')} description={t('claudeCode.execution.stallRecoveryDescription')}>
+            <Switch checked={current.stallRecovery !== 'off'} onCheckedChange={(enabled) => update({ stallRecovery: enabled ? 'recover' : 'off' })} aria-label={t('claudeCode.execution.stallRecovery')} />
+          </SettingsRow>
           <SettingsRow
             label={t('claudeCode.execution.aiReviewRounds')}
             description={t('claudeCode.execution.aiReviewRoundsDescription')}

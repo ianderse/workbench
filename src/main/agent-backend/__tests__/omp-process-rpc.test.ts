@@ -4,7 +4,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ClaudeStreamMessage } from '../../claude-code/stream-types';
 import { DEFAULT_OMP_BACKEND_SETTINGS, type OmpBackendSettings } from '../../../shared/types/agent-backend';
-import { encodeRpcCommand, isSessionSettled, parseRpcLine, readSteerId, rpcSteer, sessionIdOf, steerText } from '../omp-rpc';
+import { encodeRpcCommand, isSessionSettled, parseRpcLine, readSteerId, rpcPrompt, rpcSteer, sessionIdOf, steerText } from '../omp-rpc';
 import { buildOmpArgs, OMP_FOREGROUND_OVERLAY, OMP_FOREGROUND_RULE } from '../omp-args';
 import { startOmpProcess } from '../omp-process';
 import { appLog } from '../../app-logger';
@@ -20,6 +20,7 @@ describe('omp rpc framing', () => {
   it('encodes a command as one JSON line', () => {
     expect(encodeRpcCommand({ id: 'a', type: 'abort' })).toBe('{"id":"a","type":"abort"}\n');
     expect(JSON.parse(rpcSteer('wbm-1', 'hello'))).toEqual({ id: 'steer-wbm-1', type: 'steer', message: 'hello' });
+    expect(JSON.parse(rpcPrompt('look', [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }]))).toEqual({ id: 'wb-prompt', type: 'prompt', message: 'look', images: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }] });
   });
 
   it('parses ready, responses, events and rubbish', () => {
@@ -67,6 +68,8 @@ if (process.env.FAKE_ARGV_OUT) {
 }
 const rpc = process.argv.includes('rpc');
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
+const sessionFile = require('path').join(process.cwd(), 'rpc-session.jsonl');
+if (rpc) require('fs').writeFileSync(sessionFile, '{"type":"session","id":"rpc-session"}\\n');
 const usage = { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const assistant = (text) => ({ role: 'assistant', provider: 'p', model: 'm', stopReason: 'stop', usage, content: [{ type: 'text', text }] });
 const finish = (text) => {
@@ -84,6 +87,7 @@ if (!rpc) {
       out({ type: 'message_end', message: { role: 'assistant', provider: 'quota-fixture', model: 'limited', stopReason: 'error', usage, content: [], errorMessage: '429 rate_limit_error retry-after-ms=246899000' } });
       out({ type: 'agent_end', messages: [] });
     } else if (mode === 'utility-repair') finish(input.includes('<answer>') ? '{"memories":[]}' : 'not JSON yet');
+    else if (mode === 'rpc-repair') finish('{"value":"fixed"}');
     else finish('print answer: ' + input.trim());
   });
 } else if (mode === 'rpc-exit') {
@@ -107,12 +111,19 @@ if (!rpc) {
     while ((i = buf.indexOf('\\n')) !== -1) {
       const cmd = JSON.parse(buf.slice(0, i));
       buf = buf.slice(i + 1);
-      if (cmd.type === 'get_state') out({ id: cmd.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'rpc-session', hasPendingAsyncWork: jobPending } });
+      if (cmd.type === 'get_state') {
+        if (mode === 'rpc-state-missing') out({ id: cmd.id, type: 'response', command: 'get_state', success: true, data: { hasPendingAsyncWork: jobPending } });
+        else if (mode === 'rpc-state-failed') out({ id: cmd.id, type: 'response', command: 'get_state', success: false, error: 'state unavailable' });
+        else out({ id: cmd.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'rpc-session', sessionFile, hasPendingAsyncWork: jobPending } });
+      }
       if (cmd.type === 'prompt') {
+        if (process.env.FAKE_EXPECT_ACK && !require('fs').existsSync(process.env.FAKE_EXPECT_ACK)) { process.stderr.write('prompt arrived before durable acknowledgment'); process.exit(9); }
+        if (process.env.FAKE_PROMPT_OUT) require('fs').writeFileSync(process.env.FAKE_PROMPT_OUT, JSON.stringify(cmd));
         if (mode === 'rpc-refuse') {
           out({ id: cmd.id, type: 'response', command: 'prompt', success: false, error: 'busy' });
           continue;
         }
+        if (mode === 'rpc-exit-after-prompt') process.exit(7);
         out({ id: cmd.id, type: 'response', command: 'prompt', success: true });
         if (mode === 'rpc-hang') continue;
         // omp compacts a too-large resumed session before agent_start
@@ -124,7 +135,7 @@ if (!rpc) {
           out({ type: 'message_end', message: { role: 'user', content: [{ type: 'text', text: cmd.message }] } });
           // Without a steer the run ends by itself
           setTimeout(() => {
-            if (!steered || mode === 'rpc-ignore') endRun('final answer');
+          if (!steered || mode === 'rpc-ignore') endRun(mode === 'rpc-repair' ? 'not JSON yet' : 'final answer');
           }, mode === 'rpc-ignore' ? 700 : 1500);
         }, delay);
       }
@@ -410,12 +421,12 @@ describe('startOmpProcess with live messages', () => {
     expect(outcome.stderr).toContain('no output from omp');
   });
 
-  it('uses omp -p when the setting is off, for utility calls, without live options and with attachments', async () => {
+  it('uses omp -p when the setting is off, for utility calls, without live options and with document attachments', async () => {
     for (const extra of [
       { settings: settings({ liveMessages: false }) },
       { oneShot: true },
       { live: undefined },
-      { prompt: [{ type: 'text', text: 'look' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] as never },
+      { prompt: [{ type: 'text', text: 'look' }, { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'AAAA' } }] as never },
     ]) {
       const { messages, promise } = run('rpc-ok', extra as never);
       const handle = await promise;
@@ -423,5 +434,135 @@ describe('startOmpProcess with live messages', () => {
       await handle.done;
       expect(text(messages)).toMatch(/^print answer: /);
     }
+  });
+
+  it('preserves native image payloads and awaits durable session acknowledgment before its first prompt', async () => {
+    const acknowledgment = path.join(dir, 'acknowledged');
+    const payload = path.join(dir, 'prompt.json');
+    const onSessionReady = vi.fn(async () => { await writeFile(acknowledgment, 'durable'); });
+    const { promise } = run('rpc-ok', {
+      settings: settings({ liveMessages: false }), live: undefined, onSessionReady,
+      env: { FAKE_MODE: 'rpc-ok', FAKE_EXPECT_ACK: acknowledgment, FAKE_PROMPT_OUT: payload },
+      prompt: [{ type: 'text', text: 'look at the original image' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }],
+    });
+    const outcome = await (await promise).done;
+    expect(outcome.result?.is_error).toBeFalsy();
+    expect(onSessionReady).toHaveBeenCalledWith('rpc-session');
+    expect(JSON.parse(await readFile(payload, 'utf8'))).toMatchObject({ message: 'look at the original image', images: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }] });
+  });
+
+  it('does not submit the prompt while durable session acknowledgment is still pending', async () => {
+    const payload = path.join(dir, 'prompt.json');
+    let release!: () => void;
+    const acknowledgment = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const callbackEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const { promise } = run('rpc-ok', {
+      settings: settings({ liveMessages: false }), live: undefined,
+      env: { FAKE_MODE: 'rpc-ok', FAKE_PROMPT_OUT: payload },
+      onSessionReady: async () => { entered(); await acknowledgment; },
+      rpcWaitsMs: { ready: 5000, start: 2000, settle: 400, state: 400 },
+    });
+    const handle = await promise;
+    await callbackEntered;
+    await expect(readFile(payload, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    release();
+    expect((await handle.done).result?.is_error).toBe(false);
+    expect(JSON.parse(await readFile(payload, 'utf8'))).toMatchObject({ type: 'prompt', message: 'do the thing' });
+  });
+
+  it('bounds a stuck session acknowledgment and cannot submit a late prompt after the callback resolves', async () => {
+    const payload = path.join(dir, 'prompt.json');
+    const history = path.join(dir, 'history.jsonl');
+    let release!: () => void;
+    const acknowledgment = new Promise<void>((resolve) => { release = resolve; });
+    let entered!: () => void;
+    const callbackEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const { promise } = run('rpc-ok', {
+      env: { FAKE_MODE: 'rpc-ok', FAKE_PROMPT_OUT: payload, FAKE_ARGV_OUT: path.join(dir, 'argv.json'), FAKE_ARGV_HISTORY: history },
+      onSessionReady: async () => { entered(); await acknowledgment; },
+      rpcWaitsMs: { ready: 5000, start: 150, settle: 100, state: 100 },
+    });
+    const handle = await promise;
+    await callbackEntered;
+    await expect(handle.done).rejects.toThrow(/acknowledgment|RPC/i);
+    await expect(readFile(payload, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const launches = (await readFile(history, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(launches).toHaveLength(1);
+    expect(launches[0].argv).toContain('rpc');
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await expect(readFile(payload, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each(['rpc-state-missing', 'rpc-state-failed'])('fails closed without a prompt or print replay when session identity is unavailable (%s)', async (mode) => {
+    const payload = path.join(dir, 'prompt.json');
+    const history = path.join(dir, 'history.jsonl');
+    const { promise } = run(mode, {
+      env: { FAKE_MODE: mode, FAKE_PROMPT_OUT: payload, FAKE_ARGV_OUT: path.join(dir, 'argv.json'), FAKE_ARGV_HISTORY: history },
+      onSessionReady: async () => undefined,
+    });
+    await expect((await promise).done).rejects.toThrow(/session identity|durable acknowledgment|RPC/);
+    await expect(readFile(payload, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const launches = (await readFile(history, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(launches).toHaveLength(1);
+    expect(launches[0].argv).toContain('rpc');
+  });
+
+  it.each([false, true])('never print-replays a prompt whose RPC acceptance is uncertain (strict=%s)', async (strict) => {
+    const payload = path.join(dir, 'prompt.json');
+    const history = path.join(dir, 'history.jsonl');
+    const { promise } = run('rpc-exit-after-prompt', {
+      env: { FAKE_MODE: 'rpc-exit-after-prompt', FAKE_PROMPT_OUT: payload, FAKE_ARGV_OUT: path.join(dir, 'argv.json'), FAKE_ARGV_HISTORY: history },
+      ...(strict ? { onSessionReady: async () => undefined } : {}),
+    });
+    const handle = await promise;
+    await expect(handle.done).rejects.toThrow(/prompt was sent.*acceptance is uncertain/i);
+    expect(JSON.parse(await readFile(payload, 'utf8'))).toMatchObject({ type: 'prompt', message: 'do the thing' });
+    const launches = (await readFile(history, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(launches).toHaveLength(1);
+    expect(launches[0].argv).toContain('rpc');
+  });
+
+  it('repairs malformed JSON by resuming the acknowledged session without creating another identity', async () => {
+    const history = path.join(dir, 'history.jsonl');
+    const onSessionReady = vi.fn(async () => undefined);
+    const handle = await startOmpProcess({
+      settings: settings({ liveMessages: false }), cwd: dir, model: 'fixture/small', tools: [], session: { dir },
+      prompt: 'Return the object', jsonSchema: { type: 'object', required: ['value'], properties: { value: { type: 'string' } } },
+      env: { FAKE_MODE: 'rpc-repair', FAKE_ARGV_OUT: path.join(dir, 'argv.json'), FAKE_ARGV_HISTORY: history },
+      onSessionReady, rpcWaitsMs: { ready: 5000, start: 400, settle: 400, state: 400 },
+    });
+    const outcome = await handle.done;
+    expect(outcome.result?.structured_output).toEqual({ value: 'fixed' });
+    expect(onSessionReady).toHaveBeenCalledTimes(1);
+    expect(onSessionReady).toHaveBeenCalledWith('rpc-session');
+    const calls = (await readFile(history, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { argv: string[] });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].argv).toContain('rpc');
+    expect(calls[1].argv).not.toContain('rpc');
+    expect(calls[1].argv[calls[1].argv.indexOf('--resume') + 1]).toBe('rpc-session');
+  });
+
+  it('never submits a prompt or falls back to print mode after session acknowledgment fails', async () => {
+    const payload = path.join(dir, 'prompt.json');
+    const history = path.join(dir, 'history.jsonl');
+    const argv = path.join(dir, 'argv.json');
+    const { promise } = run('rpc-ok', {
+      env: { FAKE_MODE: 'rpc-ok', FAKE_PROMPT_OUT: payload, FAKE_ARGV_OUT: argv, FAKE_ARGV_HISTORY: history },
+      onSessionReady: async () => { throw new Error('Disk full'); },
+    });
+    await expect((await promise).done).rejects.toThrow('Fresh context RPC launch failed');
+    await expect(readFile(payload, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const launches = (await readFile(history, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    expect(launches).toHaveLength(1);
+    expect(launches[0].argv).toContain('rpc');
+  });
+
+  it('rejects document attachments before a critical replacement session can submit anything', async () => {
+    const { promise } = run('rpc-ok', { onSessionReady: async () => undefined,
+      prompt: [{ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'AAAA' } }],
+    });
+    await expect(promise).rejects.toThrow('document attachments');
   });
 });

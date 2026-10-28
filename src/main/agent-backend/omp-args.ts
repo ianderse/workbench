@@ -56,7 +56,7 @@ export function modelAliasOf(model: string | undefined): ClaudeModelAlias | unde
 }
 
 /** OMP model roles Workbench picks by job (`omp --model @<role>`) */
-export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny' | 'design' | 'memory';
+export type OmpRole = 'default' | 'plan' | 'judge' | 'tiny' | 'design' | 'memory' | 'advisor';
 
 /** Role name -> model selector, from the user's OMP config (`modelRoles`) */
 export type OmpRoleMap = Readonly<Record<string, string>>;
@@ -147,8 +147,8 @@ export function ompMaxRetries(settings: Pick<OmpBackendSettings, 'retries'>): nu
  * Advisor handling for one run. One-shot utility calls (titles, commit messages, triage) never get the
  * advisor: they are cheap calls and must not burn the (usually remote) advisor model's quota.
  */
-export function resolveOmpAdvisor(settings: OmpBackendSettings, oneShot?: boolean): { mode: OmpAdvisorMode; model?: string } {
-  if (oneShot) return { mode: 'off' };
+export function resolveOmpAdvisor(settings: OmpBackendSettings, oneShot?: boolean, taskPhase = false): { mode: OmpAdvisorMode; model?: string } {
+  if (oneShot || (taskPhase && (settings.advisorSchedule ?? 'phase-boundaries') !== 'continuous')) return { mode: 'off' };
   const mode: OmpAdvisorMode = settings.advisor === 'on' || settings.advisor === 'off' ? settings.advisor : 'inherit';
   const model = settings.advisorModel?.trim();
   return { mode, ...(model ? { model } : {}) };

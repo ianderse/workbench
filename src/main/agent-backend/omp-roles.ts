@@ -26,6 +26,15 @@ export function parseOmpFallbackChains(output: string): OmpFallbackChains {
 }
 
 let fallbackChains: OmpFallbackChains = {};
+let advisorEnabled: boolean | undefined;
+
+/** Effective OMP config value; absence is unknown, never permission to invoke a paid advisor. */
+export function parseOmpAdvisorEnabled(output: string): boolean | undefined {
+  try {
+    const value = JSON.parse(output)?.['advisor.enabled']?.value;
+    return typeof value === 'boolean' ? value : undefined;
+  } catch { return undefined; }
+}
 
 const REFRESH_MS = 10 * 60 * 1000;
 const RETRY_AFTER_FAILURE_MS = 60 * 1000;
@@ -50,14 +59,19 @@ export function parseOmpRoles(output: string): Record<string, string> | undefine
 let cached: { roles: Record<string, string>; at: number } | undefined;
 let nextTryAt = 0;
 let loading: Promise<Record<string, string> | undefined> | undefined;
+let readGeneration = 0;
 
 /** Read the roles from OMP now (async); keeps the previous value when the read fails */
 export function refreshOmpRoles(): Promise<Record<string, string> | undefined> {
   if (loading) return loading;
+  const generation = ++readGeneration;
+  // Cached worker routes remain useful, but stale enablement is not authority for another paid call.
+  advisorEnabled = undefined;
   loading = (async () => {
     try {
       const command = await resolveOmpCommand(getAgentBackendSettings().omp.command);
       const { stdout } = await runTool('claude', ['config', 'list', '--json'], { command, timeout: READ_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 });
+      if (generation !== readGeneration) return cached?.roles;
       const roles = parseOmpRoles(stdout);
       if (!roles) {
         appLog.warn('[OMP] Could not read model roles from `omp config list --json`');
@@ -65,15 +79,17 @@ export function refreshOmpRoles(): Promise<Record<string, string> | undefined> {
         return cached?.roles;
       }
       fallbackChains = parseOmpFallbackChains(stdout);
+      advisorEnabled = parseOmpAdvisorEnabled(stdout);
       cached = { roles, at: Date.now() };
       nextTryAt = Date.now() + REFRESH_MS;
       return roles;
     } catch (error) {
+      if (generation !== readGeneration) return cached?.roles;
       appLog.warn('[OMP] Could not read model roles:', error);
       nextTryAt = Date.now() + RETRY_AFTER_FAILURE_MS;
       return cached?.roles;
     } finally {
-      loading = undefined;
+      if (generation === readGeneration) loading = undefined;
     }
   })();
   return loading;
@@ -89,8 +105,10 @@ export function getOmpRoles(): OmpRoleMap | undefined {
 }
 
 /** Test hook */
-export function resetOmpRolesForTests(roles?: Record<string, string>, chains: OmpFallbackChains = {}): void {
+export function resetOmpRolesForTests(roles?: Record<string, string>, chains: OmpFallbackChains = {}, enabled?: boolean): void {
+  readGeneration++;
   fallbackChains = chains;
+  advisorEnabled = enabled;
   cached = roles ? { roles, at: Date.now() } : undefined;
   nextTryAt = roles ? Date.now() + REFRESH_MS : 0;
   loading = undefined;
@@ -101,4 +119,10 @@ export async function getOmpFallbackPolicy(): Promise<{ roles: OmpRoleMap | unde
   if (loading) await loading;
   else if (Date.now() >= nextTryAt) await refreshOmpRoles();
   return { roles: cached?.roles, chains: fallbackChains };
+}
+
+/** Uses the same bounded config read as roles and fallback chains. */
+export async function getOmpAdvisorPolicy(): Promise<{ enabled: boolean | undefined; model: string | undefined }> {
+  const { roles } = await getOmpFallbackPolicy();
+  return { enabled: advisorEnabled, model: roles?.advisor };
 }

@@ -22,9 +22,9 @@ import { buildHumanApprovalOverridePrompt, buildHumanWorkPrompt, isHumanApproval
  * crashed run continues where it left off.
  */
 
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
-import { mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdtemp, open, readdir, rename, rm, unlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { resolveClaudeEnv } from './env';
@@ -41,6 +41,7 @@ import { resolveUiWork, usesDesignModel, type UiImplementer } from '../../shared
 import type { MergeBaseDuring } from '../../shared/utils/merge-base-timing';
 import { toRepoPath } from '../../shared/utils/changed-files';
 import { TaskLogWriter, summarizeToolInput } from './task-log';
+import { buildTaskStartBrief } from './task-start-brief';
 import { buildParallelTasksPrompt } from '../task-changelog';
 import { git } from '../utils/git-exec';
 import { generateReviewSummary, trackReviewSummary } from './review-summary';
@@ -110,7 +111,8 @@ import { ompSubagentsPerTask } from '../../shared/types/agent-backend';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import type { AgentOverride } from '../../shared/types/task';
 import { OMP_READ_ONLY_TOOLS, ompMaxRetries, ompRoleForJob, resolveOmpSelection, modelAliasOf, type OmpRole } from '../agent-backend/omp-args';
-import { getOmpRoles } from '../agent-backend/omp-roles';
+import { getOmpAdvisorPolicy, getOmpFallbackPolicy, getOmpRoles } from '../agent-backend/omp-roles';
+import { getOmpCooldownStore, ompFallbackCandidates, providerOf } from '../agent-backend/omp-cooldown';
 import { buildOmpMemoryPrompt } from '../self-improve/nudge';
 import { recallProjectMemory, saveMemoryContext } from '../self-improve/project-memory';
 import { MEMORY_SERVER_NAME, MEMORY_TOOL_NAME, openTaskMemoryTools } from '../self-improve/task-memory';
@@ -128,7 +130,13 @@ import {
   normalizeReview,
   REVIEW_SCHEMA,
   REVIEW_SYSTEM_PROMPT,
+  type ReviewReport,
 } from './review-diff';
+import { beginCheckpoint, completeCheckpoint, failCheckpoint } from './checkpoint-journal';
+import { buildHandoffPrompt, fingerprintWorktree, loadSessionEpoch, persistSessionEpoch, preparePhaseHandoff, verifyPhaseHandoff, type SessionEpoch } from './phase-handoff';
+import { findSessionTranscript } from './session-spending';
+import { evaluatePhaseProgress } from './phase-progress';
+import type { PhaseProgressEvidence } from '../../shared/types/task-throughput';
 import {
   addUnverifiedTargets,
   clearResyncRequest,
@@ -164,6 +172,8 @@ export interface TaskAttachment {
 }
 
 export interface TaskRunConfig {
+  /** Durable manual request; consumed only after the replacement session is acknowledged. */
+  freshContextRequestId?: string;
   humanApprovalOverride?: HumanApprovalOverride;
   /** Persisted scoped human decisions; carried separately from one revision's feedback. */
   humanWork?: HumanWorkstream;
@@ -430,6 +440,8 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
 `}- Verify your work with the project's own checks (tests, type checker, linter, build) for the code you changed, and fix failures you caused. Show evidence rather than asserting success.
 - While working, run the tests that cover what you changed; run the full suite once before you commit, not after every edit.
 - Keep file reads and command output focused: search symbols or document headings first, then read relevant ranges. Use concise test output and inspect failure details as needed.
+- Batch independent file reads, searches and checks into the same tool turn. Group independent shell inspections into one invocation with clearly separated results. Keep edits and commands that depend on earlier results sequential.
+- Use the supplied phase-start snapshot before repeating opening Git inspections. Request fresh state when it affects a change or when work has moved on; avoid status-only model turns that add no new decision.
 - Keep generated folders (node_modules, build output, virtual environments) out of commits: if the project has no .gitignore for them, create or extend one before installing dependencies or committing.
 - When the work is done, commit it in this worktree with a descriptive message. Don't push.
 - End with a short summary for the reviewer: what changed, how you verified it, and any assumptions or follow-ups.`,
@@ -478,6 +490,23 @@ function feedbackText(config: TaskRunConfig): string | undefined {
 
 function taskBlock(config: TaskRunConfig): string {
   return `<task title="${config.title.replace(/"/g, "'")}">\n${config.description}\n</task>`;
+}
+
+/** Corrupt/legacy checkpoint data must not turn missing findings into a successful review. */
+function usableReviewReport(value: unknown): ReviewReport | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const report = value as Record<string, unknown>;
+  if (typeof report.summary !== 'string' || !Array.isArray(report.findings)) return undefined;
+  if (!report.findings.every((entry) => {
+    if (!entry || typeof entry !== 'object') return false;
+    const finding = entry as Record<string, unknown>;
+    return ['blocker', 'major', 'minor'].includes(String(finding.severity)) && typeof finding.issue === 'string' && !!finding.issue.trim()
+      && (finding.file === undefined || typeof finding.file === 'string')
+      && (finding.line === undefined || (typeof finding.line === 'number' && Number.isInteger(finding.line) && finding.line > 0))
+      && (finding.requiresHuman === undefined || typeof finding.requiresHuman === 'boolean')
+      && (finding.fix === undefined || typeof finding.fix === 'string');
+  })) return undefined;
+  return normalizeReview(report);
 }
 
 /**
@@ -655,6 +684,9 @@ export class ClaudeTaskRun {
   private saveTimer: NodeJS.Timeout | null = null;
   /** Fresh-context review (OMP) for the validate prompt; set by `runOmpReview` */
   private reviewSection: string | undefined;
+  private planAdvice: string | undefined;
+  private epoch: SessionEpoch | undefined;
+  private handoffPrompt = '';
   /** The AI review loop's current round (and the findings a fix round is sent to fix) */
   private loop: { round: number; max: number; feedback?: string } | undefined;
   /** Splitting is off for the rest of this run (a proposal was dismissed or could not be applied) */
@@ -664,6 +696,7 @@ export class ClaudeTaskRun {
   /** Lines from the base branch the session's merge fix said must go (and why), for the last check */
   private resyncDropped: Array<{ file: string; line: string }> = [];
   private memoryPrompt = '';
+  private startingBrief = '';
   private memoryTools: Awaited<ReturnType<typeof openTaskMemoryTools>>;
 
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
@@ -709,6 +742,7 @@ export class ClaudeTaskRun {
 
   private async runSteps(): Promise<TaskRunOutcome> {
     const settings = this.config.settings;
+    await this.reconcilePhaseRecovery();
 
     if (this.config.specReview) return this.runSpecReview();
     // 0. Resync: take in the base branch first, then carry on as the mode says. A change request
@@ -759,6 +793,7 @@ export class ClaudeTaskRun {
       const planned = await this.runSessionPhase('plan');
       if (planned) return planned;
     }
+    if (this.info.plan && !implementStarted) await this.runOmpPlanCheckpoint();
 
     // 3. Implement (a resync that carried on with the unfinished work finished it too)
     if (!this.hasCompleted('implement') && !this.info.phases.some((p) => p.name === 'resync' && p.resync?.continued && p.endedAt && !p.isError)) {
@@ -772,7 +807,8 @@ export class ClaudeTaskRun {
     // would pass for the result and the task would end up in Human Review with the fixes undone
     const lastPhase = this.info.phases.at(-1);
     if (
-      settings.validation && lastPhase?.name === 'revise' && (!lastPhase.endedAt || lastPhase.isError)
+      settings.validation && (this.info.reviewRounds?.length ?? 0) < this.reviewRoundsAllowed()
+      && lastPhase?.name === 'revise' && (!lastPhase.endedAt || lastPhase.isError)
       && this.info.validation && !this.info.reviewVerdict
     ) {
       const report = this.info.validation;
@@ -785,7 +821,7 @@ export class ClaudeTaskRun {
       }
     }
     // (a fix round stopped midway leaves no report, so the review starts again)
-    if (settings.validation && (!this.info.validation || !this.validatedSinceLastChange())) {
+    if (settings.validation && (!this.info.validation || !this.validatedSinceLastChange() || !this.info.reviewVerdict)) {
       const validated = await this.runReviewLoop();
       if (validated) return validated;
     }
@@ -1158,12 +1194,21 @@ export class ClaudeTaskRun {
     const triage = this.info.triage ?? fixedTriage(this.config.settings, this.config.title, 'fallback', 'No triage recorded');
     // A task pin still wins; UI work puts the design model on the steps it covers
     const design = this.runsOnDesignModel(name);
-    const model = design && !triage.pinned?.model ? designModelFor(this.config.backend, getOmpRoles())
+    let model = design && !triage.pinned?.model ? designModelFor(this.config.backend, getOmpRoles())
       : name === 'plan' && !triage.pinned?.model ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
     const effort: ClaudeEffort = (name === 'plan' || design) && !triage.pinned?.effort && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
     const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' || name === 'spec_review' ? 'validation' : 'coding';
     const role = ompRoleForJob(design ? 'design' : name);
     const reviewingSpec = name === 'spec_review';
+    model = await this.preparePhaseRecovery(name) ?? model;
+    await this.prepareFreshContext(name);
+    this.startingBrief = await buildTaskStartBrief({
+      cwd: this.config.worktreePath,
+      baseBranch: this.config.baseBranch,
+      verification: triage.verification,
+      signal: this.abortController.signal,
+    });
+    if (this.stopped) return { status: 'stopped' };
 
     // A session lives in the runtime it ran in (native or WSL); after a switch, start a new one
     await whenShellRuntimeReady();
@@ -1244,12 +1289,16 @@ export class ClaudeTaskRun {
     }
 
     const sessionId = resumeSessionId ?? randomUUID();
+    if (backend !== 'omp' && this.epoch?.state === 'prepared') await this.acknowledgeEpoch(sessionId);
+    const progressBefore = ['implement', 'revise', 'validate', 'resync'].includes(name) ? await this.captureProgressEvidence() : undefined;
     const phase = this.beginPhase(name, {
       model: this.phaseModel(model, role),
       effort,
       permissionMode: name === 'plan' ? 'plan' : this.config.isolated === false ? 'auto' : 'bypassPermissions',
       // OMP picks the session id itself: it is stored when the run reports it
       sessionId: backend === 'omp' ? resumeSessionId : sessionId,
+      ...(progressBefore ? { progressBefore } : {}),
+      ...(this.info.phaseRecovery?.state === 'pending' && this.info.phaseRecovery.targetPhase === name ? { recoveryId: this.info.phaseRecovery.id } : {}),
       ...(name === 'resync' && resync ? { resync: { ref: resync.request.ref, into: resync.request.into, continued: resyncContinues } } : {}),
     });
     if (!this.info.sessionId && backend !== 'omp') this.info.sessionId = sessionId;
@@ -1287,6 +1336,9 @@ export class ClaudeTaskRun {
     }
 
     const result = outcome.result;
+    if (this.epoch?.sessionId && result?.session_id && result.session_id !== this.epoch.sessionId) {
+      throw new Error(`Replacement session identity changed from ${this.epoch.sessionId} to ${result.session_id}; preserving the uncertain result without continuing`);
+    }
     if (!result || result.is_error || result.subtype !== 'success') {
       const error = outcome.error
         || result?.errors?.join('; ')
@@ -1366,8 +1418,272 @@ export class ClaudeTaskRun {
       this.log.endPhase('coding', true, name === 'revise' ? 'Changes applied' : 'Implementation finished');
       if (name === 'revise') this.info.validation = undefined;
     }
+    if (phase.recoveryId && this.info.phaseRecovery?.id === phase.recoveryId) {
+      this.info.phaseRecovery.state = 'applied';
+      await this.persistInfoRequired();
+    }
     this.saveInfo();
+    // Validation is observed after its human gate and review-round cap are known.
+    return name === 'validate' ? null : this.observePhaseProgress(phase);
+  }
+
+  private async captureProgressEvidence(): Promise<PhaseProgressEvidence | undefined> {
+    if ((this.config.settings.stallRecovery ?? 'recover') === 'off') return undefined;
+    try {
+      const previous = this.info.phaseProgress?.lastEvidence;
+      const report = this.info.validation;
+      return {
+        repositoryFingerprint: await fingerprintWorktree(this.config.worktreePath),
+        failedChecks: report ? report.checks.filter((check) => !check.passed).map((check) => `${check.name}: ${check.command ?? ''}`) : previous?.failedChecks ?? [],
+        openFindings: report ? report.findings.filter((finding) => !finding.fixed).map((finding) => `${finding.severity}: ${finding.description}`) : previous?.openFindings ?? [],
+      };
+    } catch {
+      // An unreadable/in-progress repository is not evidence of stagnation.
+      return undefined;
+    }
+  }
+
+  private phaseProgressKey(phase: ClaudeRunPhase): string {
+    return `${this.info.phases.indexOf(phase)}:${phase.name}:${phase.startedAt}`;
+  }
+
+  private async configuredProgressFallback(name: SessionPhaseName, expectedModel?: string): Promise<string | undefined> {
+    const { omp } = getAgentBackendSettings();
+    if (this.config.backend !== 'omp' || !omp.allowFallbackModels || this.config.agentOverride?.model || this.info.triage?.pinned?.model) return undefined;
+    try {
+      const policy = await getOmpFallbackPolicy();
+      const design = this.runsOnDesignModel(name);
+      const role = ompRoleForJob(design ? 'design' : name);
+      const model = this.phaseModel(design ? designModelFor('omp', policy.roles) : this.info.triage?.model ?? this.config.settings.fixedModel, role);
+      const blocked = await getOmpCooldownStore().active();
+      return ompFallbackCandidates(model, role, policy.chains, policy.roles).find((candidate) => (!expectedModel || candidate.model === expectedModel) && !blocked[providerOf(candidate.model) ?? ''])?.model;
+    } catch { return undefined; }
+  }
+
+  /** Reconcile a completed target before replaying a durable recovery after a process restart. */
+  private async reconcilePhaseRecovery(): Promise<void> {
+    const recovery = this.info.phaseRecovery;
+    if (!recovery) return;
+    const explicitRetry = this.config.mode === 'revise' || (!!this.config.freshContextRequestId && this.config.freshContextRequestId !== this.info.freshContextConsumedRequestId);
+    if ((this.config.settings.stallRecovery ?? 'recover') === 'off' || (explicitRetry && (recovery.state === 'failed' || recovery.action === 'stalled'))) {
+      this.info.phaseRecovery = undefined;
+      await this.persistInfoRequired();
+      return;
+    }
+    if (recovery.state === 'pending' && this.info.phases.some((phase) => phase.recoveryId === recovery.id && phase.endedAt && !phase.isError)) {
+      recovery.state = 'applied';
+      await this.persistInfoRequired();
+    }
+    if (recovery.state === 'failed' || recovery.action === 'stalled') throw new Error(recovery.error ?? 'Task stalled; the saved recovery is exhausted');
+  }
+
+  /** Attach a saved intent to the next ordinary paid phase, never adding a phase or review round. */
+  private async preparePhaseRecovery(name: SessionPhaseName): Promise<string | undefined> {
+    const recovery = this.info.phaseRecovery;
+    if (!recovery || recovery.state !== 'pending' || !['implement', 'revise', 'validate'].includes(name)) return undefined;
+    if (recovery.targetPhase && recovery.targetPhase !== name) throw new Error(`Saved progress recovery is waiting for ${recovery.targetPhase}, not ${name}`);
+    recovery.targetPhase = name;
+    await this.persistInfoRequired();
+    if (recovery.action !== 'configured-fallback') return undefined;
+    if (!recovery.model || await this.configuredProgressFallback(name, recovery.model) !== recovery.model) {
+      recovery.state = 'failed';
+      recovery.error = 'Task stalled: its saved fallback is no longer authorized, configured, or available outside provider cooldown';
+      await this.persistInfoRequired();
+      throw new Error(recovery.error);
+    }
+    this.noteLog(name === 'validate' ? 'validation' : 'coding', `Progress recovery: using configured fallback ${recovery.model} for this ${name} phase`);
+    return recovery.model;
+  }
+
+  private async observePhaseProgress(phase: ClaudeRunPhase, options: { allowRecovery?: boolean; humanOnly?: boolean; passed?: boolean } = {}): Promise<TaskRunOutcome | null> {
+    if ((this.config.settings.stallRecovery ?? 'recover') === 'off' || !['implement', 'revise', 'validate', 'resync'].includes(phase.name)) return null;
+    const after = await this.captureProgressEvidence();
+    if (!after) return null;
+    const phaseKey = this.phaseProgressKey(phase);
+    if (options.humanOnly || options.passed) {
+      const state = this.info.phaseProgress ?? { version: 1 as const, evaluatedPhaseKeys: [], consecutiveNoProgress: 0, freshContextRecoveries: 0, fallbackRecoveries: 0, updatedAt: new Date().toISOString() };
+      if (!state.evaluatedPhaseKeys.includes(phaseKey)) state.evaluatedPhaseKeys.push(phaseKey);
+      state.lastEvaluatedPhaseKey = phaseKey;
+      state.lastEvidence = options.passed ? { ...after, failedChecks: [], openFindings: [] } : after;
+      state.lastValidationSignature = undefined;
+      state.consecutiveNoProgress = 0;
+      state.escalationKey = undefined;
+      state.updatedAt = new Date().toISOString();
+      this.info.phaseProgress = state;
+      await this.persistInfoRequired();
+      return null;
+    }
+    const nextPhase = phase.name === 'validate' ? 'revise' : this.config.settings.validation ? 'validate' : undefined;
+    const fallback = nextPhase && options.allowRecovery !== false ? await this.configuredProgressFallback(nextPhase) : undefined;
+    const result = evaluatePhaseProgress(this.info.phaseProgress, {
+      phaseKey, phase: phase.name, completed: !!phase.endedAt, successful: !phase.isError,
+      numTurns: phase.numTurns ?? 0, pendingWork: !!this.current || this.toolNames.size > 0 || this.info.subagents.some((agent) => agent.status === 'running'),
+      continued: phase.resync?.continued, before: phase.progressBefore, after, at: new Date().toISOString(),
+    }, {
+      allowFreshContext: options.allowRecovery !== false && !!nextPhase,
+      allowFallback: options.allowRecovery !== false && !!fallback,
+      modelPinned: !!this.config.agentOverride?.model || !!this.info.triage?.pinned?.model,
+      fallbackAvailable: !!fallback,
+    });
+    this.info.phaseProgress = result.state;
+    const action = !nextPhase ? 'none' : result.action;
+    if (action === 'fresh-context' || action === 'configured-fallback' || action === 'stalled') {
+      const blockers = [...after.failedChecks, ...after.openFindings].slice(0, 6).join('; ');
+      this.info.phaseRecovery = {
+        id: result.state.escalationKey!, action, state: action === 'stalled' ? 'failed' : 'pending', sourcePhaseKey: phaseKey,
+        ...(action !== 'stalled' ? { targetPhase: nextPhase } : {}),
+        ...(action === 'configured-fallback' && fallback ? { model: fallback } : {}),
+        ...(action === 'stalled' ? { error: `Task stalled: ${result.reason}${options.allowRecovery === false ? '; the configured AI review round limit is reached' : ''}${blockers ? `. Unchanged blockers: ${blockers}` : ''}` } : {}),
+      };
+    }
+    // Counters, deduplication and pending effects become durable together, before any new launch.
+    await this.persistInfoRequired();
+    if (action !== 'none') this.noteLog(phase.name === 'validate' ? 'validation' : 'coding', `Progress watchdog: ${result.reason}`);
+    if (action === 'stalled') {
+      const error = this.info.phaseRecovery!.error!;
+      this.failEvent(phase.name, error);
+      return { status: 'failed', error, validation: this.info.validation };
+    }
     return null;
+  }
+
+  private async transcriptFor(sessionId: string, backend: AgentBackendKind): Promise<string | undefined> {
+    if (backend === 'claude') return (await findSessionTranscript(sessionId, [this.info.configDir ?? defaultClaudeConfigDir()], this.config.worktreePath))?.file;
+    const find = async (directory: string): Promise<string | undefined> => {
+      let entries;
+      try { entries = await readdir(directory, { withFileTypes: true }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+      for (const entry of entries) {
+        if (entry.isFile() && entry.name.endsWith('.jsonl') && entry.name.includes(sessionId)) return path.join(directory, entry.name);
+        if (entry.isDirectory()) { const nested = await find(path.join(directory, entry.name)); if (nested) return nested; }
+      }
+      return undefined;
+    };
+    return find(path.join(this.config.specDir, 'omp-sessions'));
+  }
+
+  /** Restart never guesses whether an acknowledged model request was accepted. */
+  private async prepareFreshContext(name: SessionPhaseName): Promise<void> {
+    await whenShellRuntimeReady();
+    const current = await loadSessionEpoch(this.config.specDir);
+    const compatible = !current || ((!current.backend || current.backend === this.config.backend) && (!current.runtime || current.runtime === currentRuntime()));
+    this.epoch = compatible ? current : undefined;
+    if (current && compatible && current.state !== 'prepared') {
+      const transcript = current.sessionId ? await this.transcriptFor(current.sessionId, this.config.backend) : undefined;
+      if (!transcript) throw new Error(`Fresh-session outcome is uncertain: ${current.sessionId ?? current.id} was acknowledged but has no raw transcript. Do not replay its prompt automatically. Original work is preserved at ${current.handoff.path}`);
+      // Journal acknowledgment is authoritative even if the process died before updating run info.
+      this.info.sessionId = current.sessionId;
+      this.info.sessionEpoch = current;
+      if (current.reason === 'manual' && current.boundaryKey.startsWith('manual:')) this.info.freshContextConsumedRequestId = current.boundaryKey.slice('manual:'.length);
+      if (current.state === 'acknowledged') await this.acknowledgeEpoch(current.sessionId!);
+    }
+    if (current && compatible && current.state === 'prepared') {
+      if (current.handoff.nextPhase !== name) throw new Error(`Prepared fresh context is for ${current.handoff.nextPhase}, not ${name}; preserved work has not been replayed`);
+      await verifyPhaseHandoff(current.handoff, { worktreePath: this.config.worktreePath, requireCurrentWorktree: true });
+      this.handoffPrompt = await buildHandoffPrompt(current.handoff);
+      this.info.sessionId = undefined;
+      this.info.sessionEpoch = current;
+      await this.persistInfoRequired();
+      return;
+    }
+    const request = this.config.freshContextRequestId;
+    const manual = !!request && this.info.freshContextConsumedRequestId !== request && !current?.manualRequestIds?.includes(request);
+    let lastWorkIndex = -1;
+    this.info.phases.forEach((phase, index) => { if (['implement', 'revise', 'resync'].includes(phase.name)) lastWorkIndex = index; });
+    const lastWork = this.info.phases[lastWorkIndex];
+    const automatic = name === 'validate' && (this.config.settings.freshContext ?? 'before-validation') === 'before-validation'
+      && lastWork?.name === 'implement' && !!lastWork.endedAt && !lastWork.isError && !!this.info.sessionId;
+    const recovery = this.info.phaseRecovery;
+    const recovering = recovery?.state === 'pending' && recovery.action === 'fresh-context' && recovery.targetPhase === name;
+    if (!manual && !automatic && !recovering) return;
+    const boundaryKey = manual ? `manual:${request}` : recovering ? `recovery:${recovery.id}` : `before-validation:${lastWorkIndex}:${lastWork.sessionId ?? ''}:${lastWork.endedAt}`;
+    const reason = manual ? 'manual' : recovering ? 'stagnation' : 'before-validation';
+    if (current?.boundaryKey === boundaryKey) return;
+    const oldSessionId = this.info.sessionId;
+    let published = false;
+    try {
+      if (this.config.backend === 'omp' && [...this.config.attachments, ...(this.config.feedbackAttachments ?? [])].some((attachment) => attachment.mimeType === 'application/pdf')) {
+        throw new Error('OMP document attachments require print mode, which cannot acknowledge a replacement session before submitting the prompt');
+      }
+      if (!compatible && current?.state !== 'running') throw new Error('A fresh-session transition from another backend/runtime is pending');
+      const oldBackend = this.info.backend ?? 'claude';
+      const transcript = oldSessionId ? await this.transcriptFor(oldSessionId, oldBackend) : undefined;
+      if (oldSessionId && !transcript) throw new Error(`Current raw session transcript is unavailable: ${oldSessionId}`);
+      await this.persistInfoRequired();
+      const handoff = await preparePhaseHandoff({
+        specDir: this.config.specDir, worktreePath: this.config.worktreePath, runInfo: this.info,
+        nextPhase: name, reason, boundaryKey, baseRef: this.config.baseBranch,
+        pendingWork: !!this.current || this.toolNames.size > 0,
+        transcriptRoots: oldBackend === 'claude' && transcript ? [transcript] : [],
+      });
+      await verifyPhaseHandoff(handoff, { worktreePath: this.config.worktreePath, requireCurrentWorktree: true });
+      const now = new Date().toISOString();
+      const epoch: SessionEpoch = {
+        id: createHash('sha256').update(boundaryKey).digest('hex'), boundaryKey, reason,
+        ...(oldSessionId ? { priorSessionId: oldSessionId } : {}), backend: this.config.backend, runtime: currentRuntime(),
+        state: 'prepared', handoff, createdAt: now, updatedAt: now,
+        manualRequestIds: [...new Set([...(current?.manualRequestIds ?? []), ...(manual && request ? [request] : [])])],
+      };
+      await persistSessionEpoch(this.config.specDir, epoch);
+      published = true;
+      this.epoch = epoch;
+      this.info.sessionEpoch = epoch;
+      this.info.sessionId = undefined;
+      this.handoffPrompt = await buildHandoffPrompt(handoff);
+      await this.persistInfoRequired();
+      this.noteLog(name === 'plan' ? 'planning' : name === 'validate' ? 'validation' : 'coding', `Fresh context prepared; original session and work preserved at ${handoff.path}`);
+    } catch (error) {
+      if (recovering) {
+        recovery.state = 'failed';
+        recovery.error = `Task stalled: fresh-context recovery could not safely preserve or launch the current session: ${error instanceof Error ? error.message : String(error)}`;
+        await this.persistInfoRequired();
+        throw new Error(recovery.error);
+      }
+      if (manual || published) throw error;
+      this.info.sessionId = oldSessionId;
+      this.epoch = compatible ? current : undefined;
+      this.handoffPrompt = '';
+      this.noteLog('validation', `Fresh context deferred; continuing the original session: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private async acknowledgeEpoch(sessionId: string): Promise<void> {
+    const epoch = this.epoch;
+    if (!epoch) return;
+    if (epoch.sessionId && epoch.sessionId !== sessionId) throw new Error('Replacement session identity changed; its prompt was not submitted');
+    if (epoch.state !== 'prepared' && !await this.transcriptFor(sessionId, this.config.backend)) {
+      throw new Error(`Replacement session ${sessionId} has no raw transcript; a potentially accepted prompt cannot be replayed`);
+    }
+    if (epoch.state === 'prepared') {
+      epoch.sessionId = sessionId;
+      epoch.state = 'acknowledged';
+      epoch.updatedAt = new Date().toISOString();
+      await persistSessionEpoch(this.config.specDir, epoch);
+    }
+    this.info.sessionId = sessionId;
+    this.info.sessionEpoch = { ...epoch };
+    if (epoch.reason === 'manual' && epoch.boundaryKey.startsWith('manual:')) this.info.freshContextConsumedRequestId = epoch.boundaryKey.slice('manual:'.length);
+    await this.persistInfoRequired();
+    if (epoch.state === 'acknowledged') {
+      epoch.state = 'running';
+      epoch.updatedAt = new Date().toISOString();
+      await persistSessionEpoch(this.config.specDir, epoch);
+      this.info.sessionEpoch = { ...epoch };
+      await this.persistInfoRequired();
+    }
+  }
+
+  /** Critical transitions propagate storage failures before a replacement prompt can be sent. */
+  private async persistInfoRequired(): Promise<void> {
+    if (this.saveTimer) { clearTimeout(this.saveTimer); this.saveTimer = null; }
+    this.info.updatedAt = new Date().toISOString();
+    const temporary = `${this.runFile}.${randomUUID()}.tmp`;
+    const file = await open(temporary, 'wx');
+    try { await file.writeFile(JSON.stringify(this.info, null, 2)); await file.sync(); }
+    finally { await file.close(); }
+    try { await rename(temporary, this.runFile); }
+    finally { await unlink(temporary).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'ENOENT') throw error; }); }
+    this.callbacks.onRunInfo?.(structuredClone(this.info));
   }
 
   // ---------------------------------------------------------------------------
@@ -1543,20 +1859,39 @@ export class ClaudeTaskRun {
    */
   private async runReviewLoop(): Promise<TaskRunOutcome | null> {
     const max = this.reviewRoundsAllowed();
-    const rounds: ReviewRound[] = [];
+    // An interrupted repair belongs to the existing loop. A completed verdict starts a new loop
+    // only when subsequent work actually required validation again.
+    const rounds: ReviewRound[] = this.info.reviewVerdict ? [] : [...(this.info.reviewRounds ?? [])];
     this.info.reviewRounds = rounds;
     this.info.reviewVerdict = undefined;
-    let previousOpen: ReviewRound['openFindings'] | undefined;
+    let previousOpen = rounds.at(-1)?.openFindings;
+    const latestValidation = [...this.info.phases].reverse().find((phase) => phase.name === 'validate' && phase.endedAt && !phase.isError);
+    // A crash after a validation was saved but before its round was recorded must not buy
+    // another validation. Account for that exact saved report first.
+    let reuseReport = !!this.info.validation && this.validatedSinceLastChange() && !!latestValidation
+      && !rounds.some((round) => Date.parse(round.endedAt) >= Date.parse(latestValidation.endedAt!));
     try {
-      for (let round = 1; ; round++) {
+      for (;;) {
+        if (rounds.length >= max && !reuseReport) {
+          this.info.reviewVerdict = { status: 'failed', rounds: rounds.length, maxRounds: max,
+            failure: buildReviewFailureSummary(rounds, this.info.validation ?? normalizeValidation(undefined), this.config.humanApprovalOverride) };
+          await this.persistInfoRequired();
+          this.emitLog(`AI review limit reached (${rounds.length}/${max}); saved review rounds are retained, with no additional paid repair or review`);
+          return null;
+        }
+        const round = rounds.length + 1;
         this.loop = { round, max };
         // Merge the base branch once before every validation (the first and each re-validation after
         // a fix round); validation then runs on the merged tree
-        const synced = await this.syncBeforeValidation();
-        if (synced) return synced;
         const startedAt = new Date().toISOString();
-        const stopped = await this.runSessionPhase('validate');
-        if (stopped) return stopped;
+        if (!reuseReport) {
+          const synced = await this.syncBeforeValidation();
+          if (synced) return synced;
+          const stopped = await this.runSessionPhase('validate');
+          if (stopped) return stopped;
+        }
+        const observedPhase = reuseReport ? latestValidation : [...this.info.phases].reverse().find((phase) => phase.name === 'validate');
+        reuseReport = false;
         const report = this.info.validation ?? normalizeValidation(undefined);
         const gate = evaluateReviewGate(report, this.config.humanApprovalOverride);
         const counts = compareWithPreviousRound(previousOpen, gate);
@@ -1577,16 +1912,21 @@ export class ClaudeTaskRun {
         const humanOnly = gate.openFindings.length > 0 && gate.openFindings.every((finding) => finding.requiresHuman) && gate.failingChecks.length === 0;
         const hasOverride = isHumanApprovalOverride(this.config.humanApprovalOverride);
         const passes = hasOverride ? gate.passes : !gate.openFindings.some((finding) => finding.requiresHuman) && (max === 1 ? report.status !== 'failed' : gate.passes);
-        if (passes || round >= max || humanOnly) {
+        const terminal = passes || round >= max || humanOnly;
+        if (terminal) {
           this.info.reviewVerdict = passes
             ? { status: 'passed', rounds: round, maxRounds: max }
             : { status: 'failed', rounds: round, maxRounds: max, failure: buildReviewFailureSummary(rounds, report, this.config.humanApprovalOverride) };
           if (hasOverride) this.info.reviewVerdict.humanApprovalOverride = { ...this.config.humanApprovalOverride! };
-          this.saveInfo();
           if (humanOnly) this.emitLog('Waiting for human input; ending the AI repair loop without approving the task.');
           if (!passes && !humanOnly) this.emitLog(`Still failing AI review after ${round} ${round === 1 ? 'round' : 'rounds'}`);
-          return null;
         }
+        await this.persistInfoRequired();
+        if (observedPhase) {
+          const stalled = await this.observePhaseProgress(observedPhase, { allowRecovery: !terminal, humanOnly, passed: passes });
+          if (stalled) return stalled;
+        }
+        if (terminal) return null;
         this.emitLog(`AI review round ${round}/${max}: ${gate.openFindings.length} blocker or major finding(s) and ${gate.failingChecks.length} failing check(s) open, sending the task back to fix them`);
         this.saveInfo();
         this.loop = { round: round + 1, max, feedback: buildFixFeedback(gate, report) };
@@ -1699,7 +2039,8 @@ no notes came with the request, so review the change against the task with fresh
         break;
     }
     if (name === 'implement' && this.splitActive()) text += deferredPrompt();
-    blocks.push({ type: 'text', text });
+    if (name === 'implement' && this.planAdvice) text += `\n\n${this.planAdvice}`;
+    blocks.push({ type: 'text', text: [text, this.startingBrief, !resume ? this.handoffPrompt : undefined].filter(Boolean).join('\n\n') });
     blocks.push(...taskBlocks, ...feedbackBlocks);
     // Messages go last, in their own block and tag, so they can't be read as part of the task
     const messages = formatInboxSection(inbox);
@@ -2056,6 +2397,8 @@ no notes came with the request, so review the change against the task with fresh
       const progress = new StreamProgress();
       const handle = await startOmpProcess({
         settings: omp,
+        taskPhase: true,
+        ...(this.epoch ? { onSessionReady: (sessionId: string) => this.acknowledgeEpoch(sessionId) } : {}),
         cwd: this.config.worktreePath,
         env: this.config.extraEnv,
         label: `${this.config.specId} ${params.name}`,
@@ -2196,61 +2539,108 @@ no notes came with the request, so review the change against the task with fresh
     });
   }
 
-  /**
-   * OMP: a separate one-shot run reviews the diff with fresh context (no session, read-only tools,
-   * the Large model); its findings go into the validate prompt. A failed review is logged and the
-   * validation goes on without it.
-   */
-  private async runOmpReview(): Promise<void> {
-    const cwd = this.config.worktreePath;
-    let diff: string | undefined;
+  /** Only an enabled, configured advisor is used; inheriting a model never implies consent. */
+  private async runOmpPlanCheckpoint(): Promise<void> {
+    this.planAdvice = undefined;
+    const { omp } = getAgentBackendSettings();
+    if (this.stopped || this.config.backend !== 'omp' || (omp.advisorSchedule ?? 'phase-boundaries') !== 'phase-boundaries' || omp.advisor === 'off') return;
+    const policy = await getOmpAdvisorPolicy();
+    if (omp.advisor !== 'on' && policy.enabled !== true) return;
+    const model = omp.advisorModel?.trim() || policy.model;
+    if (!model || !model.includes('/')) {
+      this.noteLog('planning', 'Plan advisor skipped: no explicit advisor model is configured');
+      return;
+    }
+    const cooldowns = await getOmpCooldownStore().active();
+    if (cooldowns[providerOf(model) ?? '']) {
+      this.noteLog('planning', 'Plan advisor skipped: its configured provider is cooling down');
+      return;
+    }
+    const request = `${taskBlock(this.config)}\n\nReview this implementation plan before work begins. Identify at most six concrete correctness or acceptance gaps. Do not implement, edit files, or claim any check has run.\n\n<plan>\n${this.info.plan}\n</plan>`;
+    const report = await this.runReviewCheckpoint('plan-advisor', model, 'advisor', 'high', request, 'planning');
+    if (report) this.planAdvice = `Plan advisor checkpoint (advice, not proof of implementation or test success):\n${report.summary}\n${report.findings.map((finding) => `${finding.severity}: ${finding.issue}${finding.fix ? ` Suggested action: ${finding.fix}` : ''}`).join('\n')}`;
+  }
+
+  /** One durable, bounded read-only call per complete input/model fingerprint. */
+  private async runReviewCheckpoint(kind: 'plan-advisor' | 'diff-review', model: string, role: OmpRole, effort: ClaudeEffort, request: string, logPhase: TaskLogPhase): Promise<ReviewReport | undefined> {
+    let repository: string;
+    try { repository = await fingerprintWorktree(this.config.worktreePath, this.config.baseBranch); }
+    catch {
+      // An unverified repository never reuses prior success; retain the existing review behavior.
+      repository = `unverified-${randomUUID()}`;
+    }
+    const human = humanDecisionPrompt(this.config);
+    const system = kind === 'plan-advisor'
+      ? `You are a read-only implementation-plan advisor. Identify concrete missing requirements and correctness risks, at most six findings. Do not edit files or treat a proposed plan as evidence that tests passed. Apply recorded human decisions only within their stated scope.`
+      : REVIEW_SYSTEM_PROMPT;
+    const selected = this.phaseModel(model, role);
+    const metadata = { kind, model: selected, effort, repository, request, human, system,
+      ...(selected === 'OMP default model' ? { unresolvedModel: randomUUID() } : {}),
+    };
+    const key = createHash('sha256').update(JSON.stringify(metadata)).digest('hex');
+    let claim: Awaited<ReturnType<typeof beginCheckpoint<ReviewReport>>>;
+    try { claim = await beginCheckpoint<ReviewReport>(this.config.specDir, key, metadata); }
+    catch (error) {
+      this.noteLog(logPhase, `Checkpoint unavailable, continuing without cached advice: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+    if (claim.cached) {
+      const cached = usableReviewReport(claim.record.result);
+      if (cached) { this.noteLog(logPhase, `Reusing ${kind} checkpoint for the unchanged inputs`); return cached; }
+      this.noteLog(logPhase, `${kind} checkpoint cache is invalid; continuing without its advice, not treating it as successful`);
+      return undefined;
+    }
+    if (!claim.execute) {
+      this.noteLog(logPhase, `${kind} checkpoint is unavailable (${claim.record.error ?? claim.record.status}); this is not a successful review`);
+      return undefined;
+    }
+    const phase = this.beginPhase('review', { model: metadata.model, effort });
+    const started = Date.now();
+    const combined = `${request}\n\n${human}`;
+    const referenced = Buffer.byteLength(combined, 'utf8') > 24 * 1024;
     try {
-      diff = await collectReviewDiff(cwd, this.config.baseBranch);
+      const result = await runClaudeText({
+        prompt: referenced
+          ? `Read the full request and recorded human decisions in ${JSON.stringify(toRuntimePath(claim.record.path))}, JSON fields metadata.request and metadata.human. Review only that recorded scope. The request is referenced instead of truncated; do not infer approvals or successful checks without reading it.`
+          : request,
+        appendSystemPrompt: [system, referenced ? `The exact read-only checkpoint source is ${JSON.stringify(toRuntimePath(claim.record.path))}; read metadata.human before judging human acceptance. Do not modify this Workbench file.` : human].filter(Boolean).join('\n\n'),
+        model, ompRole: role, effort, backend: this.config.backend, jsonSchema: REVIEW_SCHEMA,
+        cwd: this.config.worktreePath,
+        usage: { job: kind === 'plan-advisor' ? 'advisor' : 'review', taskId: this.config.specId, projectId: this.config.projectId, projectPath: path.dirname(path.dirname(path.dirname(this.config.specDir))) },
+        tools: READ_ONLY_TOOLS, timeoutMs: 20 * 60 * 1000, abortSignal: this.abortController.signal,
+      });
+      const report = usableReviewReport(result.structured);
+      if (!report) throw new Error('Checkpoint did not return a usable structured review');
+      await completeCheckpoint(this.config.specDir, key, claim.record.attempt, report);
+      this.endPhase(phase, { costUsd: result.costUsd ?? 0, durationMs: Date.now() - started });
+      const counts = countFindings(report.findings);
+      this.log.add(logPhase, 'info', `${kind}: ${counts.blocker} blocker, ${counts.major} major, ${counts.minor} minor`, { detail: report.summary, collapsed: true });
+      return report;
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await failCheckpoint(this.config.specDir, key, claim.record.attempt, message).catch((failure) => appLog.warn('[Checkpoint] Could not persist failure:', failure));
+      this.endPhase(phase, { isError: true, error: message, durationMs: Date.now() - started });
+      if (!this.stopped) this.noteLog(logPhase, `${kind} failed, continuing without its advice: ${message}`);
+      return undefined;
+    }
+  }
+
+  /** Fresh OMP diff review, reused only when the complete worktree and acceptance inputs match. */
+  private async runOmpReview(): Promise<void> {
+    this.reviewSection = undefined;
+    let diff: string | undefined;
+    try { diff = await collectReviewDiff(this.config.worktreePath, this.config.baseBranch); }
+    catch (error) {
       this.noteLog('validation', `Review skipped, could not read the diff: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
-    if (!diff) {
-      this.noteLog('validation', 'Review skipped: no changes to review');
-      return;
-    }
-    const reviewTriage = this.info.triage;
-    const reviewModel = reviewTriage?.pinned?.model ? reviewTriage.model : 'opus';
-    const reviewEffort: ClaudeEffort = reviewTriage?.pinned?.effort ? reviewTriage.effort : 'high';
-    this.noteLog('validation', `Reviewing the change with a fresh context${this.loop && this.loop.max > 1 ? ` (round ${this.loop.round}/${this.loop.max})` : ''} (${this.modelLabel(reviewModel, reviewEffort, ompRoleForJob('review'))})`);
-    const phase = this.beginPhase('review', { model: this.phaseModel(reviewModel, ompRoleForJob('review')), effort: reviewEffort });
-    const started = Date.now();
-    try {
-      const result = await runClaudeText({
-        prompt: `${taskBlock(this.config)}${this.config.feedback && !isRecordedHumanFeedback(this.config) ? `\n\nRecorded reviewer feedback / evidence (verify its references):\n${this.config.feedback}` : ''}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`,
-        appendSystemPrompt: [REVIEW_SYSTEM_PROMPT, humanDecisionPrompt(this.config)].filter(Boolean).join('\n\n'),
-        model: reviewModel,
-        ompRole: ompRoleForJob('review'),
-        effort: reviewEffort,
-        backend: this.config.backend,
-        jsonSchema: REVIEW_SCHEMA,
-        cwd,
-        usage: { job: 'review', taskId: this.config.specId, projectId: this.config.projectId, projectPath: path.dirname(path.dirname(path.dirname(this.config.specDir))) },
-        tools: READ_ONLY_TOOLS,
-        // Local models are slow; one-shot OMP runs get five times this
-        timeoutMs: 20 * 60 * 1000,
-        abortSignal: this.abortController.signal,
-      });
-      const report = normalizeReview(result.structured, result.text);
-      const counts = countFindings(report.findings);
-      Object.assign(phase, { endedAt: new Date().toISOString(), costUsd: result.costUsd ?? 0, durationMs: Date.now() - started });
-      this.updateTotalCost();
-      this.saveInfo();
-      this.reviewSection = formatReviewForValidation(report);
-      const detail = [report.summary, ...report.findings.map((f) => `${f.severity}${f.file ? ` ${f.file}${f.line ? `:${f.line}` : ''}` : ''}: ${f.issue}`)].filter(Boolean).join('\n');
-      this.log.add('validation', 'info', `Review: ${counts.blocker} blocker, ${counts.major} major, ${counts.minor} minor`, { detail, collapsed: true });
-      this.emitLog(`Review: ${counts.blocker} blocker, ${counts.major} major, ${counts.minor} minor. ${report.summary}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      Object.assign(phase, { endedAt: new Date().toISOString(), isError: true, error: message, durationMs: Date.now() - started });
-      this.saveInfo();
-      if (!this.stopped) this.noteLog('validation', `Review failed, validating without it: ${message}`);
-    }
+    if (!diff) { this.noteLog('validation', 'Review skipped: no changes to review'); return; }
+    const triage = this.info.triage;
+    const model = triage?.pinned?.model ? triage.model : 'opus';
+    const effort: ClaudeEffort = triage?.pinned?.effort ? triage.effort : 'high';
+    const request = `${taskBlock(this.config)}${this.config.feedback && !isRecordedHumanFeedback(this.config) ? `\n\nRecorded reviewer feedback / evidence (verify its references):\n${this.config.feedback}` : ''}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`;
+    const report = await this.runReviewCheckpoint('diff-review', model, ompRoleForJob('review'), effort, request, 'validation');
+    if (report) this.reviewSection = formatReviewForValidation(report);
   }
 
   /** Apply one stream message; returns a signal for rate-limit or auth problems */
@@ -2450,6 +2840,7 @@ no notes came with the request, so review the change against the task with fresh
       : (block.content ?? []).map((c) => c.text ?? '').join('\n');
     const name = this.toolNames.get(block.tool_use_id);
     if (inSubagent || !name) return;
+    this.toolNames.delete(block.tool_use_id);
     this.log.add(logPhase, 'tool_end', `${name} ${block.is_error ? 'failed' : 'done'}`, {
       tool_name: name,
       tool_use_id: block.tool_use_id,

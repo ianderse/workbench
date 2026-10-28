@@ -11,6 +11,10 @@
     "archived": "Archived"
   },
   "actions": {
+    "freshContext": "Continue with fresh context",
+    "freshContextPreserved": "Fresh-context request accepted. Existing work, transcripts and approvals are retained",
+    "freshContextPending": "Fresh-context request saved but not started. Resolve the task error, then Resume to continue this request",
+    "freshContextRestart": "Restart Workbench to load fresh-context continuation. Existing work is preserved",
     "start": "Start",
     "stop": "Stop",
     "resume": "Resume",

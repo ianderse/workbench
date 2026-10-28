@@ -15,6 +15,8 @@ export function resolveClaudeCodeTaskSettings(stored: Partial<ClaudeCodeTaskSett
   if (!CLAUDE_EFFORTS.includes(merged.fixedEffort)) merged.fixedEffort = DEFAULT_CLAUDE_CODE_TASK_SETTINGS.fixedEffort;
   if (merged.triage !== 'auto' && merged.triage !== 'fixed') merged.triage = 'auto';
   if (!['auto', 'always', 'never'].includes(merged.planning)) merged.planning = 'auto';
+  if (merged.freshContext !== 'off' && merged.freshContext !== 'before-validation') merged.freshContext = DEFAULT_CLAUDE_CODE_TASK_SETTINGS.freshContext;
+  if (merged.stallRecovery !== 'off' && merged.stallRecovery !== 'recover') merged.stallRecovery = DEFAULT_CLAUDE_CODE_TASK_SETTINGS.stallRecovery;
   const rounds = Number(merged.aiReviewRounds);
   merged.aiReviewRounds = Number.isFinite(rounds)
     ? Math.min(MAX_AI_REVIEW_ROUNDS, Math.max(MIN_AI_REVIEW_ROUNDS, Math.round(rounds)))

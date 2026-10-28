@@ -77,7 +77,9 @@
  *    is lost. `--config` with `async.enabled: false` (plus `bash.autoBackground.enabled: false`) removes the `async`
  *    argument from the bash tool, so commands run in the foreground (`OMP_FOREGROUND_OVERLAY` in omp-args.ts).
  *
- * Not verified: protocol v2 framing (we stay on v1), `images` on prompt (attachments use print mode).
+ * Images: native `prompt.images` base64 payload contract verified in official v18.13.2 rpc-types.ts
+ * and pi-ai ImageContent; transport tests preserve the payload. PDF/document attachments stay in print mode.
+ * Not verified: protocol v2 framing (we stay on v1).
  */
 
 /** Parsed stdout line */
@@ -124,7 +126,9 @@ export const RPC_PENDING_ID = 'wb-pending';
 export const RPC_PROMPT_ID = 'wb-prompt';
 
 export const rpcGetState = (id: string = RPC_STATE_ID) => encodeRpcCommand({ id, type: 'get_state' });
-export const rpcPrompt = (message: string) => encodeRpcCommand({ id: RPC_PROMPT_ID, type: 'prompt', message });
+/** Native image shape verified against OMP v18.13.2 rpc-types.ts and pi-ai ImageContent. */
+export interface OmpRpcImage { type: 'image'; data: string; mimeType: string }
+export const rpcPrompt = (message: string, images: readonly OmpRpcImage[] = []) => encodeRpcCommand({ id: RPC_PROMPT_ID, type: 'prompt', message, ...(images.length ? { images } : {}) });
 export const rpcSteer = (id: string, message: string) => encodeRpcCommand({ id: `steer-${id}`, type: 'steer', message });
 
 const MESSAGE_MARKER = /\[Workbench message (wbm-[A-Za-z0-9_-]+)\]/;

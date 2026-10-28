@@ -18,11 +18,12 @@
 
 import type { ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { access, mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { appLog } from '../app-logger';
 import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
+import { toHostPath } from '../platform/shell-runtime';
 import type { ClaudeProcessHandle } from '../claude-code/process';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from '../claude-code/stream-types';
 import type { ClaudeEffort } from '../../shared/types/claude-code';
@@ -35,7 +36,7 @@ import { getOmpRoles } from './omp-roles';
 import { buildOmpUtilityExtension } from './omp-utility';
 import { buildJsonRepairPrompt, buildStructuredInstruction, parseStructuredOutput } from './omp-structured';
 import { createOmpTranslator, isOmpNotice } from './omp-translate';
-import { hasPendingAsyncWork, isSessionSettled, isWorkingEvent, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PENDING_ID, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText } from './omp-rpc';
+import { hasPendingAsyncWork, isSessionSettled, isWorkingEvent, parseRpcLine, readSteerId, rpcGetState, rpcPrompt, rpcSteer, RPC_PENDING_ID, RPC_PROMPT_ID, RPC_STATE_ID, sessionIdOf, steerText, type OmpRpcImage } from './omp-rpc';
 import { recordOmpUsage, type UsageContext } from '../usage/usage-record';
 import { ompEventDiagnostic, ompLaunchDiagnostic } from './omp-prompt-diagnostics';
 
@@ -74,6 +75,10 @@ export interface OmpRunOptions {
   maxTimeMinutes?: number;
   /** Utility call: no extensions or skills */
   oneShot?: boolean;
+  /** Apply Workbench's advisor schedule only to task phases; Insights retains its existing mode. */
+  taskPhase?: boolean;
+  /** Critical epoch journal acknowledgment, awaited before submitting an RPC prompt. */
+  onSessionReady?: (sessionId: string) => Promise<void>;
   /** Emit `omp_text_delta` messages while text streams */
   emitDeltas?: boolean;
   /** Emit `omp_progress` messages (chunk sizes) while a reply streams */
@@ -144,9 +149,11 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     repairExtensionPath?: string;
     appendText: string;
     attachmentBytes: number;
+    rpcImages: OmpRpcImage[];
+    rpcCompatible: boolean;
   };
   // One-shot utility calls never use the advisor; the setting applies to the other runs
-  const advisor = resolveOmpAdvisor(options.settings, options.oneShot);
+  const advisor = resolveOmpAdvisor(options.settings, options.oneShot, options.taskPhase);
   // Roles are read in the background; until they are known `--model` is left out
   const roles = getOmpRoles();
   const role = options.role ?? 'default';
@@ -211,6 +218,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
       attachmentPaths,
       systemPromptFile,
       appendSystemPromptFile,
+      rpcImages: files.filter((file) => file.mediaType.startsWith('image/')).map((file) => ({ type: 'image', data: file.data, mimeType: file.mediaType })),
+      rpcCompatible: files.every((file) => file.mediaType.startsWith('image/')),
     };
   } catch (error) {
     await cleanup();
@@ -261,6 +270,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
   const label = options.label ?? path.basename(options.cwd);
   const diagnosticRunId = randomBytes(6).toString('hex');
   let diagnosticAttempt = 0;
+  let acknowledgedSessionId: string | undefined;
+  let acknowledgedSessionFile: string | undefined;
   const waits = { ready: 20_000, start: 30_000, settle: 8_000, state: 5_000, hang: 10 * 60_000, poll: 30_000, ...(options.rpcWaitsMs ?? {}) };
 
   interface RunOnceResult {
@@ -268,6 +279,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     result?: ClaudeResultMessage;
     text: string;
     sessionId?: string;
+    promptSent?: boolean;
+    refused?: boolean;
     /** RPC only: the run never started, this is why (the caller repeats the step in print mode) */
     fallback?: string;
   }
@@ -308,6 +321,9 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
       // slow start is not a failed start, only a silent process (`waits.hang`) is given up
       let accepted = false;
       let promptSent = false;
+      let promptRefused = false;
+      let sessionReady = !options.onSessionReady;
+      let acknowledgingSession = false;
       let ended = false; // agent_end seen
       let fallback: string | undefined;
       let stdinClosed = false;
@@ -370,9 +386,9 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
         }
       };
       const sendPrompt = () => {
-        if (promptSent || stdinClosed) return;
+        if (promptSent || stdinClosed || !sessionReady) return;
         promptSent = true;
-        child.stdin?.write(rpcPrompt(input));
+        child.stdin?.write(rpcPrompt(input, repair ? [] : setup.rpcImages));
         after(waits.start, () => giveUp('no response to the prompt'));
       };
       // Hang guard before agent_start: restarted by every stdout line, so a compaction that talks never trips it
@@ -438,17 +454,40 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
           clearTimers();
           child.stdin?.write(rpcGetState());
           // The session id comes from get_state; without an answer the prompt goes out anyway
-          after(waits.state, sendPrompt);
+          after(waits.state, () => {
+            if (options.onSessionReady && !sessionReady && !acknowledgingSession) giveUp('no session identity available for durable acknowledgment');
+            else sendPrompt();
+          });
           return;
         }
         if (parsed.kind === 'response') {
           if (parsed.id === RPC_STATE_ID) {
             const sessionId = parsed.success ? sessionIdOf(parsed.data) : undefined;
-            if (sessionId) emit({ type: 'session', id: sessionId, cwd: options.cwd });
-            sendPrompt();
+            if (options.onSessionReady) {
+              if (!sessionId) { giveUp('no session identity available for durable acknowledgment'); return; }
+              if (acknowledgingSession || sessionReady) return;
+              acknowledgingSession = true;
+              after(waits.start, () => { if (!sessionReady) giveUp('session acknowledgment did not finish'); });
+              void Promise.resolve().then(() => options.onSessionReady!(sessionId)).then(() => {
+                if (stdinClosed || child.killed || child.exitCode !== null || aborted || timedOut) return;
+                sessionReady = true;
+                acknowledgedSessionId = sessionId;
+                const state = parsed.data as { sessionFile?: unknown } | undefined;
+                acknowledgedSessionFile = typeof state?.sessionFile === 'string' ? toHostPath(state.sessionFile) : undefined;
+                emit({ type: 'session', id: sessionId, cwd: options.cwd });
+                sendPrompt();
+              }).catch((error) => {
+                stderr = (stderr + `\nSession acknowledgment failed: ${error instanceof Error ? error.message : String(error)}`).slice(-8000);
+                giveUp('session acknowledgment failed; prompt was not submitted');
+              });
+            } else {
+              if (sessionId) emit({ type: 'session', id: sessionId, cwd: options.cwd });
+              sendPrompt();
+            }
           } else if (parsed.id === RPC_PENDING_ID) {
             onPendingState(parsed.success ? hasPendingAsyncWork(parsed.data) : false);
           } else if (parsed.id === RPC_PROMPT_ID && !parsed.success) {
+            promptRefused = true;
             giveUp(`prompt refused: ${parsed.error ?? 'unknown error'}`);
           } else if (parsed.id === RPC_PROMPT_ID) {
             markAccepted();
@@ -550,6 +589,9 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
           resolve({
             outcome: { exitCode, signal, stderr, aborted, timedOut, results: [], resultOrigins: [], unread: [] },
             text: '',
+            sessionId: translator.sessionId,
+            promptSent,
+            refused: promptRefused,
             fallback: fallback ?? `omp exited with code ${exitCode} before the run started${last ? `: ${last}` : ''}`,
           });
           return;
@@ -604,9 +646,12 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     attachmentPaths: setup.attachmentPaths,
     extensionPaths: setup.extensionPaths,
   });
-  // Live messages: an RPC process takes steer commands while the step runs. Attachments (`@file`) are not
-  // supported in RPC mode, so those steps stay on print mode, as do utility calls and the setting turned off
-  const useRpc = !!options.live && !options.oneShot && options.settings.liveMessages !== false && setup.attachmentPaths.length === 0;
+  // Images use native RPC payloads. Documents remain on print mode; critical fresh epochs reject them.
+  if (options.onSessionReady && (!setup.rpcCompatible || options.oneShot)) {
+    await cleanup();
+    throw new Error('Fresh context cannot safely acknowledge an OMP session with document attachments; preserve the current session');
+  }
+  const useRpc = (!!options.onSessionReady || (!!options.live && options.settings.liveMessages !== false)) && !options.oneShot && setup.rpcCompatible;
   const rpcArgs = useRpc
     ? buildOmpArgs({
       settings: options.settings,
@@ -645,6 +690,8 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     if (!rpcArgs) return runOnce(baseArgs, setup.text, !!options.jsonSchema);
     const rpcRun = await runOnce(rpcArgs, setup.text, !!options.jsonSchema, undefined, true);
     if (!rpcRun.fallback) return rpcRun;
+    if (rpcRun.promptSent && !rpcRun.refused) throw new Error(`OMP prompt was sent but acceptance is uncertain; it will not be replayed in print mode. Reconcile preserved session ${rpcRun.sessionId ?? acknowledgedSessionId ?? '(identity unavailable)'}: ${rpcRun.fallback}`);
+    if (options.onSessionReady) throw new Error(`Fresh context RPC launch failed without an accepted prompt; no print-mode replay: ${rpcRun.fallback}`);
     // Never lose a step to the new transport: run it again in print mode (the RPC process did not start the run)
     appLog.warn(`[OMP] ${label}: RPC mode did not start (${rpcRun.fallback}); running this step with omp -p, messages wait for the next step`);
     if (aborted || timedOut) return rpcRun;
@@ -666,6 +713,10 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
         if (ok && !structured) {
           // One more try, asking for the JSON alone: in the same session when there is one
           const sessionId = result.session_id || run.sessionId;
+          if (options.onSessionReady) {
+            if (!sessionId || sessionId !== acknowledgedSessionId || !acknowledgedSessionFile) throw new Error('Cannot safely repair JSON: the acknowledged session identity/transcript is unavailable; prompt outcome must be reconciled');
+            await access(acknowledgedSessionFile).catch(() => { throw new Error('Cannot safely repair JSON: the acknowledged transcript is absent; do not replay a potentially accepted prompt'); });
+          }
           const resumeSession = options.session && sessionId
             ? { dir: options.session.dir, resume: sessionId }
             : undefined;

@@ -40,6 +40,23 @@ describe('provider cooldown recovery', () => {
     expect((await store.active(NOW)).anthropic.resetAt).toBe(new Date(NOW + delay).toISOString());
   });
 
+  it('re-acknowledges the same resumed identity before a cooldown fallback and propagates acknowledgment failure', async () => {
+    const acknowledged: string[] = [];
+    const onSessionReady = vi.fn(async (sessionId: string) => {
+      acknowledged.push(sessionId);
+      if (acknowledged.length === 2) throw new Error('replacement journal unavailable');
+    });
+    const spawn = vi.fn<Parameters<typeof startWithOmpCooldownRecovery>[1]>(async (runOptions) => {
+      await runOptions.onSessionReady?.(runOptions.session?.resume ?? 'same-session');
+      return acknowledged.length === 1 ? handle(failed()) : handle(success);
+    });
+    const run = await startWithOmpCooldownRecovery(options({ onSessionReady }), spawn, deps());
+    await expect(run.done).rejects.toThrow('replacement journal unavailable');
+    expect(spawn).toHaveBeenCalledTimes(2);
+    expect(spawn.mock.calls[1][0].session?.resume).toBe('same-session');
+    expect(acknowledged).toEqual(['same-session', 'same-session']);
+  });
+
   it('persists the provider hold across restarts and skips all Anthropic models until the advertised deadline', async () => {
     await store.record('anthropic', new Date(NOW + delay).toISOString());
     store = new OmpCooldownStore(path.join(root, 'cooldowns.json'));

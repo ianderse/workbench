@@ -32,7 +32,8 @@ import { cancelFallbackTimer } from '../agent-events-handlers';
 import { safeSendToRenderer } from '../utils';
 import { readSettingsFile } from '../../settings-utils';
 import { resolveClaudeCodeTaskSettings } from '../../claude-code/settings';
-import { stuckTaskStartupAction } from '../../../shared/utils/task-resume';
+import { canResumeTask, isRunFinished, stuckTaskStartupAction } from '../../../shared/utils/task-resume';
+import { randomUUID } from 'crypto';
 import type { ClaudeCodeTaskSettings } from '../../../shared/types/claude-code';
 import { getAPIProfileEnv } from '../../services/profile';
 import { getAgentBackendSettings } from '../../agent-backend/settings';
@@ -342,6 +343,9 @@ export function registerTaskExecutionHandlers(
       return;
     }
 
+    // Another command may have registered this project/task while Git/auth were checked.
+    if (agentManager.isRunning(taskId, project.id)) return;
+
     // Starting (manually or via the resume scheduler) releases any rate-limit hold
     clearRateLimitHold(project, task, getMainWindow);
 
@@ -385,7 +389,12 @@ export function registerTaskExecutionHandlers(
         console.warn('[TASK_START] No main window found');
         return;
       }
-      await startTask(taskId, projectId);
+      const { project } = findTaskAndProject(taskId, projectId);
+      if (!project) { await startTask(taskId, projectId); return; }
+      await taskQueue.runExclusive(project.id, async () => {
+        projectStore.invalidateTasksCache(project.id);
+        if (!agentManager.isRunning(taskId, project.id)) await startTask(taskId, project.id);
+      });
     }
   );
 
@@ -408,6 +417,53 @@ export function registerTaskExecutionHandlers(
       }) !== undefined
     );
   };
+
+  handleIpc(IPC_CHANNELS.TASK_FRESH_CONTEXT, async (_, taskId: string, projectId: string): Promise<IPCResult<{ action: 'started' | 'queued' | 'pending'; warning?: string }>> => {
+    if (!projectId) return { success: false, error: 'Project is required for fresh-context continuation' };
+    return taskQueue.runExclusive(projectId, async () => {
+      let accepted = false;
+      try {
+        projectStore.invalidateTasksCache(projectId);
+        const { task, project } = findTaskAndProject(taskId, projectId);
+        if (!task || !project || project.id !== projectId || task.projectId !== projectId || task.metadata?.archivedAt) return { success: false, error: 'Task not found in this project' };
+        if (agentManager.isRunning(taskId, projectId)) return { success: false, error: 'Stop the task before continuing with fresh context' };
+        const merging = branchMergeBlocker(projectId, taskId);
+        if (merging) return { success: false, error: merging };
+        if (task.stagedInMainProject || activeAutoMerge(task)) return { success: false, error: 'Fresh context requires an unmerged task worktree' };
+        const run = loadClaudeRunInfo(getMainSpecDir(project, task));
+        const settings = resolveClaudeCodeTaskSettings(readSettingsFile()?.claudeCodeTasks as Partial<ClaudeCodeTaskSettings> | undefined);
+        const file = path.join(getMainSpecDir(project, task), 'task_metadata.json');
+        const metadata = JSON.parse(readFileSync(file, 'utf8')) as Task['metadata'];
+        const pendingId = metadata?.freshContextRequestId && metadata.freshContextRequestId !== run?.freshContextConsumedRequestId ? metadata.freshContextRequestId : undefined;
+        const pendingQueued = !!pendingId && task.status === 'queue' && !!run && !isRunFinished(run, settings.validation);
+        if (!run || (!pendingQueued && !canResumeTask({ ...task, claudeRun: run }, settings.validation))) return { success: false, error: 'Fresh context is available for stopped or failed tasks with unfinished work' };
+        if (!findTaskWorktree(project.path, task.specId)) return { success: false, error: 'The existing task worktree is required for fresh context' };
+        const auth = await checkClaudeCodeAuth(task);
+        if (!auth.ok) return { success: false, error: auth.error };
+        // The durable request is the accepted operation. Retries recover its identity until
+        // the runner acknowledges a replacement session; later failures cannot reject it.
+        writeFileAtomicSync(file, JSON.stringify({ ...metadata, freshContextRequestId: pendingId ?? randomUUID() }, null, 2));
+        accepted = true;
+        projectStore.invalidateTasksCache(projectId);
+        if (isAtParallelLimit(project, taskId)) {
+          if (!(await persistPlanStatus(getPlanPath(project, task), 'queue', projectId))) throw new Error('Could not queue fresh-context continuation');
+          safeSendToRenderer(getMainWindow, IPC_CHANNELS.TASK_STATUS_CHANGE, taskId, 'queue', projectId);
+          taskHooks.emit('state', { project, task, status: 'queue' });
+          taskQueue.request(projectId);
+          return { success: true, data: { action: 'queued' } };
+        }
+        await startTask(taskId, projectId);
+        return agentManager.isRunning(taskId, projectId)
+          ? { success: true, data: { action: 'started' } }
+          : { success: true, data: { action: 'pending', warning: 'Fresh-context request saved; the runner has not started. Resolve the task error and Resume to continue this request.' } };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return accepted
+          ? { success: true, data: { action: 'pending', warning: `Fresh-context request saved; continuation needs recovery: ${message}` } }
+          : { success: false, error: message };
+      }
+    });
+  });
 
   /**
    * Start a task over from a clean slate: discard its worktree and branch (all commits and

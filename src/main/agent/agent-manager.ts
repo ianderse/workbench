@@ -557,6 +557,7 @@ export class AgentManager extends EventEmitter {
     const effectiveAgent = resolveEffectiveAgent(task.metadata?.agentOverride, getAgentBackendSettings().kind);
     const config: TaskRunConfig = {
       taskId,
+      ...(task.metadata?.freshContextRequestId ? { freshContextRequestId: task.metadata.freshContextRequestId } : {}),
       ...(task.metadata?.humanWork?.approvalOverride ? { humanApprovalOverride: task.metadata.humanWork.approvalOverride } : {}),
       ...(task.metadata?.humanWork ? { humanWork: structuredClone(task.metadata.humanWork) } : {}),
       projectId: project.id,

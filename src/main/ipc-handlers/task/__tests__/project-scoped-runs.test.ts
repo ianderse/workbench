@@ -21,6 +21,10 @@ import os from 'os';
 import path from 'path';
 import type { Project, Task } from '../../../../shared/types';
 import { IPC_CHANNELS } from '../../../../shared/constants';
+import { loadClaudeRunInfo } from '../../../claude-code/task-runner';
+import { findTaskWorktree } from '../../../worktree-paths';
+import type { ClaudeRunInfo } from '../../../../shared/types/claude-code';
+import { persistPlanStatus } from '../plan-file-utils';
 
 const mocks = vi.hoisted(() => ({
   projects: [] as Project[],
@@ -237,6 +241,147 @@ beforeEach(() => {
   agentManager.reset();
   vi.spyOn(console, 'warn').mockImplementation(() => undefined);
   vi.spyOn(console, 'error').mockImplementation(() => undefined);
+});
+
+describe('TASK_FRESH_CONTEXT', () => {
+  it.each([false, true])('records a scoped request and preserves existing work when queued=%s', async (queued) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'wb-fresh-context-'));
+    const paused = makeTask('project-b', { status: 'human_review', reviewReason: 'stopped' });
+    setupProjects('project-a', 'project-b', { 'project-b': paused });
+    mocks.projects[1].path = root;
+    const specDir = path.join(root, '.workbench', 'tasks', TASK_ID);
+    const worktree = path.join(root, 'worktree');
+    mkdirSync(specDir, { recursive: true });
+    mkdirSync(worktree);
+    const run: ClaudeRunInfo = { version: 1, sessionId: 'old-session', totalCostUsd: 12, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' };
+    const metadata = { customField: 'preserved', humanWork: { revision: 1, items: [] } };
+    const metadataFile = path.join(specDir, 'task_metadata.json');
+    writeFileSync(metadataFile, JSON.stringify(metadata));
+    writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(run));
+    writeFileSync(path.join(specDir, 'implementation_plan.json'), JSON.stringify({ status: 'human_review', phases: [] }));
+    writeFileSync(path.join(worktree, 'untracked.txt'), 'unfinished user work');
+    vi.mocked(loadClaudeRunInfo).mockReturnValue(run);
+    vi.mocked(findTaskWorktree).mockReturnValue(worktree);
+    if (queued) mocks.tasksByProject.set('project-a', [makeTask('project-a', { id: 'busy-1' }), makeTask('project-a', { id: 'busy-2' }), makeTask('project-a', { id: 'busy-3' })]);
+    try {
+      const result = await invokeIpcHandler<{ success: boolean; data?: { action: string } }>(IPC_CHANNELS.TASK_FRESH_CONTEXT, TASK_ID, 'project-b');
+      expect(result).toEqual({ success: true, data: { action: queued ? 'queued' : 'started' } });
+      const saved = JSON.parse(readFileSync(metadataFile, 'utf8'));
+      expect(saved).toMatchObject(metadata);
+      expect(saved.freshContextRequestId).toMatch(/^[\da-f-]{36}$/);
+      expect(JSON.parse(readFileSync(path.join(specDir, 'claude_run.json'), 'utf8'))).toEqual(run);
+      expect(readFileSync(path.join(worktree, 'untracked.txt'), 'utf8')).toBe('unfinished user work');
+      if (queued) {
+        expect(agentManager.startTask).not.toHaveBeenCalled();
+        expect(persistPlanStatus).toHaveBeenCalledWith(expect.stringContaining(`${TASK_ID}/implementation_plan.json`), 'queue', 'project-b');
+      } else {
+        expect(agentManager.startTask).toHaveBeenCalledTimes(1);
+        expect(agentManager.startTask).toHaveBeenCalledWith(TASK_ID, expect.objectContaining({ project: expect.objectContaining({ id: 'project-b' }) }));
+        const duplicate = await invokeIpcHandler<{ success: boolean }>(IPC_CHANNELS.TASK_FRESH_CONTEXT, TASK_ID, 'project-b');
+        expect(duplicate.success).toBe(false);
+        expect(JSON.parse(readFileSync(metadataFile, 'utf8')).freshContextRequestId).toBe(saved.freshContextRequestId);
+        expect(agentManager.startTask).toHaveBeenCalledTimes(1);
+      }
+    } finally {
+      vi.mocked(loadClaudeRunInfo).mockReturnValue(null);
+      vi.mocked(findTaskWorktree).mockReturnValue(null);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['queue-false', 'queue-throw', 'git-soft', 'start-soft', 'start-throw'] as const)('retains accepted intent and retries its identity after %s', async (fault) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'wb-fresh-context-fault-'));
+    const paused = makeTask('project-b', { status: 'human_review', reviewReason: 'stopped' });
+    setupProjects('project-a', 'project-b', { 'project-b': paused });
+    mocks.projects[1].path = root;
+    const specDir = path.join(root, '.workbench', 'tasks', TASK_ID);
+    mkdirSync(specDir, { recursive: true });
+    const metadataFile = path.join(specDir, 'task_metadata.json');
+    writeFileSync(metadataFile, JSON.stringify({ retained: true }));
+    vi.mocked(loadClaudeRunInfo).mockReturnValue({ version: 1, sessionId: 'old-session', totalCostUsd: 4, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' });
+    vi.mocked(findTaskWorktree).mockReturnValue(root);
+    if (fault.startsWith('queue')) {
+      mocks.tasksByProject.set('project-a', [makeTask('project-a', { id: 'busy-1' }), makeTask('project-a', { id: 'busy-2' }), makeTask('project-a', { id: 'busy-3' })]);
+      if (fault === 'queue-false') vi.mocked(persistPlanStatus).mockResolvedValueOnce(false);
+      else vi.mocked(persistPlanStatus).mockRejectedValueOnce(new Error('injected queue interruption'));
+    } else if (fault === 'git-soft') mocks.checkGitStatus.mockResolvedValueOnce({ isGitRepo: false, hasCommits: false });
+    else if (fault === 'start-soft') agentManager.startTask.mockResolvedValueOnce(undefined);
+    else agentManager.startTask.mockRejectedValueOnce(new Error('injected launch interruption'));
+    try {
+      const result = await invokeIpcHandler<{ success: boolean; data: { action: string; warning?: string } }>(IPC_CHANNELS.TASK_FRESH_CONTEXT, TASK_ID, 'project-b');
+      expect(result.success).toBe(true);
+      expect(result.data.action).toBe('pending');
+      expect(result.data.warning).toContain('saved');
+      const accepted = JSON.parse(readFileSync(metadataFile, 'utf8'));
+      expect(accepted.retained).toBe(true);
+      expect(accepted.freshContextRequestId).toMatch(/^[\da-f-]{36}$/);
+      expect(agentManager.isRunning(TASK_ID, 'project-b')).toBe(false);
+      const retried = await invokeIpcHandler<{ success: boolean; data: { action: string } }>(IPC_CHANNELS.TASK_FRESH_CONTEXT, TASK_ID, 'project-b');
+      expect(retried.success).toBe(true);
+      expect(retried.data.action).toBe(fault.startsWith('queue') ? 'queued' : 'started');
+      expect(JSON.parse(readFileSync(metadataFile, 'utf8')).freshContextRequestId).toBe(accepted.freshContextRequestId);
+    } finally {
+      vi.mocked(loadClaudeRunInfo).mockReturnValue(null);
+      vi.mocked(findTaskWorktree).mockReturnValue(null);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])('serializes Resume against fresh-context acceptance when freshFirst=%s', async (freshFirst) => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'wb-fresh-context-race-'));
+    const paused = makeTask('project-b', { status: 'human_review', reviewReason: 'stopped' });
+    setupProjects('project-a', 'project-b', { 'project-b': paused });
+    mocks.projects[1].path = root;
+    const specDir = path.join(root, '.workbench', 'tasks', TASK_ID);
+    mkdirSync(specDir, { recursive: true });
+    const metadataFile = path.join(specDir, 'task_metadata.json');
+    writeFileSync(metadataFile, '{}');
+    vi.mocked(loadClaudeRunInfo).mockReturnValue({ version: 1, sessionId: 'old-session', totalCostUsd: 0, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' });
+    vi.mocked(findTaskWorktree).mockReturnValue(root);
+    let tail = Promise.resolve<unknown>(undefined);
+    mocks.queue.runExclusive.mockImplementation((_projectId, fn) => {
+      const next = tail.then(fn);
+      tail = next.catch(() => undefined);
+      return next;
+    });
+    let release!: (value: { isGitRepo: boolean; hasCommits: boolean }) => void;
+    const gate = new Promise<{ isGitRepo: boolean; hasCommits: boolean }>((resolve) => { release = resolve; });
+    let checked!: () => void;
+    const entered = new Promise<void>((resolve) => { checked = resolve; });
+    mocks.checkGitStatus.mockImplementationOnce(() => { checked(); return gate; });
+    try {
+      const fresh = () => invokeIpcHandler<{ success: boolean; data?: { action: string } }>(IPC_CHANNELS.TASK_FRESH_CONTEXT, TASK_ID, 'project-b');
+      const resume = () => invokeIpcHandler(IPC_CHANNELS.TASK_START, TASK_ID, undefined, 'project-b');
+      const first = freshFirst ? fresh() : resume();
+      await entered;
+      const second = freshFirst ? resume() : fresh();
+      release({ isGitRepo: true, hasCommits: true });
+      const results = await Promise.all([first, second]);
+      const result = results[freshFirst ? 0 : 1] as { success: boolean; data?: { action: string } };
+      expect(agentManager.startTask).toHaveBeenCalledTimes(1);
+      const saved = JSON.parse(readFileSync(metadataFile, 'utf8'));
+      if (freshFirst) {
+        expect(result).toEqual({ success: true, data: { action: 'started' } });
+        expect(saved.freshContextRequestId).toBeTruthy();
+      } else {
+        expect(result.success).toBe(false);
+        expect(saved.freshContextRequestId).toBeUndefined();
+      }
+    } finally {
+      mocks.queue.runExclusive.mockImplementation(async (_projectId, fn) => fn());
+      vi.mocked(loadClaudeRunInfo).mockReturnValue(null);
+      vi.mocked(findTaskWorktree).mockReturnValue(null);
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects a missing project and an active run before changing task data', async () => {
+    setupProjects('project-a', 'project-b');
+    agentManager.addRun(TASK_ID, 'project-b');
+    expect((await invokeIpcHandler<{ success: boolean }>(IPC_CHANNELS.TASK_FRESH_CONTEXT, TASK_ID)).success).toBe(false);
+    expect((await invokeIpcHandler<{ success: boolean }>(IPC_CHANNELS.TASK_FRESH_CONTEXT, TASK_ID, 'project-b')).success).toBe(false);
+    expect(agentManager.startTask).not.toHaveBeenCalled();
+  });
 });
 
 describe('TASK_STOP', () => {
@@ -1021,7 +1166,12 @@ describe('held restart feedback', () => {
     await invokeIpcHandler(IPC_CHANNELS.TASK_START, TASK_ID, undefined, 'project-a');
     agentManager.startTask.mockClear();
 
-    // The notes describe the attempt that was discarded, so the run after it has to start clean
+    // A duplicate start while this run owns the task cannot launch a competing writer.
+    await invokeIpcHandler(IPC_CHANNELS.TASK_START, TASK_ID, undefined, 'project-a');
+    expect(agentManager.startTask).not.toHaveBeenCalled();
+    agentManager.killTask(TASK_ID, 'project-a');
+
+    // The notes describe the attempt that was discarded, so the later run starts clean.
     await invokeIpcHandler(IPC_CHANNELS.TASK_START, TASK_ID, undefined, 'project-a');
 
     expect(agentManager.startTask).toHaveBeenCalledWith(

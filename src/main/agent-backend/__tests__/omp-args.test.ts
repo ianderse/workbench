@@ -71,9 +71,17 @@ describe('omp advisor', () => {
   });
 
   it('resolves the advisor from the settings and forces it off for one-shot calls', () => {
-    expect(resolveOmpAdvisor(settings)).toEqual({ mode: 'inherit' });
-    expect(resolveOmpAdvisor({ ...settings, advisor: 'on', advisorModel: ' omlx/big ' })).toEqual({ mode: 'on', model: 'omlx/big' });
-    expect(resolveOmpAdvisor({ ...settings, advisor: 'on', advisorModel: 'omlx/big' }, true)).toEqual({ mode: 'off' });
+    const continuous = { ...settings, advisorSchedule: 'continuous' as const };
+    expect(resolveOmpAdvisor(continuous)).toEqual({ mode: 'inherit' });
+    expect(resolveOmpAdvisor({ ...continuous, advisor: 'on', advisorModel: ' omlx/big ' })).toEqual({ mode: 'on', model: 'omlx/big' });
+    expect(resolveOmpAdvisor({ ...continuous, advisor: 'on', advisorModel: 'omlx/big' }, true)).toEqual({ mode: 'off' });
+  });
+
+  it('suppresses per-turn advising at phase boundaries and when the schedule is off', () => {
+    expect(resolveOmpAdvisor({ ...settings, advisor: 'on', advisorSchedule: 'phase-boundaries' }, false, true)).toEqual({ mode: 'off' });
+    expect(resolveOmpAdvisor({ ...settings, advisor: 'on', advisorSchedule: 'off' }, false, true)).toEqual({ mode: 'off' });
+    expect(resolveOmpAdvisor({ ...settings, advisor: 'off', advisorSchedule: 'continuous' }, false, true)).toEqual({ mode: 'off' });
+    expect(resolveOmpAdvisor({ ...settings, advisor: 'on', advisorSchedule: 'off' })).toEqual({ mode: 'on' });
   });
 
   it('caps subagents per run so one task cannot swamp the model server', () => {

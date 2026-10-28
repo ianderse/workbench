@@ -22,6 +22,7 @@ export type OmpThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | '
  * `inherit` = whatever OMP's own config says, `on` = `--advisor`, `off` = disabled through a config overlay
  */
 export type OmpAdvisorMode = 'inherit' | 'on' | 'off';
+export type OmpAdvisorSchedule = 'continuous' | 'phase-boundaries' | 'off';
 
 export const OMP_ADVISOR_MODES: readonly OmpAdvisorMode[] = ['inherit', 'on', 'off'] as const;
 
@@ -44,6 +45,8 @@ export interface OmpBackendSettings {
   maxPhaseMinutes?: number;
   /** Advisor for task phases, Insights and agent terminals (utility calls never use it); default `inherit` */
   advisor?: OmpAdvisorMode;
+  /** Task-only schedule. Insights and agent terminals retain their configured advisor mode. */
+  advisorSchedule?: OmpAdvisorSchedule;
   /** OMP model for the advisor role (`modelRoles.advisor`); empty = the advisor model OMP is configured with */
   advisorModel?: string;
   /**
@@ -84,6 +87,7 @@ export const DEFAULT_OMP_BACKEND_SETTINGS: OmpBackendSettings = {
   extraArgs: [],
   maxPhaseMinutes: 0,
   advisor: 'inherit',
+  advisorSchedule: 'phase-boundaries',
   advisorModel: '',
   allowFallbackModels: false,
   retries: 5,

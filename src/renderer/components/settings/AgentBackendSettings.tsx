@@ -19,6 +19,7 @@ import {
   type AgentBackendKind,
   type AgentBackendSettings,
   type OmpAdvisorMode,
+  type OmpAdvisorSchedule,
   type OmpThinkingLevel
 } from '../../../shared/types/agent-backend';
 import type { OmpDetection } from '../../../shared/types/omp-detection';
@@ -190,6 +191,18 @@ export function AgentBackendSettings({ settings, onSettingsChange }: AgentBacken
 
           <SettingsSection title={t('agentBackend.advisorTitle')} description={t('agentBackend.advisorDescription')}>
             <SettingsRows>
+              <SettingsRow label={t('agentBackend.advisorSchedule')} description={t('agentBackend.advisorScheduleDescription')}>
+                <SegmentedControl<OmpAdvisorSchedule>
+                  value={omp.advisorSchedule ?? 'phase-boundaries'}
+                  onValueChange={(advisorSchedule) => updateOmp({ advisorSchedule })}
+                  ariaLabel={t('agentBackend.advisorSchedule')}
+                  options={[
+                    { value: 'continuous', label: t('agentBackend.advisorSchedules.continuous') },
+                    { value: 'phase-boundaries', label: t('agentBackend.advisorSchedules.phase-boundaries') },
+                    { value: 'off', label: t('agentBackend.advisorSchedules.off') },
+                  ]}
+                />
+              </SettingsRow>
               <SettingsRow label={t('agentBackend.advisor')} description={t('agentBackend.advisorModeDescription')}>
                 <SegmentedControl<OmpAdvisorMode>
                   value={omp.advisor ?? 'inherit'}
