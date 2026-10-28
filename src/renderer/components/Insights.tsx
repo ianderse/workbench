@@ -722,24 +722,18 @@ export function Insights({ projectId }: InsightsProps) {
                 ))}
 
                 {/* Streaming message */}
-                {(streamingContent || currentTool) && (
-                  <div className="space-y-2">
-                    {streamingContent && (
-                      <MarkdownContent>{streamingContent}</MarkdownContent>
-                    )}
-                    {/* Tool usage indicator */}
-                    {currentTool && (
-                      <ToolIndicator name={currentTool.name} input={currentTool.input} />
-                    )}
-                    <SparkMark className="h-5 w-5" animate />
-                  </div>
-                )}
+                {streamingContent && <MarkdownContent>{streamingContent}</MarkdownContent>}
 
-                {/* Thinking indicator */}
-                {status.phase === 'thinking' && !streamingContent && !currentTool && (
-                  <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                    <SparkMark className="h-5 w-5" animate />
-                    {t('insights.thinking')}
+                {/* While Claude works: the spinning mark, with the tool being called, or "Thinking"
+                    between tools (nothing next to it while text streams in) */}
+                {isLoading && (
+                  <div className="flex min-w-0 items-center gap-2.5 text-sm text-muted-foreground">
+                    <SparkMark className="h-5 w-5 shrink-0" animate />
+                    {currentTool ? (
+                      <ToolIndicator name={currentTool.name} input={currentTool.input} />
+                    ) : !streamingContent ? (
+                      t('insights.thinking')
+                    ) : null}
                   </div>
                 )}
 
@@ -1011,6 +1005,15 @@ const TASK_TOOL_PREFIX = 'mcp__workbench__';
 const taskToolName = (toolName: string): string | null =>
   toolName.startsWith(TASK_TOOL_PREFIX) ? toolName.slice(TASK_TOOL_PREFIX.length) : null;
 
+/** A Bash call of the GitHub or GitLab CLI: its icon and name (the command is shown as is) */
+const cliCall = (toolName: string, input?: string): { icon: React.ElementType; label: string } | null => {
+  if (toolName !== 'Bash' || !input) return null;
+  const cli = /^\s*(gh|glab)\s/.exec(input)?.[1];
+  if (cli === 'gh') return { icon: GitHubIcon, label: 'GitHub' };
+  if (cli === 'glab') return { icon: GitLabIcon, label: 'GitLab' };
+  return null;
+};
+
 const getToolIcon = (toolName: string) => {
   if (taskToolName(toolName)) return KanbanIcon;
   switch (toolName) {
@@ -1187,20 +1190,23 @@ function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
       {expanded && (
         <div className="mt-2 space-y-1 rounded-xl border border-border p-3">
           {tools.map((tool, index) => {
-            const Icon = getToolIcon(tool.name);
+            // gh and glab calls show as GitHub and GitLab, like the task tools show as Kanban steps
+            const cli = cliCall(tool.name, tool.input);
+            const Icon = cli?.icon ?? getToolIcon(tool.name);
+            const taskTool = taskToolName(tool.name);
+            const label = cli?.label
+              ?? (taskTool ? t(`insights.taskTools.${taskTool}`, { defaultValue: taskTool }) : tool.name);
+            // The whole call, cut with an ellipsis only when it doesn't fit the row
             return (
               <div
                 key={`${tool.name}-${index}`}
-                className="flex items-center gap-2 text-xs"
+                className="flex min-w-0 items-center gap-2 text-xs"
+                title={tool.input}
               >
                 <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="font-medium text-foreground">
-                  {taskToolName(tool.name)
-                    ? t(`insights.taskTools.${taskToolName(tool.name)}`, { defaultValue: taskToolName(tool.name) })
-                    : tool.name}
-                </span>
+                <span className="shrink-0 font-medium text-foreground">{label}</span>
                 {tool.input && (
-                  <span className="max-w-[250px] truncate text-muted-foreground">
+                  <span className="min-w-0 truncate text-muted-foreground">
                     {tool.input}
                   </span>
                 )}
@@ -1242,17 +1248,13 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
     }
   };
 
-  const { icon: Icon, label } = getToolInfo(name);
+  const { icon: Icon, label } = cliCall(name, input) ?? getToolInfo(name);
 
   return (
-    <div className="inline-flex max-w-full items-center gap-2 rounded-xl border border-border px-3 py-1.5 text-sm">
-      <Icon className="h-4 w-4 shrink-0 animate-pulse text-muted-foreground" />
-      <span className="font-medium text-foreground">{label}</span>
-      {input && (
-        <span className="max-w-[300px] truncate text-muted-foreground">
-          {input}
-        </span>
-      )}
-    </div>
+    <span className="flex min-w-0 items-center gap-2" title={input}>
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="shrink-0 font-medium text-foreground">{label}</span>
+      {input && <span className="min-w-0 truncate">{input}</span>}
+    </span>
   );
 }

@@ -137,24 +137,24 @@ export function extractTaskSuggestion(text: string): TaskSuggestion | null {
 
 /** Brief description of a tool call's arguments for UI display */
 export function extractToolInput(args: Record<string, unknown>): string {
-  // Bash (graphify searches): the command itself
-  if (args.command) {
-    const command = String(args.command);
-    return command.length > 80 ? `${command.slice(0, 77)}...` : command;
-  }
+  // Bash (graphify searches, gh and glab): the whole command; the chat cuts it to its row
+  if (args.command) return capToolInput(String(args.command));
   if (args.pattern) return `pattern: ${args.pattern}`;
-  if (args.file_path) {
-    const fp = String(args.file_path);
-    return fp.length > 50 ? `...${fp.slice(-47)}` : fp;
-  }
+  if (args.file_path) return capToolInput(String(args.file_path));
   if (args.path) return String(args.path);
   // Task tools: the task (and where it goes) or the new task's title
   if (args.taskId) return args.to ? `${args.taskId} → ${args.to}` : String(args.taskId);
   if (Array.isArray(args.taskIds)) return args.taskIds.join(', ');
   if (args.title) return String(args.title);
-  if (args.description) {
-    const description = String(args.description);
-    return description.length > 80 ? `${description.slice(0, 77)}...` : description;
-  }
+  if (args.description) return capToolInput(String(args.description));
   return '';
+}
+
+/** Longest tool input kept (on its first line); the chat shows what fits on a row */
+const TOOL_INPUT_MAX = 500;
+
+function capToolInput(value: string): string {
+  const firstLine = value.split('\n', 1)[0];
+  const capped = firstLine.length > TOOL_INPUT_MAX ? firstLine.slice(0, TOOL_INPUT_MAX) : firstLine;
+  return capped.length < value.length ? `${capped}…` : capped;
 }

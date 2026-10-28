@@ -39,6 +39,15 @@ describe('extractToolInput', () => {
     expect(extractToolInput({ file_path: 'src/a.ts' })).toBe('src/a.ts');
     expect(extractToolInput({})).toBe('');
   });
+
+  it('keeps whole commands and paths, cutting only very long or multi-line ones', () => {
+    const command = 'gh issue view 14 --repo proactive-agent/workbench --json title,body,labels,comments';
+    expect(extractToolInput({ command })).toBe(command);
+    expect(extractToolInput({ file_path: '/home/me/projects/app/src/renderer/components/Insights.tsx' }))
+      .toBe('/home/me/projects/app/src/renderer/components/Insights.tsx');
+    expect(extractToolInput({ command: 'gh pr create --body-file - <<EOF\nbody\nEOF' })).toBe('gh pr create --body-file - <<EOF…');
+    expect(extractToolInput({ command: 'x'.repeat(600) })).toBe(`${'x'.repeat(500)}…`);
+  });
 });
 
 describe('buildSystemPrompt', () => {
