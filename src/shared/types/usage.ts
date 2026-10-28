@@ -56,7 +56,12 @@ export interface UsageTotals {
   cacheWrite: number;
   /** input + output + cacheRead + cacheWrite */
   total: number;
+  /** Cost reported by the backend, unchanged from the ledger. */
   costUsd: number;
+  /** Token cost at known model rates, excluding usage without a known price. */
+  calculatedCostUsd: number;
+  /** Tokens whose provider/model has no usable rates. Known free usage is priced. */
+  unpricedTokens: number;
 }
 
 export interface UsageModelRow extends UsageTotals {
@@ -71,6 +76,7 @@ export interface UsageModelRow extends UsageTotals {
   timedOutput: number;
   /** Output tokens per second, when durations are known */
   tokensPerSecond?: number;
+  pricing?: UsageModelPricing;
 }
 
 export interface UsageProviderRow extends UsageTotals {
@@ -94,6 +100,8 @@ export interface UsageDayRow {
   date: string;
   tokens: number;
   costUsd: number;
+  calculatedCostUsd: number;
+  unpricedTokens: number;
 }
 
 /** Base rates in USD per million tokens. Cache writes use the model catalog's base rate. */
@@ -104,21 +112,13 @@ export interface UsagePricingRates {
   cacheWrite: number;
 }
 
-/** One provider-qualified cloud model that local token usage can be compared against. */
-export interface UsagePricingModel {
+/** Rates used for this model; local models without a price use Sonnet as a fallback. */
+export interface UsageModelPricing {
   model: string;
   provider: string;
-  label: string;
   rates: UsagePricingRates;
   source: 'omp' | 'builtin';
-}
-
-export interface UsageCostComparison extends UsagePricingModel {
-  /** The same local token mix priced at this cloud model's base rates. */
-  cloudCostUsd: number;
-  /** Cloud equivalent minus the local usage's reported cost; excludes hardware and power. */
-  savingsUsd: number;
-  breakdownUsd: UsagePricingRates;
+  fallback: boolean;
 }
 
 export interface UsageSummary {
@@ -132,8 +132,8 @@ export interface UsageSummary {
     cloud: UsageTotals;
     /** Share of all tokens that ran locally, 0..1 */
     localShare: number;
-    /** Model-specific estimates using the same local input, output and cache token counts. */
-    comparisons: UsageCostComparison[];
+    /** Avoided API token value of local usage; reported token costs are not payments. Excludes hardware and power. */
+    savedCostUsd?: number;
   };
   byJob: UsageJobRow[];
   byTask: UsageTaskRow[];
@@ -143,7 +143,7 @@ export interface UsageSummary {
     /** Highest output per input token */
     chattiest?: { model: string; ratio: number };
     fastest?: { model: string; tokensPerSecond: number };
-    priciestTask?: { taskId: string; title?: string; costUsd: number };
+    priciestTask?: { taskId: string; title?: string; calculatedCostUsd: number };
     /** Runs on an OMP fallback model */
     fallbackRuns: number;
     failedRequests: number;

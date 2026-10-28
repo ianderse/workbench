@@ -96,16 +96,16 @@ describe('summarizeUsage', () => {
     expect(summary.byTask.some((row) => row.taskId === 't2' && row.title === undefined)).toBe(true);
   });
 
-  it('splits local and cloud and offers model-specific comparisons', () => {
+  it('splits local and cloud and uses Sonnet only as the local fallback', () => {
     expect(summary.locality.local.total).toBe(3600 + 1000 + 15);
     expect(summary.locality.cloud.total).toBe(1000);
     expect(summary.locality.localShare).toBeCloseTo(4615 / 5615, 6);
     const expected = tokensCostUsd('claude-sonnet-5-5', { input: 1510, output: 1005, cacheRead: 2000, cacheWrite: 100 });
-    const sonnet = summary.locality.comparisons.find((row) => row.model === 'claude-sonnet-5-5')!;
-    expect(sonnet.cloudCostUsd).toBeCloseTo(expected, 8);
-    expect(sonnet.savingsUsd).toBeCloseTo(expected, 8);
-    expect(sonnet.source).toBe('builtin');
-    expect(summary.locality.comparisons.some((row) => row.model === 'claude-opus-5-5')).toBe(true);
+    expect(summary.locality.local.calculatedCostUsd).toBeCloseTo(expected, 8);
+    expect(summary.locality.savedCostUsd).toBeCloseTo(expected, 8);
+    expect(summary.locality.local.unpricedTokens).toBe(0);
+    const localModel = summary.byModel.find((row) => row.model === 'qwen')!;
+    expect(localModel.pricing).toMatchObject({ model: 'claude-sonnet-5-5', provider: 'anthropic', source: 'builtin', fallback: true });
   });
 
   it('covers the last 30 days, quiet days included', () => {
@@ -119,7 +119,7 @@ describe('summarizeUsage', () => {
   it('finds the fun facts', () => {
     expect(summary.facts.chattiest?.model).toBe('claude-opus-5-5');
     expect(summary.facts.fastest?.model).toBe('claude-opus-5-5');
-    expect(summary.facts.priciestTask).toMatchObject({ taskId: 't2', costUsd: 1.5 });
+    expect(summary.facts.priciestTask).toMatchObject({ taskId: 't2', calculatedCostUsd: 0.0168 });
     expect(summary.facts.fallbackRuns).toBe(1);
     expect(summary.facts.failedRequests).toBe(1);
   });

@@ -5,7 +5,7 @@
  * the caller supplies the provider classifier, task titles and the clock.
  */
 import type { OmpModelInfo } from '../../shared/types/omp-detection';
-import { compareLocalUsage } from './model-pricing';
+import { modelPricingLookup, tokenCostUsd } from './model-pricing';
 import type {
   UsageDayRow, UsageEntry, UsageJob, UsageJobRow, UsageLocality, UsageModelRow, UsageProviderRow,
   UsageSummary, UsageTaskRow, UsageTotals,
@@ -25,16 +25,18 @@ export interface SummarizeOptions {
 }
 
 function emptyTotals(): UsageTotals {
-  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, costUsd: 0 };
+  return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0, costUsd: 0, calculatedCostUsd: 0, unpricedTokens: 0 };
 }
 
-function add(target: UsageTotals, entry: UsageEntry): void {
+function add(target: UsageTotals, entry: UsageEntry, calculatedCostUsd: number, unpricedTokens: number): void {
   target.input += entry.input;
   target.output += entry.output;
   target.cacheRead += entry.cacheRead;
   target.cacheWrite += entry.cacheWrite;
   target.total += entry.input + entry.output + entry.cacheRead + entry.cacheWrite;
   target.costUsd += entry.costUsd;
+  target.calculatedCostUsd += calculatedCostUsd;
+  target.unpricedTokens += unpricedTokens;
 }
 
 function dayKey(date: Date): string {
@@ -48,6 +50,7 @@ const byTotalDesc = <T extends UsageTotals>(a: T, b: T): number => b.total - a.t
 export function summarizeUsage(entries: readonly UsageEntry[], options: SummarizeOptions = {}): UsageSummary {
   const now = options.now ?? new Date();
   const classify = options.classify ?? (() => 'cloud' as const);
+  const pricingFor = modelPricingLookup(options.pricingModels ?? []);
 
   const totals = emptyTotals();
   const local = emptyTotals();
@@ -59,51 +62,57 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
   const days = new Map<string, UsageDayRow>();
   let fallbackRuns = 0;
   let failedRequests = 0;
+  let savedCostUsd: number | undefined;
 
   // The 30 days, quiet ones included
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   for (let i = USAGE_DAYS - 1; i >= 0; i--) {
     const day = new Date(today);
     day.setDate(day.getDate() - i);
-    days.set(dayKey(day), { date: dayKey(day), tokens: 0, costUsd: 0 });
+    days.set(dayKey(day), { date: dayKey(day), tokens: 0, costUsd: 0, calculatedCostUsd: 0, unpricedTokens: 0 });
   }
 
   for (const entry of entries) {
-    const locality = classify(entry.provider);
+    const providerName = entry.provider ?? (entry.backend === 'claude' ? 'anthropic' : 'unknown');
+    const locality = classify(providerName);
     const tokens = entry.input + entry.output + entry.cacheRead + entry.cacheWrite;
-    add(totals, entry);
-    add(locality === 'local' ? local : cloud, entry);
+    const pricing = pricingFor(providerName, entry.model, locality === 'local');
+    const calculatedCostUsd = pricing ? tokenCostUsd(entry, pricing.rates) : 0;
+    const unpricedTokens = pricing ? 0 : tokens;
+    if (locality === 'local' && pricing && tokens > 0) savedCostUsd = (savedCostUsd ?? 0) + calculatedCostUsd;
+    add(totals, entry, calculatedCostUsd, unpricedTokens);
+    add(locality === 'local' ? local : cloud, entry, calculatedCostUsd, unpricedTokens);
 
-    const modelKey = `${entry.provider ?? ''}\u0000${entry.model}`;
+    const modelKey = `${providerName}\u0000${entry.model}`;
     let model = models.get(modelKey);
     if (!model) {
       model = {
         ...emptyTotals(), model: entry.model, backend: entry.backend, locality,
-        ...(entry.provider ? { provider: entry.provider } : {}), requests: 0, durationMs: 0, timedOutput: 0,
+        provider: providerName, requests: 0, durationMs: 0, timedOutput: 0,
+        ...(pricing ? { pricing } : {}),
       };
       models.set(modelKey, model);
     }
-    add(model, entry);
+    add(model, entry, calculatedCostUsd, unpricedTokens);
     model.requests += entry.requests ?? 1;
     if (entry.durationMs > 0 && entry.output > 0) {
       model.durationMs += entry.durationMs;
       model.timedOutput += entry.output;
     }
 
-    const providerName = entry.provider ?? (entry.backend === 'claude' ? 'anthropic' : 'unknown');
     let provider = providers.get(providerName);
     if (!provider) {
       provider = { ...emptyTotals(), provider: providerName, locality };
       providers.set(providerName, provider);
     }
-    add(provider, entry);
+    add(provider, entry, calculatedCostUsd, unpricedTokens);
 
     let job = jobs.get(entry.job);
     if (!job) {
       job = { ...emptyTotals(), job: entry.job };
       jobs.set(entry.job, job);
     }
-    add(job, entry);
+    add(job, entry, calculatedCostUsd, unpricedTokens);
 
     if (entry.taskId) {
       let task = tasks.get(entry.taskId);
@@ -116,7 +125,7 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
         };
         tasks.set(entry.taskId, task);
       }
-      add(task, entry);
+      add(task, entry, calculatedCostUsd, unpricedTokens);
     }
 
     const at = new Date(entry.at);
@@ -125,6 +134,8 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
       if (day) {
         day.tokens += tokens;
         day.costUsd += entry.costUsd;
+        day.calculatedCostUsd += calculatedCostUsd;
+        day.unpricedTokens += unpricedTokens;
       }
     }
 
@@ -152,7 +163,7 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
   }
 
   const byTask = [...tasks.values()].sort(byTotalDesc);
-  const priciest = [...byTask].filter((t) => t.costUsd > 0).sort((a, b) => b.costUsd - a.costUsd)[0];
+  const priciest = [...byTask].filter((t) => t.calculatedCostUsd > 0).sort((a, b) => b.calculatedCostUsd - a.calculatedCostUsd)[0];
 
   return {
     generatedAt: now.toISOString(),
@@ -164,7 +175,7 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
       local,
       cloud,
       localShare: totals.total > 0 ? local.total / totals.total : 0,
-      comparisons: compareLocalUsage(local, options.pricingModels ?? [], classify),
+      ...(savedCostUsd !== undefined ? { savedCostUsd } : {}),
     },
     byJob: [...jobs.values()].sort(byTotalDesc),
     byTask,
@@ -172,7 +183,7 @@ export function summarizeUsage(entries: readonly UsageEntry[], options: Summariz
     facts: {
       ...(chattiest ? { chattiest } : {}),
       ...(fastest ? { fastest } : {}),
-      ...(priciest ? { priciestTask: { taskId: priciest.taskId, title: priciest.title, costUsd: priciest.costUsd } } : {}),
+      ...(priciest ? { priciestTask: { taskId: priciest.taskId, title: priciest.title, calculatedCostUsd: priciest.calculatedCostUsd } } : {}),
       fallbackRuns,
       failedRequests,
     },

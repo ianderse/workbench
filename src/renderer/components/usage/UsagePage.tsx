@@ -18,10 +18,10 @@ import { useProjectStore } from '../../stores/project-store';
 import { formatCostUsd } from '../../../shared/utils/claude-run';
 import { formatTokens } from '../../../shared/utils/format-tokens';
 import { formatDay, niceCeil } from '../settings/UsageCostChart';
-import { LocalSavingsEstimate } from './LocalSavingsEstimate';
+import { CalculatedCost, ModelUsageCosts } from './ModelUsageCosts';
 import type { UsageSummary, UsageTotals } from '../../../shared/types/usage';
 
-const CACHE_PREFIX = 'usage-summary:v2:';
+const CACHE_PREFIX = 'usage-summary:v3:';
 const TOP_TASKS = 8;
 
 /** Segment colors: design tokens, so light and dark follow the theme */
@@ -152,7 +152,7 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
   const topTasks = summary.byTask.slice(0, TOP_TASKS);
   const taskLabel = (id: string, title?: string) => title || t('tasks.untitled', { id });
   const biggest = facts.priciestTask ?? (summary.byTask[0]
-    ? { taskId: summary.byTask[0].taskId, title: summary.byTask[0].title, costUsd: 0 }
+    ? { taskId: summary.byTask[0].taskId, title: summary.byTask[0].title, calculatedCostUsd: 0 }
     : undefined);
   const biggestTotal = biggest ? summary.byTask.find((row) => row.taskId === biggest.taskId) : undefined;
 
@@ -163,13 +163,15 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <span className="text-4xl font-semibold tracking-tight tabular-nums text-foreground">{formatTokens(totals.total)}</span>
           <span className="text-sm text-muted-foreground">{t('hero.tokens')}</span>
-          <span className="ml-auto text-sm text-muted-foreground">
-            {totals.costUsd > 0 ? t('hero.cost', { cost: formatCostUsd(totals.costUsd) }) : t('hero.noCost')}
-          </span>
+          <div className="ml-auto text-right text-sm text-muted-foreground">
+            <p>{t('hero.calculatedCost')} <CalculatedCost totals={totals} /></p>
+            <p className="text-xs">{totals.costUsd > 0 ? t('hero.cost', { cost: formatCostUsd(totals.costUsd) }) : t('hero.noCost')}</p>
+          </div>
         </div>
         <div className="mt-4">
           <SegmentedBar totals={totals} />
         </div>
+        {totals.unpricedTokens > 0 && <p className="mt-3 text-xs text-muted-foreground">{t('hero.unpriced', { tokens: formatTokens(totals.unpricedTokens) })}</p>}
       </Card>
 
       {/* 2. Local and cloud */}
@@ -182,6 +184,7 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
           <div>
             <div className="text-2xl font-semibold tabular-nums text-foreground">{formatTokens(locality.cloud.total)}</div>
             <div className="text-sm text-muted-foreground">{t('locality.cloud')}</div>
+            <div className="mt-1 text-xs text-muted-foreground">{t('locality.cloudCost')} <CalculatedCost totals={locality.cloud} /></div>
           </div>
         </div>
         <div className="mt-3 flex h-2 w-full overflow-hidden rounded-full bg-muted" role="img" aria-label={t('locality.share', { percent: localPercent })}>
@@ -189,28 +192,18 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
         </div>
         <p className="mt-3 text-xs text-(--nav-label-color)">{t('locality.share', { percent: localPercent })}</p>
         {locality.local.total > 0
-          ? <LocalSavingsEstimate summary={summary} />
+          ? <div className="mt-3">
+              <p className="text-sm font-medium text-foreground">{locality.savedCostUsd !== undefined
+                ? t('locality.estimatedSavings', { cost: formatCostUsd(locality.savedCostUsd) })
+                : t('byModel.unpriced')}</p>
+              <p className="mt-1 text-xs text-(--nav-label-color)">{t('locality.calculation')}</p>
+            </div>
           : <p className="mt-2 text-sm text-foreground">{t('locality.none')}</p>}
       </Card>
 
-      {/* 3. By model and by job */}
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card title={t('byModel.title')}>
-          <BarList
-            rows={summary.byModel.map((model) => ({
-              key: `${model.provider ?? ''}/${model.model}`,
-              label: model.model,
-              sub: [model.provider, t(`byModel.${model.locality}`)].filter(Boolean).join(', '),
-              value: model.total,
-              text: [
-                formatTokens(model.total),
-                model.tokensPerSecond ? t('byModel.tokensPerSecond', { rate: model.tokensPerSecond.toFixed(model.tokensPerSecond < 10 ? 1 : 0) }) : '',
-              ].filter(Boolean).join(' · '),
-              barClass: model.locality === 'local' ? 'bg-success' : 'bg-primary',
-            }))}
-          />
-        </Card>
-        <Card title={t('byJob.title')}>
+      {/* 3. Recorded usage and cost per model */}
+      <Card title={t('byModel.title')}><ModelUsageCosts models={summary.byModel} /></Card>
+      <Card title={t('byJob.title')}>
           <BarList
             rows={summary.byJob.map((job) => ({
               key: job.job,
@@ -219,8 +212,7 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
               text: formatTokens(job.total),
             }))}
           />
-        </Card>
-      </div>
+      </Card>
 
       {/* 4. Top tasks */}
       {topTasks.length > 0 && (
@@ -249,7 +241,7 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
                       </button>
                     </td>
                     <td className="py-1.5 text-right tabular-nums">{formatTokens(task.total)}</td>
-                    <td className="py-1.5 text-right tabular-nums text-muted-foreground">{task.costUsd > 0 ? formatCostUsd(task.costUsd) : '-'}</td>
+                    <td className="py-1.5 text-right tabular-nums text-muted-foreground"><CalculatedCost totals={task} /></td>
                     <td className="py-1.5 text-right tabular-nums text-muted-foreground">{task.reviewRounds ?? '-'}</td>
                   </tr>
                 ))}
@@ -274,7 +266,7 @@ export function UsageView({ summary, onOpenTask }: UsageViewProps) {
             value={biggest && biggestTotal
               ? t('facts.taskValue', {
                 title: taskLabel(biggest.taskId, biggest.title),
-                value: facts.priciestTask ? formatCostUsd(biggest.costUsd) : `${formatTokens(biggestTotal.total)} ${t('hero.tokens')}`,
+                value: facts.priciestTask ? formatCostUsd(biggest.calculatedCostUsd) : `${formatTokens(biggestTotal.total)} ${t('hero.tokens')}`,
               })
               : undefined}
           />

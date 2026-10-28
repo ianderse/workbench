@@ -16,6 +16,8 @@
   },
   "hero": {
     "tokens": "tokens",
+    "calculatedCost": "Calculated API value",
+    "unpriced": "No model price for {{tokens}} tokens. Calculated totals include priced usage only",
     "cost": "Reported cost {{cost}}",
     "noCost": "No cost reported",
     "requests": "{{count}} model runs"
@@ -31,25 +33,21 @@
     "local": "Local",
     "cloud": "Cloud",
     "share": "{{percent}}% of tokens ran locally",
-    "compareWith": "Compare local usage with",
-    "estimatedSavings": "Estimated cloud savings: {{cost}}",
-    "noPricing": "No comparison pricing available. Refresh to load model rates",
-    "breakdown": "Estimated cloud cost using {{model}}",
-    "tokenKind": "Token type",
-    "tokens": "Local tokens",
-    "rate": "USD / 1M tokens",
-    "estimatedCost": "Cloud estimate",
-    "costComparison": "Cloud estimate {{cloud}} minus reported local cost {{local}}",
-    "sources": {
-      "omp": "Rates from the OMP model catalog",
-      "builtin": "Rates from the built-in Claude price table"
-    },
-    "assumptions": "Same token mix at base API rates. Excludes long-context premiums, subscription fees, and local hardware and power costs",
-    "cacheWriteAssumption": "Cache writes use the five-minute rate",
+    "cloudCost": "Calculated token cost",
+    "estimatedSavings": "Estimated local savings: {{cost}}",
+    "calculation": "Calculated per local model using its configured rates, with Sonnet rates when no price is available. Excludes hardware and power costs",
     "none": "No local tokens yet"
   },
   "byModel": {
     "title": "By model",
+    "model": "Model",
+    "tokenCost": "Token cost",
+    "costBreakdown": "Recorded token usage and calculated cost per model",
+    "rate": "{{cost}} / 1M",
+    "fallback": "Fallback rates: {{model}}",
+    "unpriced": "Unpriced",
+    "partialCost": "{{cost}} (partial)",
+    "calculation": "Input, output, cache reads, and cache writes are calculated separately at each model's rates. Uses base API rates; built-in Claude cache writes use the five-minute rate. Subscription charges and long-context premiums may differ",
     "tokensPerSecond": "{{rate}} tok/s",
     "local": "local",
     "cloud": "cloud"
@@ -80,7 +78,7 @@
     "title": "Top tasks",
     "task": "Task",
     "tokens": "Tokens",
-    "cost": "Cost",
+    "cost": "Token cost",
     "rounds": "Review rounds",
     "untitled": "Task {{id}}",
     "open": "Open task {{title}}"
