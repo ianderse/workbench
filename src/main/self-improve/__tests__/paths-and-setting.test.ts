@@ -78,7 +78,17 @@ describe('the nudge', () => {
     expect(SELF_IMPROVE_NUDGE).toMatch(/never record secrets/i);
   });
 
-  it("has no single quotes, so it survives an agent window's shell-quoted flag", () => {
+  it('says how to tell a lasting rule from a one-off instruction', () => {
+    for (const cue of ['always', 'never', 'from now on', 'by default', 'I prefer', 'we use', 'as I said']) {
+      expect(SELF_IMPROVE_NUDGE).toContain(cue);
+    }
+    expect(SELF_IMPROVE_NUDGE).toMatch(/strongest signal/);
+    expect(SELF_IMPROVE_NUDGE).toMatch(/would make the same mistake/);
+    expect(SELF_IMPROVE_NUDGE).toMatch(/just this once/);
+  });
+
+  it("has no quotes, so it survives an agent window's shell-quoted flag (single quotes in POSIX shells, double in cmd)", () => {
     expect(SELF_IMPROVE_NUDGE).not.toContain("'");
+    expect(SELF_IMPROVE_NUDGE).not.toContain('"');
   });
 });
