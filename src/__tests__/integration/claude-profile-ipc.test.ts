@@ -79,13 +79,6 @@ vi.mock('../../main/project-store', () => ({
   projectStore: {}
 }));
 
-// Mock terminalNameGenerator
-vi.mock('../../main/terminal-name-generator', () => ({
-  terminalNameGenerator: {
-    generateName: vi.fn()
-  }
-}));
-
 // Mock shell escape utilities
 vi.mock('../../shared/utils/shell-escape', () => ({
   escapeShellArg: (arg: string) => `'${arg}'`,

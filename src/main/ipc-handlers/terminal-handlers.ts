@@ -8,7 +8,6 @@ import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { TerminalManager } from '../terminal-manager';
 import type { AgentManager } from '../agent/agent-manager';
 import { projectStore } from '../project-store';
-import { terminalNameGenerator } from '../terminal-name-generator';
 import { readSettingsFileAsync } from '../settings-utils';
 import { appLog } from '../app-logger';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
@@ -123,25 +122,6 @@ export function registerTerminalHandlers(
       })().catch((error) => {
         console.warn('[terminal-handlers] Failed to resume the task session:', error);
       });
-    }
-  );
-
-  ipcMain.handle(
-    IPC_CHANNELS.TERMINAL_GENERATE_NAME,
-    async (_, command: string, cwd?: string): Promise<IPCResult<string>> => {
-      try {
-        const name = await terminalNameGenerator.generateName(command, cwd);
-        if (name) {
-          return { success: true, data: name };
-        } else {
-          return { success: false, error: 'Failed to generate terminal name' };
-        }
-      } catch (error) {
-        return {
-          success: false,
-          error: error instanceof Error ? error.message : 'Failed to generate terminal name'
-        };
-      }
     }
   );
 
