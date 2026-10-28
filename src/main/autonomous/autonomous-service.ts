@@ -497,6 +497,7 @@ export async function mergeIntegrationIntoMain(project: Project): Promise<{ succ
         if (pushIntegration.error) appLog.warn(`[Autonomous] Could not push ${config.integrationBranch}: ${pushIntegration.error}`);
       }
     }
+    taskHooks.emit('integration-published', { project, branch: baseBranch, sha: result.sha });
     notifyChanged(project.id);
     return {
       success: true as const,

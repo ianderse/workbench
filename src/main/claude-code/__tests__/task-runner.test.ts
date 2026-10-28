@@ -199,6 +199,45 @@ describe('ClaudeTaskRun', () => {
     }, callbacks);
   }
 
+  describe('project documentation entry point', () => {
+    it.each([
+      { backend: 'claude', specReview: false }, { backend: 'omp', specReview: false },
+      { backend: 'claude', specReview: true }, { backend: 'omp', specReview: true },
+    ])('keeps progress scoped and evidence authoritative in $backend specReview=$specReview', async ({ backend, specReview }) => {
+      scripts.push({ messages: [result('docs-session', specReview ? {
+        structured_output: { complete: false, checksObserved: false, summary: 'Checks have not been observed', sections: [], gaps: [] },
+      } : {})] });
+      const progressPrompt = '## Live project progress\nTask 017 is awaiting human acceptance, not accepted.';
+      const outcome = await makeRun({
+        backend, specReview, progressPrompt,
+        settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, triage: 'fixed', planning: 'never', validation: false },
+      }).run();
+      expect(outcome.status).toBe('completed');
+      const prompt = backend === 'omp' ? String(ompSpawned[0].appendSystemPrompt) : argValue(spawned[0].args, '--append-system-prompt')!;
+      expect(prompt).toContain('root PROGRESS.md when present');
+      expect(prompt).toContain('not proof of completion or approval');
+      expect(prompt).toContain('scoped human decisions');
+      expect(prompt).toContain('if it is missing or stale, continue');
+      expect(prompt).toContain('including every applicable section for a spec review');
+      expect(prompt).toContain('do not routinely scan or reread the entire docs folder');
+      expect(prompt).toContain('Do not edit shared root PROGRESS.md or .workbench/PROGRESS.md');
+      expect(prompt.match(/## Live project progress/g)).toHaveLength(1);
+      if (specReview) expect(prompt).toContain('Do not edit, create or delete project files');
+      if (backend === 'omp' && !specReview) {
+        expect((ompSpawned[0].appendSystemPromptComponents as Record<string, number>).projectProgress).toBe(Buffer.byteLength(progressPrompt, 'utf8'));
+      }
+    });
+
+    it('continues without an authored progress file or supplied snapshot', async () => {
+      scripts.push({ messages: [result('docs-session')] });
+      expect((await makeRun({ settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, triage: 'fixed', planning: 'never', validation: false } }).run()).status).toBe('completed');
+      const prompt = argValue(spawned[0].args, '--append-system-prompt')!;
+      expect(prompt).toContain('root PROGRESS.md when present');
+      expect(prompt).toContain('if it is missing or stale, continue');
+      expect(prompt).not.toContain('## Live project progress');
+    });
+  });
+
   describe('phase advisor checkpoints', () => {
     it.each([
       { kind: 'plan', result: undefined }, { kind: 'diff', result: undefined },
@@ -319,7 +358,7 @@ describe('ClaudeTaskRun', () => {
       const prompt = `${review.mock.calls[0][0].appendSystemPrompt}\n${String(review.mock.calls[0][0].prompt)}`;
       expect(prompt.match(/Receipt: art-receipt/g)).toHaveLength(1);
       if (large) {
-        expect(review.mock.calls[0][0].appendSystemPrompt).toContain(path.join(specDir, 'task_metadata.json'));
+        expect(review.mock.calls[0][0].appendSystemPrompt).toContain(JSON.stringify(path.join(specDir, 'task_metadata.json')).slice(1, -1));
         expect(prompt).toContain('read the full referenced humanWork.items records');
         expect(prompt).not.toContain('Response / decision:');
       } else {

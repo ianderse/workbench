@@ -126,6 +126,27 @@ does not enable automatic merge: effective project autonomy, target/push policy,
 actual Git state, and serialized integration all matter. Preserve uncertain merge/push outcomes
 for reconciliation instead of rerunning them blindly.
 
+## Progress entry points and document growth
+
+Use root PROGRESS.md as a concise authored status/document map, with small standing instructions
+and task-relevant authoritative links. The full engineering reference is preserved behind a link;
+root CLAUDE.md no longer repeats it. Historical documents remain available on demand, not default
+startup reading. Agents must still read every applicable requirement and run required checks.
+
+Workbench supplies a separate deterministic live projection from recorded tasks and observed Git
+state, capped at 4,800 UTF-8 bytes, without reading the documentation archive or making a model
+call. The host refreshes it on task launch, relevant state changes, merge, and integration promotion.
+Only an ignored, managed state file is written; root authored progress and unrelated work remain
+untouched. Keep refresh time out of otherwise unchanged advice-cache inputs. Do not clone raw logs,
+full task descriptions, or entire histories just to build a short summary. Failure to persist does
+not fail successful integration or withhold the bounded launch context.
+
+Parallel workers and read-only reviewers do not maintain shared progress. The integration owner
+replaces stale authored status rather than appending a diary. Board status, reported checks,
+integration target/revision, pushed state, and explicit acceptance must stay distinct. Railhouse's
+RH-002 and safeguards record the independent planned selection, provenance, refresh, and delivery
+contract. Source/build validation alone does not establish reduced model context or productivity.
+
 ## Delivery and ongoing evidence
 
 The corresponding implementation and focused tests live with the task runner, handoff/checkpoint/

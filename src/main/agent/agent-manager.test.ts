@@ -103,6 +103,10 @@ vi.mock('../task-resync/request', async (importOriginal) => ({
   readResyncRequest: vi.fn(() => pendingResync.value),
 }));
 
+const progress = vi.hoisted(() => vi.fn(async () => '# Live project progress\nBounded recorded state'));
+vi.mock('../project-progress', () => ({ refreshProjectProgress: progress }));
+vi.mock('../project-store', () => ({ projectStore: { getTasks: vi.fn(() => []), invalidateTasksCache: vi.fn() } }));
+
 import { AgentManager } from './agent-manager';
 
 const project = {
@@ -152,6 +156,15 @@ describe('AgentManager', () => {
     vi.mocked(baseBranch.resolveBaseBranch).mockImplementation(async (_cwd: string, wanted: string) => wanted);
     vi.mocked(baseBranch.resolveDefaultBaseBranch).mockImplementation(async () => 'master');
     manager = new AgentManager();
+  });
+
+  it.each(['start', 'revise'] as const)('supplies centrally refreshed bounded progress to %s in its existing worktree', async (mode) => {
+    const task = makeTask();
+    await manager.startTask(task.id, { project, task, mode });
+    const run = await nextRun(1);
+    expect(progress).toHaveBeenCalledWith(project, []);
+    expect(run.config.progressPrompt).toContain('Bounded recorded state');
+    run.finish({ status: 'completed' });
   });
 
   /**

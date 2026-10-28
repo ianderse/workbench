@@ -208,6 +208,8 @@ export interface TaskRunConfig {
   selfImproveDir?: string;
   /** "Since this ticket was written" section: tasks merged after the ticket was created (see task-briefing.ts) */
   briefingPrompt?: string;
+  /** Bounded live project status supplied by Workbench; separate from the authored root PROGRESS.md. */
+  progressPrompt?: string;
   /** The project's task changelog; each phase's prompt lists what the other tasks are changing */
   changelogPath?: string;
   /** Extra environment (e.g. GRAPHIFY_OUT, PATH with the graphify CLI) */
@@ -358,6 +360,12 @@ export function ompSubagentGuidance(subagents: number): string {
 `;
 }
 
+const PROJECT_DOCUMENTATION_GUIDANCE = `## Project context
+- Follow the project's CLAUDE.md and AGENTS.md standing rules. Start orientation with the root PROGRESS.md when present and any supplied live project progress snapshot (reuse a declared STATUS.md, OVERVIEW.md or docs/PROGRESS.md entry point instead of creating a competing summary), then follow links to the task-relevant authoritative specs and code.
+- PROGRESS.md is a bounded status and navigation summary, not proof of completion or approval. Check current code, task records, observed evidence and scoped human decisions; if it is missing or stale, continue with those sources and state the uncertainty.
+- Read the spec sections and checks required by this task, including every applicable section for a spec review. Search headings or symbols, then read relevant ranges; do not routinely scan or reread the entire docs folder or historical decision logs.
+- Do not edit shared root PROGRESS.md or .workbench/PROGRESS.md from a task worktree; the integration owner maintains the authored entry point and Workbench maintains the live snapshot. Keep task progress, phase handoffs and findings in this task's own reports.`;
+
 /** System prompt of a Spec review ticket: read, run the tests, report; change and commit nothing */
 function buildSpecReviewSystemPrompt(config: TaskRunConfig, specDirRelative: string, omp: boolean): string {
   return [
@@ -365,13 +373,14 @@ function buildSpecReviewSystemPrompt(config: TaskRunConfig, specDirRelative: str
     `## Environment
 - Your working directory is a worktree on branch \`${config.branch}\`, created from \`${config.baseBranch}\`. It holds the code that was merged so far.
 - Workbench keeps its own task files in \`${specDirRelative}\`. Don't modify them.`,
+    PROJECT_DOCUMENTATION_GUIDANCE,
     `## Your job: a read-only spec review
 - Check whether the spec is complete as written, by reading the spec and the code. You do not build anything.
 - Do not edit, create or delete project files, do not commit, and do not run version control commands that change anything (commit, checkout, reset, stash, merge, push). Running the project's tests, type check and build is expected; they must not leave changes in tracked files. Run them in the foreground and wait for them to finish (do not end your turn while one still runs); a review whose checks were not observed cannot be complete.
 - Judge each spec section from evidence you saw: files you read, tests you ran, behaviour you observed. Do not assume a section is done because a ticket exists for it.
 - A gap needs the spec section it comes from and concrete evidence (a missing test, observed behaviour that differs from the spec, a missing file). Do not list opinions, style, or ideas beyond the spec. Write each gap's description so a coding agent with no other context can build it: what to build, the spec section to follow, acceptance criteria.
 - Answer with the structured report only.`,
-    ...[humanDecisionPrompt(config), config.selfImprovePrompt].filter(Boolean),
+    ...[config.progressPrompt, humanDecisionPrompt(config), config.selfImprovePrompt].filter(Boolean),
   ].join('\n\n');
 }
 
@@ -429,8 +438,9 @@ function buildSystemPrompt(config: TaskRunConfig, specDirRelative: string, paral
 - Your working directory is an isolated git worktree on branch \`${config.branch}\`, created from \`${config.baseBranch}\`. Edits here never touch the user's main checkout. Stay inside this worktree.
 - Permission checks are off because of that isolation. Still never push, force-push, rewrite the history of \`${config.baseBranch}\`, publish packages, deploy, or change anything outside the worktree.
 - Workbench keeps its own task files in \`${specDirRelative}\`. Don't modify or commit them.`,
+    PROJECT_DOCUMENTATION_GUIDANCE,
     `## How to work
-- Follow the project's CLAUDE.md, conventions and existing patterns. Keep the change focused on the task.
+- Follow existing patterns and keep the change focused on the task.
 ${omp
   ? `- Track work with the todo tool only when it has several distinct steps worth tracking; skip it for small changes.
 ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
@@ -456,6 +466,7 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
     ['graphify', config.graphifyPrompt],
     ['projectMemoryInstructions', config.selfImprovePrompt],
     ['briefing', config.briefingPrompt],
+    ['projectProgress', config.progressPrompt],
     ['parallelTasks', parallelTasksPrompt],
     ['messaging', messagingPrompt],
   ];
@@ -1148,6 +1159,7 @@ export class ClaudeTaskRun {
       const named = this.config.feedbackAttachments?.length ?? 0;
       try {
         ({ triage, costUsd: triageCost } = await triageTask({
+          progressPrompt: this.config.progressPrompt,
           description: [revision
             // Triage sizes the follow-up from the same statement of it the revise turn gets, with
             // the image filenames it already lists standing in for feedback the reviewer drew

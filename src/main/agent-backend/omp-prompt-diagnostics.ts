@@ -18,7 +18,7 @@ function count(value: unknown): number | undefined {
 /** Only known section names pass through; a caller cannot accidentally log prompt text as a key. */
 export function promptComponentBytes(components: Record<string, number> | undefined): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const key of ['standingInstructions', 'graphify', 'projectMemoryInstructions', 'briefing', 'parallelTasks', 'messaging', 'memoryPacket', 'planningRule', 'foregroundRule']) {
+  for (const key of ['standingInstructions', 'graphify', 'projectMemoryInstructions', 'projectProgress', 'briefing', 'parallelTasks', 'messaging', 'memoryPacket', 'planningRule', 'foregroundRule']) {
     const bytes = count(components?.[key]);
     if (bytes !== undefined) out[key] = bytes;
   }

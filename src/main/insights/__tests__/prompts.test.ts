@@ -42,6 +42,19 @@ describe('extractToolInput', () => {
 });
 
 describe('buildSystemPrompt', () => {
+  it.each([false, true])('uses bounded progress as navigation with task tools=%s', (taskTools) => {
+    const prompt = buildSystemPrompt('/nonexistent-project', { taskTools });
+    expect(prompt).toContain('Follow CLAUDE.md and AGENTS.md');
+    expect(prompt).toContain('root PROGRESS.md when present');
+    expect(prompt).toContain('not proof of completion or approval');
+    expect(prompt).toContain('scoped human decisions');
+    expect(prompt).toContain('If progress is missing or stale, continue');
+    expect(prompt).toContain('Do not routinely scan or reread the entire docs folder');
+    expect(prompt).toContain('still inspect every spec section and check needed');
+    expect(prompt).toContain('Leave shared root PROGRESS.md and .workbench/PROGRESS.md updates');
+    expect(prompt).toContain("You can read the project's files but not change them");
+  });
+
   it('describes the task tools only when the Kanban button is on', () => {
     const withTools = buildSystemPrompt('/nonexistent-project', { taskTools: true });
     expect(withTools).toContain('mcp__workbench__');

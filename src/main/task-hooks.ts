@@ -16,6 +16,8 @@ export interface TaskHookEvents {
   merged: { project: Project; task: Task };
   /** Autonomous mode merged the task into `into` (its target branch); the task stays in Human Review */
   'auto-merged': { project: Project; task: Task; into: string };
+  /** An integration branch was promoted to its base; no individual task changed board status. */
+  'integration-published': { project: Project; branch: string; sha?: string };
   /** Follow-up tickets that wait for the person's decision were created (one event per creation run) */
   'decision-needed': { project: Project; tickets: Array<{ taskId: string; title: string }> };
   /** A task the workflow cannot continue without the person (blocked auto-merge, run that could not be resumed) */
@@ -30,6 +32,7 @@ const handlers: { [K in TaskHookName]: Set<TaskHookHandler<K>> } = {
   'files-edited': new Set(),
   merged: new Set(),
   'auto-merged': new Set(),
+  'integration-published': new Set(),
   'decision-needed': new Set(),
   'needs-attention': new Set(),
 };

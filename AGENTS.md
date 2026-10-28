@@ -1,6 +1,6 @@
 # Working agreements
 
-Read `CLAUDE.md` for project architecture, conventions and validation guidance.
+Read `PROGRESS.md` for current status/navigation and `CLAUDE.md` for standing rules. Follow task-relevant canonical links; do not routinely load the entire docs folder or historical logs. Detailed architecture remains available in `docs/workbench-reference.md`. Progress is not approval, acceptance, or a substitute for required checks.
 
 ## Git delivery
 

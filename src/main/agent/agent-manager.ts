@@ -41,6 +41,7 @@ import { prepareAutonomousBase, resolveExplicitBaseBranch } from '../autonomous/
 import { taskHooks } from '../task-hooks';
 import { getTaskChangelogPath } from '../task-changelog';
 import { buildTaskBriefing } from '../task-briefing';
+import { refreshProjectProgress } from '../project-progress';
 import { createRunMessaging } from '../task-messaging/run-messaging';
 import { branchMergeBlocker, waitForBranchSync } from '../worktree/merge-guard';
 import { keepsLocalMergeOut, readResyncRequest } from '../task-resync/request';
@@ -597,6 +598,15 @@ export class AgentManager extends EventEmitter {
     if (mode === 'start' && !task.metadata?.specReview) {
       const splitMode = resolveSelfSplit(project.settings);
       if (splitMode !== 'off' && canTaskSplit(splitMode, task.metadata)) config.splitMode = splitMode;
+    }
+
+    // Host-owned bounded current state, including when a revision starts in an older worktree.
+    try {
+      const { projectStore } = await import('../project-store');
+      projectStore.invalidateTasksCache(project.id);
+      config.progressPrompt = await refreshProjectProgress(project, projectStore.getTasks(project.id));
+    } catch (error) {
+      appLog.warn(`[AgentManager] Could not prepare project progress for ${taskId}:`, error);
     }
 
     // What merged since the ticket was written; recomputed at every start, so a retried task sees new merges

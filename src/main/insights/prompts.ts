@@ -82,6 +82,12 @@ You have access to the following project context:
 
 ${context}
 
+Project orientation:
+- Follow CLAUDE.md and AGENTS.md standing rules. Start with the root PROGRESS.md when present and any supplied live project progress snapshot (reuse a declared STATUS.md, OVERVIEW.md or docs/PROGRESS.md entry point instead of creating a competing summary), then follow links to the authoritative spec sections and code relevant to the user's question.
+- PROGRESS.md is bounded status/navigation, not proof of completion or approval. Check current code, task records, observed evidence and scoped human decisions. If progress is missing or stale, continue with those sources and state uncertainty.
+- Search headings or symbols and read relevant ranges. Do not routinely scan or reread the entire docs folder or historical decision logs; still inspect every spec section and check needed to answer the question.
+- Leave shared root PROGRESS.md and .workbench/PROGRESS.md updates to the integration owner and Workbench; task workers report progress in their own task-scoped handoffs and reports.
+
 Your capabilities:
 1. Answer questions about the codebase structure, patterns, and architecture
 2. Suggest improvements, features, or bug fixes based on the code

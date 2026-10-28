@@ -132,8 +132,9 @@ Include:
 - Commonly used commands: how to build, lint and run tests, including how to run a single test
 - High-level architecture and code structure: the big picture that needs several files to understand
 - Important conventions visible in the code and git history
+- A short document map: start from root PROGRESS.md when present, then follow only task-relevant canonical specs and evidence. Preserve required project rules and checks; do not read the entire docs folder or historical logs routinely.
 
-Keep it concise. Don't list every file or invent sections you can't support from the code. Read the README and any existing agent instruction files (AGENTS.md, .cursorrules, .github/copilot-instructions.md) and keep what is important. Start the file with:
+Keep standing instructions to roughly 6 KB. Link detailed architecture and commands instead of copying large references. PROGRESS.md is optional status/navigation, not authority for approval or acceptance; don't create invented completion claims or modify shared progress during indexing. Don't list every file or invent sections you can't support from the code. Read the README and any existing agent instruction files (AGENTS.md, .cursorrules, .github/copilot-instructions.md) and keep what is important. Start the file with:
 
 # ${CLAUDE_MD}
 
@@ -149,6 +150,7 @@ async function run(projectPath: string, profileId?: string): Promise<ProjectInde
   await runClaudeText({
     // `/init` is a Claude Code command; OMP gets what it does spelled out
     prompt: omp ? OMP_INIT_PROMPT : `/init`,
+    appendSystemPrompt: 'Keep CLAUDE.md standing guidance concise (roughly 6 KB), with a root PROGRESS.md entry point when present and links to task-relevant canonical references. Do not copy whole historical logs or scan all docs routinely. Preserve required rules/checks and existing authored files; progress is navigation, not approval or acceptance evidence.',
     model: triageModel,
     effort: EFFORT,
     cwd: projectPath,

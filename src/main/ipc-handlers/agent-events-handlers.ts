@@ -28,6 +28,7 @@ import { isGraphifyEnabled, refreshGraphifyIndex } from "../graphify";
 import { projectStore } from "../project-store";
 import { appLog } from "../app-logger";
 import { registerTaskChangelog } from "../task-changelog-writer";
+import { registerProjectProgressService } from "../project-progress-service";
 import { registerTaskMessaging } from "../task-messaging";
 
 // Timeout for fallback safety net to check if task is still stuck after process exit
@@ -131,6 +132,8 @@ export function registerAgenteventsHandlers(
   taskStateManager.configure(getMainWindow);
   // Every task state and the files tasks edit go to the project's .workbench/changelog.jsonl
   registerTaskChangelog();
+  // Integrated progress is a bounded host-owned projection, never a shared agent-edited log.
+  registerProjectProgressService();
   // Parallel tasks message each other and get Workbench's notices about each other
   registerTaskMessaging({ isRunning: (taskId, projectId) => agentManager.isRunning(taskId, projectId) });
 
