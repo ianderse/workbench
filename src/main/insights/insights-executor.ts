@@ -20,6 +20,10 @@ interface ProcessorResult {
   fullResponse: string;
   suggestedTasks?: InsightsChatMessage['suggestedTasks'];
   toolsUsed: InsightsToolUsage[];
+  /** The user stopped the reply */
+  stopped?: boolean;
+  /** A newer message or regenerate stopped the reply; that run owns the conversation */
+  replaced?: boolean;
 }
 
 /**
@@ -161,7 +165,7 @@ export class InsightsExecutor extends EventEmitter {
         },
       );
 
-      this.abortControllers.delete(projectId);
+      this.releaseController(projectId, controller);
 
       // Extract task suggestion from the full result
       if (result.taskSuggestion) {
@@ -190,7 +194,7 @@ export class InsightsExecutor extends EventEmitter {
         toolsUsed,
       };
     } catch (error) {
-      this.abortControllers.delete(projectId);
+      this.releaseController(projectId, controller);
 
       // Check for rate limit in accumulated output
       this.handleRateLimit(projectId, allOutput);
@@ -199,10 +203,19 @@ export class InsightsExecutor extends EventEmitter {
 
       // Don't emit error if aborted (user cancelled)
       if (error instanceof Error && error.name === 'AbortError') {
+        // Stopped by the user: end the reply with what was written so far. When a newer message
+        // replaced this run, that run owns the chat's state, so nothing is sent
+        const replaced = this.abortControllers.has(projectId);
+        if (!replaced) {
+          this.emit('stream-chunk', projectId, { type: 'done' } as InsightsStreamChunk);
+          this.emit('status', projectId, { phase: 'complete' } as InsightsChatStatus);
+        }
         return {
+          replaced,
           fullResponse: accumulatedText.trim(),
           suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
           toolsUsed,
+          stopped: !replaced,
         };
       }
 
@@ -215,6 +228,15 @@ export class InsightsExecutor extends EventEmitter {
       throw error;
     } finally {
       taskTools?.close();
+    }
+  }
+
+  /**
+   * Forget a run's controller, unless a newer run already took its place
+   */
+  private releaseController(projectId: string, controller: AbortController): void {
+    if (this.abortControllers.get(projectId) === controller) {
+      this.abortControllers.delete(projectId);
     }
   }
 

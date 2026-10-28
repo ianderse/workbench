@@ -44,6 +44,8 @@ export interface InsightsChatMessage {
   images?: ImageAttachment[];
   // Tools used during this response (assistant messages only)
   toolsUsed?: InsightsToolUsage[];
+  // The user stopped this reply (assistant messages only); content is what was written by then
+  stopped?: boolean;
 }
 
 export interface InsightsSession {

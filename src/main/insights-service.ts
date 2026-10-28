@@ -152,6 +152,13 @@ class InsightsService extends EventEmitter {
   }
 
   /**
+   * Stop the reply being written for a project; returns false when nothing is running
+   */
+  stopMessage(projectId: string): boolean {
+    return this.executor.cancelSession(projectId);
+  }
+
+  /**
    * Send a message and get AI response
    */
   async sendMessage(
@@ -202,12 +209,52 @@ class InsightsService extends EventEmitter {
     // The chat (and the history list) learn the conversation now, a new one included
     this.emit('session-updated', projectId, session);
 
-    // Build conversation history for context
+    await this.reply(projectId, projectPath, session, message, modelConfig, images);
+  }
+
+  /**
+   * Write the latest reply again: the conversation's last reply is replaced by a new answer to
+   * the message before it, with that message's attachments
+   */
+  async regenerate(projectId: string, projectPath: string, modelConfig?: InsightsModelConfig): Promise<void> {
+    this.executor.cancelSession(projectId);
+
+    const session = this.sessionManager.loadSession(projectId, projectPath);
+    if (!session) return;
+    while (session.messages.at(-1)?.role === 'assistant') session.messages.pop();
+    const userMessage = session.messages.at(-1);
+    if (!userMessage) return;
+
+    if (modelConfig) session.modelConfig = modelConfig;
+    session.updatedAt = new Date();
+    this.sessionManager.saveSession(projectPath, session);
+    this.emit('session-updated', projectId, session);
+
+    const images = (userMessage.images ?? []).flatMap((img) => {
+      const data = img.path ? this.readAttachmentData(projectPath, img.path) : null;
+      return data ? [{ ...img, data }] : [];
+    });
+    await this.reply(projectId, projectPath, session, userMessage.content, modelConfig, images.length > 0 ? images : undefined);
+  }
+
+  /**
+   * Run Claude Code for the conversation's last message and save its reply
+   */
+  private async reply(
+    projectId: string,
+    projectPath: string,
+    session: InsightsSession,
+    message: string,
+    modelConfig?: InsightsModelConfig,
+    images?: ImageAttachment[]
+  ): Promise<void> {
+    // Build conversation history for context (replies stopped before any text are left out)
     // Add notation when images are present so the AI has context
     // For historical messages (all but the last), use past tense to avoid confusion
-    const conversationHistory = session.messages.map((m, index) => {
+    const messages = session.messages.filter((m) => !(m.role === 'assistant' && m.stopped && !m.content));
+    const conversationHistory = messages.map((m, index) => {
       const imageCount = m.images?.length ?? 0;
-      const isLastMessage = index === session.messages.length - 1;
+      const isLastMessage = index === messages.length - 1;
       let imageNotation = '';
       if (imageCount > 0 && m.role === 'user') {
         imageNotation = isLastMessage
@@ -234,6 +281,12 @@ class InsightsService extends EventEmitter {
         images
       );
 
+      if (result.replaced) return;
+
+      // A reply that ended with nothing leaves no message; a stopped one says it was stopped
+      const isEmpty = !result.fullResponse && result.toolsUsed.length === 0 && !result.suggestedTasks;
+      if (isEmpty && !result.stopped) return;
+
       // Add assistant message to session
       const assistantMessage: InsightsChatMessage = {
         id: `msg-${Date.now()}`,
@@ -241,7 +294,8 @@ class InsightsService extends EventEmitter {
         content: result.fullResponse,
         timestamp: new Date(),
         suggestedTasks: result.suggestedTasks,
-        toolsUsed: result.toolsUsed.length > 0 ? result.toolsUsed : undefined
+        toolsUsed: result.toolsUsed.length > 0 ? result.toolsUsed : undefined,
+        stopped: result.stopped || undefined
       };
 
       session.messages.push(assistantMessage);
@@ -254,6 +308,15 @@ class InsightsService extends EventEmitter {
       // Error already emitted by executor
       console.error('[InsightsService] Error executing insights:', error);
     }
+  }
+
+  /**
+   * A stored attachment's base64 data (null if missing or outside the attachments dir)
+   */
+  private readAttachmentData(projectPath: string, relativePath: string): string | null {
+    const absolutePath = this.paths.resolveAttachmentPath(projectPath, relativePath);
+    if (!absolutePath || !existsSync(absolutePath)) return null;
+    return readFileSync(absolutePath).toString('base64');
   }
 
   /**

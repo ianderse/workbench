@@ -19,6 +19,8 @@ export interface InsightsAPI {
   // Operations
   getInsightsSession: (projectId: string) => Promise<IPCResult<InsightsSession | null>>;
   sendInsightsMessage: (projectId: string, message: string, modelConfig?: InsightsModelConfig, images?: ImageAttachment[]) => void;
+  stopInsightsMessage: (projectId: string) => Promise<boolean>;
+  regenerateInsightsMessage: (projectId: string, modelConfig?: InsightsModelConfig) => void;
   clearInsightsSession: (projectId: string) => Promise<IPCResult>;
   createTaskFromInsights: (
     projectId: string,
@@ -63,6 +65,12 @@ export const createInsightsAPI = (): InsightsAPI => ({
 
   sendInsightsMessage: (projectId: string, message: string, modelConfig?: InsightsModelConfig, images?: ImageAttachment[]): void =>
     sendIpc(IPC_CHANNELS.INSIGHTS_SEND_MESSAGE, projectId, message, modelConfig, images),
+
+  stopInsightsMessage: (projectId: string): Promise<boolean> =>
+    invokeIpc(IPC_CHANNELS.INSIGHTS_STOP, projectId),
+
+  regenerateInsightsMessage: (projectId: string, modelConfig?: InsightsModelConfig): void =>
+    sendIpc(IPC_CHANNELS.INSIGHTS_REGENERATE, projectId, modelConfig),
 
   clearInsightsSession: (projectId: string): Promise<IPCResult> =>
     invokeIpc(IPC_CHANNELS.INSIGHTS_CLEAR_SESSION, projectId),

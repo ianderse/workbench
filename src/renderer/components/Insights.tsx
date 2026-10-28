@@ -14,6 +14,8 @@ import {
   PanelLeft,
   SquarePen,
   ArrowUp,
+  RotateCcw,
+  Square,
   CornerDownLeft,
   ChevronDown,
   Paperclip,
@@ -31,6 +33,8 @@ import {
   loadInsightsSession,
   openInsightsPage,
   sendMessage,
+  stopMessage,
+  regenerateMessage,
   newSession,
   switchSession,
   deleteSession,
@@ -86,6 +90,16 @@ export function Insights({ projectId }: InsightsProps) {
   const effectiveModelConfig = session?.modelConfig ?? draftModelConfig;
 
   const isLoading = status.phase === 'thinking' || status.phase === 'streaming';
+
+  // Stop turns disabled once clicked, until the reply has ended
+  const [stopRequested, setStopRequested] = useState(false);
+  useEffect(() => {
+    if (!isLoading) setStopRequested(false);
+  }, [isLoading]);
+  const handleStop = () => {
+    setStopRequested(true);
+    void stopMessage(projectId);
+  };
 
   // Image upload hook
   const {
@@ -458,8 +472,19 @@ export function Insights({ projectId }: InsightsProps) {
             <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
             <div className="flex min-w-0 items-center gap-1.5">
               {modelSelector}
-              {/* Send button only appears once there is something to send */}
-              {canSend && (
+              {/* Send button only appears once there is something to send; it turns into stop while Claude works */}
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  disabled={stopRequested}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+                  aria-label={t('insights.stop')}
+                  title={t('insights.stop')}
+                >
+                  <Square className="h-3 w-3 fill-current" />
+                </button>
+              ) : canSend && (
                 <button
                   type="button"
                   onClick={handleSend}
@@ -473,7 +498,20 @@ export function Insights({ projectId }: InsightsProps) {
             </div>
           </div>
         ) : (
-          /* Reply: send sits inside the single-line field, always visible (disabled until there is something to send) */
+          /* Reply: send sits inside the single-line field, always visible (disabled until there is something
+             to send); it turns into stop while Claude works */
+          isLoading ? (
+            <button
+              type="button"
+              onClick={handleStop}
+              disabled={stopRequested}
+              className="absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-nav-hover disabled:pointer-events-none disabled:opacity-40"
+              aria-label={t('insights.stop')}
+              title={t('insights.stop')}
+            >
+              <Square className="h-3 w-3 fill-current" />
+            </button>
+          ) : (
           <button
             type="button"
             onClick={handleSend}
@@ -484,6 +522,7 @@ export function Insights({ projectId }: InsightsProps) {
           >
             <CornerDownLeft className="h-4 w-4" />
           </button>
+          )
         )}
 
         {/* Drag-over overlay */}
@@ -581,10 +620,19 @@ export function Insights({ projectId }: InsightsProps) {
             {/* Messages */}
             <ScrollArea className="min-h-0 flex-1" onViewportRef={setViewportEl}>
               <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-                {messages.map((message) => (
+                {messages.map((message, index) => (
                   <MessageBubble
                     key={message.id}
                     message={message}
+                    onRegenerate={
+                      // The latest reply can be written again once Claude is done
+                      index === messages.length - 1 && message.role === 'assistant' && !isLoading
+                        ? () => {
+                          setTaskCreated(new Set());
+                          regenerateMessage(projectId, effectiveModelConfig);
+                        }
+                        : undefined
+                    }
                     onCreateTask={handleCreateTask}
                     creatingTask={creatingTask}
                     taskCreated={taskCreated}
@@ -672,10 +720,13 @@ interface MessageBubbleProps {
   creatingTask: Set<string>;
   taskCreated: Set<string>;
   onPreviewImage: (image: ImageAttachment) => void;
+  /** Writes this reply again (the latest reply only) */
+  onRegenerate?: () => void;
 }
 
 function MessageBubble({
   message,
+  onRegenerate,
   onPreviewImage,
   onCreateTask,
   creatingTask,
@@ -727,18 +778,25 @@ function MessageBubble({
     );
   }
 
+  // Copy (the reply's markdown) and regenerate, before the tools used
+  const actions = message.content || onRegenerate ? (
+    <div className="flex items-center gap-1">
+      {message.content && <CopyMessageButton text={message.content} />}
+      {onRegenerate && <RegenerateMessageButton onClick={onRegenerate} />}
+    </div>
+  ) : undefined;
+
   return (
     <div className="space-y-3">
-      {message.content && (
+      {message.content ? (
         <MarkdownContent>{message.content}</MarkdownContent>
-      )}
-
-      {/* A button that copies the reply's markdown, then the tools used */}
-      {message.toolsUsed && message.toolsUsed.length > 0 ? (
-        <ToolUsageHistory tools={message.toolsUsed} actions={message.content ? <CopyMessageButton text={message.content} /> : undefined} />
-      ) : message.content ? (
-        <CopyMessageButton text={message.content} />
+      ) : message.stopped ? (
+        <p className="text-[0.9375rem] text-muted-foreground">{t('insights.stoppedByUser')}</p>
       ) : null}
+
+      {message.toolsUsed && message.toolsUsed.length > 0 ? (
+        <ToolUsageHistory tools={message.toolsUsed} actions={actions} />
+      ) : actions}
 
       {/* Task suggestion cards */}
       {message.suggestedTasks && message.suggestedTasks.length > 0 && (
@@ -855,6 +913,22 @@ function CopyMessageButton({ text }: { text: string }) {
       title={label}
     >
       {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+    </button>
+  );
+}
+
+/** Writes the latest reply again */
+function RegenerateMessageButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation('common');
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
+      aria-label={t('insights.regenerate')}
+      title={t('insights.regenerate')}
+    >
+      <RotateCcw className="h-3.5 w-3.5" />
     </button>
   );
 }

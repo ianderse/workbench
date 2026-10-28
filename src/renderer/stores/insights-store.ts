@@ -335,10 +335,42 @@ export function sendMessage(projectId: string, message: string, modelConfig?: In
 }
 
 /**
+ * Stop the reply Claude is writing. The main process ends the reply with what was written so far;
+ * when nothing was running there (e.g. it just finished), the chat is settled here instead
+ */
+export async function stopMessage(projectId: string): Promise<void> {
+  const stopped = await window.electronAPI.stopInsightsMessage(projectId).catch(() => false);
+  if (stopped) return;
+  const store = useInsightsStore.getState();
+  if (store.status.phase !== 'thinking' && store.status.phase !== 'streaming') return;
+  store.setCurrentTool(null);
+  store.finalizeStreamingMessage();
+  store.setStatus({ phase: 'idle', message: '' });
+}
+
+/**
  * Open the Claude page: it always starts on a new chat, past conversations stay in the history.
  * A reply still being written keeps its conversation on screen, so it doesn't stream into the
  * new chat
  */
+/**
+ * Write the latest reply again: it leaves the chat and a new one streams in its place
+ */
+export function regenerateMessage(projectId: string, modelConfig?: InsightsModelConfig): void {
+  const store = useInsightsStore.getState();
+  const session = store.session;
+  if (session) {
+    const messages = [...session.messages];
+    while (messages.at(-1)?.role === 'assistant') messages.pop();
+    store.setSession({ ...session, messages });
+  }
+  store.clearStreamingContent();
+  store.clearToolsUsed();
+  store.setCurrentTool(null);
+  store.setStatus({ phase: 'thinking', message: 'Processing your message...' });
+  window.electronAPI.regenerateInsightsMessage(projectId, modelConfig ?? session?.modelConfig);
+}
+
 export async function openInsightsPage(projectId: string, includeArchived?: boolean): Promise<void> {
   useInsightsStore.getState().setProjectId(projectId);
   const { phase } = useInsightsStore.getState().status;

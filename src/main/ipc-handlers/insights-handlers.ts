@@ -47,6 +47,24 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
     }
   );
 
+  // Stop the reply Claude is writing and write it again
+  ipcMain.on(
+    IPC_CHANNELS.INSIGHTS_REGENERATE,
+    async (_, projectId: string, modelConfig?: InsightsModelConfig) => {
+      const project = projectStore.getProject(projectId);
+      if (!project) {
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, "Project not found");
+        return;
+      }
+      try {
+        await insightsService.regenerate(projectId, project.path, { ...getInsightsFeatureSettings(), ...modelConfig });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, `Failed to send message: ${errorMessage}`);
+      }
+    }
+  );
+
   ipcMain.on(
     IPC_CHANNELS.INSIGHTS_SEND_MESSAGE,
     async (_, projectId: string, message: string, modelConfig?: InsightsModelConfig, images?: ImageAttachment[]) => {
@@ -95,6 +113,12 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
         );
       }
     }
+  );
+
+  // Stop the reply Claude is writing; what it wrote so far is kept
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_STOP,
+    (_, projectId: string): boolean => insightsService.stopMessage(projectId)
   );
 
   ipcMain.handle(
