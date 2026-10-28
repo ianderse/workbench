@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
 import { Switch } from '../ui/switch';
 import { SettingsRows } from '../settings/SettingsRow';
-import { BUILTIN_CONNECTOR_META, ConnectorRow, ConnectorSwitchTip, customServerIcon, customServerSummary } from '../settings/ConnectorRow';
+import { ConnectorRow, ConnectorSwitchTip } from '../settings/ConnectorRow';
+import { BUILTIN_CONNECTOR_META, customServerIcon, customServerSummary } from '../settings/connector-meta';
 import { useMcpUnavailableReason } from '../../hooks/useMcpAvailability';
 import { getUsableCustomServers } from '../../../shared/utils/mcp-connectors';
 import { useSettingsStore } from '../../stores/settings-store';

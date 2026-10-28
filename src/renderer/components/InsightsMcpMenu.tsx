@@ -4,7 +4,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuTrigg
 import { Switch } from './ui/switch';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { McpIcon } from './icons/app-icons';
-import { BUILTIN_CONNECTOR_META, ConnectorSwitchTip, customServerIcon } from './settings/ConnectorRow';
+import { ConnectorSwitchTip } from './settings/ConnectorRow';
+import { BUILTIN_CONNECTOR_META, customServerIcon } from './settings/connector-meta';
 import { useMcpUnavailableReason } from '../hooks/useMcpAvailability';
 import { useSettingsStore } from '../stores/settings-store';
 import { getUsableCustomServers } from '../../shared/utils/mcp-connectors';

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSettingsStore } from '../stores/settings-store';
-import { BUILTIN_CONNECTOR_META, commandMissingText } from '../components/settings/ConnectorRow';
+import { BUILTIN_CONNECTOR_META, commandMissingText } from '../components/settings/connector-meta';
 import { getUsableCustomServers } from '../../shared/utils/mcp-connectors';
 import type { McpAvailability } from '../../shared/types';
 

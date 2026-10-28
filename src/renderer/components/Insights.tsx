@@ -29,7 +29,7 @@ import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn, formatLongRelativeTime } from '../lib/utils';
 import { GitHubIcon, GitLabIcon, GraphIcon, KanbanIcon, McpIcon } from './icons/app-icons';
-import { BUILTIN_CONNECTOR_META } from './settings/ConnectorRow';
+import { BUILTIN_CONNECTOR_META } from './settings/connector-meta';
 import {
   useInsightsStore,
   DRAFT_SESSION_ID,
