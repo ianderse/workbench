@@ -28,7 +28,8 @@ import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import { cn, formatLongRelativeTime } from '../lib/utils';
-import { GitHubIcon, GitLabIcon, GraphIcon, KanbanIcon } from './icons/app-icons';
+import { GitHubIcon, GitLabIcon, GraphIcon, KanbanIcon, McpIcon } from './icons/app-icons';
+import { BUILTIN_CONNECTOR_META } from './settings/ConnectorRow';
 import {
   useInsightsStore,
   DRAFT_SESSION_ID,
@@ -1024,8 +1025,20 @@ const cliCall = (toolName: string, input?: string): { icon: React.ElementType; l
   return null;
 };
 
+/**
+ * Icon of an MCP server's tool (mcp__<server>__<tool>): a built-in connector's own icon, the MCP
+ * mark for other servers, null for tools that aren't MCP tools
+ */
+const mcpToolIcon = (toolName: string): React.ElementType | null => {
+  const server = /^mcp__(.+?)__/.exec(toolName)?.[1];
+  if (!server) return null;
+  return BUILTIN_CONNECTOR_META.find(({ id }) => id === server.toLowerCase())?.icon ?? McpIcon;
+};
+
 const getToolIcon = (toolName: string) => {
   if (taskToolName(toolName)) return KanbanIcon;
+  const mcpIcon = mcpToolIcon(toolName);
+  if (mcpIcon) return mcpIcon;
   switch (toolName) {
     case 'Read':
       return FileText;
@@ -1268,7 +1281,7 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
       case 'Bash':
         return { icon: Terminal, label: t('insights.tools.runningCommand') };
       default:
-        return { icon: Wrench, label: toolName };
+        return { icon: mcpToolIcon(toolName) ?? Wrench, label: toolName };
     }
   };
 
