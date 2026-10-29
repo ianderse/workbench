@@ -12,7 +12,7 @@ import { useTranslation } from 'react-i18next';
 import { formatTimeRemaining, localizeUsageWindowLabel } from '../../../shared/utils/format-time';
 import type { ClaudeUsageSnapshot } from '../../../shared/types/agent';
 import { useTaskStore } from '../../stores/task-store';
-import { ClawdScene, ClawdSky, SCENE_H, useMinute } from './ClawdScene';
+import { BAR_SIDE_MASK, ClawdScene, ClawdSky, SCENE_H, useMinute } from './ClawdScene';
 import { Hearts } from './Hearts';
 import { skinForUsage, type SkinPicker } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
@@ -147,21 +147,24 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
         <div className="relative flex items-end gap-2 text-popover-foreground" style={{ height: SCENE_H }}>
           <ClawdSky percent={usage.sessionPercent} pinned={pinned} />
           {/* Clawd stands on the bar, the number sits a touch above it */}
-          <div className="relative mb-1 flex shrink-0 items-start self-end" style={{ marginLeft: 6 }}>
-            <span className={`text-[2rem] font-light leading-none tabular-nums ${getColorClass(usage.sessionPercent)}`}>
+          <div className="relative mb-1 flex shrink-0 items-start self-end" style={{ marginLeft: 7.5 }}>
+            <span className={`text-[2rem] font-medium leading-none tabular-nums ${getColorClass(usage.sessionPercent)}`}>
               {sessionPercent}
             </span>
-            <span className={`ml-0.5 mt-0.5 text-sm ${getColorClass(usage.sessionPercent)}`}>%</span>
+            <span className={`ml-0.5 mt-0.5 text-sm font-medium ${getColorClass(usage.sessionPercent)}`}>%</span>
           </div>
           <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} decor={decor} />
         </div>
 
-        {/* Positioned, so it sits over the bottom of the sky, which reaches to its middle. The track
-            is solid in both themes, so the sky and the card meeting behind it don't change how it
-            looks. */}
-        <div className="relative h-2 overflow-hidden rounded-full bg-[#e5e5e5] dark:bg-[#383835]">
+        {/* Positioned, so it is drawn over the sky, which goes on behind it. Square on top and
+            round below, with the sky's side fades at its ends; the track is solid in both themes,
+            so it reads the same over any sky. */}
+        <div
+          className="relative h-2 overflow-hidden rounded-b-[4px] bg-[#e5e5e5] dark:bg-[#383835]"
+          style={{ maskImage: BAR_SIDE_MASK, WebkitMaskImage: BAR_SIDE_MASK }}
+        >
           <div
-            className={`h-full rounded-full transition-[width] duration-500 ease-out ${getBarColorClass(usage.sessionPercent)}`}
+            className={`h-full rounded-tr-[4px] rounded-b-[4px] transition-[width] duration-500 ease-out ${getBarColorClass(usage.sessionPercent)}`}
             style={{ width: `${Math.min(usage.sessionPercent, 100)}%` }}
           />
         </div>
