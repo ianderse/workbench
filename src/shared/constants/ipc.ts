@@ -241,18 +241,14 @@ export const IPC_CHANNELS = {
   APP_UPDATE_INSTALL: 'app-update:install',
   APP_UPDATE_GET_VERSION: 'app-update:get-version',
   APP_UPDATE_GET_DOWNLOADED: 'app-update:get-downloaded',  // Get downloaded update info (for showing Install button on Settings open)
-  APP_UPDATE_GET_AVAILABLE: 'app-update:get-available',  // Get the newer version the last check found (for showing Download on Settings open)
-  APP_UPDATE_SKIP_VERSION: 'app-update:skip-version',  // Skip a specific version permanently
-  APP_UPDATE_SNOOZE: 'app-update:snooze',  // Snooze update notifications for 24 hours
-  APP_UPDATE_IS_SUPPRESSED: 'app-update:is-suppressed',  // Check if update notifications are suppressed
+  APP_UPDATE_GET_LAST_CHECK: 'app-update:get-last-check',  // The last check's result in the main process (for showing Download on Settings open)
 
   // App auto-update events (main -> renderer)
-  APP_UPDATE_AVAILABLE: 'app-update:available',
+  APP_UPDATE_CHECKED: 'app-update:checked',  // A check finished (at launch, periodic, Beta updates switched, or asked for)
   APP_UPDATE_DOWNLOADED: 'app-update:downloaded',
   APP_UPDATE_PROGRESS: 'app-update:progress',
   APP_UPDATE_ERROR: 'app-update:error',
-  APP_UPDATE_STABLE_DOWNGRADE: 'app-update:stable-downgrade',  // Stable version available for downgrade from beta
-  APP_UPDATE_OPEN_SETTINGS: 'app-update:open-settings',  // The update notification was clicked: open Settings > Updates
+  APP_UPDATE_OPEN_SETTINGS: 'app-update:open-settings',  // A new version was found or its notification clicked: open Settings > Updates (one window)
   APP_UPDATE_READONLY_VOLUME: 'app-update:readonly-volume',  // App running from read-only volume (DMG), needs to be moved
 
   // Debug operations

@@ -250,10 +250,11 @@ export function App() {
     };
   }, []);
 
-  // The update notification shown at launch was clicked: open Settings > Updates, which shows the
-  // version found and its Download button
+  // A new version was found (or its notification clicked): open Settings > Updates, which shows the
+  // version and its Download button. The main process sends this to one window only.
   useEffect(() => {
     return window.electronAPI.onAppUpdateOpenSettings(() => {
+      setSettingsInitialProjectSection(undefined);
       setSettingsInitialSection('updates');
       setIsSettingsDialogOpen(true);
     });

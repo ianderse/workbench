@@ -325,10 +325,6 @@ export interface AppSettings {
   customCLIPath?: string;
   // YOLO mode: invoke Claude with --dangerously-skip-permissions flag
   dangerouslySkipPermissions?: boolean;
-  // Version the user has permanently skipped for update notifications
-  skippedUpdateVersion?: string;
-  // Timestamp (ms) after which update notifications should resume (snooze)
-  updateRemindAfter?: number;
   // Sidebar collapsed state (icons only when true)
   sidebarCollapsed?: boolean;
   // GPU acceleration for terminal rendering (WebGL)

@@ -287,7 +287,7 @@
     "unableToCheck": "Unable to check for updates",
     "checkForUpdates": "Check for updates",
     "autoUpdateProjects": "Auto-update projects",
-    "autoUpdateProjectsDescription": "Automatically update Workbench in projects when a new version is available",
+    "autoUpdateProjectsDescription": "Open this page when a new version is found, instead of only showing a notification",
     "betaUpdates": "Beta updates",
     "betaUpdatesDescription": "Receive pre-release beta versions with new features (may be less stable)",
     "stableDowngradeAvailable": "Stable version available",
@@ -296,7 +296,9 @@
     "downloadStableVersion": "Download stable version",
     "readOnlyVolumeTitle": "Cannot install from disk image",
     "readOnlyVolumeDescription": "Workbench is running from a read-only disk image (DMG). Please drag the app to your Applications folder and relaunch it from there to install updates.",
-    "downloadError": "Failed to download update"
+    "downloadError": "Failed to download update",
+    "notificationTitle": "Workbench update available",
+    "notificationBody": "Version {{version}} is ready to download"
   },
   "notifications": {
     "title": "Notifications",

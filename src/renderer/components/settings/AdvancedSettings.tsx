@@ -1,4 +1,5 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import semver from 'semver';
 import { useTranslation } from 'react-i18next';
 import {
   RefreshCw,
@@ -20,10 +21,10 @@ import { SettingsRow, SettingsRows } from './SettingsRow';
 import { readRefreshCache, writeRefreshCache } from '../../lib/refresh-cache';
 import type {
   AppSettings,
-  AppUpdateAvailableEvent,
-  AppUpdateCheckStatus,
+  AppUpdateCheckResult,
   AppUpdateProgress,
   AppUpdateInfo,
+  IPCResult,
   NotificationSettings
 } from '../../../shared/types';
 
@@ -63,6 +64,13 @@ function ReleaseNotesRenderer({ content }: { content: string }) {
   );
 }
 
+/** Whether `candidate` is a newer version than `current` (false when either isn't semver) */
+function isNewerVersion(candidate: string, current: string): boolean {
+  const a = semver.valid(candidate);
+  const b = semver.valid(current);
+  return !!a && !!b && semver.gt(a, b);
+}
+
 /** A release's page on GitHub (its changelog); releases are tagged v<version> */
 function releaseUrl(version: string): string {
   return `https://github.com/proactive-agent/workbench/releases/tag/v${version}`;
@@ -82,31 +90,43 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
   const { t } = useTranslation('settings');
 
   // Electron app update state
-  const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateAvailableEvent | null>(null);
+  const [checkResult, setCheckResult] = useState<AppUpdateCheckResult | null>(null);
   const [isCheckingAppUpdate, setIsCheckingAppUpdate] = useState(false);
-  // Outcome of the last check; "latest" is only claimed when the check confirmed it
-  const [appUpdateStatus, setAppUpdateStatus] = useState<AppUpdateCheckStatus | null>(null);
-  const [isDownloadingAppUpdate, setIsDownloadingAppUpdate] = useState(false);
+  // The update downloaded in the main process (ready to install), whatever version it is
+  const [downloadedUpdate, setDownloadedUpdate] = useState<AppUpdateInfo | null>(null);
+  // The version being downloaded (the Download button of that version spins)
+  const [downloadingVersion, setDownloadingVersion] = useState<string | null>(null);
   const [appDownloadProgress, setAppDownloadProgress] = useState<AppUpdateProgress | null>(null);
-  const [isAppUpdateDownloaded, setIsAppUpdateDownloaded] = useState(false);
-  // Stable downgrade state (shown when user turns off beta while on prerelease)
-  const [stableDowngradeInfo, setStableDowngradeInfo] = useState<AppUpdateInfo | null>(null);
+  // The "go back to stable" offer was dismissed
+  const [downgradeDismissed, setDowngradeDismissed] = useState(false);
   // Read-only volume warning (shown when trying to install from DMG)
   const [showReadOnlyWarning, setShowReadOnlyWarning] = useState(false);
   // General update error state
   const [appUpdateError, setAppUpdateError] = useState<string | null>(null);
 
-  // Last update check result, per app version (a newer install starts fresh)
-  const appUpdateCacheKey = `app-update:${version}`;
-  const rememberAppUpdateCheck = (result: Awaited<ReturnType<typeof window.electronAPI.checkAppUpdate>>) => {
-    const update = result.success ? result.data?.update ?? null : null;
-    const status: AppUpdateCheckStatus = result.success && result.data ? result.data.status : 'error';
-    setAppUpdateInfo(update);
-    setAppUpdateStatus(status);
-    if (status !== 'error') writeRefreshCache(appUpdateCacheKey, { status, update });
-  };
+  // Last update check result, per app version and Beta updates setting (a newer install starts fresh)
+  const cacheKeyFor = (beta: boolean | undefined) => `app-update:${version}:${beta ? 'beta' : 'stable'}`;
+  const appUpdateCacheKeyRef = useRef(cacheKeyFor(settings.betaUpdates));
+  appUpdateCacheKeyRef.current = cacheKeyFor(settings.betaUpdates);
+  const rememberAppUpdateCheck = useCallback((result: AppUpdateCheckResult) => {
+    setCheckResult(result);
+    if (result.status !== 'error') writeRefreshCache(appUpdateCacheKeyRef.current, result);
+  }, []);
 
-  // On open: any already-downloaded update, otherwise the last check's result
+  // The newer version on offer. A downloaded update still shows (with Install) when there is no
+  // check result to go by, as long as it is newer than the running version.
+  const downloadedIsNewer = !!downloadedUpdate && isNewerVersion(downloadedUpdate.version, version);
+  const appUpdateInfo: AppUpdateInfo | null =
+    checkResult?.update ??
+    (downloadedIsNewer && (!checkResult || checkResult.status === 'error') ? downloadedUpdate : null);
+  const appUpdateStatus = checkResult?.status ?? null;
+  const stableDowngradeInfo = downgradeDismissed ? null : checkResult?.downgrade ?? null;
+  // Install only for the version that was actually downloaded, never for another one on offer
+  const isAppUpdateDownloaded = !!appUpdateInfo && downloadedUpdate?.version === appUpdateInfo.version;
+  const isDowngradeDownloaded = !!stableDowngradeInfo && downloadedUpdate?.version === stableDowngradeInfo.version;
+
+  // On open: the downloaded update, and the main process's last check (e.g. the one at launch),
+  // otherwise the last check this page remembers; only check when there is neither
   useEffect(() => {
     if (section !== 'updates') {
       return;
@@ -114,59 +134,41 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
 
     let isCancelled = false;
 
-    // First check if an update was already downloaded, then check for new updates
     (async () => {
-      // Check if an update was already downloaded (e.g., auto-downloaded in background)
       try {
         const result = await window.electronAPI.getDownloadedAppUpdate();
-
-        // Skip state updates if component unmounted or section changed
         if (isCancelled) return;
-
-        if (result.success && result.data) {
-          // An update was already downloaded - show "Install and Restart" button
-          setAppUpdateInfo(result.data);
-          setIsAppUpdateDownloaded(true);
-          console.log('[AdvancedSettings] Found already-downloaded update:', result.data.version);
-          return; // Don't check for new updates if we already have one downloaded
-        }
+        if (result.success) setDownloadedUpdate(result.data ?? null);
       } catch (err) {
         console.error('Failed to check for downloaded update:', err);
         if (isCancelled) return;
       }
 
-      // A newer version the app already found (the check at launch): show it and its Download
-      // button without checking again
       try {
-        const result = await window.electronAPI.getAvailableAppUpdate();
+        const result = await window.electronAPI.getLastAppUpdateCheck();
         if (isCancelled) return;
         if (result.success && result.data) {
-          setAppUpdateInfo(result.data);
-          setAppUpdateStatus('update-available');
+          rememberAppUpdateCheck(result.data);
           return;
         }
       } catch (err) {
-        console.error('Failed to get the available update:', err);
+        console.error('Failed to get the last update check:', err);
         if (isCancelled) return;
       }
 
-      // Show the last check's result for this version; only check on the button (or when this
-      // version was never checked). An already-downloaded update (above) takes precedence:
-      // electron-updater reports no available update then, which would lose the version metadata
-      const cached = readRefreshCache<{ status: AppUpdateCheckStatus; update: AppUpdateAvailableEvent | null }>(appUpdateCacheKey);
+      const cached = readRefreshCache<AppUpdateCheckResult>(appUpdateCacheKeyRef.current);
       if (cached) {
-        setAppUpdateInfo(cached.update);
-        setAppUpdateStatus(cached.status);
+        setCheckResult(cached);
         return;
       }
       setIsCheckingAppUpdate(true);
       try {
         const result = await window.electronAPI.checkAppUpdate();
         if (isCancelled) return;
-        rememberAppUpdateCheck(result);
+        rememberAppUpdateCheck(result.success && result.data ? result.data : { status: 'error', error: result.error });
       } catch (err) {
         console.error('Failed to check for app updates:', err);
-        if (!isCancelled) setAppUpdateStatus('error');
+        if (!isCancelled) setCheckResult({ status: 'error' });
       } finally {
         if (!isCancelled) {
           setIsCheckingAppUpdate(false);
@@ -177,25 +179,20 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
     return () => {
       isCancelled = true;
     };
-  }, [section]);
+  }, [section, rememberAppUpdateCheck]);
 
   // Listen for app update events
   useEffect(() => {
-    const cleanupAvailable = window.electronAPI.onAppUpdateAvailable((info) => {
-      setAppUpdateInfo(info);
+    // Any check the main process ran (launch, periodic, Beta updates switched, another window)
+    const cleanupChecked = window.electronAPI.onAppUpdateChecked((result) => {
+      rememberAppUpdateCheck(result);
       setIsCheckingAppUpdate(false);
-      setShowReadOnlyWarning(false);
-      setAppUpdateError(null);
     });
 
     const cleanupDownloaded = window.electronAPI.onAppUpdateDownloaded((info) => {
-      setAppUpdateInfo(info);
-      setIsDownloadingAppUpdate(false);
-      setIsAppUpdateDownloaded(true);
+      setDownloadedUpdate(info);
+      setDownloadingVersion(null);
       setAppDownloadProgress(null);
-      // Clear downgrade info if any update downloaded
-      setStableDowngradeInfo(null);
-      // Reset read-only warning when a new update is downloaded
       setShowReadOnlyWarning(false);
       setAppUpdateError(null);
     });
@@ -204,92 +201,84 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
       setAppDownloadProgress(progress);
     });
 
-    // Listen for stable downgrade available (when user turns off beta while on prerelease)
-    const cleanupStableDowngrade = window.electronAPI.onAppUpdateStableDowngrade((info) => {
-      setStableDowngradeInfo(info);
-    });
-
     // Listen for read-only volume warning (when trying to install from DMG)
     const cleanupReadOnlyVolume = window.electronAPI.onAppUpdateReadOnlyVolume(() => {
       setShowReadOnlyWarning(true);
     });
 
-    // Listen for update errors (e.g., install failures)
+    // Listen for update errors (e.g., download failures)
     const cleanupError = window.electronAPI.onAppUpdateError((error) => {
       setAppUpdateError(error.message);
-      setIsDownloadingAppUpdate(false);
+      setDownloadingVersion(null);
       setAppDownloadProgress(null);
     });
 
     return () => {
-      cleanupAvailable();
+      cleanupChecked();
       cleanupDownloaded();
       cleanupProgress();
-      cleanupStableDowngrade();
       cleanupReadOnlyVolume();
       cleanupError();
     };
-  }, []);
+  }, [rememberAppUpdateCheck]);
 
   const checkForAppUpdates = async () => {
     setIsCheckingAppUpdate(true);
     try {
       const result = await window.electronAPI.checkAppUpdate();
-      rememberAppUpdateCheck(result);
+      rememberAppUpdateCheck(result.success && result.data ? result.data : { status: 'error', error: result.error });
     } catch (err) {
       console.error('Failed to check for app updates:', err);
-      setAppUpdateStatus('error');
+      setCheckResult({ status: 'error' });
     } finally {
       setIsCheckingAppUpdate(false);
     }
   };
 
-  const handleDownloadAppUpdate = async () => {
-    setIsDownloadingAppUpdate(true);
+  // Download a version; the Install button appears once the main process has it downloaded
+  const startDownload = async (target: AppUpdateInfo, download: () => Promise<IPCResult>) => {
+    setDownloadingVersion(target.version);
+    setAppDownloadProgress(null);
     setAppUpdateError(null);
     try {
-      const result = await window.electronAPI.downloadAppUpdate();
+      const result = await download();
       if (!result.success) {
         setAppUpdateError(result.error || t('updates.downloadError'));
-        setIsDownloadingAppUpdate(false);
+        setDownloadingVersion(null);
+        return;
       }
-      // Note: Success case is handled by the onAppUpdateDownloaded event listener
+      // Usually the downloaded event has arrived by now; on macOS it can come a moment later
+      const downloaded = await window.electronAPI.getDownloadedAppUpdate();
+      if (downloaded.success && downloaded.data) {
+        setDownloadedUpdate(downloaded.data);
+        setDownloadingVersion(null);
+      }
     } catch (err) {
       console.error('Failed to download app update:', err);
       setAppUpdateError(t('updates.downloadError'));
-      setIsDownloadingAppUpdate(false);
+      setDownloadingVersion(null);
     }
+  };
+
+  const handleDownloadAppUpdate = () => {
+    if (appUpdateInfo) void startDownload(appUpdateInfo, window.electronAPI.downloadAppUpdate);
+  };
+
+  const handleDownloadStableVersion = () => {
+    if (stableDowngradeInfo) void startDownload(stableDowngradeInfo, window.electronAPI.downloadStableUpdate);
   };
 
   const handleInstallAppUpdate = () => {
     window.electronAPI.installAppUpdate();
   };
 
-  const handleDownloadStableVersion = async () => {
-    setIsDownloadingAppUpdate(true);
-    setAppUpdateError(null);
-    try {
-      // Use dedicated stable download API with allowDowngrade enabled
-      const result = await window.electronAPI.downloadStableUpdate();
-      if (!result.success) {
-        setAppUpdateError(result.error || t('updates.downloadError'));
-        setIsDownloadingAppUpdate(false);
-      }
-      // Note: Success case is handled by the onAppUpdateDownloaded event listener
-    } catch (err) {
-      console.error('Failed to download stable version:', err);
-      setAppUpdateError(t('updates.downloadError'));
-      setIsDownloadingAppUpdate(false);
-    }
-  };
-
   const dismissStableDowngrade = () => {
-    setStableDowngradeInfo(null);
+    setDowngradeDismissed(true);
   };
 
   if (section === 'updates') {
     const renderDownloadProgress = () =>
-      isDownloadingAppUpdate && appDownloadProgress ? (
+      downloadingVersion && appDownloadProgress ? (
         <div className="space-y-1.5">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">{t('updates.downloading')}</span>
@@ -372,13 +361,13 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
                   {t('updates.installAndRestart')}
                 </Button>
               ) : (
-                <Button size="sm" className="gap-1.5" onClick={handleDownloadAppUpdate} disabled={isDownloadingAppUpdate}>
-                  {isDownloadingAppUpdate ? (
+                <Button size="sm" className="gap-1.5" onClick={handleDownloadAppUpdate} disabled={downloadingVersion !== null}>
+                  {downloadingVersion === appUpdateInfo.version ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
                   ) : (
                     <Download className="h-3.5 w-3.5" strokeWidth={1.75} />
                   )}
-                  {isDownloadingAppUpdate ? t('updates.downloading') : t('updates.downloadUpdate')}
+                  {downloadingVersion === appUpdateInfo.version ? t('updates.downloading') : t('updates.downloadUpdate')}
                 </Button>
               )
             )}
@@ -413,7 +402,7 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
             htmlFor="betaUpdates"
             footer={
               /* Stable Downgrade - shown when user turns off beta while on prerelease */
-              stableDowngradeInfo && !appUpdateInfo ? (
+              stableDowngradeInfo && !checkResult?.update ? (
                 <div className="space-y-4 rounded-xl border border-border p-4">
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
@@ -454,24 +443,31 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
 
                   {/* Action Buttons */}
                   <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleDownloadStableVersion}
-                      disabled={isDownloadingAppUpdate}
-                    >
-                      {isDownloadingAppUpdate ? (
-                        <>
-                          <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
-                          {t('updates.downloading')}
-                        </>
-                      ) : (
-                        <>
-                          <ArrowDownToLine className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
-                          {t('updates.downloadStableVersion')}
-                        </>
-                      )}
-                    </Button>
+                    {isDowngradeDownloaded ? (
+                      <Button size="sm" variant="outline" onClick={handleInstallAppUpdate} disabled={showReadOnlyWarning}>
+                        <RefreshCw className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
+                        {t('updates.installAndRestart')}
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={handleDownloadStableVersion}
+                        disabled={downloadingVersion !== null}
+                      >
+                        {downloadingVersion === stableDowngradeInfo.version ? (
+                          <>
+                            <RefreshCw className="mr-1.5 h-3.5 w-3.5 animate-spin" strokeWidth={1.75} />
+                            {t('updates.downloading')}
+                          </>
+                        ) : (
+                          <>
+                            <ArrowDownToLine className="mr-1.5 h-3.5 w-3.5" strokeWidth={1.75} />
+                            {t('updates.downloadStableVersion')}
+                          </>
+                        )}
+                      </Button>
+                    )}
                     <Button size="sm" variant="ghost" onClick={dismissStableDowngrade}>
                       {t('common:actions.dismiss')}
                     </Button>
@@ -485,13 +481,10 @@ export function AdvancedSettings({ settings, onSettingsChange, section, version 
               checked={settings.betaUpdates ?? false}
               onCheckedChange={(checked) => {
                 onSettingsChange({ ...settings, betaUpdates: checked });
-                if (checked) {
-                  // Clear downgrade info when enabling beta again
-                  setStableDowngradeInfo(null);
-                } else {
-                  // Clear beta update info when disabling beta, so stable downgrade UI can show
-                  setAppUpdateInfo(null);
-                }
+                // Other versions are eligible now: show what was last found for this setting until
+                // the main process has checked again (APP_UPDATE_CHECKED)
+                setCheckResult(readRefreshCache<AppUpdateCheckResult>(cacheKeyFor(checked)) ?? null);
+                setDowngradeDismissed(false);
               }}
             />
           </SettingsRow>

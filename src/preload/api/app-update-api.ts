@@ -4,7 +4,6 @@ import type {
   AppUpdateCheckResult,
   AppUpdateInfo,
   AppUpdateProgress,
-  AppUpdateAvailableEvent,
   AppUpdateDownloadedEvent,
   AppUpdateErrorEvent,
   IPCResult
@@ -23,17 +22,15 @@ export interface AppUpdateAPI {
   installAppUpdate: () => void;
   getAppVersion: () => Promise<string>;
   getDownloadedAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
-  /** The newer version the last check found (the launch check's, until the next check) */
-  getAvailableAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
-  skipAppUpdate: (version: string) => Promise<IPCResult>;
-  snoozeAppUpdate: () => Promise<IPCResult>;
-  isAppUpdateSuppressed: (version: string) => Promise<IPCResult<boolean>>;
+  /** The last check's result in the main process (e.g. the launch check's), null before one */
+  getLastAppUpdateCheck: () => Promise<IPCResult<AppUpdateCheckResult | null>>;
   /** Match the Windows/Linux window controls to the theme (hex colors) */
   setTitleBarColors: (colors: { color: string; symbolColor: string }) => void;
 
   // Event Listeners
-  onAppUpdateAvailable: (
-    callback: (info: AppUpdateAvailableEvent) => void
+  /** A check finished (at launch, periodic, after Beta updates changed, or asked for) */
+  onAppUpdateChecked: (
+    callback: (result: AppUpdateCheckResult) => void
   ) => IpcListenerCleanup;
   onAppUpdateDownloaded: (
     callback: (info: AppUpdateDownloadedEvent) => void
@@ -41,16 +38,13 @@ export interface AppUpdateAPI {
   onAppUpdateProgress: (
     callback: (progress: AppUpdateProgress) => void
   ) => IpcListenerCleanup;
-  onAppUpdateStableDowngrade: (
-    callback: (info: AppUpdateInfo) => void
-  ) => IpcListenerCleanup;
   onAppUpdateReadOnlyVolume: (
     callback: (info: { appPath: string }) => void
   ) => IpcListenerCleanup;
   onAppUpdateError: (
     callback: (error: AppUpdateErrorEvent) => void
   ) => IpcListenerCleanup;
-  /** The update notification was clicked: open Settings > Updates */
+  /** A new version was found, or its notification clicked: open Settings > Updates */
   onAppUpdateOpenSettings: (callback: () => void) => IpcListenerCleanup;
 }
 
@@ -80,26 +74,17 @@ export const createAppUpdateAPI = (): AppUpdateAPI => ({
   getDownloadedAppUpdate: (): Promise<IPCResult<AppUpdateInfo | null>> =>
     invokeIpc(IPC_CHANNELS.APP_UPDATE_GET_DOWNLOADED),
 
-  getAvailableAppUpdate: (): Promise<IPCResult<AppUpdateInfo | null>> =>
-    invokeIpc(IPC_CHANNELS.APP_UPDATE_GET_AVAILABLE),
-
-  skipAppUpdate: (version: string): Promise<IPCResult> =>
-    invokeIpc(IPC_CHANNELS.APP_UPDATE_SKIP_VERSION, version),
-
-  snoozeAppUpdate: (): Promise<IPCResult> =>
-    invokeIpc(IPC_CHANNELS.APP_UPDATE_SNOOZE),
-
-  isAppUpdateSuppressed: (version: string): Promise<IPCResult<boolean>> =>
-    invokeIpc(IPC_CHANNELS.APP_UPDATE_IS_SUPPRESSED, version),
+  getLastAppUpdateCheck: (): Promise<IPCResult<AppUpdateCheckResult | null>> =>
+    invokeIpc(IPC_CHANNELS.APP_UPDATE_GET_LAST_CHECK),
 
   setTitleBarColors: (colors: { color: string; symbolColor: string }): void =>
     ipcRenderer.send(IPC_CHANNELS.WINDOW_SET_TITLE_BAR_COLORS, colors),
 
   // Event Listeners
-  onAppUpdateAvailable: (
-    callback: (info: AppUpdateAvailableEvent) => void
+  onAppUpdateChecked: (
+    callback: (result: AppUpdateCheckResult) => void
   ): IpcListenerCleanup =>
-    createIpcListener(IPC_CHANNELS.APP_UPDATE_AVAILABLE, callback),
+    createIpcListener(IPC_CHANNELS.APP_UPDATE_CHECKED, callback),
 
   onAppUpdateDownloaded: (
     callback: (info: AppUpdateDownloadedEvent) => void
@@ -110,11 +95,6 @@ export const createAppUpdateAPI = (): AppUpdateAPI => ({
     callback: (progress: AppUpdateProgress) => void
   ): IpcListenerCleanup =>
     createIpcListener(IPC_CHANNELS.APP_UPDATE_PROGRESS, callback),
-
-  onAppUpdateStableDowngrade: (
-    callback: (info: AppUpdateInfo) => void
-  ): IpcListenerCleanup =>
-    createIpcListener(IPC_CHANNELS.APP_UPDATE_STABLE_DOWNGRADE, callback),
 
   onAppUpdateReadOnlyVolume: (
     callback: (info: { appPath: string }) => void

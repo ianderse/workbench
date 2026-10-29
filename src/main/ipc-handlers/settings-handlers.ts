@@ -11,7 +11,7 @@ import type {
 } from '../../shared/types';
 import { AgentManager } from '../agent';
 import { appLog } from '../app-logger';
-import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
+import { setBetaUpdates } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { taskQueue } from '../services/task-queue';
 import { configureTools, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache, type ToolConfig } from '../cli-tool-manager';
@@ -244,13 +244,7 @@ export function registerSettingsHandlers(
         const savedSettings = readSettingsFile();
         const currentSettings = { ...DEFAULT_APP_SETTINGS, ...savedSettings };
 
-        // skippedUpdateVersion/updateRemindAfter are owned by the app updater
-        const {
-          skippedUpdateVersion: _skipped,
-          updateRemindAfter: _remindAfter,
-          ...safeSettings
-        } = settings;
-        const newSettings = { ...currentSettings, ...safeSettings };
+        const newSettings = { ...currentSettings, ...settings };
 
         writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2), 'utf-8');
 
@@ -284,18 +278,10 @@ export function registerSettingsHandlers(
           taskQueue.request();
         }
 
-        // Update auto-updater channel if betaUpdates setting changed
+        // Every save sends the whole settings object; the updater only checks again (and drops
+        // the version it found) when Beta updates actually changed
         if (settings.betaUpdates !== undefined) {
-          if (settings.betaUpdates) {
-            // Enabling beta updates - just switch channel
-            setUpdateChannel('beta');
-          } else {
-            // Disabling beta updates - switch to stable and check if downgrade is available
-            // This will notify the renderer if user is on a prerelease and stable version exists
-            setUpdateChannelWithDowngradeCheck('latest', true).catch((err) => {
-              console.error('[settings-handlers] Failed to check for stable downgrade:', err);
-            });
-          }
+          setBetaUpdates(settings.betaUpdates);
         }
 
         return { success: true };

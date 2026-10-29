@@ -1,390 +1,245 @@
 /**
- * Electron App Auto-Updater
+ * Electron App Updater
  *
- * Manages automatic updates for the packaged Electron application using electron-updater.
- * Updates are published through GitHub Releases and automatically downloaded and installed.
+ * Finds new Workbench versions on GitHub Releases and downloads and installs them when the user
+ * asks (Settings > Updates). Nothing is downloaded on its own.
  *
- * Update flow:
- * 1. Check for updates 3 seconds after app launch
- * 2. Download updates automatically when available
- * 3. Notify user when update is downloaded
- * 4. Install and restart when user confirms
+ * Which version: the app reads the GitHub release list and offers the highest version among the
+ * eligible releases (stable ones, plus pre-releases with Beta updates on), see
+ * updater/release-selection.ts. electron-updater only downloads and installs: before a download
+ * its feed is pointed at that one release's files.
+ *
+ * Flow:
+ * 1. Check 3 seconds after launch, then every 4 hours (packaged builds)
+ * 2. A newly found version opens Settings > Updates in one window ("Auto-update projects" on), or
+ *    shows a desktop notification that opens it when clicked
+ * 3. Download, then "Install and restart", from Settings > Updates
  *
  * Events sent to renderer:
- * - APP_UPDATE_AVAILABLE: New update available (with version info)
- * - APP_UPDATE_DOWNLOADED: Update downloaded and ready to install
- * - APP_UPDATE_PROGRESS: Download progress updates
- * - APP_UPDATE_ERROR: Error during update process
+ * - APP_UPDATE_CHECKED: a check finished (AppUpdateCheckResult)
+ * - APP_UPDATE_DOWNLOADED: the asked-for version is downloaded and ready to install
+ * - APP_UPDATE_PROGRESS: download progress
+ * - APP_UPDATE_ERROR: error during a download
+ * - APP_UPDATE_OPEN_SETTINGS: open Settings > Updates (sent to one window only)
  */
 
 import { accessSync, constants as fsConstants } from 'fs';
-import { allowWindowClose } from './app-tray';
-import { safeSendToRenderer } from './ipc-handlers/utils';
 import path from 'path';
+import semver from 'semver';
 import { autoUpdater } from 'electron-updater';
-import type { UpdateInfo } from 'electron-updater';
 import { app, net, Notification } from 'electron';
 import type { BrowserWindow } from 'electron';
+import { allowWindowClose } from './app-tray';
+import { appLog } from './app-logger';
+import { safeSendToRenderer } from './ipc-handlers/utils';
 import { IPC_CHANNELS } from '../shared/constants';
 import type { AppUpdateCheckResult, AppUpdateInfo } from '../shared/types';
-import { compareVersions } from './updater/version-manager';
+import settingsLocale from '../shared/i18n/locales/en/settings.json';
 import { isMacOS } from './platform';
-import { readSettingsFile, writeSettingsFile } from './settings-utils';
+import { readSettingsFile } from './settings-utils';
 import { showWindow } from './window-manager';
+import {
+  chooseUpdateOffer,
+  isPrereleaseVersion,
+  parseGitHubReleases,
+  type PublishedRelease,
+  type UpdateOffer
+} from './updater/release-selection';
 
-// GitHub repo info for API calls
+// GitHub repo the releases are published to (public, read without a token)
 const GITHUB_OWNER = 'proactive-agent';
 const GITHUB_REPO = 'workbench';
+const GITHUB_API_TIMEOUT = 10000;
 
 // Debug mode - DEBUG_UPDATER=true or development mode
 const DEBUG_UPDATER = process.env.DEBUG_UPDATER === 'true' || process.env.NODE_ENV === 'development';
 
-// Configure electron-updater
-autoUpdater.autoDownload = false;  // We control downloads manually to prevent downgrades
-autoUpdater.autoInstallOnAppQuit = true;  // Automatically install on app quit
+// Downloads only happen when the user asks; a downloaded update is installed on quit
+autoUpdater.autoDownload = false;
+autoUpdater.autoInstallOnAppQuit = true;
 
-// Update channels: 'latest' for stable, 'beta' for pre-release
-type UpdateChannel = 'latest' | 'beta';
-
-// Store interval ID for cleanup during shutdown
-let periodicCheckIntervalId: ReturnType<typeof setInterval> | null = null;
-
-/**
- * Convert basic HTML (from GitHub release bodies) to markdown.
- * Handles the common tags GitHub uses in release notes.
- */
-function htmlToMarkdown(html: string): string {
-  let md = html;
-
-  // Block-level replacements
-  md = md.replace(/<h1[^>]*>(.*?)<\/h1>/gi, '# $1\n\n');
-  md = md.replace(/<h2[^>]*>(.*?)<\/h2>/gi, '## $1\n\n');
-  md = md.replace(/<h3[^>]*>(.*?)<\/h3>/gi, '### $1\n\n');
-  md = md.replace(/<h4[^>]*>(.*?)<\/h4>/gi, '#### $1\n\n');
-
-  // Lists: convert <ol>/<ul> with <li> items
-  // First handle <li> within <ol> (numbered)
-  md = md.replace(/<ol[^>]*>([\s\S]*?)<\/ol>/gi, (_match, content: string) => {
-    let i = 0;
-    return content.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, text: string) => {
-      i++;
-      return `${i}. ${text.trim()}\n`;
-    }) + '\n';
-  });
-  // Then <li> within <ul> (bulleted)
-  md = md.replace(/<ul[^>]*>([\s\S]*?)<\/ul>/gi, (_match, content: string) => {
-    return content.replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_m: string, text: string) => {
-      return `- ${text.trim()}\n`;
-    }) + '\n';
-  });
-
-  // Inline replacements
-  md = md.replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**');
-  md = md.replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**');
-  md = md.replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*');
-  md = md.replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*');
-  md = md.replace(/<code[^>]*>(.*?)<\/code>/gi, '`$1`');
-  md = md.replace(/<tt[^>]*>(.*?)<\/tt>/gi, '`$1`');
-  md = md.replace(/<a[^>]*href="([^"]*)"[^>]*>(.*?)<\/a>/gi, '[$2]($1)');
-
-  // Block elements
-  md = md.replace(/<p[^>]*>([\s\S]*?)<\/p>/gi, '$1\n\n');
-  md = md.replace(/<br\s*\/?>/gi, '\n');
-  md = md.replace(/<hr\s*\/?>/gi, '---\n\n');
-
-  // Remove any remaining HTML tags (loop to handle nested tag fragments)
-  while (/<[^>]+>/.test(md)) {
-    md = md.replace(/<[^>]+>/g, '');
-  }
-
-  // Decode common HTML entities (&amp; LAST to prevent double-unescaping like &amp;lt; → &lt; → <)
-  md = md.replace(/&lt;/g, '<');
-  md = md.replace(/&gt;/g, '>');
-  md = md.replace(/&quot;/g, '"');
-  md = md.replace(/&#39;/g, "'");
-  md = md.replace(/&nbsp;/g, ' ');
-  md = md.replace(/&amp;/g, '&');
-
-  // Clean up excessive whitespace
-  md = md.replace(/\n{3,}/g, '\n\n');
-
-  return md.trim();
-}
-
-/**
- * Convert releaseNotes from electron-updater to a markdown string.
- * releaseNotes can be:
- * - string: Return as-is
- * - ReleaseNoteInfo[]: Convert to markdown with version headers
- * - null/undefined: Return undefined
- */
-function formatReleaseNotes(releaseNotes: UpdateInfo['releaseNotes']): string | undefined {
-  if (!releaseNotes) {
-    return undefined;
-  }
-
-  // If it's a string, convert HTML to markdown if needed
-  // electron-updater returns GitHub release bodies as HTML
-  if (typeof releaseNotes === 'string') {
-    if (releaseNotes.trimStart().startsWith('<')) {
-      return htmlToMarkdown(releaseNotes);
-    }
-    return releaseNotes;
-  }
-
-  // It's an array of ReleaseNoteInfo objects
-  // Format: [{ version: "1.0.0", note: "changes..." }, ...]
-  if (Array.isArray(releaseNotes)) {
-    // Return undefined for empty arrays for consistency with null/undefined handling
-    if (releaseNotes.length === 0) {
-      return undefined;
-    }
-
-    const formattedNotes = releaseNotes
-      .filter(item => item.note) // Filter out entries with null/undefined notes
-      .map(item => {
-        // Each item has version and note properties
-        // note can be HTML (GitHub provider) so convert if needed
-        const versionHeader = item.version ? `## ${item.version}\n` : '';
-        const note = typeof item.note === 'string' && item.note.trimStart().startsWith('<')
-          ? htmlToMarkdown(item.note)
-          : item.note;
-        return `${versionHeader}${note}`;
-      })
-      .join('\n\n');
-
-    return formattedNotes || undefined;
-  }
-
-  return undefined;
-}
-
-/**
- * Read update suppression preferences from settings.
- */
-function getUpdatePreferences(): { skippedVersion: string | null; remindAfter: number | null } {
-  const settings = readSettingsFile();
-  return {
-    skippedVersion: (settings?.skippedUpdateVersion as string) || null,
-    remindAfter: (settings?.updateRemindAfter as number) || null,
-  };
-}
-
-/**
- * Check if notifications for a version should be suppressed.
- * Returns true if the user has skipped this exact version, or snoozed and the snooze hasn't expired.
- */
-export function shouldSuppressUpdate(version: string): boolean {
-  const prefs = getUpdatePreferences();
-  if (prefs.skippedVersion === version) return true;
-  if (prefs.remindAfter && Date.now() < prefs.remindAfter) return true;
-  return false;
-}
-
-/**
- * Only install a downloaded update on quit if the user hasn't skipped or snoozed it.
- */
-function syncInstallOnQuit(): void {
-  autoUpdater.autoInstallOnAppQuit = !(downloadedUpdateInfo && shouldSuppressUpdate(downloadedUpdateInfo.version));
-}
-
-/**
- * Persist a request to skip a specific version permanently.
- * That version will never trigger notifications again unless a newer version arrives.
- */
-export function skipUpdateVersion(version: string): void {
-  const settings = readSettingsFile() || {};
-  settings.skippedUpdateVersion = version;
-  delete settings.updateRemindAfter;
-  writeSettingsFile(settings);
-  syncInstallOnQuit();
-  console.warn('[app-updater] Skipped version:', version);
-}
-
-/**
- * Snooze update notifications for 24 hours.
- */
-export function snoozeUpdate(): void {
-  const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
-  const settings = readSettingsFile() || {};
-  settings.updateRemindAfter = Date.now() + TWENTY_FOUR_HOURS;
-  writeSettingsFile(settings);
-  syncInstallOnQuit();
-  console.warn('[app-updater] Snoozed updates until:', new Date(settings.updateRemindAfter as number).toISOString());
-}
-
-/**
- * Set the update channel for electron-updater.
- * - 'latest': Only receive stable releases (default)
- * - 'beta': Receive pre-release/beta versions
- *
- * @param channel - The update channel to use
- */
-export function setUpdateChannel(channel: UpdateChannel): void {
-  autoUpdater.channel = channel;
-  availableUpdateInfo = null;
-  // Enable pre-release scanning when beta channel is selected
-  // This allows electron-updater to find beta releases on GitHub
-  autoUpdater.allowPrerelease = channel === 'beta';
-  // Clear any downloaded update info when channel changes to prevent showing
-  // an Install button for an update from a different channel
-  downloadedUpdateInfo = null;
-  console.warn(`[app-updater] Update channel set to: ${channel}, allowPrerelease: ${autoUpdater.allowPrerelease}`);
-}
-
-// Enable more verbose logging in debug mode
 if (DEBUG_UPDATER) {
   autoUpdater.logger = {
-    info: (msg: string) => console.warn('[app-updater:debug]', msg),
-    warn: (msg: string) => console.warn('[app-updater:debug]', msg),
-    error: (msg: string) => console.error('[app-updater:debug]', msg),
-    debug: (msg: string) => console.warn('[app-updater:debug]', msg)
+    info: (msg: string) => appLog.debug('[app-updater:debug]', msg),
+    warn: (msg: string) => appLog.debug('[app-updater:debug]', msg),
+    error: (msg: string) => appLog.error('[app-updater:debug]', msg),
+    debug: (msg: string) => appLog.debug('[app-updater:debug]', msg)
   };
 }
 
 /** Where update events go; windows come and go, so they are resolved per event */
 let getUpdateWindow: () => BrowserWindow | null = () => null;
+let periodicCheckIntervalId: ReturnType<typeof setInterval> | null = null;
 
-/**
- * Send an update event to every open window (an update is app-wide, and each window shows
- * the notification for itself).
- */
+/** The "Beta updates" setting */
+let betaUpdates = false;
+/** What the last check offers (the releases behind lastCheck) */
+let currentOffer: UpdateOffer | null = null;
+/** The last check's result, so Settings > Updates shows it when opened (e.g. from the notification) */
+let lastCheck: AppUpdateCheckResult | null = null;
+let checkInFlight: Promise<AppUpdateCheckResult> | null = null;
+/** The release being downloaded; only its 'update-downloaded' counts */
+let downloadingRelease: PublishedRelease | null = null;
+/** The downloaded update, ready to install (persists across Settings page navigations) */
+let downloadedUpdateInfo: AppUpdateInfo | null = null;
+/** The newest version a background check announced, so each version is announced once */
+let announcedVersion: string | null = null;
+/** The desktop notification, kept so it isn't garbage collected before it is clicked */
+let updateNotification: Notification | null = null;
+
 function sendUpdateEvent(channel: string, payload?: unknown): void {
   safeSendToRenderer(getUpdateWindow, channel, payload);
 }
 
-// Track downloaded update state so it persists across Settings page navigations
-let downloadedUpdateInfo: AppUpdateInfo | null = null;
+function toUpdateInfo(release: PublishedRelease): AppUpdateInfo {
+  return { version: release.version, releaseNotes: release.notes, releaseDate: release.publishedAt };
+}
 
-// The newer version the last check found (on the user's channel, not skipped or snoozed), so
-// Settings > Updates shows its Download button when opened, e.g. from the launch notification
-let availableUpdateInfo: AppUpdateInfo | null = null;
+/** The published releases (drafts left out); throws when GitHub can't be reached */
+async function fetchReleases(): Promise<PublishedRelease[]> {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases?per_page=100`;
+  const response = await net.fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': `Workbench/${getCurrentVersion()}`
+    },
+    signal: AbortSignal.timeout(GITHUB_API_TIMEOUT)
+  });
+  if (response.status === 404) return [];
+  if (!response.ok) {
+    throw new Error(response.status === 403
+      ? 'GitHub rate limit reached, try again later'
+      : `GitHub returned HTTP ${response.status}`);
+  }
+  return parseGitHubReleases(await response.json());
+}
 
-// The launch notification, kept so it isn't garbage collected before it is clicked
-let updateNotification: Notification | null = null;
+async function runCheck(): Promise<AppUpdateCheckResult> {
+  let releases: PublishedRelease[];
+  try {
+    releases = await fetchReleases();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    appLog.error('[app-updater] Update check failed:', message);
+    return { status: 'error', error: message };
+  }
+
+  const currentVersion = getCurrentVersion();
+  const offer = chooseUpdateOffer(currentVersion, betaUpdates, releases);
+  let result: AppUpdateCheckResult;
+  if (offer.update) {
+    result = { status: 'update-available', update: toUpdateInfo(offer.update), latestVersion: offer.update.version };
+  } else if (!offer.latest) {
+    result = { status: 'unpublished' };
+  } else if (semver.eq(offer.latest.version, currentVersion)) {
+    result = { status: 'up-to-date', latestVersion: offer.latest.version };
+  } else {
+    // Running a version newer than anything eligible (a local build, or a beta with Beta updates off)
+    result = {
+      status: 'unpublished',
+      latestVersion: offer.latest.version,
+      ...(offer.downgrade && { downgrade: toUpdateInfo(offer.downgrade) })
+    };
+  }
+
+  currentOffer = offer;
+  lastCheck = result;
+  sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_CHECKED, result);
+  return result;
+}
 
 /**
- * Tell the user about a new version found at launch with a desktop notification. Clicking it
- * shows a window and opens Settings > Updates there, where the Download button is.
+ * Check for a newer version (Settings > Updates, launch, periodic). Reports "up-to-date" only
+ * when the highest eligible release is exactly the running version.
  */
+export function checkForUpdates(): Promise<AppUpdateCheckResult> {
+  checkInFlight ??= runCheck().finally(() => {
+    checkInFlight = null;
+  });
+  return checkInFlight;
+}
+
+/** Send to one window only (never every project window), once its page has loaded */
+function sendToWindow(window: BrowserWindow, channel: string): void {
+  if (window.isDestroyed()) return;
+  const send = () => {
+    if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send(channel);
+  };
+  if (window.webContents.isLoading()) window.webContents.once('did-finish-load', send);
+  else send();
+}
+
+/** Open Settings > Updates in the focused (or main) window */
+function openUpdateSettings(bringToFront: boolean): void {
+  const window = getUpdateWindow();
+  if (!window || window.isDestroyed()) return;
+  if (bringToFront) showWindow(window);
+  sendToWindow(window, IPC_CHANNELS.APP_UPDATE_OPEN_SETTINGS);
+}
+
+/** A desktop notification about a new version; clicking it opens Settings > Updates */
 function notifyUpdateAvailable(info: AppUpdateInfo): void {
   if (!Notification.isSupported()) return;
   updateNotification?.close();
+  const text = settingsLocale.updates;
   const notification = new Notification({
-    title: 'Workbench update available',
-    body: `Version ${info.version} is ready to download`
+    title: text.notificationTitle,
+    body: text.notificationBody.replace('{{version}}', info.version)
   });
-  notification.on('click', () => {
-    const window = getUpdateWindow();
-    if (!window) return;
-    showWindow(window);
-    safeSendToRenderer(() => window, IPC_CHANNELS.APP_UPDATE_OPEN_SETTINGS);
-  });
+  notification.on('click', () => openUpdateSettings(true));
   updateNotification = notification;
   notification.show();
 }
 
-// Flag to allow intentional downgrades (e.g., switching from beta to stable)
-let intentionalDowngrade = false;
+/**
+ * Tell the user about a new version a background check found: open Settings > Updates, where its
+ * Download button is ("Auto-update projects", on by default), or show a notification
+ */
+function announceUpdate(info: AppUpdateInfo): void {
+  if (info.version === announcedVersion) return;
+  announcedVersion = info.version;
+  if (readSettingsFile()?.autoUpdateAutoBuild !== false) {
+    openUpdateSettings(false);
+  } else {
+    notifyUpdateAvailable(info);
+  }
+}
+
+async function backgroundCheck(announce: boolean): Promise<void> {
+  try {
+    const result = await checkForUpdates();
+    if (announce && result.update) announceUpdate(result.update);
+  } catch (error) {
+    appLog.error('[app-updater] Background update check failed:', error);
+  }
+}
 
 /**
- * Initialize the app updater system
- *
- * Sets up event handlers and starts periodic update checks (packaged builds; development
- * builds only check when asked, and never download).
+ * Initialize the app updater: event handlers, the check at launch and periodic checks (packaged
+ * builds; development builds check at launch and when asked, and never download)
  *
  * @param getWindow - Resolves the window update events go to
- * @param betaUpdates - Whether to receive beta/pre-release updates
+ * @param beta - The "Beta updates" setting
  */
-export function initializeAppUpdater(getWindow: () => BrowserWindow | null, betaUpdates = false): void {
+export function initializeAppUpdater(getWindow: () => BrowserWindow | null, beta = false): void {
   getUpdateWindow = getWindow;
+  betaUpdates = beta;
+  // There is nothing to install an update into in a development build
+  if (!app.isPackaged) autoUpdater.autoInstallOnAppQuit = false;
 
-  // Development builds check the published releases as well (electron-updater skips an unpacked
-  // app otherwise), so the update dialog can be tried by lowering package.json's version. There
-  // is nothing to install an update into, so they never download one or install on quit.
-  if (!app.isPackaged) {
-    autoUpdater.forceDevUpdateConfig = true;
-    autoUpdater.setFeedURL({ provider: 'github', owner: GITHUB_OWNER, repo: GITHUB_REPO });
-    autoUpdater.autoInstallOnAppQuit = false;
-  }
-
-  // Set update channel based on user preference
-  const channel = betaUpdates ? 'beta' : 'latest';
-  setUpdateChannel(channel);
-
-  // Log updater configuration
-  console.warn('[app-updater] ========================================');
-  console.warn('[app-updater] Initializing app auto-updater');
-  console.warn('[app-updater] App packaged:', app.isPackaged);
-  console.warn('[app-updater] Current version:', autoUpdater.currentVersion.version);
-  console.warn('[app-updater] Update channel:', channel);
-  console.warn('[app-updater] Auto-download enabled:', autoUpdater.autoDownload, '(manual download after version check)');
-  console.warn('[app-updater] Debug mode:', DEBUG_UPDATER);
-  console.warn('[app-updater] ========================================');
-
-  // ============================================
-  // Event Handlers
-  // ============================================
-
-  // Update available - new version found
-  autoUpdater.on('update-available', (info) => {
-    const currentVersion = autoUpdater.currentVersion.version;
-    const isNewer = compareVersions(info.version, currentVersion) > 0;
-    console.warn(`[app-updater] Update available: ${info.version} (current: ${currentVersion}, isNewer: ${isNewer})`);
-
-    // Skip if the "update" is actually a downgrade, unless it's an intentional downgrade
-    if (!isNewer && !intentionalDowngrade) {
-      console.warn('[app-updater] Ignoring update - not newer than current version');
-      return;
-    }
-
-    // Check if user has skipped or snoozed this version. Don't download it: with
-    // autoInstallOnAppQuit, a downloaded update would be installed on the next quit.
-    if (shouldSuppressUpdate(info.version)) {
-      console.warn('[app-updater] Update suppressed (skipped or snoozed):', info.version);
-      return;
-    }
-
-    availableUpdateInfo = {
-      version: info.version,
-      releaseNotes: formatReleaseNotes(info.releaseNotes),
-      releaseDate: info.releaseDate
-    };
-    // Not downloaded here: Settings > Updates has the Download button
-    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_AVAILABLE, availableUpdateInfo);
-  });
-
-  // Update downloaded - ready to install
   autoUpdater.on('update-downloaded', (info) => {
-    const currentVersion = autoUpdater.currentVersion.version;
-    const isNewer = compareVersions(info.version, currentVersion) > 0;
-    console.warn(`[app-updater] Update downloaded: ${info.version} (current: ${currentVersion}, isNewer: ${isNewer})`);
-
-    // Skip if the downloaded "update" is actually a downgrade, unless intentional
-    if (!isNewer && !intentionalDowngrade) {
-      console.warn('[app-updater] Ignoring downloaded update - not newer than current version');
+    const release = downloadingRelease;
+    if (!release || !semver.valid(info.version) || !semver.eq(info.version, release.version)) {
+      appLog.warn('[app-updater] Ignoring a download that was not asked for:', info.version);
       return;
     }
-
-    // Store downloaded update info so it persists across Settings page navigations
-    downloadedUpdateInfo = {
-      version: info.version,
-      releaseNotes: formatReleaseNotes(info.releaseNotes),
-      releaseDate: info.releaseDate
-    };
-
-    // Only notify renderer (and allow install-on-quit) if update is not suppressed
-    syncInstallOnQuit();
-    if (!shouldSuppressUpdate(info.version)) {
-      sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, downloadedUpdateInfo);
-    } else {
-      console.warn('[app-updater] Downloaded update suppressed (skipped or snoozed):', info.version);
-    }
+    downloadingRelease = null;
+    downloadedUpdateInfo = toUpdateInfo(release);
+    autoUpdater.autoInstallOnAppQuit = app.isPackaged;
+    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_DOWNLOADED, downloadedUpdateInfo);
   });
 
-  // Download progress
   autoUpdater.on('download-progress', (progress) => {
-    console.warn(`[app-updater] Download progress: ${progress.percent.toFixed(2)}%`);
     sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_PROGRESS, {
       percent: progress.percent,
       bytesPerSecond: progress.bytesPerSecond,
@@ -393,151 +248,89 @@ export function initializeAppUpdater(getWindow: () => BrowserWindow | null, beta
     });
   });
 
-  // Error handling
   autoUpdater.on('error', (error) => {
-    console.error('[app-updater] Update error:', error);
-    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_ERROR, {
-      message: error.message
-    });
+    appLog.error('[app-updater] Update error:', error);
+    sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_ERROR, { message: error.message });
   });
 
-  // No update available
-  autoUpdater.on('update-not-available', (info) => {
-    availableUpdateInfo = null;
-    console.warn('[app-updater] No updates available - you are on the latest version');
-    console.warn('[app-updater]   Current version:', info.version);
-    if (DEBUG_UPDATER) {
-      console.warn('[app-updater:debug] Full info:', JSON.stringify(info, null, 2));
-    }
-  });
-
-  // Checking for updates
-  autoUpdater.on('checking-for-update', () => {
-    console.warn('[app-updater] Checking for updates...');
-  });
-
-  // ============================================
-  // Update Check Schedule
-  // ============================================
-
-  // Check for updates 3 seconds after launch (development builds too). Only this check shows a
-  // desktop notification for a new version; the 'update-available' handler above has already
-  // left out a version that isn't newer, or that the user skipped or snoozed.
   const INITIAL_DELAY = 3000;
-  console.warn(`[app-updater] Will check for updates in ${INITIAL_DELAY / 1000} seconds...`);
-
-  setTimeout(() => {
-    console.warn('[app-updater] Performing initial update check');
-    autoUpdater.checkForUpdates()
-      .then(() => {
-        if (availableUpdateInfo) notifyUpdateAvailable(availableUpdateInfo);
-      })
-      .catch((error) => {
-        console.error('[app-updater] Initial update check failed:', error.message);
-        if (DEBUG_UPDATER) {
-          console.error('[app-updater:debug] Full error:', error);
-        }
-      });
-  }, INITIAL_DELAY);
+  setTimeout(() => void backgroundCheck(true), INITIAL_DELAY);
 
   // Development builds check again only when asked (unless DEBUG_UPDATER is set)
-  if (!app.isPackaged && process.env.DEBUG_UPDATER !== 'true') {
-    console.warn('[app-updater] Development build: no periodic update checks');
-    return;
-  }
+  if (!app.isPackaged && process.env.DEBUG_UPDATER !== 'true') return;
 
-  // Check for updates every 4 hours
   const FOUR_HOURS = 4 * 60 * 60 * 1000;
-  console.warn(`[app-updater] Periodic checks scheduled every ${FOUR_HOURS / 1000 / 60 / 60} hours`);
-
-  periodicCheckIntervalId = setInterval(() => {
-    console.warn('[app-updater] Performing periodic update check');
-    autoUpdater.checkForUpdates().catch((error) => {
-      console.error('[app-updater] Periodic update check failed:', error.message);
-      if (DEBUG_UPDATER) {
-        console.error('[app-updater:debug] Full error:', error);
-      }
-    });
-  }, FOUR_HOURS);
-
-  console.warn('[app-updater] Auto-updater initialized successfully');
+  periodicCheckIntervalId = setInterval(() => void backgroundCheck(true), FOUR_HOURS);
 }
 
 /**
- * True when an update check failed because nothing is published for this channel (no GitHub
- * release, or its update metadata file is missing), as opposed to a network/server failure
+ * The "Beta updates" setting changed: forget what the last check offered and check again
+ * (APP_UPDATE_CHECKED tells Settings > Updates the new result)
  */
-function isNothingPublishedError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /\b404\b|cannot find latest|no published versions|unable to find latest version|latest-[a-z]*\.yml/i.test(message);
+export function setBetaUpdates(enabled: boolean): void {
+  if (enabled === betaUpdates) return;
+  betaUpdates = enabled;
+  currentOffer = null;
+  lastCheck = null;
+  // A downloaded beta isn't offered any more: don't install it on quit
+  if (!enabled && downloadedUpdateInfo && isPrereleaseVersion(downloadedUpdateInfo.version)) {
+    downloadedUpdateInfo = null;
+    autoUpdater.autoInstallOnAppQuit = false;
+  }
+  void backgroundCheck(false);
 }
 
-/**
- * Manually check for updates
- * Called from IPC handler when user requests manual check. Reports "up-to-date" only when the
- * newest published release is exactly the running version.
- */
-export async function checkForUpdates(): Promise<AppUpdateCheckResult> {
-  console.warn('[app-updater] Manual update check requested');
-  let result: Awaited<ReturnType<typeof autoUpdater.checkForUpdates>>;
-  try {
-    result = await autoUpdater.checkForUpdates();
-  } catch (error) {
-    if (isNothingPublishedError(error)) {
-      console.warn('[app-updater] No published release found for this channel');
-      return { status: 'unpublished' };
-    }
-    console.error('[app-updater] Manual update check failed:', error);
-    return { status: 'error', error: error instanceof Error ? error.message : String(error) };
-  }
-
-  // electron-updater skips the check for unpackaged (development) builds
-  if (!result) {
-    return { status: 'unpublished' };
-  }
-
-  const currentVersion = autoUpdater.currentVersion.version;
-  const latestVersion = result.updateInfo.version;
-  const comparison = compareVersions(latestVersion, currentVersion);
-
-  console.warn(`[app-updater] Version comparison: ${latestVersion} vs ${currentVersion} -> ${comparison}`);
-
-  if (comparison > 0) {
-    return {
-      status: 'update-available',
-      latestVersion,
-      update: {
-        version: result.updateInfo.version,
-        releaseNotes: formatReleaseNotes(result.updateInfo.releaseNotes),
-        releaseDate: result.updateInfo.releaseDate
-      }
-    };
-  }
-
-  // Running a version newer than anything published (e.g. a local or pre-release build)
-  if (comparison < 0) {
-    return { status: 'unpublished', latestVersion };
-  }
-
-  return { status: 'up-to-date', latestVersion };
-}
-
-/**
- * Manually download update
- * Called from IPC handler when user requests manual download
- */
-export async function downloadUpdate(): Promise<void> {
-  // A development build has nothing to install an update into (see initializeAppUpdater)
+function assertCanDownload(): void {
+  // A development build has nothing to install an update into
   if (!app.isPackaged) {
     throw new Error('Development builds only check for updates; they do not download them');
   }
+}
+
+/** Point electron-updater at one release's files and download them */
+async function downloadRelease(release: PublishedRelease, isDowngrade: boolean): Promise<void> {
+  autoUpdater.setFeedURL({
+    provider: 'generic',
+    url: `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${encodeURIComponent(release.tag)}`,
+    // GitHub's asset storage doesn't serve multiple ranges in one request
+    useMultipleRangeRequest: false
+  });
+  autoUpdater.allowDowngrade = isDowngrade;
+  downloadingRelease = release;
   try {
-    console.warn('[app-updater] Manual update download requested');
+    const result = await autoUpdater.checkForUpdates();
+    if (!result?.isUpdateAvailable || !semver.eq(result.updateInfo.version, release.version)) {
+      throw new Error(`Version ${release.version} has no update for this platform`);
+    }
     await autoUpdater.downloadUpdate();
   } catch (error) {
-    console.error('[app-updater] Manual update download failed:', error);
+    downloadingRelease = null;
+    appLog.error(`[app-updater] Download of ${release.version} failed:`, error);
     throw error;
+  } finally {
+    autoUpdater.allowDowngrade = false;
   }
+}
+
+/** Download the newer version the last check found (checks first when there was none) */
+export async function downloadUpdate(): Promise<void> {
+  assertCanDownload();
+  if (!currentOffer) await checkForUpdates();
+  const release = currentOffer?.update;
+  if (!release) throw new Error('No newer version to download');
+  await downloadRelease(release, false);
+}
+
+/**
+ * Download the latest stable release over a running beta that is newer than it (Beta updates
+ * off); "Install and restart" then goes back to stable
+ */
+export async function downloadStableVersion(): Promise<void> {
+  assertCanDownload();
+  if (!currentOffer) await checkForUpdates();
+  const release = currentOffer?.downgrade;
+  if (!release) throw new Error('No stable version to download');
+  await downloadRelease(release, true);
 }
 
 /**
@@ -571,256 +364,35 @@ function isRunningFromReadOnlyVolume(): boolean {
 }
 
 /**
- * Quit and install update
- * Called from IPC handler when user confirms installation
+ * Quit and install the downloaded update
  * Returns false if running from a read-only volume (update cannot proceed)
  */
 export function quitAndInstall(): boolean {
-  // Check if running from read-only volume before attempting install
   if (isRunningFromReadOnlyVolume()) {
-    console.warn('[app-updater] Cannot install: running from read-only volume');
-
+    appLog.warn('[app-updater] Cannot install: running from read-only volume');
     sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_READONLY_VOLUME, {
       appPath: app.getAppPath()
     });
     return false;
   }
 
-  console.warn('[app-updater] Quitting and installing update');
   allowWindowClose(); // don't let hide-to-tray block the updater from closing the window
   autoUpdater.quitAndInstall(false, true);
   return true;
 }
 
-/** The newer version the last check found, or null (see availableUpdateInfo) */
-export function getAvailableUpdateInfo(): AppUpdateInfo | null {
-  return availableUpdateInfo;
+/** The last check's result, or null when nothing was checked since launch or since Beta updates changed */
+export function getLastUpdateCheck(): AppUpdateCheckResult | null {
+  return lastCheck;
 }
 
-/**
- * Get current app version
- */
 export function getCurrentVersion(): string {
   return autoUpdater.currentVersion.version;
 }
 
-/**
- * Get downloaded update info if an update has been downloaded and is ready to install.
- * This allows the UI to show "Install and Restart" even if the user opens Settings
- * after the download completed in the background.
- */
+/** The downloaded update, ready to install, or null */
 export function getDownloadedUpdateInfo(): AppUpdateInfo | null {
   return downloadedUpdateInfo;
-}
-
-/**
- * Check if a version string represents a prerelease (beta, alpha, rc, etc.)
- */
-function isPrerelease(version: string): boolean {
-  return /-(alpha|beta|rc|dev|canary)\.\d+$/i.test(version) || version.includes('-');
-}
-
-// Timeout for GitHub API requests (10 seconds)
-const GITHUB_API_TIMEOUT = 10000;
-
-/**
- * Fetch the latest stable release from GitHub API
- * Returns the latest non-prerelease version
- */
-async function fetchLatestStableRelease(): Promise<AppUpdateInfo | null> {
-  const fetchPromise = new Promise<AppUpdateInfo | null>((resolve) => {
-    const url = `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases`;
-    console.warn('[app-updater] Fetching releases from:', url);
-
-    const request = net.request({
-      url,
-      method: 'GET'
-    });
-
-    request.setHeader('Accept', 'application/vnd.github.v3+json');
-    request.setHeader('User-Agent', `Workbench/${getCurrentVersion()}`);
-
-    let data = '';
-
-    request.on('response', (response) => {
-      // Validate HTTP status code
-      const statusCode = response.statusCode;
-      if (statusCode !== 200) {
-        // Sanitize statusCode to prevent log injection
-        // Convert to number and validate range to ensure it's a valid HTTP status code
-        const numericCode = Number(statusCode);
-        const safeStatusCode = (Number.isInteger(numericCode) && numericCode >= 100 && numericCode < 600)
-          ? String(numericCode)
-          : 'unknown';
-        console.error(`[app-updater] GitHub API error: HTTP ${safeStatusCode}`);
-        if (statusCode === 403) {
-          console.error('[app-updater] Rate limit may have been exceeded');
-        } else if (statusCode === 404) {
-          console.error('[app-updater] Repository or releases not found');
-        }
-        resolve(null);
-        return;
-      }
-
-      response.on('data', (chunk) => {
-        data += chunk.toString('utf-8');
-      });
-
-      response.on('end', () => {
-        try {
-          const parsed = JSON.parse(data);
-
-          // Validate response is an array
-          if (!Array.isArray(parsed)) {
-            console.error('[app-updater] Unexpected response format - expected array, got:', typeof parsed);
-            resolve(null);
-            return;
-          }
-
-          const releases = parsed as Array<{
-            tag_name: string;
-            prerelease: boolean;
-            draft: boolean;
-            body?: string;
-            published_at?: string;
-            html_url?: string;
-          }>;
-
-          // Find the first non-prerelease, non-draft release
-          const latestStable = releases.find(r => !r.prerelease && !r.draft);
-
-          if (!latestStable) {
-            console.warn('[app-updater] No stable release found');
-            resolve(null);
-            return;
-          }
-
-          const version = latestStable.tag_name.replace(/^v/, '');
-          // Sanitize version string for logging (remove control characters and limit length)
-          const safeVersion = String(version).replace(/[\x00-\x1f\x7f]/g, '').slice(0, 50);
-          console.warn('[app-updater] Found latest stable release:', safeVersion);
-
-          resolve({
-            version,
-            releaseNotes: latestStable.body,
-            releaseDate: latestStable.published_at
-          });
-        } catch (e) {
-          // Sanitize error message for logging (prevent log injection from malformed JSON)
-          const safeError = (e instanceof Error ? e.message : 'Unknown parse error').replace(/[\r\n\x00-\x1f]/g, '');
-          console.error('[app-updater] Failed to parse releases JSON:', safeError);
-          resolve(null);
-        }
-      });
-    });
-
-    request.on('error', (error) => {
-      // Sanitize error message for logging (use only the message property, strip control chars)
-      const safeErrorMessage = (error instanceof Error ? error.message : 'Unknown error').replace(/[\r\n\x00-\x1f]/g, '');
-      console.error('[app-updater] Failed to fetch releases:', safeErrorMessage);
-      resolve(null);
-    });
-
-    request.end();
-  });
-
-  // Add timeout to prevent hanging indefinitely
-  const timeoutPromise = new Promise<AppUpdateInfo | null>((resolve) => {
-    setTimeout(() => {
-      console.error(`[app-updater] GitHub API request timed out after ${GITHUB_API_TIMEOUT}ms`);
-      resolve(null);
-    }, GITHUB_API_TIMEOUT);
-  });
-
-  return Promise.race([fetchPromise, timeoutPromise]);
-}
-
-/**
- * Check if we should offer a downgrade to stable
- * Called when user disables beta updates while on a prerelease version
- *
- * Returns the latest stable version if:
- * 1. Current version is a prerelease
- * 2. A stable version exists
- */
-async function checkForStableDowngrade(): Promise<AppUpdateInfo | null> {
-  const currentVersion = getCurrentVersion();
-
-  // Only check for downgrade if currently on a prerelease
-  if (!isPrerelease(currentVersion)) {
-    console.warn('[app-updater] Current version is not a prerelease, no downgrade needed');
-    return null;
-  }
-
-  console.warn('[app-updater] Current version is prerelease:', currentVersion);
-  console.warn('[app-updater] Checking for stable version to downgrade to...');
-
-  const latestStable = await fetchLatestStableRelease();
-
-  if (!latestStable) {
-    console.warn('[app-updater] No stable release available for downgrade');
-    return null;
-  }
-
-  console.warn('[app-updater] Stable downgrade available:', latestStable.version);
-  return latestStable;
-}
-
-/**
- * Set update channel with optional downgrade check
- * When switching from beta to stable, checks if user should be offered a downgrade
- *
- * @param channel - The update channel to switch to
- * @param triggerDowngradeCheck - Whether to check for stable downgrade (when disabling beta)
- */
-export async function setUpdateChannelWithDowngradeCheck(
-  channel: UpdateChannel,
-  triggerDowngradeCheck = false
-): Promise<AppUpdateInfo | null> {
-  // Use the shared channel-setting function to avoid code duplication
-  setUpdateChannel(channel);
-
-  // If switching to stable and downgrade check requested, look for stable version
-  if (channel === 'latest' && triggerDowngradeCheck) {
-    const stableVersion = await checkForStableDowngrade();
-
-    if (stableVersion) {
-      // Notify the renderer about the available stable downgrade
-      sendUpdateEvent(IPC_CHANNELS.APP_UPDATE_STABLE_DOWNGRADE, stableVersion);
-    }
-
-    return stableVersion;
-  }
-
-  return null;
-}
-
-/**
- * Download a specific version (for downgrade)
- * Uses electron-updater with allowDowngrade enabled to download older stable versions
- */
-export async function downloadStableVersion(): Promise<void> {
-  // Switch to stable channel (resets allowPrerelease and clears downloadedUpdateInfo)
-  setUpdateChannel('latest');
-  // Enable downgrade to allow downloading older versions (e.g., stable when on beta)
-  autoUpdater.allowDowngrade = true;
-  intentionalDowngrade = true;
-  console.warn('[app-updater] Downloading stable version (allowDowngrade=true)...');
-
-  try {
-    // Force a fresh check on the stable channel, then download
-    const result = await autoUpdater.checkForUpdates();
-    if (!result) {
-      throw new Error('No stable version available for download');
-    }
-  } catch (error) {
-    console.error('[app-updater] Failed to download stable version:', error);
-    throw error;
-  } finally {
-    // Reset flags to prevent unintended downgrades in normal update checks
-    autoUpdater.allowDowngrade = false;
-    intentionalDowngrade = false;
-  }
 }
 
 /**
@@ -830,6 +402,5 @@ export function stopPeriodicUpdates(): void {
   if (periodicCheckIntervalId) {
     clearInterval(periodicCheckIntervalId);
     periodicCheckIntervalId = null;
-    console.warn('[app-updater] Periodic update checks stopped');
   }
 }

@@ -15,10 +15,7 @@ import {
   quitAndInstall,
   getCurrentVersion,
   getDownloadedUpdateInfo,
-  getAvailableUpdateInfo,
-  skipUpdateVersion,
-  snoozeUpdate,
-  shouldSuppressUpdate
+  getLastUpdateCheck
 } from '../app-updater';
 
 /**
@@ -133,21 +130,18 @@ export function registerAppUpdateHandlers(): void {
   );
 
   /**
-   * APP_UPDATE_GET_DOWNLOADED: Get downloaded update info
-   * Returns info about a downloaded update that's ready to install,
-   * or null if no update has been downloaded yet.
-   * This allows the UI to show "Install and Restart" even if the user
-   * opens Settings after the download completed in the background.
-   */
-  /**
-   * APP_UPDATE_GET_AVAILABLE: the newer version the last check found (e.g. the one at launch), so
-   * Settings > Updates shows its Download button without checking again
+   * APP_UPDATE_GET_LAST_CHECK: the last check's result in the main process (e.g. the one at launch),
+   * so Settings > Updates shows the version found and its Download button without checking again
    */
   ipcMain.handle(
-    IPC_CHANNELS.APP_UPDATE_GET_AVAILABLE,
-    async (): Promise<IPCResult<AppUpdateInfo | null>> => ({ success: true, data: getAvailableUpdateInfo() })
+    IPC_CHANNELS.APP_UPDATE_GET_LAST_CHECK,
+    async (): Promise<IPCResult<AppUpdateCheckResult | null>> => ({ success: true, data: getLastUpdateCheck() })
   );
 
+  /**
+   * APP_UPDATE_GET_DOWNLOADED: the downloaded update that's ready to install, or null, so the UI
+   * shows "Install and restart" for it even if Settings opens after the download finished
+   */
   ipcMain.handle(
     IPC_CHANNELS.APP_UPDATE_GET_DOWNLOADED,
     async (): Promise<IPCResult<AppUpdateInfo | null>> => {
@@ -160,59 +154,6 @@ export function registerAppUpdateHandlers(): void {
           success: false,
           error: error instanceof Error ? error.message : 'Failed to get downloaded update info'
         };
-      }
-    }
-  );
-
-  /**
-   * APP_UPDATE_SKIP_VERSION: Permanently skip a specific version
-   * That version will never show notifications again until a newer version arrives
-   */
-  ipcMain.handle(
-    IPC_CHANNELS.APP_UPDATE_SKIP_VERSION,
-    async (_event, version: string): Promise<IPCResult> => {
-      try {
-        // Validate version format (semver-like, max 50 chars)
-        if (!version || typeof version !== 'string' || version.length > 50 || !/^[\d\w.-]+$/.test(version)) {
-          return { success: false, error: 'Invalid version format' };
-        }
-        skipUpdateVersion(version);
-        return { success: true };
-      } catch (error) {
-        console.error('[app-update-handlers] Skip version failed:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to skip version' };
-      }
-    }
-  );
-
-  /**
-   * APP_UPDATE_SNOOZE: Snooze update notifications for 24 hours
-   */
-  ipcMain.handle(
-    IPC_CHANNELS.APP_UPDATE_SNOOZE,
-    async (): Promise<IPCResult> => {
-      try {
-        snoozeUpdate();
-        return { success: true };
-      } catch (error) {
-        console.error('[app-update-handlers] Snooze update failed:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to snooze update' };
-      }
-    }
-  );
-
-  /**
-   * APP_UPDATE_IS_SUPPRESSED: Check if update notifications are suppressed for a version
-   * Used by the renderer to avoid showing stale banners after a skip/snooze
-   */
-  ipcMain.handle(
-    IPC_CHANNELS.APP_UPDATE_IS_SUPPRESSED,
-    async (_event, version: string): Promise<IPCResult<boolean>> => {
-      try {
-        return { success: true, data: shouldSuppressUpdate(version) };
-      } catch (error) {
-        console.error('[app-update-handlers] Check suppression failed:', error);
-        return { success: false, error: error instanceof Error ? error.message : 'Failed to check suppression' };
       }
     }
   );

@@ -86,7 +86,7 @@ import type {
   AllProfilesUsage
 } from './agent';
 import type { AppSettings } from './settings';
-import type { AppUpdateCheckResult, AppUpdateInfo, AppUpdateProgress, AppUpdateAvailableEvent, AppUpdateDownloadedEvent, AppUpdateErrorEvent } from './app-update';
+import type { AppUpdateCheckResult, AppUpdateInfo, AppUpdateProgress, AppUpdateDownloadedEvent, AppUpdateErrorEvent } from './app-update';
 import type {
   InsightsSession,
   InsightsSessionSummary,
@@ -378,25 +378,19 @@ export interface ElectronAPI {
   downloadStableUpdate: () => Promise<IPCResult>;
   installAppUpdate: () => void;
   getDownloadedAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
-  getAvailableAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
-  skipAppUpdate: (version: string) => Promise<IPCResult>;
-  snoozeAppUpdate: () => Promise<IPCResult>;
-  isAppUpdateSuppressed: (version: string) => Promise<IPCResult<boolean>>;
+  getLastAppUpdateCheck: () => Promise<IPCResult<AppUpdateCheckResult | null>>;
 
   setTitleBarColors: (colors: { color: string; symbolColor: string }) => void;
 
   // Electron app update event listeners
-  onAppUpdateAvailable: (
-    callback: (info: AppUpdateAvailableEvent) => void
+  onAppUpdateChecked: (
+    callback: (result: AppUpdateCheckResult) => void
   ) => () => void;
   onAppUpdateDownloaded: (
     callback: (info: AppUpdateDownloadedEvent) => void
   ) => () => void;
   onAppUpdateProgress: (
     callback: (progress: AppUpdateProgress) => void
-  ) => () => void;
-  onAppUpdateStableDowngrade: (
-    callback: (info: AppUpdateInfo) => void
   ) => () => void;
   onAppUpdateOpenSettings: (callback: () => void) => () => void;
   onAppUpdateReadOnlyVolume: (
