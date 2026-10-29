@@ -9,6 +9,8 @@ import { applyHumanWorkMutation } from '../../../../shared/utils/human-work';
 import { useTaskStore } from '../../../stores/task-store';
 import { HumanWorkPanel } from './HumanWorkPanel';
 import { HumanWorkInbox } from '../../HumanWorkInbox';
+import { HumanRequestSummary } from './HumanRequestSummary';
+import { ciHumanWorkItems } from '../../../../shared/utils/__tests__/fixtures/human-work-ci';
 const finding = { severity: 'blocker' as const, description: 'A real reviewer must approve the images.', file: 'docs/report.md', line: 7 };
 let task: Task;
 const mutate = vi.fn();
@@ -21,6 +23,33 @@ beforeEach(() => {
   window.electronAPI = { ...window.electronAPI, mutateHumanWork: mutate, submitReview: review };
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+it('shows repeated hosted-CI proof as one executable request and labels earlier enforcement separately', () => {
+  const items = ciHumanWorkItems();
+  const humanWork = { revision: 6, items };
+  const before = structuredClone(humanWork);
+  useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork } }] });
+  render(<HumanWorkPanel task={task} findings={[items.at(-1)!.finding]} />);
+  expect(screen.getAllByRole('heading', { name: 'Authorize the hosted CI check' })).toHaveLength(1);
+  const enforcement = screen.getByRole('heading', { name: 'Review repository check enforcement' }).closest('article')!;
+  expect(enforcement).toHaveTextContent('Earlier review request; not listed in the latest findings');
+  expect(screen.getAllByText('Earlier review request; not listed in the latest findings')).toHaveLength(1);
+  expect(screen.getByText(/An agent can carry it out once authorized/)).toBeVisible();
+  expect(screen.getByText('Record the run URL, tested commit, failing step and retained diagnostics.')).toBeVisible();
+  expect(screen.getAllByLabelText('Responsible person')).toHaveLength(2);
+  expect(screen.getByRole('button', { name: 'Submit and continue' })).toBeDisabled();
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork).toEqual(before);
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it.each([
+  'Hosted PR deliberate-failure demonstration completed: see the failed and passing hosted runs.',
+  'Hosted PR deliberate-failure demonstration not produced. The evidence requirement is waived.',
+])('does not prescribe new CI execution for a completed or waived demonstration: %s', description => {
+  render(<HumanRequestSummary findings={[{ ...finding, description }]} />);
+  expect(screen.getByRole('heading', { name: 'Review the human requirement' })).toBeVisible();
+  expect(screen.queryByText('Push a temporary PR branch with a deliberately failing test and confirm the GitHub check fails.')).not.toBeInTheDocument();
+});
 it('tracks a legacy review blocker, requires a complete receipt, and hands off the exact saved revision', async () => {
   render(<HumanWorkPanel task={task} findings={[finding]} />);
   fireEvent.click(screen.getByRole('button', { name: 'Track as human action' }));

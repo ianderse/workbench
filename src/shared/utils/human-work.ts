@@ -13,9 +13,13 @@ export function humanReviewTopics(text: string): Array<'study' | 'visual'> {
 /** Display grouping only: every source finding, receipt and server-side requirement stays intact. */
 export function groupHumanWorkItems(items: HumanWorkItem[]): HumanWorkItem[][] {
   const groups: HumanWorkItem[][] = [];
-  const tokens = (text: string) => new Set(text.toLowerCase().match(/[a-z0-9]{4,}/g) ?? []);
+  // Receipt references grow as reviews repeat; their random IDs are provenance,
+  // not part of the requirement's meaning for conservative display matching.
+  const tokens = (text: string) => new Set(text.toLowerCase()
+    .replace(/\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b/g, '')
+    .match(/[a-z0-9]{4,}/g) ?? []);
   for (const item of items) {
-    const group = groups.find(([other]) => {
+    const group = groups.find(notes => notes.some(other => {
       if (!item.finding.file || item.finding.file !== other.finding.file) return false;
       // Differing submissions must remain independently editable, even for similar requirements.
       if (['owner', 'status', 'response', 'evidence'].some(key => item[key as keyof HumanWorkSnapshot] !== other[key as keyof HumanWorkSnapshot])) return false;
@@ -24,9 +28,16 @@ export function groupHumanWorkItems(items: HumanWorkItem[]): HumanWorkItem[][] {
       const gate = item.finding.description.match(/\bgate\s+[\w.-]+/i)?.[0].toLowerCase();
       const sameGate = !!gate && gate === other.finding.description.match(/\bgate\s+[\w.-]+/i)?.[0].toLowerCase();
       const topics = humanReviewTopics(item.finding.description).join(',');
-      return !!topics && topics === humanReviewTopics(other.finding.description).join(',')
+      const references = (description: string, id: string) => {
+        const ids: string[] = description.toLowerCase().match(/\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b/g) ?? [];
+        return ids.includes(id.toLowerCase());
+      };
+      // Unknown topics need an explicit receipt relationship as well as overlap;
+      // generic approval boilerplate alone cannot join unrelated requests.
+      if (!topics && !references(item.finding.description, other.id) && !references(other.finding.description, item.id)) return false;
+      return topics === humanReviewTopics(other.finding.description).join(',')
         && shared / new Set([...a, ...b]).size >= (sameGate ? 0.3 : 0.5);
-    });
+    }));
     if (group) group.push(item); else groups.push([item]);
   }
   return groups;

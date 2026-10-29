@@ -107,3 +107,14 @@ resolution. Every original finding and its history remains stored. Saving a grou
 the selected records atomically under the same expected-revision check; different existing answers
 remain separate. Continuing still requires every tracked receipt and current blocker to be covered.
 The human override remains a separate, explicit owner decision.
+
+Grouping also covers repeated CI and repository-policy requests, not only visual or participant
+work. Receipt UUIDs are ignored for display similarity because they are audit references rather
+than new requirements. Related notes can match another member of a group as the wording evolves;
+different answers or source files stay separate. An explicit missing hosted-CI demonstration gets
+a short execution outline: an authorized temporary PR with a failing test, recorded run evidence,
+then removal of the failure and a passing run. This is automatable verification work, not a claim
+that a person's code approval supplies the missing hosted evidence. Repository check enforcement
+is shown separately and remains subject to the task's actual conditional policy.
+For requests outside the visual/participant topics, an explicit reference to another receipt's
+identity is also required for grouping; similar approval boilerplate alone is insufficient.

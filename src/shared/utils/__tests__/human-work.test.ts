@@ -1,9 +1,33 @@
 import { describe, expect, it } from 'vitest';
 import { applyHumanWorkMutation, buildHumanWorkFeedback, buildHumanWorkPrompt, groupHumanWorkItems, MAX_HUMAN_WORK_PROMPT_BYTES } from '../human-work';
 import type { ReviewRoundFinding } from '../../types/claude-code';
+import { ciHumanWorkItems } from './fixtures/human-work-ci';
 const finding: ReviewRoundFinding = { severity: 'blocker', description: 'A real reviewer must approve the committed images.', file: 'docs/report.md', line: 7 };
 const at = '2026-10-27T16:00:00.000Z';
 const create = () => applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding }, [finding], 'human-1', at);
+
+it('groups six reworded CI receipts into hosted verification and repository enforcement requests without changing records', () => {
+  const items = ciHumanWorkItems();
+  const before = structuredClone(items);
+  const groups = groupHumanWorkItems(items);
+  expect(groups.map(group => group.length)).toEqual([4, 2]);
+  expect(groups[0].every(item => item.finding.description.startsWith('Hosted PR'))).toBe(true);
+  expect(groups[1].every(item => item.finding.description.startsWith('Pre-merge enforcement'))).toBe(true);
+  expect(items).toEqual(before);
+  const answered = ciHumanWorkItems();
+  answered[2].response = 'This demonstration is deferred pending push authorization.';
+  expect(groupHumanWorkItems(answered).find(group => group.some(item => item.id === answered[2].id))).toHaveLength(1);
+  const otherSource = ciHumanWorkItems();
+  otherSource[2].finding.file = 'docs/another-workflow.md';
+  expect(groupHumanWorkItems(otherSource).find(group => group.some(item => item.id === otherSource[2].id))).toHaveLength(1);
+});
+
+it('keeps similar unlinked nonvisual requests separate despite shared approval boilerplate', () => {
+  const items = ciHumanWorkItems().slice(0, 2);
+  items[0].finding.description = 'An owner must authorize deployment of service alpha before the configured release can proceed. Record the exact revision and deployment window in the report.';
+  items[1].finding.description = 'An owner must authorize deployment of service beta before the configured release can proceed. Record the exact revision and deployment window in the report.';
+  expect(groupHumanWorkItems(items)).toHaveLength(2);
+});
 describe('human work records', () => {
   it('tracks an immutable source finding, deduplicates it, and keeps progress/submission history', () => {
     const first = create();

@@ -9,9 +9,18 @@ export function humanRequestPresentation(findings: ReviewRoundFinding[]) {
     .map(path => path.replace(/\\/g, '/')))];
   const screenshots = images.filter(path => /(?:^|\/)\d{2,5}[x×]\d{2,5}\//i.test(path));
   const topics = humanReviewTopics(text);
+  // Only explicit outstanding requests get an executable CI outline. A past
+  // demonstration or merely mentioning CI must not become another approval gate.
+  const hostedCiPending = findings.length > 0 && findings.every(finding =>
+    /^Hosted PR deliberate-failure (?:evidence|demonstration) not produced\b/i.test(finding.description.trim())
+    && !/\b(?:demonstration|requirement|evidence)\s+(?:is\s+|was\s+)?(?:waived|deferred|not\s+required|completed)\b/i.test(finding.description));
+  const enforcement = findings.length > 0 && findings.every(finding =>
+    /^Pre-merge enforcement\b/i.test(finding.description.trim()));
   const kind = screenshots.length ? 'screenshots'
-    : topics.includes('study') ? 'study'
-      : topics.includes('visual') ? 'visual' : 'decision';
+    : hostedCiPending ? 'hostedCi'
+      : enforcement ? 'enforcement'
+        : topics.includes('study') ? 'study'
+          : topics.includes('visual') ? 'visual' : 'decision';
   // A topic mention does not mean that work is still required. Only the explicit
   // pending-baseline wording gets specialized decision guidance; ambiguity stays neutral.
   const baselineApprovalPending = /\bbaselines?\s+without\s+(?:human\s+)?approval\b/i.test(text)
@@ -36,6 +45,11 @@ export function HumanRequestSummary({ findings }: { findings: ReviewRoundFinding
     <h4 className="text-base font-medium leading-snug">{title}</h4>
     <p className="text-sm text-muted-foreground">{t(presentation.kind === 'screenshots' && presentation.baselines
       ? 'humanWork.request.baselineDecision' : `humanWork.request.${presentation.kind}Help`)}</p>
+    {presentation.kind === 'hostedCi' && <ol className="list-decimal space-y-1 pl-5 text-sm">
+      <li>{t('humanWork.request.hostedCiFail')}</li>
+      <li>{t('humanWork.request.hostedCiEvidence')}</li>
+      <li>{t('humanWork.request.hostedCiPass')}</li>
+    </ol>}
     {!!presentation.images.length && <ul className="space-y-1" aria-label={t('humanWork.request.artifacts')}>
       {presentation.images.map(path => <li key={path} className="rounded bg-muted/50 px-2 py-1 font-mono text-xs wrap-anywhere">{path}</li>)}
     </ul>}

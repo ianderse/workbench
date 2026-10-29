@@ -13,10 +13,11 @@ import { HumanRequestSummary } from './HumanRequestSummary';
 type HumanDraft = Pick<HumanWorkItem, 'owner' | 'status' | 'response' | 'evidence'>;
 const fieldsOf = ({ owner, status, response, evidence }: HumanWorkItem): HumanDraft => ({ owner, status, response, evidence });
 
-function HumanAction({ item, related, draft, change, save, disabled }: { item: HumanWorkItem; related: HumanWorkItem[]; draft: HumanDraft; change: (fields: HumanDraft) => void; save: (fields: Omit<Extract<HumanWorkMutation, { action: 'update' }>, 'action' | 'expectedRevision'>) => void; disabled: boolean }) {
+function HumanAction({ item, related, draft, change, save, disabled, earlier }: { item: HumanWorkItem; related: HumanWorkItem[]; draft: HumanDraft; change: (fields: HumanDraft) => void; save: (fields: Omit<Extract<HumanWorkMutation, { action: 'update' }>, 'action' | 'expectedRevision'>) => void; disabled: boolean; earlier: boolean }) {
   const { t } = useTranslation('tasks');
   const { owner, status, response, evidence } = draft;
   return <article className="space-y-4 rounded-md border bg-background p-4">
+    {earlier && <p className="text-xs text-muted-foreground">{t('humanWork.earlierRequest')}</p>}
     <HumanRequestSummary findings={[item, ...related].map(note => note.finding)} />
     <form className="space-y-3 border-t pt-3" onSubmit={(event) => { event.preventDefault(); save({ id: item.id, ...(related.length ? { relatedIds: related.map(note => note.id) } : {}), owner, status, response, evidence }); }}>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -113,7 +114,8 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
     {!overrideActive && remaining.map((finding) => <div key={humanFindingKey(finding)} className="space-y-3 rounded-md border bg-background p-4"><HumanRequestSummary findings={[finding]} /><details className="text-xs text-muted-foreground"><summary>{t('humanWork.exactRequirements', { count: 1 })}</summary><p className="mt-2 whitespace-pre-wrap wrap-anywhere">{finding.description}</p></details><Button size="sm" variant="outline" disabled={!available || busy || handedBack} onClick={() => void mutate({ action: 'create', expectedRevision: stream?.revision ?? 0, finding })}>{t('humanWork.track')}</Button></div>)}
     {groups.map(group => {
       const item = group.at(-1)!;
-      const action = <HumanAction item={item} related={group.filter(note => note.id !== item.id)} draft={draftFor(item)} change={(fields) => setDrafts(current => ({ ...current, ...Object.fromEntries(group.map(note => [note.id, { revision: note.revision, fields }])) }))} disabled={!available || busy || handedBack || overrideActive} save={fields => void mutate({ action: 'update', expectedRevision: stream!.revision, ...fields })} />;
+      const earlier = !group.some(note => findings.some(finding => humanFindingKey(finding) === humanFindingKey(note.finding)));
+      const action = <HumanAction item={item} related={group.filter(note => note.id !== item.id)} earlier={earlier} draft={draftFor(item)} change={(fields) => setDrafts(current => ({ ...current, ...Object.fromEntries(group.map(note => [note.id, { revision: note.revision, fields }])) }))} disabled={!available || busy || handedBack || overrideActive} save={fields => void mutate({ action: 'update', expectedRevision: stream!.revision, ...fields })} />;
       return item.status === 'submitted' && !edited(item)
         ? <details key={`${item.id}:${item.revision}`} className="rounded border p-3 text-sm"><summary>{t('humanWork.recordedResponse', { owner: item.owner, count: group.length })}</summary><p className="mt-2 whitespace-pre-wrap wrap-anywhere">{item.response}</p><div className="mt-3">{action}</div></details>
         : <div key={`${item.id}:${item.revision}`}>{action}</div>;
