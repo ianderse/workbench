@@ -20,7 +20,7 @@
  * - Graceful fallbacks when tools not found
  */
 
-import { execFileSync, execFile, type ExecFileOptionsWithStringEncoding, type ExecFileSyncOptions } from 'child_process';
+import { execFileSync, execFile, spawn, type ChildProcess, type ExecFileOptionsWithStringEncoding, type ExecFileSyncOptions } from 'child_process';
 import { existsSync, readdirSync, promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -280,6 +280,24 @@ export function sortNvmVersionDirs(
     .map((entry) => entry.name);
 }
 
+/** Folders holding one folder per Node.js version (nvm, nvm.fish, fnm), read for its versions */
+function getNodeVersionDirs(homeDir: string): string[] {
+  if (isWindows()) return [];
+  return [
+    joinPaths(homeDir, '.nvm', 'versions', 'node'),
+    joinPaths(homeDir, '.local', 'share', 'nvm'),
+    ...getFnmDirs(homeDir).map((dir) => joinPaths(dir, 'node-versions')),
+  ];
+}
+
+function getFnmDirs(homeDir: string): string[] {
+  return [
+    joinPaths(homeDir, '.local', 'share', 'fnm'),
+    joinPaths(homeDir, '.fnm'),
+    joinPaths(homeDir, 'Library', 'Application Support', 'fnm'),
+  ];
+}
+
 /**
  * Where Node.js version managers keep `node`, newest version first: nvm, nvm.fish, fnm (its
  * default alias, then its versions), Volta, asdf, mise and nodenv. A desktop-launched app doesn't
@@ -300,15 +318,10 @@ export function getNodeVersionManagerPaths(
   }
   const nvmDir = joinPaths(homeDir, '.nvm', 'versions', 'node');
   const nvmFishDir = joinPaths(homeDir, '.local', 'share', 'nvm');
-  const fnmDirs = [
-    joinPaths(homeDir, '.local', 'share', 'fnm'),
-    joinPaths(homeDir, '.fnm'),
-    joinPaths(homeDir, 'Library', 'Application Support', 'fnm'),
-  ];
   return [
     ...listVersions(nvmDir).map((version) => joinPaths(nvmDir, version, 'bin', 'node')),
     ...listVersions(nvmFishDir).map((version) => joinPaths(nvmFishDir, version, 'bin', 'node')),
-    ...fnmDirs.flatMap((dir) => [
+    ...getFnmDirs(homeDir).flatMap((dir) => [
       joinPaths(dir, 'aliases', 'default', 'bin', 'node'),
       ...listVersions(joinPaths(dir, 'node-versions')).map((version) =>
         joinPaths(dir, 'node-versions', version, 'installation', 'bin', 'node')),
@@ -337,25 +350,81 @@ async function listNodeVersionsAsync(dir: string): Promise<string[]> {
   }
 }
 
+/** The same paths as `getNodeVersionManagerPaths`, with the version folders read asynchronously */
+async function getNodeVersionManagerPathsAsync(homeDir: string): Promise<string[]> {
+  const dirs = getNodeVersionDirs(homeDir);
+  const versions = new Map(await Promise.all(dirs.map(async (dir) => [dir, await listNodeVersionsAsync(dir)] as const)));
+  return getNodeVersionManagerPaths(homeDir, (dir) => versions.get(dir) ?? []);
+}
+
+/** How long the login shell may take to say where `node` is */
+const LOGIN_SHELL_TIMEOUT_MS = 5000;
+
 /**
  * `node` as the user's login shell finds it (what a terminal would run, whichever version
- * manager set it up). Not on Windows, where installers put Node on the system PATH
+ * manager set it up). The last resort: an interactive shell runs the user's rc files, which can
+ * be slow or wait for input. So it gets no stdin, runs in its own process group (no terminal to
+ * take over) and the whole group is killed when it isn't done in time: this always settles, with
+ * null when the shell fails or takes too long. Not on Windows, where installers put Node on the
+ * system PATH
+ * @internal exported for tests
  */
-async function findNodeInLoginShell(): Promise<string | null> {
-  if (isWindows()) return null;
+export function findNodeInLoginShell(timeoutMs = LOGIN_SHELL_TIMEOUT_MS): Promise<string | null> {
+  if (isWindows()) return Promise.resolve(null);
   const shell = process.env.SHELL || '/bin/sh';
-  try {
-    const { stdout } = await execFileAsync(shell, ['-ilc', 'command -v node'], {
-      encoding: 'utf-8',
-      timeout: 5000,
-      windowsHide: true,
-      cwd: os.homedir(),
+  return new Promise((resolve) => {
+    let child: ChildProcess;
+    try {
+      // -i: nvm and the like are usually set up in .bashrc / .zshrc, which only interactive shells read
+      child = spawn(shell, ['-ilc', 'command -v node'], {
+        cwd: os.homedir(),
+        stdio: ['ignore', 'pipe', 'ignore'],
+        detached: true,
+        windowsHide: true,
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let stdout = '';
+    let settled = false;
+    const finish = (found: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(found);
+    };
+    const timer = setTimeout(() => {
+      killProcessGroup(child);
+      // A process the rc files started may still hold the pipe open
+      child.stdout?.destroy();
+      finish(null);
+    }, timeoutMs);
+    child.stdout?.setEncoding('utf-8');
+    child.stdout?.on('data', (chunk: string) => {
+      // Only the last lines matter; a chatty rc file shouldn't grow this without bound
+      stdout = (stdout + chunk).slice(-64 * 1024);
     });
-    // Interactive shells may print a greeting first: the path is the last absolute line
-    const found = stdout.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('/')).pop();
-    return found ?? null;
+    child.on('error', () => finish(null));
+    child.on('close', (code) => {
+      if (code !== 0) return finish(null);
+      // Interactive shells may print a greeting first: the path is the last absolute line
+      const found = stdout.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('/')).pop();
+      finish(found ?? null);
+    });
+  });
+}
+
+/** Kill a detached child and everything it started (its process group) */
+function killProcessGroup(child: ChildProcess): void {
+  try {
+    if (child.pid) process.kill(-child.pid, 'SIGKILL');
   } catch {
-    return null;
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Already gone
+    }
   }
 }
 
@@ -430,6 +499,9 @@ export function buildClaudeDetectionResult(
  *   const pythonPath = getToolPath('python');
  *   const gitPath = getToolPath('git');
  */
+/** The longest one tool's detection may take before it counts as not found (and is looked for again next time) */
+const TOOL_INFO_DEADLINE_MS = 30_000;
+
 class CLIToolManager {
   private cache: Map<CLITool, CacheEntry> = new Map();
   /** Full detection results for Settings > Developer > Paths, detected without blocking */
@@ -1052,7 +1124,8 @@ class CLIToolManager {
    */
   /**
    * Detect Node.js: the configured path, the (augmented) PATH, then version managers' folders.
-   * npx is the one next to it
+   * npx is the one next to it. Unlike the async detection, this never asks the login shell (it
+   * would block the process while the user's rc files run)
    */
   private detectNode(): ToolDetectionResult {
     const candidates: Array<{ path: string; source: ToolDetectionResult['source'] }> = [];
@@ -1076,6 +1149,8 @@ class CLIToolManager {
       const version = execFileSync(nodeCmd, ['--version'], {
         encoding: 'utf-8',
         timeout: 5000,
+        killSignal: 'SIGKILL',
+        stdio: ['ignore', 'pipe', 'ignore'],
         windowsHide: true,
       }).trim();
       return { valid: true, version: version.replace(/^v/, ''), message: `Node.js ${version} is available` };
@@ -2266,39 +2341,27 @@ class CLIToolManager {
    * @returns Promise resolving to detection result
    */
   /**
-   * Detect Node.js asynchronously: the configured path, the (augmented) PATH, the login shell's
-   * `node`, then version managers' folders. npx is the one next to it
+   * Detect Node.js asynchronously: the configured path, the (augmented) PATH, version managers'
+   * folders, and only when none of those has it, the login shell's `node`. npx is the one next to it
    */
   private async detectNodeAsync(): Promise<ToolDetectionResult> {
-    const candidates: Array<{ path: string; source: ToolDetectionResult['source'] }> = [];
+    const tryCandidate = async (nodePath: string | null | undefined, source: ToolDetectionResult['source']) => {
+      if (!nodePath) return null;
+      const validation = await this.validateNodeAsync(nodePath);
+      return validation.valid ? nodeResult(nodePath, validation, source) : null;
+    };
     if (this.userConfig.nodePath && !isWrongPlatformPath(this.userConfig.nodePath)) {
-      candidates.push({ path: this.userConfig.nodePath, source: 'user-config' });
+      const configured = await tryCandidate(this.userConfig.nodePath, 'user-config');
+      if (configured) return configured;
     }
-    const onPath = await findExecutableAsync('node');
-    if (onPath) candidates.push({ path: onPath, source: 'system-path' });
-    const fromShell = await findNodeInLoginShell();
-    if (fromShell) candidates.push({ path: fromShell, source: 'system-path' });
-    for (const managed of getNodeVersionManagerPaths(os.homedir(), () => [])) {
-      if (await existsAsync(managed)) candidates.push({ path: managed, source: 'nvm' });
+    const onPath = await tryCandidate(await findExecutableAsync('node'), 'system-path');
+    if (onPath) return onPath;
+    for (const managed of await getNodeVersionManagerPathsAsync(os.homedir())) {
+      if (!(await existsAsync(managed))) continue;
+      const found = await tryCandidate(managed, 'nvm');
+      if (found) return found;
     }
-    // Version folders (nvm, nvm.fish, fnm) need a directory read each
-    const home = os.homedir();
-    for (const [dir, bin] of [
-      [joinPaths(home, '.nvm', 'versions', 'node'), ['bin', 'node']],
-      [joinPaths(home, '.local', 'share', 'nvm'), ['bin', 'node']],
-      [joinPaths(home, '.local', 'share', 'fnm', 'node-versions'), ['installation', 'bin', 'node']],
-      [joinPaths(home, '.fnm', 'node-versions'), ['installation', 'bin', 'node']],
-    ] as const) {
-      if (isWindows()) break;
-      for (const version of await listNodeVersionsAsync(dir)) {
-        candidates.push({ path: joinPaths(dir, version, ...bin), source: 'nvm' });
-      }
-    }
-    for (const candidate of candidates) {
-      const validation = await this.validateNodeAsync(candidate.path);
-      if (validation.valid) return nodeResult(candidate.path, validation, candidate.source);
-    }
-    return NODE_NOT_FOUND;
+    return (await tryCandidate(await findNodeInLoginShell(), 'system-path')) ?? NODE_NOT_FOUND;
   }
 
   private async validateNodeAsync(nodeCmd: string): Promise<ToolValidation> {
@@ -2306,6 +2369,7 @@ class CLIToolManager {
       const { stdout } = await execFileAsync(nodeCmd, ['--version'], {
         encoding: 'utf-8',
         timeout: 5000,
+        killSignal: 'SIGKILL',
         windowsHide: true,
       });
       const version = stdout.trim();
@@ -2482,13 +2546,25 @@ class CLIToolManager {
 
   /** `fresh`: in WSL, look the tool up again instead of using the startup probe's result */
   private cachedToolInfo(tool: CLITool, fresh = false): Promise<ToolDetectionResult> {
-    let pending = this.infoCache.get(tool);
-    if (!pending) {
-      pending = this.detectToolPathAsync(tool, fresh);
-      this.infoCache.set(tool, pending);
-      // A failed detection is retried next time
-      pending.catch(() => this.infoCache.delete(tool));
-    }
+    const cached = this.infoCache.get(tool);
+    if (cached) return cached;
+    const forget = () => {
+      if (this.infoCache.get(tool) === pending) this.infoCache.delete(tool);
+    };
+    // Every caller waits on this (Node's folder is added to each Claude Code run's PATH), so it
+    // must settle: a detection that takes too long counts as not found and isn't kept
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<ToolDetectionResult>((resolve) => {
+      timer = setTimeout(() => {
+        forget();
+        resolve({ found: false, source: 'fallback', message: `Timed out looking for ${TOOL_LABELS[tool]}` });
+      }, TOOL_INFO_DEADLINE_MS);
+    });
+    const detection = this.detectToolPathAsync(tool, fresh).finally(() => clearTimeout(timer));
+    const pending: Promise<ToolDetectionResult> = Promise.race([detection, deadline]);
+    this.infoCache.set(tool, pending);
+    // A failed detection is retried next time
+    pending.catch(forget);
     return pending;
   }
 }
