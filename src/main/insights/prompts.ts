@@ -139,7 +139,7 @@ function toolsPrompt(options: InsightsPromptOptions): string {
     ...(servers.length > 0
       ? [`- MCP servers the user turned on for this chat: ${servers.join(', ')} (tools named mcp__<server>__<tool>). Use them when they fit the question.`]
       : []),
-    '- No web access.',
+    '- WebSearch and WebFetch for the web: documentation, release notes, issues and anything else outside the project.',
     "- Files attached to the current message are part of it. Earlier messages note [User previously attached N file(s)]: those files aren't visible any more, so ask for them again when you need them.",
   ].join('\n');
 }

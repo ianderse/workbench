@@ -97,6 +97,7 @@ vi.mock('../../platform/shell-runtime', () => ({
 import {
   runInsights,
   INSIGHTS_READ_ONLY_TOOLS,
+  INSIGHTS_WEB_TOOLS,
   INSIGHTS_GRAPHIFY_COMMANDS,
   INSIGHTS_TASK_TOOLS_RULE,
   INSIGHTS_GITHUB_RULES,
@@ -185,7 +186,7 @@ describe('runInsights', () => {
     const { args, configDir, apiKey, systemPrompt } = record();
 
     expect(args).toEqual(expect.arrayContaining(['-p', '--input-format', 'stream-json', '--output-format', 'stream-json']));
-    expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
+    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS].join(','));
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
     expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-4-6');
     expect(args[args.indexOf('--effort') + 1]).toBe('high');
@@ -210,7 +211,7 @@ describe('runInsights', () => {
     })).promise;
     const { args, systemPrompt, graphifyOut } = record();
 
-    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, 'Bash'].join(','));
+    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS, 'Bash'].join(','));
     const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--allowedTools') + 1 + INSIGHTS_GRAPHIFY_COMMANDS.length);
     expect(allowed).toEqual([...INSIGHTS_GRAPHIFY_COMMANDS]);
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
@@ -244,7 +245,7 @@ describe('runInsights', () => {
     expect(args.join(' ')).not.toContain('secret');
     expect(args).toContain('--strict-mcp-config');
     expect(args.slice(args.indexOf('--allowedTools') + 1)).toContain(INSIGHTS_TASK_TOOLS_RULE);
-    expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
+    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS].join(','));
     expect(Number(mcpToolTimeout)).toBeGreaterThan(10 * 60 * 1000);
     expect(systemPrompt).toContain('mcp__workbench__');
     expect(systemPrompt).toContain('__TASK_SUGGESTION__');
@@ -380,8 +381,8 @@ describe('runInsights', () => {
       setRun(withIds);
       await (await run({ session: { mode: 'resume', sessionId: 'sess-1', profileId: 'main' } })).promise;
       const { args, mcpConfig } = record();
-      expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
-      expect(args).not.toContain('--allowedTools');
+      expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS].join(','));
+      expect(args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--permission-mode'))).toEqual([...INSIGHTS_WEB_TOOLS]);
       expect(args).toContain('--strict-mcp-config');
       expect(mcpConfig).toBeNull();
     });
@@ -435,7 +436,7 @@ describe('runInsights', () => {
     setRun(conversation);
     await (await run()).promise;
     const { args, graphifyOut } = record();
-    expect(args).not.toContain('--allowedTools');
+    expect(args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--permission-mode'))).toEqual([...INSIGHTS_WEB_TOOLS]);
     expect(args[args.indexOf('--tools') + 1]).not.toContain('Bash');
     expect(graphifyOut).toBeNull();
   });

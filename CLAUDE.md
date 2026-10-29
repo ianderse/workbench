@@ -276,10 +276,10 @@ headless stream-json run built in `insights/claude-code-runner.ts`, on the proje
   (`--resume <id> --resume-session-at <uuid> --fork-session`), leaving the original session as it was. Chats are saved
   in `.workbench/chats/` (`session-storage.ts`); a new chat is saved only once it has a message. Stop ends the reply,
   as does leaving its chat.
-- **Can't change the project's files** — `--tools` gives Read, Glob and Grep, plus Bash only for graphify's searches
-  (Use Graphify on) and read-only `gh` / `glab` commands (the GitHub / GitLab buttons, `INSIGHTS_GITHUB_COMMANDS` /
-  `INSIGHTS_GITLAB_COMMANDS` in `insights/prompts.ts`), and Edit/Write only for `.workbench/compeng/**` (Self-improve
-  on). `--permission-mode dontAsk` denies everything else without asking.
+- **Can't change the project's files** — `--tools` gives Read, Glob, Grep, WebFetch and WebSearch, plus Bash only for
+  graphify's searches (Use Graphify on) and read-only `gh` / `glab` commands (the GitHub / GitLab buttons,
+  `INSIGHTS_GITHUB_COMMANDS` / `INSIGHTS_GITLAB_COMMANDS` in `insights/prompts.ts`), and Edit/Write only for
+  `.workbench/compeng/**` (Self-improve on). `--permission-mode dontAsk` denies everything else without asking.
 - **MCP per chat** — `--strict-mcp-config` loads only the servers chosen in the chat's MCP menu
   (`InsightsMcpMenu.tsx`, the Connectors defaults until changed) and, with the Kanban button on, Workbench's task tools
   (`insights/task-tools.ts`, served over local MCP HTTP by `task-tools-server.ts` with a token per turn): they create,

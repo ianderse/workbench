@@ -6,7 +6,7 @@
  * (`claude -p --output-format stream-json --include-partial-messages`), so text streams
  * into the chat as it is written.
  *
- * The CLI can't change the project's files: only Read/Glob/Grep (plus Bash limited to graphify's
+ * The CLI can't change the project's files: only Read/Glob/Grep, WebFetch/WebSearch (plus Bash limited to graphify's
  * read-only searches when the project's memory graph is on, and to read-only `gh` / `glab`
  * commands when the GitHub / GitLab buttons are on) are available, and the MCP servers are
  * Workbench's task tools (`task-tools-server.ts`), so Claude can manage the project's tasks, and
@@ -133,6 +133,9 @@ const EMPTY_RESPONSE_ERROR = 'The model returned an empty response';
 /** Tools the Insights agent may use (read-only codebase exploration) */
 export const INSIGHTS_READ_ONLY_TOOLS = ['Read', 'Glob', 'Grep'] as const;
 
+/** Claude Code's web tools; they ask for permission, so they are allowed outright too */
+export const INSIGHTS_WEB_TOOLS = ['WebFetch', 'WebSearch'] as const;
+
 /**
  * Bash commands allowed for searching the project's memory graph (graphify's read-only
  * searches); every other Bash command is denied
@@ -233,6 +236,7 @@ export function buildInsightsArgs(
   const withBash = withGraphify || cliRules.length > 0;
   const tools = [
     ...INSIGHTS_READ_ONLY_TOOLS,
+    ...INSIGHTS_WEB_TOOLS,
     ...(withBash ? ['Bash'] : []),
     // Saving memories; every other write is denied (dontAsk allows only the rule below)
     ...(memory ? ['Write', 'Edit'] : []),
@@ -243,6 +247,7 @@ export function buildInsightsArgs(
     ...cliRules,
     ...(mcp?.taskTools ? [INSIGHTS_TASK_TOOLS_RULE] : []),
     ...(mcp?.servers ?? []).map((server) => `mcp__${server}`),
+    ...INSIGHTS_WEB_TOOLS,
   ];
   return [
     '-p',
@@ -253,7 +258,7 @@ export function buildInsightsArgs(
     '--model', model,
     '--effort', effort,
     '--tools', tools.join(','),
-    ...(allowed.length ? ['--allowedTools', ...allowed] : []),
+    '--allowedTools', ...allowed,
     '--permission-mode', 'dontAsk',
     '--strict-mcp-config',
     ...(mcp ? ['--mcp-config', mcp.configFile] : []),

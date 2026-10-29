@@ -58,7 +58,7 @@ describe('buildSystemPrompt', () => {
   it('lists exactly the tools the turn has', () => {
     const plain = buildSystemPrompt();
     expect(plain).toContain('- No shell commands.');
-    expect(plain).toContain('- No web access.');
+    expect(plain).toContain('- WebSearch and WebFetch for the web');
     expect(plain).not.toContain('MCP servers the user turned on');
     expect(plain).toContain("You can't change them: code changes are made by tasks.");
 
