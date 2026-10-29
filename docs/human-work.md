@@ -77,6 +77,28 @@ that the feedback needs to be supplied again, rather than silently returning the
 
 ## New reviews
 
+### Originating decisions
+
+Generated decision work retains the exact recorded words, decision time and source
+task/project in a host-added description block and separate `sourceDecision`
+metadata. This is evidence context, not the child's own decision or a task-wide
+override. The source decision is saved before generated work is queued.
+
+Launch resolves originating decisions against the same project's canonical task
+records, including legacy parent pointers and split lineage. The resulting source
+context reaches triage, execution, validation, advice and fresh diff review through
+the shared human-decision prompt; it also changes the review checkpoint fingerprint.
+Suggestions alone are not decisions. Missing, stale or conflicting source data is
+explicitly unverified and cannot be treated as proof that no approval exists.
+Apply only the recorded scope and time; do not invent a separate review-session
+date, named reviewer or owner “no requested changes” statement.
+
+This prevents missing source evidence from being replaced by a history of pending
+requests. Existing receipts remain preserved; display grouping is not semantic
+reconciliation, and these changes do not silently approve or waive their contents.
+
+### Task scope
+
 Task review checks the current ticket's acceptance criteria and explicit applicable pre-merge
 requirements. Reviewers must identify the task/spec/instruction that makes a missing requirement
 applicable, rather than treating every pending project gate as a blocker on every ticket. A separate

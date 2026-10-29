@@ -1,5 +1,6 @@
 import type { HumanApprovalOverride, HumanWorkstream } from '../../shared/types/human-work';
 import { buildHumanApprovalOverridePrompt, buildHumanWorkFeedback, buildHumanWorkPrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
+import { formatSourceDecisionContext, type SourceDecisionContext } from '../decision-source-context';
 /**
  * Claude Code task runner
  * =======================
@@ -178,6 +179,8 @@ export interface TaskRunConfig {
   humanApprovalOverride?: HumanApprovalOverride;
   /** Persisted scoped human decisions; carried separately from one revision's feedback. */
   humanWork?: HumanWorkstream;
+  /** Exact originating decisions resolved from host task records, including legacy lineage. */
+  sourceDecisionContext?: SourceDecisionContext;
   taskId: string;
   projectId?: string;
   specId: string;
@@ -481,7 +484,7 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
 
 function humanDecisionPrompt(config: TaskRunConfig, context: 'task' | 'triage' = 'task'): string {
   const receiptPath = toRuntimePath(path.join(config.specDir, 'task_metadata.json'));
-  return [buildHumanApprovalOverridePrompt(config.humanApprovalOverride), buildHumanWorkPrompt(config.humanWork, receiptPath, context)].filter(Boolean).join('\n\n');
+  return [formatSourceDecisionContext(config.sourceDecisionContext, toRuntimePath), buildHumanApprovalOverridePrompt(config.humanApprovalOverride), buildHumanWorkPrompt(config.humanWork, receiptPath, context)].filter(Boolean).join('\n\n');
 }
 
 /** Only an exact generated handoff is redundant with the durable system context. */

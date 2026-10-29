@@ -10,10 +10,12 @@
  *   - deferred: the note is saved, the ticket stays in Planning
  *   - rejected: the reason is saved and the ticket is archived
  *
- * Entry point: `decideTicket()`. It never throws; on any failure nothing changes. All effects go
+ * Entry point: `decideTicket()`. It never throws; model failure changes nothing. A source-decision
+ * persistence failure leaves created work unqueued in Planning. Effects go
  * through `DecisionDeps` (the grooming deps plus the move to Done), so tests run it without Electron.
  */
 import type { Task, TaskMetadata } from '../shared/types';
+import type { TaskSourceDecision } from '../shared/types/task';
 import {
   DECISION_SCHEMA,
   DECISION_SYSTEM_PROMPT,
@@ -164,6 +166,7 @@ async function run(projectId: string, taskId: string, request: DecisionRequest, 
 
   const created: DecisionData['created'] = [];
   const queued: string[] = [];
+  const sourceDecision: TaskSourceDecision = { taskId: fresh.id, projectId, text: decisionText, at, outcome: 'tickets' };
   let firstError: unknown;
   for (const plan of result.tickets) {
     try {
@@ -173,8 +176,9 @@ async function run(projectId: string, taskId: string, request: DecisionRequest, 
         dependsOnTaskIds: [...(fresh.metadata?.dependsOnTaskIds ?? [])],
         // No needsDecision: these are plain tickets
         followUpFrom: { taskId: fresh.id, item: 'decision' },
+        sourceDecision: { ...sourceDecision },
       };
-      const id = await deps.createTask(projectId, plan.title, buildDecisionTicketDescription(plan, fresh.id), metadata);
+      const id = await deps.createTask(projectId, plan.title, buildDecisionTicketDescription(plan, fresh.id, sourceDecision), metadata);
       if (!id) continue;
       created.push({ taskId: id, queued: plan.queue });
       if (plan.queue) queued.push(id);
@@ -186,22 +190,29 @@ async function run(projectId: string, taskId: string, request: DecisionRequest, 
   if (created.length === 0) {
     return { success: false, error: firstError instanceof Error ? firstError.message : 'Could not create the tickets' };
   }
-  try {
-    if (queued.length > 0) await deps.queueTasks?.(projectId, queued, 'end');
-  } catch (error) {
-    appLog.warn('[Decision] Could not queue the new tickets:', error);
-  }
-  // Tickets waiting for the reviewed task (or for this decision ticket) also wait for the queued result
+  // Rewire waiting dependents while the source is still undecided, before publishing the
+  // decision could make them eligible. Children already exist in Planning, so references resolve.
   if (queued.length > 0) {
     const sourceIds = [fresh.id, ...(from?.taskId ? [from.taskId] : [])];
     const ownDeps = [...(fresh.metadata?.dependsOnTaskIds ?? [])];
     await makeDependentsWait(deps, projectId, sourceIds, queued, Object.fromEntries(queued.map((id) => [id, ownDeps])));
   }
-
-  await deps.updateTask(projectId, fresh.id, {
-    description: appendNoteBlock(fresh.description, buildDecisionBlock('tickets', decisionText, result.decisionRecord)),
-    metadata: { decision: { text: decisionText, at, outcome: 'tickets', ticketIds: created.map((c) => c.taskId) } },
-  });
+  // A queued child may start immediately. Publish its canonical source before allowing that.
+  try {
+    await deps.updateTask(projectId, fresh.id, {
+      description: appendNoteBlock(fresh.description, buildDecisionBlock('tickets', decisionText, result.decisionRecord)),
+      metadata: { decision: { text: decisionText, at, outcome: 'tickets', ticketIds: created.map((c) => c.taskId) } },
+    });
+  } catch (error) {
+    deps.changed(projectId);
+    appLog.warn(`[Decision] Could not persist the source decision on ${fresh.id}; created tickets remain in Planning:`, error);
+    return { success: false, error: `Could not record the decision. Created tickets remain in Planning: ${created.map((c) => c.taskId).join(', ')}. Check the source decision before retrying.` };
+  }
+  try {
+    if (queued.length > 0) await deps.queueTasks?.(projectId, queued, 'end');
+  } catch (error) {
+    appLog.warn('[Decision] Could not queue the new tickets:', error);
+  }
   try {
     await deps.markDone(projectId, fresh.id);
   } catch (error) {

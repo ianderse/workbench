@@ -75,6 +75,17 @@ describe('decision texts and state', () => {
     expect(buildDecisionTicketDescription({ title: 't', description: 'work', queue: true }, '017-decide')).toContain('#017');
   });
 
+  it('adds host-recorded source text without clipping it to the generated description', () => {
+    const text = `Approve only the named revision.\n${'Preserve retained gates. '.repeat(220)}`;
+    const description = buildDecisionTicketDescription({ title: 'Record', description: 'Generated scope', queue: true }, '012-decision', {
+      taskId: '012-decision', projectId: 'project', text, at: '2026-10-28T16:03:30.409Z', outcome: 'tickets',
+    });
+    expect(description).toContain(text);
+    expect(description).toContain('Source task: 012-decision; project: project.');
+    expect(description).toContain('Recorded decision time: 2026-10-28T16:03:30.409Z');
+    expect(description).toContain('not a new approval of this task');
+  });
+
   it('knows when a ticket awaits a decision', () => {
     const base = { followUpFrom: { taskId: '1', item: 'x', needsDecision: true } };
     expect(isAwaitingDecision(base)).toBe(true);

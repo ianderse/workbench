@@ -200,6 +200,16 @@ export interface TaskDecision {
   ticketIds?: string[];
 }
 
+/** The recorded decision that generated work; evidence context, not a child approval/override. */
+export interface TaskSourceDecision {
+  taskId: string;
+  projectId: string;
+  text: string;
+  /** Time the originating decision was recorded, not a separate review-session date. */
+  at: string;
+  outcome: TaskDecision['outcome'];
+}
+
 export interface TaskMetadata {
   /** Host-owned request consumed once by the preserved session transition journal. */
   freshContextRequestId?: string;
@@ -277,6 +287,8 @@ export interface TaskMetadata {
   followUpFrom?: TaskFollowUpRef;
   /** Set on a needs-decision ticket once the person answered it */
   decision?: TaskDecision;
+  /** Host-preserved originating words and provenance, independent of model-generated summaries. */
+  sourceDecision?: TaskSourceDecision;
   /** Set on the reviewed task before the follow-up model call (ISO time); a run that never finished is retried after 15 minutes */
   followUpsStartedAt?: string;
   /** Set on the reviewed task once its follow-ups were handled (ISO time); it is only handled once */

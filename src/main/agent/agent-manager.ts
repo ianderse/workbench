@@ -45,6 +45,7 @@ import { refreshProjectProgress } from '../project-progress';
 import { createRunMessaging } from '../task-messaging/run-messaging';
 import { branchMergeBlocker, waitForBranchSync } from '../worktree/merge-guard';
 import { keepsLocalMergeOut, readResyncRequest } from '../task-resync/request';
+import { resolveSourceDecisionContext } from '../decision-source-context';
 
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
@@ -604,8 +605,11 @@ export class AgentManager extends EventEmitter {
     try {
       const { projectStore } = await import('../project-store');
       projectStore.invalidateTasksCache(project.id);
-      config.progressPrompt = await refreshProjectProgress(project, projectStore.getTasks(project.id));
+      const projectTasks = projectStore.getTasks(project.id);
+      config.sourceDecisionContext = resolveSourceDecisionContext(task, projectTasks, project.id, path.join(project.path, getSpecsDir(project.autoBuildPath)));
+      config.progressPrompt = await refreshProjectProgress(project, projectTasks);
     } catch (error) {
+      config.sourceDecisionContext ??= resolveSourceDecisionContext(task, [], project.id, path.join(project.path, getSpecsDir(project.autoBuildPath)));
       appLog.warn(`[AgentManager] Could not prepare project progress for ${taskId}:`, error);
     }
 

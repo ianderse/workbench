@@ -100,6 +100,70 @@ beforeEach(() => {
 });
 
 describe('decideTicket: make tickets', () => {
+  it('preserves the exact originating words even when generated prose contradicts them', async () => {
+    const text = 'I approve RH-02 r1.1 and authorize only §4.\nKeep notification and destructive recovery gates intact.';
+    tasks.find((t) => t.id === '017-decide')!.metadata!.followUpFrom!.suggestion = 'Approve everything';
+    modelAnswer = { tickets: [{ title: 'Record the decision', description: 'No owner decision exists. Ask again.', queue: true }], decisionRecord: '- all approval missing' };
+    const deps = makeDeps();
+    const queue = deps.queueTasks!;
+    deps.queueTasks = async (projectId, ids, position) => {
+      const parent = tasks.find((t) => t.id === '017-decide')!;
+      expect(parent.metadata?.decision).toMatchObject({ text, outcome: 'tickets', ticketIds: ids });
+      for (const id of ids) {
+        const child = tasks.find((t) => t.id === id)!;
+        expect(child.metadata?.sourceDecision).toEqual({ taskId: parent.id, projectId, text, at: parent.metadata!.decision!.at, outcome: 'tickets' });
+        expect(child.metadata?.decision).toBeUndefined();
+        expect(child.metadata?.humanWork?.approvalOverride).toBeUndefined();
+        expect(child.description).toContain(text);
+        expect(child.description).toContain(`Recorded decision time: ${parent.metadata!.decision!.at}`);
+        expect(child.description).not.toContain('Approve everything');
+      }
+      await queue(projectId, ids, position);
+    };
+    const result = await decideTicket('p1', '017-decide', { action: 'tickets', text }, deps);
+    expect(result.success).toBe(true);
+    expect(queued).toHaveLength(1);
+  });
+
+  it('keeps created work unqueued and the parent unfinished if source persistence fails', async () => {
+    const deps = makeDeps();
+    deps.updateTask = async () => { throw new Error('disk full'); };
+    const result = await decideTicket('p1', '017-decide', { action: 'tickets', text: 'Approve only §4' }, deps);
+    expect(result).toMatchObject({ success: false, error: expect.stringContaining('Created tickets remain in Planning') });
+    expect(queued).toEqual([]);
+    expect(done).toEqual([]);
+    expect(tasks.find((t) => t.id === '017-decide')!.metadata?.decision).toBeUndefined();
+    const children = tasks.filter((t) => t.metadata?.followUpFrom?.item === 'decision');
+    expect(children).toHaveLength(2);
+    expect(children.every((t) => t.status === 'backlog')).toBe(true);
+    expect(children.every((t) => t.metadata?.sourceDecision?.text === 'Approve only §4')).toBe(true);
+  });
+
+  it('rewires waiting dependents before publishing the decision and queueing its children', async () => {
+    tasks.push(makeTask('019-waiting', 'queue', {}, { dependsOnTaskIds: ['017-decide'] }));
+    const deps = makeDeps();
+    const update = deps.updateTask;
+    const queue = deps.queueTasks!;
+    let rewiredBeforePublication = false;
+    deps.updateTask = async (projectId, id, updates) => {
+      if (id === '017-decide' && updates.metadata?.decision) {
+        const children = updates.metadata.decision.ticketIds!;
+        expect(tasks.find((t) => t.id === '019-waiting')!.metadata?.dependsOnTaskIds).toEqual(['017-decide', ...children]);
+        rewiredBeforePublication = true;
+      }
+      await update(projectId, id, updates);
+    };
+    deps.queueTasks = async (projectId, ids, position) => {
+      expect(rewiredBeforePublication).toBe(true);
+      expect(tasks.find((t) => t.id === '017-decide')!.metadata?.decision?.ticketIds).toEqual(ids);
+      expect(tasks.find((t) => t.id === '019-waiting')!.metadata?.dependsOnTaskIds).toEqual(['017-decide', ...ids]);
+      await queue(projectId, ids, position);
+    };
+    const result = await decideTicket('p1', '017-decide', { action: 'tickets', text: 'Build both now' }, deps);
+    expect(result.success).toBe(true);
+    expect(queued).toHaveLength(1);
+  });
+
   it('creates and queues tickets, records the decision and moves the ticket to Done', async () => {
     const result = await decideTicket('p1', '017-decide', { action: 'tickets', text: 'Add forgetting and debate; defer threats' }, makeDeps());
 
@@ -130,11 +194,13 @@ describe('decideTicket: make tickets', () => {
   });
 
   it('keeps a ticket the person only wants planned in Planning', async () => {
+    tasks.push(makeTask('019-waiting', 'queue', {}, { dependsOnTaskIds: ['017-decide'] }));
     modelAnswer = { tickets: [{ title: 'Plan debate', description: 'Plan only', queue: false }], decisionRecord: '- debate: add, plan only' };
     const result = await decideTicket('p1', '017-decide', { action: 'tickets', text: 'Just plan debate' }, makeDeps());
-    expect(result.data?.created).toEqual([{ taskId: '023-new', queued: false }]);
+    expect(result.data?.created).toEqual([{ taskId: '024-new', queued: false }]);
     expect(queued).toEqual([]);
-    expect(tasks.find((t) => t.id === '023-new')?.status).toBe('backlog');
+    expect(tasks.find((t) => t.id === '024-new')?.status).toBe('backlog');
+    expect(tasks.find((t) => t.id === '019-waiting')!.metadata?.dependsOnTaskIds).toEqual(['017-decide']);
   });
 
   it('changes nothing when the model fails', async () => {
@@ -247,5 +313,6 @@ describe('suggestDecision', () => {
     const result = await decideTicket('p1', '017-decide', { action: 'tickets', text: '' }, makeDeps());
     expect(result.success).toBe(true);
     expect(modelPrompts[0]).toContain('Add both now');
+    expect(tasks.find((t) => t.id === '023-new')!.metadata?.sourceDecision?.text).toBe('Add both now');
   });
 });

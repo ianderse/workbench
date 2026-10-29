@@ -14,6 +14,7 @@ import * as handoffs from '../phase-handoff';
 import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-code';
 import { mutateProjectMemory, readMemoryContexts } from '../../self-improve/project-memory';
 import { closeTaskToolsServer } from '../../insights/task-tools-server';
+import type { SourceDecisionContext } from '../../decision-source-context';
 
 vi.mock('../env', () => ({
   resolveClaudeEnv: vi.fn(async (options?: { extraEnv?: Record<string, string> }) => ({
@@ -337,6 +338,54 @@ describe('ClaudeTaskRun', () => {
         expect(failed.reviewSection).toBeUndefined();
       } finally { review.mockRestore(); diff.mockRestore(); fingerprint.mockRestore(); }
     });
+  });
+
+  it.each(['claude', 'omp'])('delivers exact originating decisions to every %s phase and triage without turning them into overrides', async (backend) => {
+    const sourceDecisionContext: SourceDecisionContext = { records: [{ metadataPath: '/project/.workbench/tasks/012-decision/task_metadata.json', viaTaskId: '017-record', decision: {
+      taskId: '012-decision', projectId: 'p', text: 'I approve RH-02 r1.1 and authorize only §4. Keep destructive recovery and policy gates intact.', at: '2026-10-28T16:03:30.409Z', outcome: 'tickets',
+    } }], unresolved: [] };
+    triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+    scripts.push(
+      { messages: [result('source-decision', { structured_output: { plan: '# Plan\nBuild the task' } })] },
+      { messages: [result('source-decision')] },
+      { messages: [result('source-decision', { structured_output: { status: 'passed', summary: 'Checked', checks: [], findings: [] } })] },
+    );
+    await makeRun({ backend, sourceDecisionContext }).run();
+    expect(triageMock.mock.calls[0][0].description).toContain(sourceDecisionContext.records[0].decision.text);
+    const prompts = backend === 'omp'
+      ? ompSpawned.map((options) => String(options.appendSystemPrompt))
+      : spawned.map((options) => argValue(options.args, '--append-system-prompt')!);
+    expect(prompts).toHaveLength(3);
+    for (const prompt of prompts) {
+      expect(prompt).toContain(sourceDecisionContext.records[0].decision.text);
+      expect(prompt).toContain('012-decision/task_metadata.json');
+      expect(prompt).toContain('Recorded decision time: 2026-10-28T16:03:30.409Z');
+      expect(prompt).toContain('Empty checkpoint metadata.human or humanWork fields alone do not establish absence');
+      expect(prompt).not.toContain('## Owner override:');
+    }
+    expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.humanApprovalOverride).toBeUndefined();
+  });
+
+  it('includes source decision provenance in fresh review input and checkpoint identity', async () => {
+    const fingerprint = vi.spyOn(handoffs, 'fingerprintWorktree').mockResolvedValue('same-tree');
+    const diff = vi.spyOn(reviewDiff, 'collectReviewDiff').mockResolvedValue('diff --git a/a.ts b/a.ts\n+fixed');
+    const review = vi.spyOn(runText, 'runClaudeText').mockResolvedValue({ text: 'Checked', structured: { summary: 'Checked', findings: [] } });
+    try {
+      const context: SourceDecisionContext = { records: [{ metadataPath: '/project/.workbench/tasks/012-decision/task_metadata.json', viaTaskId: '017-record', decision: {
+        taskId: '012-decision', projectId: 'p', text: 'I approve RH-02 r1.1; keep every separate gate intact.', at: '2026-10-28T16:03:30.409Z', outcome: 'tickets',
+      } }], unresolved: [] };
+      const first = makeRun({ backend: 'omp', sourceDecisionContext: context }) as unknown as { runOmpReview(): Promise<void> };
+      await first.runOmpReview();
+      expect(review.mock.calls[0][0].appendSystemPrompt).toContain(context.records[0].decision.text);
+      expect(review.mock.calls[0][0].appendSystemPrompt).toContain('do not invent a separate review-session date');
+      const changed = structuredClone(context); changed.records[0].decision.text += ' Additional scoped clarification.';
+      const second = makeRun({ backend: 'omp', sourceDecisionContext: changed }) as unknown as { runOmpReview(): Promise<void> };
+      await second.runOmpReview();
+      expect(review).toHaveBeenCalledTimes(2);
+      expect(review.mock.calls[1][0].appendSystemPrompt).toContain(changed.records[0].decision.text);
+      const files = readdirSync(path.join(specDir, 'checkpoints'));
+      expect(files).toHaveLength(2);
+    } finally { fingerprint.mockRestore(); diff.mockRestore(); review.mockRestore(); }
   });
 
   it.each(['claude', 'omp'])('carries persisted scoped receipts in every %s phase and triage without revision feedback', async (backend) => {

@@ -8,7 +8,7 @@
  * the schema, the prompt, the validation of the answer and the texts. Nothing here touches the
  * disk or a process; `main/decision-tickets.ts` applies the result.
  */
-import type { TaskMetadata } from '../types/task';
+import type { TaskMetadata, TaskSourceDecision } from '../types/task';
 import { taskNumber } from './queue-grooming';
 import { MAX_SUGGESTION_CHARS } from './follow-up-tickets';
 
@@ -171,8 +171,14 @@ export function normalizeDecisionResult(raw: unknown): DecisionResult {
 }
 
 /** The description of a ticket made from a decision: the work and where it came from */
-export function buildDecisionTicketDescription(plan: DecisionTicketPlan, decisionTaskId: string): string {
-  return [plan.description.trim(), '', '---', `**From the decision on #${taskNumber(decisionTaskId)}.**`].join('\n');
+export function buildDecisionTicketDescription(plan: DecisionTicketPlan, decisionTaskId: string, source?: TaskSourceDecision): string {
+  const lines = [plan.description.trim(), '', '---', `**From the decision on #${taskNumber(decisionTaskId)}.**`];
+  if (source) lines.push('', '## Originating recorded decision',
+    `Source task: ${source.taskId}; project: ${source.projectId}.`,
+    `Recorded decision time: ${source.at}. Outcome: ${source.outcome}.`,
+    'The exact recorded words below retain their original scope. This is not a new approval of this task or evidence of a separate review session.',
+    '', source.text);
+  return lines.join('\n');
 }
 
 /** The block appended to the decision ticket's description */

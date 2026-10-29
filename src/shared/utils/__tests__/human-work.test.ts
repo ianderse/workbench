@@ -85,6 +85,20 @@ it('carries actual scoped approvals with their audit identity without turning re
   expect(buildHumanWorkPrompt(rejected)).toContain('including participant studies that have not happened unless explicitly waived or deferred');
 });
 
+it('keeps open requests as history without treating them as proof that originating approval is absent', () => {
+  const stream = create();
+  const before = structuredClone(stream);
+  const prompt = buildHumanWorkPrompt(stream);
+  expect(prompt).toContain('its status and an earlier failed verdict do not establish that the requirement is still unmet');
+  expect(prompt).toContain('including originating decisions supplied separately');
+  expect(prompt).toContain('cite the actual source and explain the correction without inventing approval');
+  expect(prompt).toContain(`Source finding: ${JSON.stringify(finding)}`);
+  expect(prompt).toContain('Genuine unresolved work stays pending');
+  expect(stream).toEqual(before);
+  expect(stream.items[0].status).toBe('open');
+  expect(stream.approvalOverride).toBeUndefined();
+});
+
 it('bounds maximal saved receipt bodies without partially quoting or changing their decisions', () => {
   const stream = create();
   stream.revision = 60;

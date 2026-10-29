@@ -155,6 +155,8 @@ describe('AgentManager', () => {
     const baseBranch = await import('../utils/base-branch');
     vi.mocked(baseBranch.resolveBaseBranch).mockImplementation(async (_cwd: string, wanted: string) => wanted);
     vi.mocked(baseBranch.resolveDefaultBaseBranch).mockImplementation(async () => 'master');
+    const { projectStore } = await import('../project-store');
+    vi.mocked(projectStore.getTasks).mockReturnValue([]);
     manager = new AgentManager();
   });
 
@@ -241,6 +243,29 @@ describe('AgentManager', () => {
     const task = makeTask(); task.metadata = { ...task.metadata, humanWork: { revision: 3, items: [], approvalOverride: override } };
     await manager.startTask(task.id, { project, task, mode: 'revise' });
     expect((await nextRun(1)).config.humanApprovalOverride).toEqual(override);
+  });
+
+  it.each(['start', 'revise'] as const)('resolves the legacy originating decision independently of human receipts on %s', async (mode) => {
+    const { projectStore } = await import('../project-store');
+    const words = 'I approve RH-02 r1.1 and authorize only §4; keep recovery and policy gates intact.';
+    const origin = makeTask({ id: '012-decision', specId: '012-decision', metadata: {
+      decision: { text: words, at: '2026-10-28T16:03:30.409Z', outcome: 'tickets', ticketIds: ['017-record'] },
+    } });
+    const task = makeTask({ id: '017-record', specId: '017-record', metadata: {
+      followUpFrom: { taskId: origin.id, item: 'decision' },
+    } });
+    vi.mocked(projectStore.getTasks).mockReturnValue([origin, task]);
+    await manager.startTask(task.id, { project, task, mode });
+    const run = await nextRun(1);
+    expect(run.config.sourceDecisionContext?.records[0]).toMatchObject({
+      metadataPath: '/project/.workbench/tasks/012-decision/task_metadata.json',
+      decision: { text: words, at: origin.metadata!.decision!.at, projectId: project.id },
+    });
+    expect(run.config.humanApprovalOverride).toBeUndefined();
+    expect(run.config.humanWork).toBeUndefined();
+    origin.metadata!.decision!.text = 'Changed later';
+    expect(run.config.sourceDecisionContext?.records[0].decision.text).toBe(words);
+    run.finish({ status: 'completed' });
   });
 
   it('passes an independent snapshot of named human receipts into ordinary starts and revisions', async () => {
