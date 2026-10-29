@@ -249,6 +249,8 @@ function backgroundFadeY(h: number): [number, number][] {
   ];
 }
 
+/** The gray sky's background (0 the dark card's colour, 1 the light one's): halfway, at any hour */
+const GRAY_BACKDROP_LIGHT = 0.5;
 /** Weather counts are tuned for a 140px strip; a wider sky gets more */
 const DENSITY_W = 140;
 
@@ -314,9 +316,11 @@ interface ClawdSkyProps {
   pinned?: Date | null;
   /** The 5-hour bar is under the sky, which goes on behind it; without it the sky ends at the ground */
   bar?: boolean;
+  /** Everything in gray but the sun and the moon (the popover's states with no usage to show) */
+  gray?: boolean;
 }
 
-export function ClawdSky({ percent, pinned = null, bar = true }: ClawdSkyProps) {
+export function ClawdSky({ percent, pinned = null, bar = true, gray = false }: ClawdSkyProps) {
   const [ref, w] = useWidth();
   const now = useMinute(pinned);
   // The preview in Settings can show a second sky; each one needs its own gradient and mask ids
@@ -345,26 +349,31 @@ export function ClawdSky({ percent, pinned = null, bar = true }: ClawdSkyProps) 
     'sky-mask-sides': edgeMask(w, h, null, EDGE_SHARPNESS, bar),
   }), [w, h, bar]);
   const maskUrl = (name: keyof typeof masks) => `url(#${id(name)})`;
+  // The layers that go gray (all but the sun and the moon)
+  const grayFilter = gray ? `url(#${id('gray')})` : undefined;
   // The sky's layers, drawn below its masks
   const skyLayers = (
     <>
       {/* The sky's own background, whatever the app's theme: the dark popover with the light
           one over it, as light as the day (the rest of the card stays in the theme) */}
-      <g mask={maskUrl('sky-mask-y-bg')}>
+      <g mask={maskUrl('sky-mask-y-bg')} filter={gray ? `url(#${id('gray-flat')})` : undefined}>
         <rect x="0" y="0" width={w} height={h} className="dark fill-popover" />
-        <rect x="0" y="0" width={w} height={h} className="light fill-popover" opacity={look.light} />
+        <rect x="0" y="0" width={w} height={h} className="light fill-popover" opacity={gray ? GRAY_BACKDROP_LIGHT : look.light} />
 
         {/* The sky's colour, with the background's fades so it covers it out to its edges. The
-            same in both themes, as the background under it is */}
-        <rect
-          x="0" y="0" width={w} height={h} fill={`url(#${id('sky-tint')})`} fillOpacity={0.8}
-        />
+            same in both themes, as the background under it is. A gray sky has none: its
+            background stays a neutral gray at any hour */}
+        {!gray && (
+          <rect
+            x="0" y="0" width={w} height={h} fill={`url(#${id('sky-tint')})`} fillOpacity={0.8}
+          />
+        )}
       </g>
 
       <g mask={maskUrl('sky-mask-y')}>
         {/* Stars twinkle at night */}
         {look.stars > 0 && (
-          <g opacity={look.stars}>
+          <g opacity={look.stars} filter={grayFilter}>
             {STARS.map((s, i) => (
               <rect
                 key={i}
@@ -397,7 +406,7 @@ export function ClawdSky({ percent, pinned = null, bar = true }: ClawdSkyProps) 
       </g>
 
       {/* The clouds fade in and out as briefly as the background, so the highest ones show */}
-      <g mask={maskUrl('sky-mask-y-bg')}>
+      <g mask={maskUrl('sky-mask-y-bg')} filter={grayFilter}>
         {/* Clouds drift past in front of the sun and the moon. Thick ones are solid and hide
             them; which ones are thick changes each time the sky opens. */}
         {CLOUDS.slice(0, clouds).map((c, i) => (
@@ -427,7 +436,7 @@ export function ClawdSky({ percent, pinned = null, bar = true }: ClawdSkyProps) 
         ))}
       </g>
 
-      <g mask={maskUrl('sky-mask-y')}>
+      <g mask={maskUrl('sky-mask-y')} filter={grayFilter}>
         {/* Rain, slanting a little with the wind */}
         {weather.kind === 'rain' && DROPS.slice(0, Math.min(DROPS.length, fall)).map((d, i) => (
           <rect
@@ -477,7 +486,7 @@ export function ClawdSky({ percent, pinned = null, bar = true }: ClawdSkyProps) 
       {weather.kind === 'snow' && (
         <rect
           x={0} y={ground - 1.5} width={w} height={1.5} fill="#E2E8F0" opacity={0.6 + 0.3 * look.light}
-          mask={maskUrl('sky-mask-sides')}
+          mask={maskUrl('sky-mask-sides')} filter={grayFilter}
         />
       )}
     </>
@@ -509,6 +518,22 @@ export function ClawdSky({ percent, pinned = null, bar = true }: ClawdSkyProps) 
                 ))}
               </mask>
             ))}
+            {gray && (
+              <filter id={id('gray-flat')} colorInterpolationFilters="sRGB">
+                <feColorMatrix type="saturate" values="0" />
+              </filter>
+            )}
+            {gray && (
+              <filter id={id('gray')} colorInterpolationFilters="sRGB">
+                <feColorMatrix type="saturate" values="0" />
+                {/* Half as bright again */}
+                <feComponentTransfer>
+                  <feFuncR type="linear" slope={1.5} />
+                  <feFuncG type="linear" slope={1.5} />
+                  <feFuncB type="linear" slope={1.5} />
+                </feComponentTransfer>
+              </filter>
+            )}
             {/* The sky's own colour for the time of day */}
             <linearGradient id={id('sky-tint')} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0" stopColor={look.top} />

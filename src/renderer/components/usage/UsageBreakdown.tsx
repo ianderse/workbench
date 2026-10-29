@@ -175,7 +175,8 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
 
 /**
  * The sky with Clawd asleep in it, for the popover's states with no usage to show (no number, no
- * bar). The sky still follows the time of day; with no tasks to watch he sleeps.
+ * bar), in gray but for the sun and the moon. The sky still follows the time of day; with no
+ * tasks to watch he sleeps.
  */
 export function SleepingSky({ active, pinned = null }: {
   /** Clawd only animates while this is on */
@@ -204,8 +205,12 @@ export function SleepingSky({ active, pinned = null }: {
 
   return (
     <div className="relative flex items-end" style={{ height: SCENE_H }}>
-      <ClawdSky percent={null} pinned={pinned} bar={false} />
-      <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} decor={decor} />
+      {/* In gray but for the sun and the moon, and Clawd half in color: something is keeping
+          the usage from showing */}
+      <ClawdSky percent={null} pinned={pinned} bar={false} gray />
+      <div className="flex h-full flex-1 brightness-150 grayscale-50">
+        <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} decor={decor} />
+      </div>
     </div>
   );
 }
