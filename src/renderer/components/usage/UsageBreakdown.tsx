@@ -17,7 +17,6 @@ import { Hearts } from './Hearts';
 import { skinForUsage, type SkinPicker } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
 import { holidayDecor } from './clawd/decor';
-import { daylight } from './clawd/sky';
 import { getBarColorClass, getColorClass } from './usage-colors';
 
 /** The label the main process sends for Anthropic's second window */
@@ -76,10 +75,10 @@ interface UsageHeroProps {
 
 /**
  * The top of the usage popover: the header with the hearts, and the 5-hour limit, large, with
- * the sky behind it and Clawd walking alongside. Its background, out to the card's edges, follows
- * the daylight and covers the card's border, so the parent must be the card's content: 12px
- * padding inside a 1px border, rounded-xl, no overflow clipping, and UsageCardSurface for the
- * rest of the background (the popover and the usage simulator in Settings both are).
+ * the sky behind it and Clawd walking alongside. The card's background follows the app's theme;
+ * only the sky follows the daylight. The parent must be the card's content: 12px padding inside
+ * a 1px border, rounded-xl, and UsageCardSurface for the background (the popover and the usage
+ * simulator in Settings both are).
  */
 export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = null }: UsageHeroProps) {
   const { t } = useTranslation(['common']);
@@ -132,31 +131,11 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
   const day = now.toDateString();
   // Worked out again once a day
   const decor = useMemo(() => holidayDecor(new Date(day)), [day]);
-  // The top of the card is outdoors: light by day, dark at night, halfway between at dawn and
-  // dusk, whatever the app's theme. Its text takes the theme closer to that background.
-  const light = daylight(now);
-  const tone = light >= 0.5 ? 'light' : 'dark';
 
   return (
     <div className="relative isolate space-y-2.5">
-      {/* The daylight background, over the card's padding and its 1px border (with a border of its
-          own) down to the bottom of the 5-hour bar, fading out over twice the bar's height so it
-          meets the theme's background at the bar's top edge. The dark popover with the light one
-          over it, as light as the day. First, so the spacing between the rows below stays the
-          same; m-0 undoes that spacing's margin, which would lift an absolute box's bottom edge. */}
-      <div
-        aria-hidden="true"
-        className="absolute -inset-x-[13px] -top-[13px] bottom-0 -z-10 m-0 [mask-image:linear-gradient(to_bottom,#000_calc(100%-16px),transparent)]"
-      >
-        <div className="dark absolute inset-0 rounded-t-xl border border-b-0 border-border bg-popover" />
-        <div
-          className="light absolute inset-0 rounded-t-xl border border-b-0 border-border bg-popover"
-          style={{ opacity: light }}
-        />
-      </div>
-
       {/* Header: the three hearts are the 5-hour limit left */}
-      <div className={`${tone} flex items-center justify-between gap-2 border-b pb-2 text-popover-foreground`}>
+      <div className="flex items-center justify-between gap-2 pb-2 text-popover-foreground">
         <span className="text-xs font-semibold">
           {t('common:usage.usageBreakdown')}
         </span>
@@ -165,21 +144,21 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
 
       {/* The bar is the ground Clawd stands on, so the two sit flush with no gap between them */}
       <div>
-        <div className={`${tone} relative flex items-end gap-2 text-popover-foreground`} style={{ height: SCENE_H }}>
+        <div className="relative flex items-end gap-2 text-popover-foreground" style={{ height: SCENE_H }}>
           <ClawdSky percent={usage.sessionPercent} pinned={pinned} />
           {/* Clawd stands on the bar, the number sits a touch above it */}
-          <div className="relative mb-1 flex shrink-0 items-start self-end">
+          <div className="relative mb-1 flex shrink-0 items-start self-end" style={{ marginLeft: 6 }}>
             <span className={`text-[2rem] font-light leading-none tabular-nums ${getColorClass(usage.sessionPercent)}`}>
               {sessionPercent}
             </span>
-            <span className="ml-0.5 mt-0.5 text-sm text-muted-foreground">%</span>
+            <span className={`ml-0.5 mt-0.5 text-sm ${getColorClass(usage.sessionPercent)}`}>%</span>
           </div>
           <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} decor={decor} />
         </div>
 
         {/* Positioned, so it sits over the bottom of the sky, which reaches to its middle. The track
-            is solid in both themes, so the daylight and theme backgrounds meeting behind it don't
-            change how it looks. */}
+            is solid in both themes, so the sky and the card meeting behind it don't change how it
+            looks. */}
         <div className="relative h-2 overflow-hidden rounded-full bg-[#e5e5e5] dark:bg-[#383835]">
           <div
             className={`h-full rounded-full transition-[width] duration-500 ease-out ${getBarColorClass(usage.sessionPercent)}`}
@@ -192,16 +171,15 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
 }
 
 /**
- * The usage card's own background and border in the app's theme, below the corners only: the
- * hero's daylight background covers the top, and nothing under its rounded corners can show
- * through their soft edge. The card itself (the popover, a simulator card) draws no background
- * or border; this goes first inside its padded content, which is relative and isolate.
+ * The usage card's background and border in the app's theme. The card itself (the popover, a
+ * simulator card) draws neither; this goes first inside its padded content, which is relative
+ * and isolate.
  */
 export function UsageCardSurface() {
   return (
     <div
       aria-hidden="true"
-      className="absolute -inset-px top-10 -z-10 m-0 rounded-b-xl border border-t-0 border-border bg-popover"
+      className="absolute -inset-px -z-10 m-0 rounded-xl border border-border bg-popover"
     />
   );
 }

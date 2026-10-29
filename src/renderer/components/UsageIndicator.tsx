@@ -407,8 +407,7 @@ export function UsageIndicator() {
         side="top"
         align="end"
         sideOffset={popoverOffset}
-        // Not clipped: the usage card's daylight background covers the popover's border. The card
-        // draws its own background and border (UsageCardSurface), so the popover drops both.
+        // The card draws its own background and border (UsageCardSurface), so the popover drops both
         className={cn(
           'text-xs w-[17rem] p-0',
           !usage.needsReauthentication && 'border-transparent bg-transparent',
