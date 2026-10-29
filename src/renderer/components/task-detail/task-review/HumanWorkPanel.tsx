@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next';
 import type { Task } from '../../../../shared/types';
 import type { HumanWorkItem, HumanWorkMutation } from '../../../../shared/types/human-work';
 import type { ReviewRoundFinding } from '../../../../shared/types/claude-code';
-import { groupHumanWorkItems, humanFindingKey, humanReviewTopics, isHumanApprovalOverride } from '../../../../shared/utils/human-work';
+import { groupHumanWorkItems, humanFindingKey, isHumanApprovalOverride } from '../../../../shared/utils/human-work';
 import { useTaskStore } from '../../../stores/task-store';
 import { Button } from '../../ui/button';
 import { Input } from '../../ui/input';
 import { HumanReviewMaterials } from './HumanReviewMaterials';
+import { HumanRequestSummary } from './HumanRequestSummary';
 
 type HumanDraft = Pick<HumanWorkItem, 'owner' | 'status' | 'response' | 'evidence'>;
 const fieldsOf = ({ owner, status, response, evidence }: HumanWorkItem): HumanDraft => ({ owner, status, response, evidence });
@@ -15,18 +16,18 @@ const fieldsOf = ({ owner, status, response, evidence }: HumanWorkItem): HumanDr
 function HumanAction({ item, related, draft, change, save, disabled }: { item: HumanWorkItem; related: HumanWorkItem[]; draft: HumanDraft; change: (fields: HumanDraft) => void; save: (fields: Omit<Extract<HumanWorkMutation, { action: 'update' }>, 'action' | 'expectedRevision'>) => void; disabled: boolean }) {
   const { t } = useTranslation('tasks');
   const { owner, status, response, evidence } = draft;
-  return <article className="space-y-3 rounded border p-3">
-    <h4 className="text-sm font-medium">{t('humanWork.recordDecision')}</h4>
-    {!!related.length && <p className="text-xs text-muted-foreground">{t('humanWork.groupedHelp', { count: related.length + 1 })}</p>}
-    <details className="text-xs"><summary>{t('humanWork.exactRequirements', { count: related.length + 1 })}</summary>{[item, ...related].map(note => <div key={note.id} className="mt-2 space-y-1 border-l pl-2"><p className="whitespace-pre-wrap wrap-anywhere">{note.finding.description}</p>{note.finding.file && <p className="break-all font-mono">{note.finding.file}{note.finding.line ? `:${note.finding.line}` : ''}</p>}{note.history.length > 0 && <p>{t('humanWork.priorReceiptCount', { count: note.history.length })}</p>}</div>)}</details>
-    <form className="space-y-3" onSubmit={(event) => { event.preventDefault(); save({ id: item.id, ...(related.length ? { relatedIds: related.map(note => note.id) } : {}), owner, status, response, evidence }); }}>
-      <label className="block space-y-1 text-xs">{t('humanWork.owner')}<Input maxLength={160} value={owner} onChange={(event) => change({ ...draft, owner: event.target.value })} disabled={disabled} /></label>
-      <label className="block space-y-1 text-xs">{t('humanWork.statusLabel')}<select className="block w-full rounded border bg-background p-2 text-sm" value={status} onChange={(event) => change({ ...draft, status: event.target.value as HumanWorkItem['status'] })} disabled={disabled}>{(['open', 'in_progress', 'submitted'] as const).map((value) => <option key={value} value={value}>{t(`humanWork.status.${value}`)}</option>)}</select></label>
-      <label className="block space-y-1 text-xs">{t('humanWork.response')}<textarea className="block w-full rounded border bg-background p-2 text-sm" rows={3} maxLength={8000} value={response} onChange={(event) => change({ ...draft, response: event.target.value })} disabled={disabled} /></label>
-      <label className="block space-y-1 text-xs">{t('humanWork.evidence')}<textarea className="block w-full rounded border bg-background p-2 text-sm" rows={2} maxLength={4000} value={evidence} onChange={(event) => change({ ...draft, evidence: event.target.value })} disabled={disabled} /></label>
+  return <article className="space-y-4 rounded-md border bg-background p-4">
+    <HumanRequestSummary findings={[item, ...related].map(note => note.finding)} />
+    <form className="space-y-3 border-t pt-3" onSubmit={(event) => { event.preventDefault(); save({ id: item.id, ...(related.length ? { relatedIds: related.map(note => note.id) } : {}), owner, status, response, evidence }); }}>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label className="block space-y-1 text-xs">{t('humanWork.reviewerLabel')}<Input aria-label={t('humanWork.owner')} maxLength={160} value={owner} onChange={(event) => change({ ...draft, owner: event.target.value })} disabled={disabled} /></label>
+        <label className="block space-y-1 text-xs">{t('humanWork.shortStatus')}<select aria-label={t('humanWork.statusLabel')} className="block w-full rounded border bg-background p-2 text-sm" value={status} onChange={(event) => change({ ...draft, status: event.target.value as HumanWorkItem['status'] })} disabled={disabled}>{(['open', 'in_progress', 'submitted'] as const).map((value) => <option key={value} value={value}>{t(`humanWork.status.${value}`)}</option>)}</select></label>
+      </div>
+      <label className="block space-y-1 text-xs">{t('humanWork.decisionLabel')}<textarea aria-label={t('humanWork.response')} className="block w-full rounded border bg-background p-2 text-sm" rows={3} maxLength={8000} value={response} onChange={(event) => change({ ...draft, response: event.target.value })} disabled={disabled} /></label>
+      <label className="block space-y-1 text-xs">{t('humanWork.evidenceLabel')}<textarea aria-label={t('humanWork.evidence')} className="block w-full rounded border bg-background p-2 text-sm" rows={2} maxLength={4000} value={evidence} onChange={(event) => change({ ...draft, evidence: event.target.value })} disabled={disabled} /></label>
       <Button type="submit" size="sm" variant="outline" disabled={disabled || (status === 'submitted' && !(owner.trim() && response.trim() && evidence.trim()))}>{t('humanWork.save')}</Button>
     </form>
-    <p className="text-xs text-muted-foreground">{t('humanWork.recorded', { at: new Date(item.at).toLocaleString(), revision: item.revision })}</p>
+    <details className="text-xs text-muted-foreground"><summary>{t('humanWork.exactRequirements', { count: related.length + 1 })}</summary>{[item, ...related].map(note => <div key={note.id} className="mt-3 space-y-1 border-l pl-2"><p className="whitespace-pre-wrap wrap-anywhere">{note.finding.description}</p>{note.finding.file && <p className="break-all font-mono">{note.finding.file}{note.finding.line ? `:${note.finding.line}` : ''}</p>}<p className="break-all">{t('humanWork.receipt', { id: note.id })}</p><p>{t('humanWork.recorded', { at: new Date(note.at).toLocaleString(), revision: note.revision })}</p>{note.history.length > 0 && <p>{t('humanWork.priorReceiptCount', { count: note.history.length })}</p>}</div>)}</details>
     {!!item.history.length && <details className="text-xs"><summary>{t('humanWork.history')}</summary>{item.history.slice().reverse().map((entry) => <div key={entry.revision} className="mt-2 space-y-1 border-l pl-2"><p>{entry.owner || t('humanWork.unassigned')} · {t(`humanWork.status.${entry.status}`)} · {new Date(entry.at).toLocaleString()}</p><p className="whitespace-pre-wrap wrap-anywhere">{entry.response}</p><p className="whitespace-pre-wrap wrap-anywhere">{entry.evidence}</p></div>)}</details>}
   </article>;
 }
@@ -36,7 +37,6 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
   const cached = useTaskStore((state) => state.tasks.find((entry) => entry.id === task.id && entry.projectId === task.projectId));
   const stream = (cached ?? task).metadata?.humanWork;
   const groups = groupHumanWorkItems(stream?.items ?? []);
-  const topics = new Set(humanReviewTopics([...findings, ...(stream?.items.map(item => item.finding) ?? [])].map(finding => finding.description).join('\n')));
   const overrideActive = isHumanApprovalOverride(stream?.approvalOverride);
   const [showOverride, setShowOverride] = useState(false);
   const latestOwner = stream?.items.slice().reverse().find((item) => item.owner.trim());
@@ -107,25 +107,10 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
   return <section className="mt-4 space-y-3 rounded-lg border border-warning/50 bg-warning/5 p-4" aria-label={t('humanWork.title')}>
     <h3 className="text-sm font-medium">{t(overrideActive ? 'humanWork.recordedDecisionTitle' : responsesRecorded ? 'humanWork.recordedResponsesTitle' : 'humanWork.checklistTitle')}</h3>
     <p className="text-xs text-muted-foreground">{t(overrideActive ? 'humanWork.recordedDecisionHelp' : responsesRecorded ? 'humanWork.recordedResponsesHelp' : 'humanWork.checklistHelp')}</p>
-    {!overrideActive && !responsesRecorded && <ol className="list-decimal space-y-2 pl-5 text-sm">
-      <li>{t('humanWork.stepOpen')}</li>
-      {topics.has('study') && <li>{t('humanWork.stepStudy')}</li>}
-      {topics.has('visual') && <li>{t('humanWork.stepVisual')}</li>}
-      {!topics.size && <li>{t('humanWork.stepOther')}</li>}
-      <li>{t('humanWork.stepSubmit')}</li>
-    </ol>}
     {!available && <p role="alert" className="text-sm">{t('humanWork.restart')}</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {overrideActive && <div role="status" className="space-y-1 rounded border border-primary/50 p-3 text-sm"><p className="font-medium">{t('humanWork.overrideActive', { approver: stream!.approvalOverride!.approver })}</p><p className="whitespace-pre-wrap wrap-anywhere">{stream!.approvalOverride!.reason}</p><p className="text-xs text-muted-foreground">{new Date(stream!.approvalOverride!.at).toLocaleString()} · {t('humanWork.overrideScope')}</p></div>}
-    {!showOverride && <Button size="sm" variant="outline" disabled={!available || busy || handedBack} onClick={() => setShowOverride(true)}>{t('humanWork.overrideButton')}</Button>}
-    {showOverride && <form className="space-y-3 rounded border border-primary/50 p-3" onSubmit={(event) => { event.preventDefault(); if (approver.trim() && overrideReason.trim()) void overrideAndContinue(); }}>
-      <h4 className="text-sm font-medium">{t('humanWork.overrideButton')}</h4><p className="text-xs text-muted-foreground">{t('humanWork.overrideHelp')}</p>
-      <label className="block space-y-1 text-xs">{t('humanWork.overrideApprover')}<Input value={approver} maxLength={160} disabled={busy} onChange={(event) => setApprover(event.target.value)} /></label>
-      <label className="block space-y-1 text-xs">{t('humanWork.overrideReason')}<textarea rows={3} maxLength={8000} className="block w-full rounded border bg-background p-2 text-sm" disabled={busy} value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label>
-      <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={busy || !approver.trim() || !overrideReason.trim()}>{t('humanWork.applyOverride')}</Button><Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setShowOverride(false)}>{t('humanWork.cancelOverride')}</Button></div>
-    </form>}
-    <HumanReviewMaterials key={`${task.projectId}:${task.id}`} task={cached ?? task} />
-    {!overrideActive && remaining.map((finding) => <div key={humanFindingKey(finding)} className="space-y-2 rounded border p-3"><p className="text-sm wrap-anywhere">{finding.description}</p><Button size="sm" variant="outline" disabled={!available || busy || handedBack} onClick={() => void mutate({ action: 'create', expectedRevision: stream?.revision ?? 0, finding })}>{t('humanWork.track')}</Button></div>)}
+    {!overrideActive && remaining.map((finding) => <div key={humanFindingKey(finding)} className="space-y-3 rounded-md border bg-background p-4"><HumanRequestSummary findings={[finding]} /><details className="text-xs text-muted-foreground"><summary>{t('humanWork.exactRequirements', { count: 1 })}</summary><p className="mt-2 whitespace-pre-wrap wrap-anywhere">{finding.description}</p></details><Button size="sm" variant="outline" disabled={!available || busy || handedBack} onClick={() => void mutate({ action: 'create', expectedRevision: stream?.revision ?? 0, finding })}>{t('humanWork.track')}</Button></div>)}
     {groups.map(group => {
       const item = group.at(-1)!;
       const action = <HumanAction item={item} related={group.filter(note => note.id !== item.id)} draft={draftFor(item)} change={(fields) => setDrafts(current => ({ ...current, ...Object.fromEntries(group.map(note => [note.id, { revision: note.revision, fields }])) }))} disabled={!available || busy || handedBack || overrideActive} save={fields => void mutate({ action: 'update', expectedRevision: stream!.revision, ...fields })} />;
@@ -135,5 +120,16 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
     })}
     {(!!stream?.items.length || overrideActive) && <><p className="text-xs text-muted-foreground">{t(overrideActive ? 'humanWork.overrideHandoffHelp' : 'humanWork.handoffHelp')}</p>{!overrideActive && incomplete > 0 && <p className="text-xs text-muted-foreground">{t('humanWork.completeFields')}</p>}{!overrideActive && remaining.length > 0 && <p className="text-xs text-muted-foreground">{t('humanWork.trackRemaining', { count: remaining.length })}</p>}<Button size="sm" disabled={!ready || busy || handedBack || !available || (!overrideActive && remaining.length > 0)} onClick={() => void handBack()}>{t(overrideActive ? 'humanWork.continueOverride' : needsSubmission ? 'humanWork.submitAndContinue' : 'humanWork.handBack')}</Button></>}
     {handedBack && <p role="status" className="text-sm">{t('humanWork.handedBack')}</p>}
+    <HumanReviewMaterials key={`${task.projectId}:${task.id}`} task={cached ?? task} />
+    <details className="border-t pt-3 text-xs text-muted-foreground"><summary>{t('humanWork.taskWideDecision')}</summary>
+      <p className="mt-2">{t('humanWork.taskWideDecisionHelp')}</p>
+      {!showOverride && <Button className="mt-2" size="sm" variant="outline" disabled={!available || busy || handedBack} onClick={() => setShowOverride(true)}>{t('humanWork.overrideButton')}</Button>}
+      {showOverride && <form className="mt-3 space-y-3 rounded border border-primary/50 p-3" onSubmit={(event) => { event.preventDefault(); if (approver.trim() && overrideReason.trim()) void overrideAndContinue(); }}>
+        <h4 className="text-sm font-medium">{t('humanWork.overrideButton')}</h4><p>{t('humanWork.overrideHelp')}</p>
+        <label className="block space-y-1">{t('humanWork.overrideApprover')}<Input value={approver} maxLength={160} disabled={busy} onChange={(event) => setApprover(event.target.value)} /></label>
+        <label className="block space-y-1">{t('humanWork.overrideReason')}<textarea rows={3} maxLength={8000} className="block w-full rounded border bg-background p-2 text-sm" disabled={busy} value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} /></label>
+        <div className="flex flex-wrap gap-2"><Button type="submit" size="sm" disabled={busy || !approver.trim() || !overrideReason.trim()}>{t('humanWork.applyOverride')}</Button><Button type="button" size="sm" variant="ghost" disabled={busy} onClick={() => setShowOverride(false)}>{t('humanWork.cancelOverride')}</Button></div>
+      </form>}
+    </details>
   </section>;
 }

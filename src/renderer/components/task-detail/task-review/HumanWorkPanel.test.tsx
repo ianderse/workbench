@@ -76,6 +76,7 @@ it('saves unsaved complete fields before continuing and never launches if a save
 
 it('records an explicit task override and continues without forcing additional approval evidence', async () => {
   render(<HumanWorkPanel task={task} findings={[finding]} />);
+  fireEvent.click(screen.getByText('Task-wide approval options'));
   fireEvent.click(screen.getByRole('button', { name: 'Approve human requirements for this task' }));
   expect(screen.getByRole('button', { name: 'Record approval and continue' })).toBeDisabled();
   fireEvent.change(screen.getByLabelText('Approver'), { target: { value: 'Ian Andersen' } });
@@ -144,7 +145,7 @@ it('shows worktree-aware artifact links, missing generated art and the quoted li
   const open = vi.fn(async () => ({ success: true }));
   window.electronAPI = { ...window.electronAPI, getHumanReviewPacket: getPacket as never, openHumanReviewArtifact: open };
   const view = render(<HumanWorkPanel task={task} findings={[{ ...finding, description: 'Three participant sessions and human review of the screenshots are required.' }]} />);
-  expect(screen.getByText(/Complete the requested participant sessions/)).toBeInTheDocument();
+  expect(screen.getByRole('heading', { name: 'Review the participant requirement' })).toBeInTheDocument();
   expect(await screen.findByText(/These files come from this task’s worktree/)).toBeInTheDocument();
   expect(screen.getByText(/No generated image files found in this location/)).toBeInTheDocument();
   fireEvent.click(screen.getAllByRole('button', { name: 'Show in file manager' })[0]);
@@ -168,4 +169,80 @@ it('never partially saves grouped responses against an older main process', asyn
   expect(await screen.findByRole('alert')).toHaveTextContent('Restart Workbench');
   expect(mutate).not.toHaveBeenCalled();
   expect(review).not.toHaveBeenCalled();
+});
+
+const changedScreenshotFindings = [
+  {
+    "severity": "major",
+    "description": "Three changed matrix references (02-operations-refusal 1440x900; 05-debrief-mission-research-week2 1440x900 and 390x844) are committed as regression baselines without human approval; the applicable \u00a714.2 gate (human acceptance before reference diffs are treated as regressions) is unmet and prior owner overrides (task 126 rev 9, task 173 rev 3) expressly exclude future changed images. Real finding, left open deliberately: the manifest approval field and DESIGN_DECISIONS \u00a773 record the re-pin honestly and claim no approval. Resolution needs a human artifact-level acceptance or scoped owner waiver naming exactly these three files, kept distinct from the plates' art/license clearance.",
+    "requiresHuman": true,
+    "file": "docs/DESIGN_DECISIONS.md",
+    "line": 4730
+  },
+  {
+    "severity": "major",
+    "description": "Real and left open deliberately: the three changed matrix references (1440x900/02-operations-refusal.png; 1440x900/05-debrief-mission-research-week2.png; 390x844/05-debrief-mission-research-week2.png) are committed as regression baselines while the \u00a714.2 human-acceptance gate is unmet \u2014 receipt 159c1480-6eab-4558-9adb-bcdc34264cb0 is recorded open with no submitted decision, and the task-126 rev-9 / task-173 rev-3 owner overrides expressly exclude future changed images. The code is honest about this (manifest approval string + DESIGN_DECISIONS \u00a774 claim no approval), but only a human artifact-level acceptance or scoped owner waiver naming exactly these three files \u2014 kept distinct from the plates' art/license clearance and r5 lighting deviation \u2014 can close it. Nothing code-side can or should fix it.",
+    "requiresHuman": true,
+    "file": "docs/DESIGN_DECISIONS.md",
+    "line": 4763
+  }
+] as const;
+
+it('shows the repeated screenshot approval as one concise request with all three exact targets', () => {
+  const notes = changedScreenshotFindings.map(note => ({ ...note }));
+  let humanWork = applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding: notes[0] }, notes, 'note-1', '2026-10-28T23:08:45Z');
+  humanWork = applyHumanWorkMutation(humanWork, { action: 'create', expectedRevision: 1, finding: notes[1] }, notes, 'note-2', '2026-10-28T23:48:35Z');
+  const before = structuredClone(humanWork);
+  useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork } }] });
+  render(<HumanWorkPanel task={task} findings={notes} />);
+  expect(screen.getAllByRole('heading', { name: 'Review 3 updated screenshots' })).toHaveLength(1);
+  expect(screen.getByText('Decide whether these screenshots may become regression baselines. Record approval or requested changes for these files.')).toBeVisible();
+  const artifacts = screen.getByRole('list', { name: 'Artifacts named in this request' });
+  expect(artifacts.children).toHaveLength(3);
+  for (const path of ['1440x900/02-operations-refusal.png', '1440x900/05-debrief-mission-research-week2.png', '390x844/05-debrief-mission-research-week2.png']) {
+    expect(screen.getByText(path)).toBeVisible();
+  }
+  expect(screen.getAllByLabelText('Responsible person')).toHaveLength(1);
+  for (const note of notes) expect(screen.getByText(note.description)).not.toBeVisible();
+  expect(screen.getByText('docs/DESIGN_DECISIONS.md:4763')).not.toBeVisible();
+  expect(screen.getByText('Read all 2 related review notes').closest('details')).not.toHaveAttribute('open');
+  expect(screen.getByRole('button', { name: 'Approve human requirements for this task' })).not.toBeVisible();
+  expect(screen.getByRole('button', { name: 'Submit and continue' })).toBeDisabled();
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork).toEqual(before);
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it('keeps different recorded answers independently editable even when screenshot requests are related', () => {
+  const notes = changedScreenshotFindings.map(note => ({ ...note }));
+  let humanWork = applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding: notes[0] }, notes, 'note-1', '2026-10-28T23:08:45Z');
+  humanWork = applyHumanWorkMutation(humanWork, { action: 'create', expectedRevision: 1, finding: notes[1] }, notes, 'note-2', '2026-10-28T23:48:35Z');
+  humanWork.items[0].response = 'Please change the refusal screenshot.';
+  humanWork.items[1].response = 'Review scheduled; no decision yet.';
+  useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork } }] });
+  render(<HumanWorkPanel task={task} findings={notes} />);
+  expect(screen.getAllByLabelText('Responsible person')).toHaveLength(2);
+  expect(screen.getByDisplayValue('Please change the refusal screenshot.')).toBeVisible();
+  expect(screen.getByDisplayValue('Review scheduled; no decision yet.')).toBeVisible();
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork?.items).toHaveLength(2);
+});
+
+it.each([
+  ['negated participant work', 'The participant study is waived. The screenshots still need an owner decision.', 'Review the participant requirement'],
+  ['license clearance', 'The screenshots are visually accepted. The art license clearance still needs evidence from the owner.', 'Review the image requirement'],
+  ['negated baseline approval', 'Baseline approval is not required. License clearance remains open for 1440x900/report.png.', 'Review 1 screenshot'],
+  ['waived older baseline finding', 'Regression baselines without human approval were the earlier finding. Approval is waived. The license receipt for 1440x900/report.png remains open.', 'Review 1 screenshot'],
+  ['unknown human requirement', 'An owner must provide the physical device serial number and test receipt.', 'Review the human requirement'],
+])('keeps generic guidance neutral for %s and preserves the complete requirement', (_name, description, title) => {
+  const note = { ...finding, requiresHuman: true, description };
+  render(<HumanWorkPanel task={task} findings={[note]} />);
+  expect(screen.getByRole('heading', { name: title })).toBeVisible();
+  expect(screen.getByText(description)).not.toBeVisible();
+  expect(screen.getByText(description).closest('details')).not.toHaveAttribute('open');
+  expect(screen.queryByText(/Complete the requested participant/)).not.toBeInTheDocument();
+  expect(screen.queryByText('Decide whether these screenshots may become regression baselines. Record approval or requested changes for these files.')).not.toBeInTheDocument();
+  expect(screen.getByText(/Read the source requirement/)).toBeVisible();
+  fireEvent.click(screen.getByText('Read the exact requirement'));
+  expect(screen.getByText(description)).toBeVisible();
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork).toBeUndefined();
+  expect(mutate).not.toHaveBeenCalled();
 });

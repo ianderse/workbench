@@ -79,9 +79,19 @@ and early exit from human-only AI review loops. Real human approval and particip
 remain the user's acceptance boundary.
 ## Finding the work to review
 
-Human-only reviews appear above the work summary as **What needs your input**. The checklist
-highlights participant sessions and visual review when the original findings mention them; the
-exact requirements remain available beside the response form. It does not replace the spec.
+Human-only reviews appear above the work summary as **What needs your input**. Each response card
+starts with a short requested action and any explicit screenshot/image paths found in the original
+notes. Related notes can therefore read as one request, such as **Review 3 updated screenshots**,
+instead of requiring the reviewer to interpret repeated technical paragraphs. These deterministic
+display hints do not establish approval, waive requirements, or replace the spec. Original wording,
+locations, receipt identities and history remain under the review-note disclosure.
+Topic mentions alone never instruct the reviewer to run a study or approve art: generic legacy
+findings use neutral guidance. Baseline-specific decision copy requires an explicit outstanding
+approval statement; negated or waived approval wording falls back to the original requirement.
+
+The scoped response form uses concise Reviewer, Status, Your decision and Evidence labels.
+Supporting files follow the response cards. **Task-wide approval options** is a separate secondary
+disclosure so a response to one request is not confused with an override of all human gates.
 
 **Files to review** resolves the report and its local Markdown links in this task's worktree,
 falling back to the project checkout only when there is no task worktree. **Open** uses the
