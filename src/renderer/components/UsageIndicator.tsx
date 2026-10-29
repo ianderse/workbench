@@ -22,6 +22,7 @@ import type { AppSection } from './settings/AppSettings';
 import { useSettingsStore } from '../stores/settings-store';
 import { cn } from '../lib/utils';
 import { UsageBreakdown } from './usage/UsageBreakdown';
+import { ApiProfileUsageCard, ReauthRequiredCard, UsageUnavailableCard } from './usage/UsageStateCards';
 import { useUsageStore } from '../stores/usage-store';
 import {
   THRESHOLD_ELEVATED, THRESHOLD_WARNING, getBadgeColorClasses, getColorClass,
@@ -228,7 +229,6 @@ export function UsageIndicator() {
     }
     const badgeLabel = t('common:usage.apiKeyBadge');
     const badgeColor = 'text-muted-foreground bg-muted/50 border-border';
-    const message = t('common:usage.apiKeyUnknown', { provider: providerName });
 
     return (
       <Popover open={isOpen} onOpenChange={handleOpenChange}>
@@ -253,24 +253,7 @@ export function UsageIndicator() {
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          <div className="p-3 space-y-3">
-            <div className="flex items-center gap-1.5 pb-2 border-b">
-              <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
-            </div>
-            <div className="flex items-start gap-2.5 py-1">
-              <div className="min-w-0 space-y-1">
-                <p className="truncate text-xs font-medium">{activeApiProfile.name} · {providerName}</p>
-                <p className="text-xs text-muted-foreground leading-relaxed">{message}</p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleOpenAccounts}
-              className="w-full rounded-md bg-muted/60 px-2 py-1.5 text-xs font-medium hover:bg-muted"
-            >
-              {t('common:usage.manageAccounts')}
-            </button>
-          </div>
+          <ApiProfileUsageCard profileName={activeApiProfile.name} provider={providerName} onManageAccounts={handleOpenAccounts} />
         </PopoverContent>
       </Popover>
     );
@@ -316,35 +299,7 @@ export function UsageIndicator() {
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          <div className="p-3 space-y-3">
-            <div className="flex items-center gap-1.5 pb-2 border-b">
-              <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
-            </div>
-
-            {/* Status message */}
-            <div className="flex items-start gap-2.5 py-2">
-              {needsReauth ? (
-                <>
-                  <AlertCircle className="h-4 w-4 text-red-500 flex-shrink-0 mt-0.5" />
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-red-500">{t('common:usage.reauthRequired')}</p>
-                    <p className="text-[10px] text-muted-foreground leading-relaxed">
-                      {t('common:usage.reauthRequiredDescription')}
-                    </p>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium">{t('common:usage.dataUnavailable')}</p>
-                    <p className="text-[10px] text-muted-foreground leading-relaxed">
-                      {t('common:usage.dataUnavailableDescription')}
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-        </div>
+          {needsReauth ? <ReauthRequiredCard onReauth={handleOpenAccounts} /> : <UsageUnavailableCard />}
       </PopoverContent>
       </Popover>
     );
@@ -417,31 +372,7 @@ export function UsageIndicator() {
       >
         {/* Re-auth required prompt - shown when the active profile needs re-authentication */}
         {usage.needsReauthentication ? (
-          <div className="p-3 space-y-3">
-            <div className="flex items-center gap-1.5 pb-2 border-b">
-              <span className="font-semibold text-xs">{t('common:usage.usageBreakdown')}</span>
-            </div>
-            <div className="py-2 space-y-3">
-              <div className="flex items-start gap-2.5 p-2.5 rounded-lg bg-destructive/10 border border-destructive/20">
-                <AlertCircle className="h-4 w-4 text-destructive flex-shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="text-xs font-medium text-destructive">
-                    {t('common:usage.reauthRequired')}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground leading-relaxed">
-                    {t('common:usage.reauthRequiredDescription')}
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={handleOpenAccounts}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-md bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors text-xs font-medium"
-              >
-                {t('common:usage.reauthButton')}
-              </button>
-            </div>
-          </div>
+          <ReauthRequiredCard onReauth={handleOpenAccounts} />
         ) : (
           <UsageBreakdown usage={usage} open={isOpen} />
         )}

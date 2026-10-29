@@ -5,6 +5,7 @@ import { cn } from '../../lib/utils';
 import { SettingsSection } from './SettingsSection';
 import { SettingsRow, SettingsRows } from './SettingsRow';
 import { SessionResets, UsageCardSurface, UsageHero } from '../usage/UsageBreakdown';
+import { ApiProfileUsageCard, ReauthRequiredCard, UsageUnavailableCard } from '../usage/UsageStateCards';
 import { createSkinPicker } from '../usage/clawd/skins';
 import { IS_DEV_BUILD } from '../../lib/title-bar';
 import {
@@ -102,6 +103,26 @@ export function UsageSimulatorSettings() {
 
   return (
     <SettingsSection title={t('usageSimulator.title')}>
+      {/* The popover's other states, when it has no usage to draw, in each theme */}
+      <div className="mb-6 space-y-4">
+        {STATE_PREVIEWS.map((state) => (
+          <div key={state} className="flex items-center gap-4">
+            {PREVIEW_THEMES.map((theme) => (
+              <div
+                key={theme}
+                className={`${theme} w-[17rem] rounded-xl border border-border bg-popover text-xs text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.24)]`}
+              >
+                <StatePreview state={state} />
+              </div>
+            ))}
+            {/* What the row shows, in the space beside its cards */}
+            <div className="flex min-w-0 flex-1 justify-center text-center text-sm text-muted-foreground">
+              {t(`usageSimulator.states.${state}`)}
+            </div>
+          </div>
+        ))}
+      </div>
+
       {/* The popover in each theme side by side, whatever the app's theme, so both can be compared
           at the same moment: the morning on top, the evening below. Each card has the popover's own
           width, shape and padding. */}
@@ -177,4 +198,24 @@ export function UsageSimulatorSettings() {
       </SettingsRows>
     </SettingsSection>
   );
+}
+
+/** The popover's states with no usage to draw */
+const STATE_PREVIEWS = ['apiProfile', 'reauth', 'unavailable'] as const;
+
+/** The stand-in API profile's provider */
+const PREVIEW_PROVIDER = 'api.example.com';
+
+/** One of the popover's states, its buttons doing nothing */
+function StatePreview({ state }: { state: (typeof STATE_PREVIEWS)[number] }) {
+  const { t } = useTranslation('settings');
+  const noop = () => {};
+  switch (state) {
+    case 'apiProfile':
+      return <ApiProfileUsageCard profileName={t('usageSimulator.sampleProfileName')} provider={PREVIEW_PROVIDER} onManageAccounts={noop} />;
+    case 'unavailable':
+      return <UsageUnavailableCard />;
+    case 'reauth':
+      return <ReauthRequiredCard onReauth={noop} />;
+  }
 }

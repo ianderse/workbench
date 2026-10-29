@@ -666,7 +666,13 @@
     "timeLabel": "Time",
     "timeDescription": "The top previews show this time in the morning, the bottom ones in the evening",
     "percentLabel": "5-hour usage",
-    "percentDescription": "The percentage the previews show; starts at the real value"
+    "percentDescription": "The percentage the previews show; starts at the real value",
+    "states": {
+      "apiProfile": "No usage endpoint",
+      "unavailable": "Usage couldn't be fetched",
+      "reauth": "Has to sign in again"
+    },
+    "sampleProfileName": "My API profile"
   },
   "liveAgentSimulator": {
     "title": "Live agent graph",
