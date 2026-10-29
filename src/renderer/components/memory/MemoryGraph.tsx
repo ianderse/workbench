@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { AgentLoader } from '../ui/agent-loader';
 // The app's Content Security Policy forbids eval; this makes PixiJS build its shaders without it
 import 'pixi.js/unsafe-eval';
-import { Application, Circle, Color, Container, Graphics, Text } from 'pixi.js';
+import { Application, Circle, Color, Container, Graphics, Text, type ColorSource } from 'pixi.js';
 import { select } from 'd3-selection';
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from 'd3-zoom';
 import { useMemoryGraphStore } from '../../stores/memory-graph-store';
@@ -49,20 +49,16 @@ function readColors(element: Element) {
   const style = getComputedStyle(element);
   const text = new Color(style.color);
   return {
-    // Colorful style: node and link colors come from Graphify's palette, the same in light and
-    // dark. Links are much fainter than Graphify's 0.7 / 0.35 (kept as a 2:1 ratio) because
-    // thousands overlap in 3D.
+    // Links in both styles: much fainter than Graphify's 0.7 / 0.35 (kept as a 2:1 ratio)
+    // because thousands overlap in 3D
     linkAlpha: { extracted: 0.08, inferred: 0.04 },
     dimmedLinkAlpha: 0.03,
-    // Plain style: nodes in the muted label grey (in 3D many overlap, and the text color added up
-    // too bright), links in the text color; a hovered neighbourhood lights up in the primary color
+    // Colorful style: nodes and links in Graphify's palette, the same in light and dark.
+    // Plain style: nodes and their links in the theme's graph grey; a hovered neighbourhood
+    // lights up in the primary color
     plain: {
-      node: new Color(style.getPropertyValue('--nav-label-color').trim() || style.color),
-      nodeAlpha: 0.5,
+      node: new Color(style.getPropertyValue('--graph-node').trim() || style.color),
       accent: new Color(style.getPropertyValue('--primary').trim() || style.color),
-      link: text,
-      linkAlpha: 0.035,
-      dimmedLinkAlpha: 0.02,
     },
     text,
     font: style.fontFamily,
@@ -240,7 +236,7 @@ export function MemoryGraph({ projectId = '', graph: givenGraph, colorful: given
 
       // Colorful: nodes are colored by community like Graphify's graph view; the hovered node turns
       // white with a ring in its community color (Graphify's highlight), the rest of its
-      // neighbourhood stays lit. Plain: every node in the muted grey; a hovered node and its
+      // neighbourhood stays lit. Plain: every node in the graph grey; a hovered node and its
       // neighbours light up in the primary color at half opacity
       const isLit = (index: number) =>
         !!hovered && (hovered.index === index || neighbours[hovered.index].has(index));
@@ -248,7 +244,7 @@ export function MemoryGraph({ projectId = '', graph: givenGraph, colorful: given
         const shape = nodeGraphics[node.index].clear().circle(0, 0, node.radius);
         if (!colorfulRef.current) {
           const { plain } = colors;
-          shape.fill(isLit(node.index) ? { color: plain.accent, alpha: 0.5 } : { color: plain.node, alpha: plain.nodeAlpha });
+          shape.fill(isLit(node.index) ? { color: plain.accent, alpha: 0.5 } : plain.node);
           return;
         }
         const color = PALETTE[node.colorIndex];
@@ -314,32 +310,15 @@ export function MemoryGraph({ projectId = '', graph: givenGraph, colorful: given
         }
       };
 
-      // Plain: every link in the text color; with a hovered node every link dims and its own links
-      // are drawn on top in the primary color
-      const drawPlainLinks = (width: number) => {
-        const { plain } = colors;
-        for (const [s, t] of linkPairs) {
-          linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
-        }
-        linkLayer.stroke({ width, color: plain.link, alpha: hovered ? plain.dimmedLinkAlpha : plain.linkAlpha });
-        if (!hovered) return;
-        for (const [s, t] of linkPairs) {
-          if (s !== hovered.index && t !== hovered.index) continue;
-          linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
-        }
-        linkLayer.stroke({ width: width * 1.5, color: plain.accent, alpha: 0.5 });
-      };
-
+      // Links are drawn like their nodes: in their community's color (colorful) or the graph grey
+      // (plain), so however many overlap they add up to the node color, never past it. One stroke
+      // per (community, extracted or not) group; with a hovered node every link dims first and the
+      // node's own links are drawn on top at Graphify's opacities (plain: in the primary color).
       const drawLinks = () => {
         linkLayer.clear();
         const width = 1 / transform.k;
-        if (!colorfulRef.current) {
-          drawPlainLinks(width);
-          return;
-        }
-        // One stroke per (community color, extracted or not) group; with a hovered node every link
-        // dims first and the node's own links are drawn on top at Graphify's opacities
-        const strokeGroup = (group: number, only: ((s: number, t: number) => boolean) | null, lineWidth: number, alpha: number) => {
+        const colorful = colorfulRef.current;
+        const strokeGroup = (group: number, only: ((s: number, t: number) => boolean) | null, lineWidth: number, alpha: number, color: ColorSource) => {
           let any = false;
           for (const link of linkGroups[group]) {
             const [s, t] = linkPairs[link];
@@ -347,19 +326,21 @@ export function MemoryGraph({ projectId = '', graph: givenGraph, colorful: given
             linkLayer.moveTo(projectedX[s], projectedY[s]).lineTo(projectedX[t], projectedY[t]);
             any = true;
           }
-          if (any) linkLayer.stroke({ width: lineWidth, color: PALETTE[group >> 1], alpha });
+          if (any) linkLayer.stroke({ width: lineWidth, color, alpha });
         };
         for (let group = 0; group < linkGroups.length; group++) {
           const inferred = group & 1;
           strokeGroup(group, null, width, hovered
             ? colors.dimmedLinkAlpha
-            : inferred ? colors.linkAlpha.inferred : colors.linkAlpha.extracted);
+            : inferred ? colors.linkAlpha.inferred : colors.linkAlpha.extracted,
+          colorful ? PALETTE[group >> 1] : colors.plain.node);
         }
         if (hovered) {
           const index = hovered.index;
           for (let group = 0; group < linkGroups.length; group++) {
             strokeGroup(group, (s, t) => s === index || t === index, width * 1.5,
-              group & 1 ? HOVER_LINK_ALPHA.inferred : HOVER_LINK_ALPHA.extracted);
+              group & 1 ? HOVER_LINK_ALPHA.inferred : HOVER_LINK_ALPHA.extracted,
+              colorful ? PALETTE[group >> 1] : colors.plain.accent);
           }
         }
       };

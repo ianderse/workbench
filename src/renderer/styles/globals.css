@@ -387,6 +387,9 @@
   --nav-label-transform: none;
   --nav-label-tracking: 0;
 
+  /* Graph page: plain-style nodes */
+  --graph-node: #bcbcbc;
+
   /* Kanban columns */
   --column-bg: none;
   --column-top-width: 2px;
@@ -534,6 +537,9 @@
   --nav-label-weight: 400;
   --nav-label-transform: none;
   --nav-label-tracking: 0;
+
+  /* Graph page: plain-style nodes */
+  --graph-node: #555555;
 
   /* Kanban columns */
   --column-bg: none;
