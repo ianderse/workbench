@@ -7,10 +7,11 @@
  * into the chat as it is written.
  *
  * The CLI can't change the project's files: only Read/Glob/Grep (plus Bash limited to graphify's
- * read-only searches when the project's memory graph is on) are available, and the only MCP
- * server is Workbench's task tools (`task-tools-server.ts`), so Claude can manage the
- * project's tasks. Anything else is denied without prompting (`--permission-mode dontAsk`) and
- * no session is persisted. Credentials come from the best available Claude profile or the active API profile
+ * read-only searches when the project's memory graph is on, and to read-only `gh` / `glab`
+ * commands when the GitHub / GitLab buttons are on) are available, and the MCP servers are
+ * Workbench's task tools (`task-tools-server.ts`), so Claude can manage the project's tasks, and
+ * the ones chosen for the chat. Anything else is denied without prompting
+ * (`--permission-mode dontAsk`). Each chat is a Claude Code session (see InsightsSessionPlan). Credentials come from the best available Claude profile or the active API profile
  * (`resolveClaudeEnv`).
  */
 
@@ -31,6 +32,7 @@ import type { ImageAttachment } from '../../shared/types';
 import type { GraphifyAgentContext } from '../graphify';
 import type { InsightsCliTools } from './prompts';
 import { randomUUID } from 'node:crypto';
+import semver from 'semver';
 import { extractTaskSuggestions, stripTaskSuggestions } from '../../shared/utils/task-suggestions';
 import { COMPENG_DIR_NAME } from '../self-improve/paths';
 import type { ClaudeSessionRef } from '../../shared/types';
@@ -40,6 +42,8 @@ import { TASK_TOOLS_SERVER_NAME, toBridgeServer, type TaskToolsMcpServer, type T
 import TASK_TOOLS_BRIDGE_SOURCE from './task-tools-bridge.cjs?raw';
 import { buildMessageContent } from './message-content';
 import {
+  INSIGHTS_GITHUB_COMMANDS,
+  INSIGHTS_GITLAB_COMMANDS,
   buildConversationPrompt,
   buildSystemPrompt,
   extractToolInput,
@@ -164,9 +168,22 @@ function toClaudeEffort(level: string | undefined): ClaudeEffort {
 /** Where a chat may write: the project memory (self-improve), relative to the project */
 export const INSIGHTS_MEMORY_RULE = `Edit(.workbench/${COMPENG_DIR_NAME}/**)`;
 
-/** Bash rules for the git hosting CLIs (the GitHub and GitLab buttons) */
-export const INSIGHTS_GITHUB_RULE = 'Bash(gh:*)';
-export const INSIGHTS_GITLAB_RULE = 'Bash(glab:*)';
+/**
+ * Bash rules for the git hosting CLIs (the GitHub and GitLab buttons): their read-only commands,
+ * each with any arguments. A bare `Bash(gh:*)` would let Claude check out branches, download
+ * files, call the API or run aliases and extensions (arbitrary commands) without asking
+ */
+export const INSIGHTS_GITHUB_RULES = INSIGHTS_GITHUB_COMMANDS.map((command) => `Bash(${command}:*)`);
+export const INSIGHTS_GITLAB_RULES = INSIGHTS_GITLAB_COMMANDS.map((command) => `Bash(${command}:*)`);
+
+/** First Claude Code version with `--system-prompt-snapshot` (CHANGELOG 2.1.267) */
+export const SYSTEM_PROMPT_SNAPSHOT_MIN_VERSION = '2.1.267';
+
+/** Whether a Claude Code version (as `claude --version` prints it) knows `--system-prompt-snapshot` */
+export function supportsSystemPromptSnapshot(version: string | null | undefined): boolean {
+  const parsed = version ? semver.coerce(version) : null;
+  return !!parsed && semver.gte(parsed, SYSTEM_PROMPT_SNAPSHOT_MIN_VERSION);
+}
 
 /** MCP tools rule for Workbench's task tools (every tool of the server) */
 export const INSIGHTS_TASK_TOOLS_RULE = `mcp__${TASK_TOOLS_SERVER_NAME}`;
@@ -194,7 +211,10 @@ export function sessionArgs(plan: InsightsSessionPlan, newSessionId: string, tit
   return ['--session-id', newSessionId, ...(title ? ['--name', `Workbench chat: ${title}`] : [])];
 }
 
-/** CLI arguments for a headless turn that can't change the project's files */
+/**
+ * CLI arguments for a headless turn that can't change the project's files.
+ * `systemPromptSnapshot`: the CLI knows `--system-prompt-snapshot` (see supportsSystemPromptSnapshot)
+ */
 export function buildInsightsArgs(
   model: string,
   effort: ClaudeEffort,
@@ -204,10 +224,11 @@ export function buildInsightsArgs(
   cliTools: InsightsCliTools = {},
   memory = false,
   session: string[] = [],
+  systemPromptSnapshot = false,
 ): string[] {
   const cliRules = [
-    ...(cliTools.github ? [INSIGHTS_GITHUB_RULE] : []),
-    ...(cliTools.gitlab ? [INSIGHTS_GITLAB_RULE] : []),
+    ...(cliTools.github ? INSIGHTS_GITHUB_RULES : []),
+    ...(cliTools.gitlab ? INSIGHTS_GITLAB_RULES : []),
   ];
   const withBash = withGraphify || cliRules.length > 0;
   const tools = [
@@ -238,6 +259,10 @@ export function buildInsightsArgs(
     ...(mcp ? ['--mcp-config', mcp.configFile] : []),
     ...session,
     '--append-system-prompt-file', systemPromptFile,
+    // Claude Code records a session's system prompt on its first request and resends that record
+    // on every resume and fork; each turn's prompt describes what that turn is given, so it must
+    // be sent fresh (the flag is passed only to versions that know it)
+    ...(systemPromptSnapshot ? ['--system-prompt-snapshot', 'off'] : []),
   ];
 }
 
@@ -406,16 +431,19 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
   try {
     await whenShellRuntimeReady();
     const wsl = getWslInfo();
+    let cliVersion: string | null | undefined;
     if (wsl) {
       // Claude Code runs inside WSL: the distribution's own claude (from the startup probe)
       if (!wsl.tools.claude.path) {
         throw new Error(formatInsightsError(INSIGHTS_ERROR_CODES.claudeCodeMissing, `Claude Code CLI not found in WSL (${wsl.distro})`));
       }
+      cliVersion = wsl.tools.claude.version;
     } else {
       const cliInfo = await getToolInfoAsync('claude', { refreshIfMissing: true });
       if (!cliInfo.found) {
         throw new Error(formatInsightsError(INSIGHTS_ERROR_CODES.claudeCodeMissing, cliInfo.message || 'Claude Code CLI not found'));
       }
+      cliVersion = cliInfo.version;
     }
     const taskToolsRoute = getTaskToolsRoute();
     const offeredTaskTools = taskToolsRoute === 'off' ? undefined : config.taskTools;
@@ -483,6 +511,7 @@ export async function runInsights(config: InsightsRunConfig, onStream?: Insights
           config.cliTools,
           config.memory,
           sessionArgs(turnPlan, randomUUID(), config.title),
+          supportsSystemPromptSnapshot(cliVersion),
         ),
         cwd: projectDir,
         env,

@@ -49,6 +49,8 @@ process.stdin.on('end', () => {
 );
 
 let cliFound = true;
+/** Version of the installed claude, as getToolInfoAsync reports it */
+let cliVersion: string | undefined = '2.1.312';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -60,7 +62,7 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 vi.mock('../../cli-tool-manager', () => ({
-  getToolInfoAsync: async () => (cliFound ? { found: true, path: '/usr/bin/claude' } : { found: false, message: 'Claude CLI not found' }),
+  getToolInfoAsync: async () => (cliFound ? { found: true, path: '/usr/bin/claude', version: cliVersion } : { found: false, message: 'Claude CLI not found' }),
 }));
 vi.mock('../../claude-code/env', () => ({
   resolveClaudeEnv: async () => ({
@@ -80,7 +82,7 @@ vi.mock('../../env-utils', () => ({
  * CLI itself still runs natively: spawning stays native (isWslRuntime false)
  */
 const wslRef = vi.hoisted(() => ({
-  info: null as null | { distro: string; networkingMode: string | null; interop?: boolean; tools: { claude: { path: string | null } } },
+  info: null as null | { distro: string; networkingMode: string | null; interop?: boolean; tools: { claude: { path: string | null; version?: string | null } } },
   version: 2,
 }));
 vi.mock('../../platform/shell-runtime', () => ({
@@ -97,10 +99,11 @@ import {
   INSIGHTS_READ_ONLY_TOOLS,
   INSIGHTS_GRAPHIFY_COMMANDS,
   INSIGHTS_TASK_TOOLS_RULE,
-  INSIGHTS_GITHUB_RULE,
+  INSIGHTS_GITHUB_RULES,
   INSIGHTS_MEMORY_RULE,
-  INSIGHTS_GITLAB_RULE,
+  INSIGHTS_GITLAB_RULES,
   resetTaskToolsBridgeForTests,
+  supportsSystemPromptSnapshot,
   toClaudeModel,
   type InsightsStreamEvent,
 } from '../claude-code-runner';
@@ -151,6 +154,7 @@ async function run(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   cliFound = true;
+  cliVersion = '2.1.312';
   wslRef.info = null;
   wslRef.version = 2;
   resetTaskToolsBridgeForTests();
@@ -274,18 +278,28 @@ describe('runInsights', () => {
     expect(mcpToolTimeout).toBeNull();
   });
 
-  it('lets Claude use gh and glab, and no other command, when their buttons are on', async () => {
+  it("lets Claude use gh's and glab's read-only commands, and no other command, when their buttons are on", async () => {
     setRun(conversation);
     await (await run({ cliTools: { github: true, gitlab: true } })).promise;
     const { args, systemPrompt } = record();
 
     expect(args[args.indexOf('--tools') + 1]).toContain('Bash');
-    const allowed = args.slice(args.indexOf('--allowedTools') + 1);
-    expect(allowed).toContain(INSIGHTS_GITHUB_RULE);
-    expect(allowed).toContain(INSIGHTS_GITLAB_RULE);
-    expect(allowed.some((rule: string) => rule.startsWith('Bash(graphify'))).toBe(false);
+    const allowed: string[] = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--permission-mode'));
+    expect(allowed).toEqual(expect.arrayContaining([...INSIGHTS_GITHUB_RULES, ...INSIGHTS_GITLAB_RULES]));
+    expect(allowed).toContain('Bash(gh pr view:*)');
+    expect(allowed).toContain('Bash(glab mr view:*)');
+    // No wildcard over the whole CLI, nor commands that change files, git state or the remote
+    expect(allowed).not.toContain('Bash(gh:*)');
+    expect(allowed).not.toContain('Bash(glab:*)');
+    const bashRules = allowed.filter((rule) => rule.startsWith('Bash('));
+    for (const command of ['gh pr checkout', 'gh repo sync', 'gh run download', 'gh release download', 'gh api', 'gh alias', 'gh extension', 'gh pr create', 'gh pr merge', 'gh issue comment', 'glab mr checkout', 'glab api', 'glab ci status', 'glab ci view', 'glab mr merge']) {
+      expect(bashRules.some((rule) => command.startsWith(rule.slice('Bash('.length, -':*)'.length)))).toBe(false);
+    }
+    expect(allowed.some((rule) => rule.startsWith('Bash(graphify'))).toBe(false);
     expect(systemPrompt).toContain('GitHub CLI (`gh`)');
     expect(systemPrompt).toContain('GitLab CLI (`glab`)');
+    expect(systemPrompt).toContain('`gh pr view`');
+    expect(systemPrompt).toContain('`glab mr view`');
   });
 
   it('offers only gh with just the GitHub button on', async () => {
@@ -293,8 +307,8 @@ describe('runInsights', () => {
     await (await run({ cliTools: { github: true } })).promise;
     const { args, systemPrompt } = record();
 
-    expect(args).toContain(INSIGHTS_GITHUB_RULE);
-    expect(args).not.toContain(INSIGHTS_GITLAB_RULE);
+    expect(args).toEqual(expect.arrayContaining(INSIGHTS_GITHUB_RULES));
+    for (const rule of INSIGHTS_GITLAB_RULES) expect(args).not.toContain(rule);
     expect(systemPrompt).not.toContain('glab');
   });
 
@@ -378,6 +392,30 @@ describe('runInsights', () => {
       const { args, stdin } = record();
       expect(args).not.toContain('--resume');
       expect(stdin).toContain('Earlier answer');
+    });
+
+    it('sends the turn\'s own system prompt to new, resumed and forked sessions, not a recorded one', async () => {
+      const sessions = [
+        { mode: 'new' },
+        { mode: 'resume', sessionId: 'sess-1', profileId: 'main' },
+        { mode: 'fork', sessionId: 'sess-1', atMessageUuid: 'msg-a', profileId: 'main' },
+      ];
+      for (const session of sessions) {
+        setRun(withIds);
+        await (await run({ session })).promise;
+        const { args } = record();
+        expect(args[args.indexOf('--system-prompt-snapshot') + 1]).toBe('off');
+        expect(args).toContain('--append-system-prompt-file');
+      }
+    });
+
+    it('leaves --system-prompt-snapshot out for Claude Code versions without it', async () => {
+      for (const version of ['2.1.266', undefined]) {
+        cliVersion = version;
+        setRun(withIds);
+        await (await run({ session: { mode: 'resume', sessionId: 'sess-1', profileId: 'main' } })).promise;
+        expect(record().args).not.toContain('--system-prompt-snapshot');
+      }
     });
 
     it('starts a new session when the session can no longer be resumed', async () => {
@@ -504,6 +542,19 @@ describe('runInsights', () => {
       expect(record().mcpConfig).toEqual({ mcpServers: { 'workbench': mcpServer } });
     });
 
+    it("checks the distribution's claude version for --system-prompt-snapshot", async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: 'mirrored', tools: { claude: { path: '/home/me/.local/bin/claude', version: '2.1.267' } } };
+      cliVersion = undefined;
+      setRun(conversation);
+      await (await run()).promise;
+      expect(record().args).toContain('--system-prompt-snapshot');
+
+      wslRef.info.tools.claude.version = '2.0.0';
+      setRun(conversation);
+      await (await run()).promise;
+      expect(record().args).not.toContain('--system-prompt-snapshot');
+    });
+
     it('keeps the task tools with mirrored networking', async () => {
       wslRef.info = { distro: 'Ubuntu', networkingMode: 'mirrored', tools: { claude: { path: '/home/me/.local/bin/claude' } } };
       setRun(conversation);
@@ -517,6 +568,18 @@ describe('runInsights', () => {
       const error = await promise.catch((e: Error) => e);
       expect(parseInsightsError((error as Error).message).code).toBe(INSIGHTS_ERROR_CODES.claudeCodeMissing);
     });
+  });
+});
+
+describe('supportsSystemPromptSnapshot', () => {
+  it('is true from Claude Code 2.1.267, whatever the version text around the number', () => {
+    expect(supportsSystemPromptSnapshot('2.1.267')).toBe(true);
+    expect(supportsSystemPromptSnapshot('2.1.312 (Claude Code)')).toBe(true);
+    expect(supportsSystemPromptSnapshot('2.2.0')).toBe(true);
+    expect(supportsSystemPromptSnapshot('2.1.266')).toBe(false);
+    expect(supportsSystemPromptSnapshot('1.0.128')).toBe(false);
+    expect(supportsSystemPromptSnapshot(undefined)).toBe(false);
+    expect(supportsSystemPromptSnapshot('unknown')).toBe(false);
   });
 });
 

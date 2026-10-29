@@ -32,6 +32,53 @@ export interface InsightsCliTools {
   gitlab?: boolean;
 }
 
+/**
+ * The `gh` commands the GitHub button allows: reading only. Each is allowed with any arguments
+ * (`Bash(<command>:*)`); every other `gh` command (checkout, sync, download, create, comment,
+ * merge, api, alias, extension...) is denied. None writes files, changes git state or the remote,
+ * or needs a terminal; `--web` only opens the browser
+ */
+export const INSIGHTS_GITHUB_COMMANDS = [
+  'gh pr view',
+  'gh pr list',
+  'gh pr diff',
+  'gh pr checks',
+  'gh pr status',
+  'gh issue view',
+  'gh issue list',
+  'gh issue status',
+  'gh run list',
+  'gh run view',
+  'gh workflow list',
+  'gh workflow view',
+  'gh release list',
+  'gh release view',
+  'gh repo view',
+  'gh label list',
+  'gh search',
+  'gh status',
+] as const;
+
+/**
+ * The `glab` commands the GitLab button allows: reading only, as for `gh`. `glab ci status` and
+ * `glab ci view` are left out: they can offer to retry or cancel jobs
+ */
+export const INSIGHTS_GITLAB_COMMANDS = [
+  'glab mr view',
+  'glab mr list',
+  'glab mr diff',
+  'glab mr issues',
+  'glab issue view',
+  'glab issue list',
+  'glab ci list',
+  'glab ci get',
+  'glab ci trace',
+  'glab release list',
+  'glab release view',
+  'glab repo view',
+  'glab label list',
+] as const;
+
 /** What the chat's Claude Code run is given, which the system prompt describes */
 export interface InsightsPromptOptions {
   /** The Kanban button: Workbench's task tools */
@@ -62,12 +109,16 @@ function cliToolsPrompt(cliTools: InsightsCliTools): string {
   ];
   if (clis.length === 0) return '';
   const heading = [...(cliTools.github ? ['GitHub'] : []), ...(cliTools.gitlab ? ['GitLab'] : [])].join(' and ');
+  const commands = [
+    ...(cliTools.github ? INSIGHTS_GITHUB_COMMANDS : []),
+    ...(cliTools.gitlab ? INSIGHTS_GITLAB_COMMANDS : []),
+  ].map((command) => `\`${command}\``);
   return `
 
 ## ${heading}
-You can use ${clis.join(' and ')} through Bash for the project's repository: issues, pull or merge requests, reviews, CI runs, releases and the like.
-- Read freely; create, comment, close, merge or change anything only when the user asked for exactly that, and tell them what you did (with links or numbers).
-- Never delete repositories, branches, releases or other resources, and never change repository settings or secrets.
+You can use ${clis.join(' and ')} through Bash to read the project's repository: pull or merge requests and their diffs and checks, issues, CI runs and their logs, releases, repository info and search. Only these commands are allowed, with any arguments: ${commands.join(', ')}.
+- Everything else is denied: checking out or syncing branches, downloading files, creating, editing, commenting on, reviewing, closing or merging anything, \`api\` calls, aliases and extensions. When the user wants one of those, tell them to do it themselves or do it through a task.
+- Writing a command's output to a file is denied; piping it into \`head\` or \`grep\` works, and \`--jq\` picks fields from JSON output.
 - When a command fails (not installed, not signed in, no access), say so instead of trying something else.`;
 }
 
@@ -75,8 +126,8 @@ You can use ${clis.join(' and ')} through Bash for the project's repository: iss
 function toolsPrompt(options: InsightsPromptOptions): string {
   const commands = [
     ...(options.graphify ? ['the graphify searches described below'] : []),
-    ...(options.cliTools?.github ? ['`gh`'] : []),
-    ...(options.cliTools?.gitlab ? ['`glab`'] : []),
+    ...(options.cliTools?.github ? ['the `gh` commands listed below'] : []),
+    ...(options.cliTools?.gitlab ? ['the `glab` commands listed below'] : []),
   ];
   const servers = options.mcpServers ?? [];
   return [

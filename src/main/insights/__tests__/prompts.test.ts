@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConversationPrompt, buildSystemPrompt, extractToolInput } from '../prompts';
+import { INSIGHTS_GITHUB_COMMANDS, INSIGHTS_GITLAB_COMMANDS, buildConversationPrompt, buildSystemPrompt, extractToolInput } from '../prompts';
 
 describe('buildConversationPrompt', () => {
   it('uses the message directly without history', () => {
@@ -63,13 +63,27 @@ describe('buildSystemPrompt', () => {
     expect(plain).toContain("You can't change them: code changes are made by tasks.");
 
     const full = buildSystemPrompt({ graphify: true, cliTools: { github: true }, mcpServers: ['context7', 'Ant_Design'], memory: true });
-    expect(full).toContain('- Bash, only for the graphify searches described below and `gh`.');
+    expect(full).toContain('- Bash, only for the graphify searches described below and the `gh` commands listed below.');
     expect(full).toContain('MCP servers the user turned on for this chat: context7, Ant_Design');
     expect(full).toContain('(except your project memory, below)');
     expect(full).toContain('## Project memory');
   });
 
-  it('has no project memory section while self-improve is off', () => {
+  it('lists exactly the read-only gh and glab commands allowed, and says the rest is denied', () => {
+    const prompt = buildSystemPrompt({ cliTools: { github: true, gitlab: true } });
+    for (const command of [...INSIGHTS_GITHUB_COMMANDS, ...INSIGHTS_GITLAB_COMMANDS]) expect(prompt).toContain(`\`${command}\``);
+    expect(prompt).toContain('## GitHub and GitLab');
+    expect(prompt).toContain('Everything else is denied');
+    expect(prompt).toContain('do it themselves or do it through a task');
+    expect(prompt).not.toContain('`gh pr checkout`');
+
+    const githubOnly = buildSystemPrompt({ cliTools: { github: true } });
+    expect(githubOnly).toContain('`gh pr view`');
+    expect(githubOnly).not.toContain('glab');
+    expect(buildSystemPrompt()).not.toContain('## GitHub');
+  });
+
+    it('has no project memory section while self-improve is off', () => {
     expect(buildSystemPrompt()).not.toContain('## Project memory');
   });
 });
