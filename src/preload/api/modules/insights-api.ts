@@ -20,8 +20,8 @@ export interface InsightsAPI {
   getInsightsSession: (projectId: string) => Promise<IPCResult<InsightsSession | null>>;
   sendInsightsMessage: (projectId: string, message: string, modelConfig?: InsightsModelConfig, images?: ImageAttachment[]) => void;
   stopInsightsMessage: (projectId: string) => Promise<boolean>;
-  regenerateInsightsMessage: (projectId: string, modelConfig?: InsightsModelConfig) => void;
-  editInsightsMessage: (projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig) => void;
+  regenerateInsightsMessage: (projectId: string, modelConfig?: InsightsModelConfig, sessionId?: string) => void;
+  editInsightsMessage: (projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig, sessionId?: string) => void;
   clearInsightsSession: (projectId: string) => Promise<IPCResult>;
   createTaskFromInsights: (
     projectId: string,
@@ -70,11 +70,11 @@ export const createInsightsAPI = (): InsightsAPI => ({
   stopInsightsMessage: (projectId: string): Promise<boolean> =>
     invokeIpc(IPC_CHANNELS.INSIGHTS_STOP, projectId),
 
-  regenerateInsightsMessage: (projectId: string, modelConfig?: InsightsModelConfig): void =>
-    sendIpc(IPC_CHANNELS.INSIGHTS_REGENERATE, projectId, modelConfig),
+  regenerateInsightsMessage: (projectId: string, modelConfig?: InsightsModelConfig, sessionId?: string): void =>
+    sendIpc(IPC_CHANNELS.INSIGHTS_REGENERATE, projectId, modelConfig, sessionId),
 
-  editInsightsMessage: (projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig): void =>
-    sendIpc(IPC_CHANNELS.INSIGHTS_EDIT_MESSAGE, projectId, messageId, content, modelConfig),
+  editInsightsMessage: (projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig, sessionId?: string): void =>
+    sendIpc(IPC_CHANNELS.INSIGHTS_EDIT_MESSAGE, projectId, messageId, content, modelConfig, sessionId),
 
   clearInsightsSession: (projectId: string): Promise<IPCResult> =>
     invokeIpc(IPC_CHANNELS.INSIGHTS_CLEAR_SESSION, projectId),

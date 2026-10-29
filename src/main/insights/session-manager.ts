@@ -51,7 +51,10 @@ export class SessionManager {
    * Create a new session
    */
   createNewSession(projectId: string, projectPath: string): InsightsSession {
-    const sessionId = `session-${Date.now()}`;
+    // Ids are timestamps; one taken already (two chats within a millisecond) moves to the next
+    let stamp = Date.now();
+    while (this.storage.loadSessionById(projectPath, `session-${stamp}`)) stamp += 1;
+    const sessionId = `session-${stamp}`;
     const session: InsightsSession = {
       id: sessionId,
       projectId,
@@ -228,6 +231,24 @@ export class SessionManager {
   saveSession(projectPath: string, session: InsightsSession): void {
     this.storage.saveSession(projectPath, session);
     this.sessions.set(session.projectId, session);
+  }
+
+  /**
+   * Save a conversation whose reply just ended. A chat deleted meanwhile stays deleted (returns
+   * false), a chat that is no longer the open one doesn't become it again, and what changed on
+   * disk meanwhile (title, model, archive) is kept
+   */
+  saveReply(projectId: string, projectPath: string, session: InsightsSession): boolean {
+    const stored = this.storage.loadSessionById(projectPath, session.id);
+    if (!stored) return false;
+    session.title = stored.title;
+    session.modelConfig = stored.modelConfig;
+    session.archivedAt = stored.archivedAt;
+    this.storage.saveSession(projectPath, session);
+    if (this.sessions.get(projectId)?.id === session.id) {
+      this.sessions.set(projectId, session);
+    }
+    return true;
   }
 
   /**

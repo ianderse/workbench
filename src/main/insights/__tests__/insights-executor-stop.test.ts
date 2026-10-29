@@ -7,6 +7,9 @@ vi.mock('../../graphify', () => ({
   isGraphifyEnabled: async () => false,
   getGraphifyPromptContext: async () => null,
 }));
+// No real tool detection or MCP server checks (they start shells and servers)
+vi.mock('../../cli-tool-manager', () => ({ getToolInfoAsync: async () => ({ found: false }) }));
+vi.mock('../../mcp-availability', () => ({ usableMcpConnectorIds: (ids: string[]) => ids }));
 vi.mock('../../project-store', () => ({ projectStore: { getProject: () => undefined } }));
 vi.mock('../../settings-utils', () => ({ readSettingsFileAsync: async () => undefined }));
 vi.mock('../task-tools-server', () => ({ openTaskToolsSession: async () => undefined }));

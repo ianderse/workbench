@@ -66,6 +66,11 @@ const initialStatus: InsightsChatStatus = {
  */
 export const DRAFT_SESSION_ID = 'draft';
 
+/** A message id that stays unique for messages created in the same millisecond */
+function newMessageId(): string {
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export const useInsightsStore = create<InsightsState>((set, _get) => ({
   // Initial state
   projectId: null,
@@ -196,7 +201,7 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
       }
 
       const newMessage: InsightsChatMessage = {
-        id: `msg-${Date.now()}`,
+        id: newMessageId(),
         role: 'assistant',
         content,
         timestamp: new Date(),
@@ -312,7 +317,7 @@ export function sendMessage(projectId: string, message: string, modelConfig?: In
     data: undefined // Strip base64 data, keep thumbnails for display
   }));
   const userMessage: InsightsChatMessage = {
-    id: `msg-${Date.now()}`,
+    id: newMessageId(),
     role: 'user',
     content: message,
     timestamp: new Date(),
@@ -356,6 +361,11 @@ export async function stopMessage(projectId: string): Promise<void> {
  * A reply still being written keeps its conversation on screen, so it doesn't stream into the
  * new chat
  */
+/** The shown conversation's id, so regenerate and edit act on it (none before it is created) */
+function savedSessionId(session: InsightsSession | null): string | undefined {
+  return session && session.id !== DRAFT_SESSION_ID ? session.id : undefined;
+}
+
 /**
  * Write the latest reply again: it leaves the chat and a new one streams in its place
  */
@@ -371,7 +381,7 @@ export function regenerateMessage(projectId: string, modelConfig?: InsightsModel
   store.clearToolsUsed();
   store.setCurrentTool(null);
   store.setStatus({ phase: 'thinking', message: 'Processing your message...' });
-  window.electronAPI.regenerateInsightsMessage(projectId, modelConfig ?? session?.modelConfig);
+  window.electronAPI.regenerateInsightsMessage(projectId, modelConfig ?? session?.modelConfig, savedSessionId(session));
 }
 
 /**
@@ -391,7 +401,7 @@ export function editMessage(projectId: string, messageId: string, content: strin
   store.clearToolsUsed();
   store.setCurrentTool(null);
   store.setStatus({ phase: 'thinking', message: 'Processing your message...' });
-  window.electronAPI.editInsightsMessage(projectId, messageId, content, modelConfig ?? session.modelConfig);
+  window.electronAPI.editInsightsMessage(projectId, messageId, content, modelConfig ?? session.modelConfig, savedSessionId(session));
 }
 
 export async function openInsightsPage(projectId: string, includeArchived?: boolean): Promise<void> {
@@ -513,6 +523,8 @@ export function setupInsightsListeners(): () => void {
   const unsubStreamChunk = window.electronAPI.onInsightsStreamChunk(
     (projectId, chunk: InsightsStreamChunk) => {
       if (!isCurrentProject(projectId)) return;
+      // A reply of a chat the user left (stopped when they did) doesn't show in the chat on screen
+      if (chunk.sessionId && chunk.sessionId !== store().session?.id) return;
       switch (chunk.type) {
         case 'text':
           if (chunk.content) {
@@ -594,7 +606,9 @@ export function setupInsightsListeners(): () => void {
       // Update current session if it matches, or take the conversation a new chat's first
       // message created
       const currentSession = store().session;
-      if (currentSession?.id === session.id || currentSession?.id === DRAFT_SESSION_ID) {
+      const createdForDraft = currentSession?.id === DRAFT_SESSION_ID &&
+        session.messages[0]?.content === currentSession.messages[0]?.content;
+      if (currentSession?.id === session.id || createdForDraft) {
         store().setSession(session);
       }
       // Also refresh sessions list for sidebar

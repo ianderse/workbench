@@ -54,7 +54,8 @@ const electronAPI = {
   sendInsightsMessage: vi.fn(),
   regenerateInsightsMessage: vi.fn(),
   editInsightsMessage: vi.fn(),
-  newInsightsSession: vi.fn(async () => ({ success: true }))
+  newInsightsSession: vi.fn(async () => ({ success: true })),
+  switchInsightsSession: vi.fn(async (projectId: string, sessionId: string) => ({ success: true, data: session(projectId, { id: sessionId }) }))
 };
 
 // Emitters mirroring what InsightsExecutor/InsightsService send over IPC
@@ -239,7 +240,7 @@ describe('Insights mock conversations', () => {
 
     expect(state().session?.messages.map((m) => m.role)).toEqual(['user']);
     expect(state().status.phase).toBe('thinking');
-    expect(electronAPI.regenerateInsightsMessage).toHaveBeenCalledWith('project-a', undefined);
+    expect(electronAPI.regenerateInsightsMessage).toHaveBeenCalledWith('project-a', undefined, 'session-project-a');
 
     emit.chunk('project-a', { type: 'text', content: 'Second answer' });
     emit.chunk('project-a', { type: 'done' });
@@ -259,7 +260,43 @@ describe('Insights mock conversations', () => {
 
     expect(state().session?.messages.map((m) => m.content)).toEqual(['first, edited']);
     expect(state().status.phase).toBe('thinking');
-    expect(electronAPI.editInsightsMessage).toHaveBeenCalledWith('project-a', firstId, 'first, edited', undefined);
+    expect(electronAPI.editInsightsMessage).toHaveBeenCalledWith('project-a', firstId, 'first, edited', undefined, 'session-project-a');
+  });
+
+  it('leaves a reply of a chat the user left out of a new chat', async () => {
+    store.sendMessage('project-a', 'hello');
+    emit.chunk('project-a', { type: 'text', content: 'partial', sessionId: 'session-project-a' });
+
+    await store.newSession('project-a');
+    emit.chunk('project-a', { type: 'text', content: ' more', sessionId: 'session-project-a' });
+    emit.chunk('project-a', { type: 'done', sessionId: 'session-project-a' });
+
+    expect(state().session).toBeNull();
+    expect(state().streamingContent).toBe('');
+
+    // The next message of the new chat takes only the conversation it created
+    store.sendMessage('project-a', 'new question');
+    emit.session('project-a', session('project-a', {
+      messages: [{ id: 'u1', role: 'user', content: 'hello', timestamp: new Date() }]
+    }));
+    expect(state().session?.id).toBe(store.DRAFT_SESSION_ID);
+  });
+
+  it('leaves a reply of a chat the user left out of the chat switched to', async () => {
+    store.sendMessage('project-a', 'hello');
+    emit.chunk('project-a', { type: 'text', content: 'partial', sessionId: 'session-project-a' });
+
+    await store.switchSession('project-a', 'session-other');
+    emit.chunk('project-a', { type: 'text', content: ' more', sessionId: 'session-project-a' });
+    emit.chunk('project-a', { type: 'done', sessionId: 'session-project-a' });
+
+    expect(state().session?.id).toBe('session-other');
+    expect(state().session?.messages).toEqual([]);
+    expect(state().streamingContent).toBe('');
+
+    // Its own replies still stream in
+    emit.chunk('project-a', { type: 'text', content: 'Answer', sessionId: 'session-other' });
+    expect(state().streamingContent).toBe('Answer');
   });
 
   it('keeps a new chat empty when another conversation is updated', async () => {

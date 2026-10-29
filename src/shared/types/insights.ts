@@ -115,4 +115,6 @@ export interface InsightsStreamChunk {
     input?: string;  // Brief description of what's being searched/read
   };
   error?: string;
+  /** The conversation the reply belongs to; the chat shows only its own conversation's reply */
+  sessionId?: string;
 }

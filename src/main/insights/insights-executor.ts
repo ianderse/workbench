@@ -41,6 +41,8 @@ interface ProcessorResult {
 export interface InsightsTurnOptions {
   session?: InsightsSessionPlan;
   title?: string;
+  /** The chat's conversation, sent with each stream chunk so only that chat shows the reply */
+  chatSessionId?: string;
 }
 
 /** The chat's MCP servers: its own choice or the Connectors defaults, without unavailable ones */
@@ -102,6 +104,8 @@ export class InsightsExecutor extends EventEmitter {
 
     const controller = new AbortController();
     this.abortControllers.set(projectId, controller);
+    const emitChunk = (chunk: InsightsStreamChunk) =>
+      this.emit('stream-chunk', projectId, { ...chunk, sessionId: turn.chatSessionId });
 
     const fullResponse = '';
     const suggestedTasks: InsightsChatMessage['suggestedTasks'] = [];
@@ -165,10 +169,10 @@ export class InsightsExecutor extends EventEmitter {
             case 'text-delta': {
               accumulatedText += event.text;
               allOutput = (allOutput + event.text).slice(-10000);
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'text',
                 content: event.text,
-              } as InsightsStreamChunk);
+              });
               break;
             }
             case 'tool-start': {
@@ -177,25 +181,25 @@ export class InsightsExecutor extends EventEmitter {
                 input: event.input,
                 timestamp: new Date(),
               });
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'tool_start',
                 tool: { name: event.name, input: event.input },
-              } as InsightsStreamChunk);
+              });
               break;
             }
             case 'tool-end': {
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'tool_end',
                 tool: { name: event.name },
-              } as InsightsStreamChunk);
+              });
               break;
             }
             case 'error': {
               allOutput = (allOutput + event.error).slice(-10000);
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'error',
                 error: event.error,
-              } as InsightsStreamChunk);
+              });
               break;
             }
           }
@@ -208,15 +212,15 @@ export class InsightsExecutor extends EventEmitter {
       if (result.taskSuggestions.length > 0) {
         const tasks = result.taskSuggestions.map(({ title, description }) => ({ title, description }));
         suggestedTasks.push(...tasks);
-        this.emit('stream-chunk', projectId, {
+        emitChunk({
           type: 'task_suggestion',
           suggestedTasks: tasks,
-        } as InsightsStreamChunk);
+        });
       }
 
-      this.emit('stream-chunk', projectId, {
+      emitChunk({
         type: 'done',
-      } as InsightsStreamChunk);
+      });
 
       this.emit('status', projectId, {
         phase: 'complete',
@@ -242,7 +246,7 @@ export class InsightsExecutor extends EventEmitter {
         // replaced this run, that run owns the chat's state, so nothing is sent
         const replaced = this.abortControllers.has(projectId);
         if (!replaced) {
-          this.emit('stream-chunk', projectId, { type: 'done' } as InsightsStreamChunk);
+          emitChunk({ type: 'done' });
           this.emit('status', projectId, { phase: 'complete' } as InsightsChatStatus);
         }
         return {
@@ -254,10 +258,10 @@ export class InsightsExecutor extends EventEmitter {
         };
       }
 
-      this.emit('stream-chunk', projectId, {
+      emitChunk({
         type: 'error',
         error: errorMsg,
-      } as InsightsStreamChunk);
+      });
 
       this.emit('error', projectId, errorMsg);
       throw error;
