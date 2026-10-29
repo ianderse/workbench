@@ -666,8 +666,7 @@
     "timeLabel": "Time",
     "timeDescription": "The top previews show this time in the morning, the bottom ones in the evening",
     "percentLabel": "5-hour usage",
-    "percentDescription": "The percentage the preview shows; empty uses the real value",
-    "percentPlaceholder": "Real"
+    "percentDescription": "The percentage the previews show; starts at the real value"
   },
   "liveAgentSimulator": {
     "title": "Live agent graph",

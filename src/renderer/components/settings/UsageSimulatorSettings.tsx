@@ -26,6 +26,16 @@ const PREVIEW_ROWS = [
   { half: 'pm', pm: true, pickSkin: createSkinPicker() },
 ] as const;
 
+/** The simulator's sliders */
+const RANGE_CLASS = cn(
+  'h-1.5 w-40 cursor-pointer appearance-none rounded-full bg-segment-track',
+  'focus-visible:outline-none focus-visible:shadow-(--shadow-focus)',
+  '[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none',
+  '[&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground',
+  '[&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:cursor-pointer',
+  '[&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-foreground'
+);
+
 /** The theme classes (globals.css) the two preview cards are forced into */
 const PREVIEW_THEMES = ['dark', 'light'] as const;
 
@@ -43,8 +53,8 @@ const NO_USAGE: ClaudeUsageSnapshot = {
  * usage popover in the dark and the light theme, at its real size, with a pretend date, time and
  * 5-hour usage - to see the sky (day and night, the moon's phase, rain and winter snow) and
  * Clawd's moods and seasonal skins at any moment. The time is shown twice: in the morning (top
- * row) and in the evening (bottom row). An empty date is today and an empty usage the real one;
- * the real popover is never affected.
+ * row) and in the evening (bottom row). An empty date is today, and the usage starts at the real
+ * one; the real popover is never affected.
  */
 export function UsageSimulatorSettings() {
   const { t } = useTranslation('settings');
@@ -69,7 +79,7 @@ export function UsageSimulatorSettings() {
     return unsubscribe;
   }, []);
 
-  // The 5-hour usage field starts out filled with the real usage, once it is known
+  // The 5-hour usage slider starts out at the real usage, once it is known
   const filledPercent = useRef(false);
   useEffect(() => {
     if (filledPercent.current || !realUsage) return;
@@ -145,14 +155,7 @@ export function UsageSimulatorSettings() {
             step={TIME_STEP_MINUTES}
             value={minutes}
             onChange={(e) => setMinutes(Number(e.target.value))}
-            className={cn(
-              'h-1.5 w-40 cursor-pointer appearance-none rounded-full bg-segment-track',
-              'focus-visible:outline-none focus-visible:shadow-(--shadow-focus)',
-              '[&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none',
-              '[&::-webkit-slider-thumb]:cursor-pointer [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-foreground',
-              '[&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:cursor-pointer',
-              '[&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-foreground'
-            )}
+            className={RANGE_CLASS}
           />
         </SettingsRow>
         <SettingsRow
@@ -160,16 +163,15 @@ export function UsageSimulatorSettings() {
           description={t('usageSimulator.percentDescription')}
           htmlFor="usage-simulator-percent"
         >
-          <Input
+          <input
             id="usage-simulator-percent"
-            type="number"
+            type="range"
             min={0}
             max={100}
             step={1}
-            className="w-24"
-            placeholder={t('usageSimulator.percentPlaceholder')}
-            value={sessionPercent ?? ''}
-            onChange={(e) => setSessionPercent(e.target.value === '' ? null : Number(e.target.value))}
+            value={sessionPercent ?? Math.round(realUsage?.sessionPercent ?? 0)}
+            onChange={(e) => setSessionPercent(Number(e.target.value))}
+            className={RANGE_CLASS}
           />
         </SettingsRow>
       </SettingsRows>
