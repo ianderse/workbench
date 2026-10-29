@@ -13,6 +13,13 @@ const run = (...phases: ClaudeRunPhase[]): ClaudeRunInfo =>
 const task = (fields: Partial<Task>): Task => ({ id: 't', specId: '001-t', ...fields }) as Task;
 
 const stoppedImplement = run(phase('triage', { endedAt: 'x' }), phase('implement', { endedAt: 'x', isError: true, error: 'Stopped' }));
+const pendingRevision = {
+  id: 'revision-1',
+  requestedAt: '2026-01-01T01:00:00Z',
+  feedback: 'Recheck this task against its acceptance criteria',
+  feedbackAttachments: [],
+  phaseStart: 2,
+};
 
 describe('canResumeTask', () => {
   it('resumes a stopped task with an unfinished step', () => {
@@ -29,10 +36,60 @@ describe('canResumeTask', () => {
     expect(canResumeTask(task({ status: 'human_review', reviewReason: 'errors', claudeRun: failedValidate }))).toBe(true);
   });
 
+  it.each(['triage', 'revise', 'resync'] as const)('resumes a later unfinished %s after a rejected review', (name) => {
+    const interrupted = task({
+      status: 'human_review',
+      reviewReason: 'qa_rejected',
+      claudeRun: run(
+        phase('implement', { endedAt: 'x' }),
+        phase('validate', { endedAt: 'x' }),
+        phase(name),
+      ),
+    });
+    expect(reviewInterruption(interrupted)).toBe('interrupted');
+    expect(canResumeTask(interrupted)).toBe(true);
+    expect(canResumeTask({ ...interrupted, status: 'in_progress' })).toBe(false);
+    expect(canResumeTask({ ...interrupted, metadata: { archivedAt: 'x' } })).toBe(false);
+  });
+
+  it('does not resume a completed rejected review or invent an interrupted run', () => {
+    const rejected = task({ status: 'human_review', reviewReason: 'qa_rejected' });
+    expect(canResumeTask(rejected)).toBe(false);
+    expect(canResumeTask({ ...rejected, claudeRun: run() })).toBe(false);
+    expect(canResumeTask({ ...rejected, claudeRun: run(phase('validate', { endedAt: 'x' })) })).toBe(false);
+    expect(canResumeTask({ ...rejected, claudeRun: run(phase('revise', { endedAt: 'x' })) }, false)).toBe(false);
+  });
+
   it('does not resume a run whose last step finished', () => {
     const done = run(phase('implement', { endedAt: 'x' }), phase('validate', { endedAt: 'x' }));
     expect(canResumeTask(task({ status: 'human_review', reviewReason: 'errors', claudeRun: done }))).toBe(false);
     expect(canResumeTask(task({ status: 'human_review', reviewReason: 'stopped', claudeRun: done }))).toBe(false);
+  });
+
+  it.each(['validate', 'triage', 'revise'] as const)('resumes an unsettled request after a finished %s phase', (name) => {
+    const pending = {
+      ...run(phase('implement', { endedAt: 'x' }), phase(name, { endedAt: 'x' })),
+      revisionRequest: pendingRevision,
+    };
+    expect(isRunFinished(pending)).toBe(false);
+    expect(isRunFinished(pending, false)).toBe(false);
+    expect(canResumeTask(task({ status: 'human_review', reviewReason: 'qa_rejected', claudeRun: pending }))).toBe(true);
+  });
+
+  it('resumes a request persisted before its first phase, without treating a settled request as unfinished', () => {
+    const pending = { ...run(), revisionRequest: pendingRevision };
+    const interrupted = task({ status: 'human_review', reviewReason: 'qa_rejected', claudeRun: pending });
+    expect(canResumeTask(interrupted)).toBe(true);
+    expect(reviewInterruption(interrupted)).toBe('interrupted');
+    const settled = {
+      ...run(phase('validate', { endedAt: 'x' })),
+      revisionRequest: { ...pendingRevision, settledAt: '2026-01-01T02:00:00Z' },
+    };
+    expect(isRunFinished(settled)).toBe(true);
+    expect(canResumeTask(task({ status: 'human_review', reviewReason: 'qa_rejected', claudeRun: settled }))).toBe(false);
+    const superseded = { ...settled, revisionRequest: { ...pendingRevision, supersededAt: '2026-01-01T02:00:00Z' } };
+    expect(isRunFinished(superseded)).toBe(true);
+    expect(canResumeTask(task({ status: 'human_review', reviewReason: 'qa_rejected', claudeRun: superseded }))).toBe(false);
   });
 
   it('knows a finished implementation is the end when validation is off', () => {
@@ -57,6 +114,11 @@ describe('stuckTaskStartupAction', () => {
     expect(stuckTaskStartupAction({ status: 'in_progress', metadata: {} } as never, unfinished, false)).toBe('resume');
     expect(stuckTaskStartupAction({ status: 'ai_review', metadata: {} } as never, unfinished, false)).toBe('resume');
     expect(stuckTaskStartupAction({ status: 'in_progress', metadata: {} } as never, finished, false)).toBe('review');
+  });
+
+  it('resumes an unsettled revision instead of recycling a prior finished validation', () => {
+    const pending = { ...run(phase('validate', { endedAt: 'x' })), revisionRequest: pendingRevision };
+    expect(stuckTaskStartupAction({ status: 'in_progress', metadata: {} } as never, pending, false)).toBe('resume');
   });
 
   it('leaves tasks alone that are running, archived or were not left running', () => {

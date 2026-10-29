@@ -1,5 +1,5 @@
 import type { HumanApprovalOverride, HumanWorkstream } from '../../shared/types/human-work';
-import { buildHumanApprovalOverridePrompt, buildHumanWorkPrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
+import { buildHumanApprovalOverridePrompt, buildHumanWorkFeedback, buildHumanWorkPrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
 /**
  * Claude Code task runner
  * =======================
@@ -712,6 +712,8 @@ export class ClaudeTaskRun {
   private memoryTools: Awaited<ReturnType<typeof openTaskMemoryTools>>;
 
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
+    // Restoring a durable reviewer request must not mutate the caller's launch options.
+    this.config = { ...config };
     this.runFile = path.join(config.specDir, CLAUDE_RUN_FILE);
     this.info = loadClaudeRunInfo(config.specDir) ?? {
       version: 1,
@@ -754,9 +756,16 @@ export class ClaudeTaskRun {
 
   private async runSteps(): Promise<TaskRunOutcome> {
     const settings = this.config.settings;
+    await this.restoreRevisionRequest();
     await this.reconcilePhaseRecovery();
 
     if (this.config.specReview) return this.runSpecReview();
+    // A saved nonterminal review round is a request to repair, even if the app stopped before
+    // it could append the repair phase. Preserve/apply that feedback before a resync clears it.
+    if (this.config.mode !== 'revise') {
+      const repair = await this.resumeInterruptedReviewRepair();
+      if (repair) return repair;
+    }
     // 0. Resync: take in the base branch first, then carry on as the mode says. A change request
     // is applied first (the reviewer's feedback never waits on, or is lost to, a sync)
     if (this.config.resync && this.config.mode !== 'revise') {
@@ -767,15 +776,24 @@ export class ClaudeTaskRun {
     if (this.config.mode === 'revise') {
       // Each change request runs the same workflow: assess it (model and effort for the
       // change), apply it in the task's session, then validate
-      const triaged = await this.runTriage(true);
-      if (triaged) return triaged;
-      const revised = await this.runSessionPhase('revise');
-      if (revised) return revised;
+      const request = this.info.revisionRequest!;
+      const completed = (name: ClaudeRunPhaseName) => this.info.phases.slice(request.phaseStart)
+        .some((phase) => phase.name === name && phase.endedAt && !phase.isError);
+      if (!completed('triage')) {
+        const triaged = await this.runTriage(true);
+        if (triaged) return triaged;
+      }
+      if (!completed('revise')) {
+        const revised = await this.runSessionPhase('revise');
+        if (revised) return revised;
+      }
+      const repair = await this.resumeInterruptedReviewRepair();
+      if (repair) return repair;
       if (this.config.resync) {
         const synced = await this.applyResync(this.config.resync);
         if (synced) return synced;
       }
-      if (settings.validation) {
+      if (settings.validation && (!this.info.validation || !this.validatedSinceLastChange() || !this.info.reviewVerdict)) {
         const validated = await this.runReviewLoop();
         if (validated) return validated;
       }
@@ -817,21 +835,8 @@ export class ClaudeTaskRun {
     // A fix round of the AI review loop that was stopped or failed midway: the report it was fixing
     // is still there (and no verdict), so finish the fixes first; without this the saved report
     // would pass for the result and the task would end up in Human Review with the fixes undone
-    const lastPhase = this.info.phases.at(-1);
-    if (
-      settings.validation && (this.info.reviewRounds?.length ?? 0) < this.reviewRoundsAllowed()
-      && lastPhase?.name === 'revise' && (!lastPhase.endedAt || lastPhase.isError)
-      && this.info.validation && !this.info.reviewVerdict
-    ) {
-      const report = this.info.validation;
-      this.loop = { round: (this.info.reviewRounds?.length ?? 1) + 1, max: this.reviewRoundsAllowed(), feedback: buildFixFeedback(evaluateReviewGate(report, this.config.humanApprovalOverride), report) };
-      try {
-        const fixed = await this.runSessionPhase('revise');
-        if (fixed) return fixed;
-      } finally {
-        this.loop = undefined;
-      }
-    }
+    const repair = await this.resumeInterruptedReviewRepair();
+    if (repair) return repair;
     // (a fix round stopped midway leaves no report, so the review starts again)
     if (settings.validation && (!this.info.validation || !this.validatedSinceLastChange() || !this.info.reviewVerdict)) {
       const validated = await this.runReviewLoop();
@@ -839,6 +844,94 @@ export class ClaudeTaskRun {
     }
 
     return this.finish();
+  }
+
+  /** Persist the exact request before assessment; ordinary Resume/drag restores it after restart. */
+  private async restoreRevisionRequest(): Promise<void> {
+    if (this.config.specReview) return;
+    const saved = this.info.revisionRequest;
+    const feedback = this.config.feedback ?? '';
+    const attachments = this.config.feedbackAttachments ?? [];
+    const pending = saved && !saved.settledAt && !saved.supersededAt ? saved : undefined;
+    const invalidPending = pending && (
+      typeof pending.id !== 'string' || !pending.id.trim()
+      || typeof pending.requestedAt !== 'string' || !Number.isFinite(Date.parse(pending.requestedAt))
+      || typeof pending.feedback !== 'string'
+      || !Array.isArray(pending.feedbackAttachments) || pending.feedbackAttachments.some((attachment) =>
+        !attachment || typeof attachment.path !== 'string' || !attachment.path
+        || typeof attachment.filename !== 'string' || !attachment.filename || typeof attachment.mimeType !== 'string' || !attachment.mimeType)
+      || !Number.isInteger(pending.phaseStart) || pending.phaseStart < 0 || pending.phaseStart > this.info.phases.length
+    );
+    if (invalidPending && this.config.mode !== 'revise') {
+      throw new Error('The saved change request is incomplete or invalid. Use Request changes to resend the instructions; existing work and review history are preserved.');
+    }
+    if (this.config.mode === 'revise') {
+      const sameRequest = pending && !invalidPending && pending.feedback === feedback
+        && JSON.stringify(pending.feedbackAttachments) === JSON.stringify(attachments);
+      if (!sameRequest) {
+        if (saved) {
+          (this.info.revisionRequestHistory ??= []).push({ ...saved,
+            ...(!saved.settledAt ? { supersededAt: new Date().toISOString() } : {}) });
+        }
+        this.info.revisionRequest = { id: randomUUID(), requestedAt: new Date().toISOString(),
+          feedback, feedbackAttachments: structuredClone(attachments), phaseStart: this.info.phases.length,
+          ...(this.config.humanWork ? { humanWorkRevision: this.config.humanWork.revision } : {}) };
+        await this.persistInfoRequired();
+      }
+    } else if (!pending) {
+      // Older builds persisted a new revision's triage, but not the request. Recover only the
+      // exact host-generated human handoff when its timestamp proves it initiated this attempt.
+      const last = this.info.phases.at(-1);
+      const previousValidation = [...this.info.phases].reverse()
+        .find((phase) => phase.name === 'validate' && phase.endedAt && !phase.isError);
+      if (last?.name !== 'triage' || (last.endedAt && !last.isError) || !previousValidation) return;
+      const override = this.config.humanWork?.approvalOverride;
+      const at = isHumanApprovalOverride(override) ? Date.parse(override.at) : NaN;
+      const validatedAt = Date.parse(previousValidation.endedAt!);
+      const triageAt = Date.parse(last.startedAt);
+      if (!Number.isFinite(at) || !Number.isFinite(validatedAt) || !Number.isFinite(triageAt)
+        || at <= validatedAt || at > triageAt) {
+        throw new Error('The interrupted change request has no saved reviewer instructions. Use Request changes to resend the instructions; existing work and review history are preserved.');
+      }
+      const stream = this.config.humanWork!;
+      this.config.humanApprovalOverride = { ...override! };
+      this.info.revisionRequest = { id: randomUUID(), requestedAt: override!.at,
+        feedback: buildHumanWorkFeedback(stream, stream.revision), feedbackAttachments: [],
+        phaseStart: this.info.phases.length - 1, humanWorkRevision: stream.revision };
+      await this.persistInfoRequired();
+    }
+    const request = this.info.revisionRequest;
+    if (request && !request.settledAt && !request.supersededAt) {
+      this.config.mode = 'revise';
+      this.config.feedback = request.feedback;
+      this.config.feedbackAttachments = structuredClone(request.feedbackAttachments);
+    }
+  }
+
+  private async resumeInterruptedReviewRepair(): Promise<TaskRunOutcome | null> {
+    const lastPhase = this.info.phases.at(-1);
+    if (!this.config.settings.validation || (this.info.reviewRounds?.length ?? 0) >= this.reviewRoundsAllowed()
+      || !this.info.validation || this.info.reviewVerdict) return null;
+    const unfinishedRepair = lastPhase?.name === 'revise' && (!lastPhase.endedAt || lastPhase.isError);
+    let validationIndex = this.info.phases.length - 1;
+    while (validationIndex >= 0) {
+      const phase = this.info.phases[validationIndex];
+      if (phase.name === 'validate' && phase.endedAt && !phase.isError) break;
+      validationIndex--;
+    }
+    const validation = this.info.phases[validationIndex];
+    const round = this.info.reviewRounds?.at(-1);
+    const gate = evaluateReviewGate(this.info.validation, this.config.humanApprovalOverride);
+    const humanOnly = gate.openFindings.length > 0 && gate.openFindings.every((finding) => finding.requiresHuman) && !gate.failingChecks.length;
+    const unstartedRepair = validation && round && !gate.passes && !humanOnly
+      && Date.parse(round.endedAt) >= Date.parse(validation.endedAt!)
+      && !this.info.phases.slice(validationIndex + 1).some((phase) => phase.name === 'revise' && phase.endedAt && !phase.isError);
+    if (!unfinishedRepair && !unstartedRepair) return null;
+    const report = this.info.validation;
+    this.loop = { round: (this.info.reviewRounds?.length ?? 1) + 1, max: this.reviewRoundsAllowed(),
+      feedback: buildFixFeedback(gate, report) };
+    try { return await this.runSessionPhase('revise'); }
+    finally { this.loop = undefined; }
   }
 
   /** Whether a finished validation comes after the last finished step that changed the branch */
@@ -1804,6 +1897,10 @@ export class ClaudeTaskRun {
 
   private async finish(): Promise<TaskRunOutcome> {
     await this.commitLeftovers();
+    if (this.info.revisionRequest && !this.info.revisionRequest.settledAt) {
+      this.info.revisionRequest.settledAt = new Date().toISOString();
+      await this.persistInfoRequired();
+    }
     // A summary from an earlier run describes work that has changed since
     this.info.reviewSummary = undefined;
     // QA_PASSED/QA_FAILED move the task to Human Review, and listeners on that (autonomous
@@ -3107,6 +3204,7 @@ export function loadClaudeRunInfo(specDir: string): ClaudeRunInfo | null {
  * implementation/revision when validation is off. Starting such a task again begins a new run.
  */
 export function isClaudeRunFinished(info: ClaudeRunInfo | null, validation: boolean): boolean {
+  if (info?.revisionRequest && !info.revisionRequest.settledAt && !info.revisionRequest.supersededAt) return false;
   const last = info?.phases.at(-1);
   if (!last?.endedAt || last.isError) return false;
   if (last.name === 'validate' || last.name === 'spec_review') return true;

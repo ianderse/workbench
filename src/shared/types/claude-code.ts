@@ -245,6 +245,20 @@ export interface ReviewSummary {
   generatedAt: string;
 }
 
+/** A reviewer request survives app/process interruption independently of its execution phases. */
+export interface ClaudeRevisionRequest {
+  id: string;
+  requestedAt: string;
+  feedback: string;
+  feedbackAttachments: Array<{ path: string; filename: string; mimeType: string }>;
+  /** First phase belonging to this request; earlier work cannot satisfy it. */
+  phaseStart: number;
+  settledAt?: string;
+  supersededAt?: string;
+  /** Legacy recovery can reconstruct only an exact saved human-work handoff. */
+  humanWorkRevision?: number;
+}
+
 /** Persisted run state of a task (`<specDir>/claude_run.json`) */
 export interface ClaudeRunInfo {
   version: 1;
@@ -252,6 +266,8 @@ export interface ClaudeRunInfo {
   freshContextConsumedRequestId?: string;
   phaseProgress?: PhaseProgressState;
   phaseRecovery?: PhaseRecoveryIntent;
+  revisionRequest?: ClaudeRevisionRequest;
+  revisionRequestHistory?: ClaudeRevisionRequest[];
   /** Claude Code session that holds the task's conversation (resumable) */
   sessionId?: string;
   /**

@@ -58,6 +58,23 @@ human action fields are incomplete, without fabricating submissions to fill them
 This changes main-process behavior and requires a full Workbench restart. Already-running task
 sessions keep their original configuration; the override applies when the task is continued.
 
+## Recovering an interrupted response
+
+An unfinished response can coexist with a failed verdict from an earlier review. Resume must
+continue the newer request in the existing worktree, even when the saved review reason is still
+`qa_rejected`. A completed rejected review has nothing unfinished to resume.
+
+The runner records each revision request, its original feedback and attachment references before
+assessment begins. Recovery uses that request and work completed since it began; an older successful
+validation or failed verdict cannot satisfy the new request. A completed new review settles the
+request even when genuine findings remain. Stopping or failing before completion retains it.
+
+Older interrupted records can recover a human-work response only when a persisted owner decision
+establishes the request after the prior validation and before the interrupted assessment. Recovery
+uses the host's saved decision and evidence, preserving their scope; it does not create approval or
+claim that a deferred study ran. When the request cannot be reconstructed, recovery must explain
+that the feedback needs to be supplied again, rather than silently returning the previous verdict.
+
 ## New reviews
 
 Task review checks the current ticket's acceptance criteria and explicit applicable pre-merge

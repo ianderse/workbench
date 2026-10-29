@@ -3,7 +3,7 @@ import { buildMcpConfig } from '../mcp-config';
 import { resolveClaudeCodeTaskSettings } from '../settings';
 import { applyPlanningPolicy, fixedTriage } from '../triage';
 import { isClaudeRunFinished } from '../task-runner';
-import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-code';
+import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS, type ClaudeRunInfo } from '../../../shared/types/claude-code';
 
 describe('buildMcpConfig', () => {
   it('maps built-in and tested custom connectors to --mcp-config servers', () => {
@@ -67,5 +67,18 @@ describe('isClaudeRunFinished', () => {
     expect(isClaudeRunFinished(run([{ name: 'validate', ...done, isError: true }]), true)).toBe(false);
     expect(isClaudeRunFinished(run([{ name: 'validate', startedAt: 'a' }]), true)).toBe(false);
     expect(isClaudeRunFinished(null, true)).toBe(false);
+  });
+
+  it('does not reset a newly accepted reviewer request before its next phase is recorded', () => {
+    const info: ClaudeRunInfo = { version: 1, phases: [{ name: 'validate', startedAt: 'a', endedAt: 'b' }],
+      subagents: [], totalCostUsd: 0, updatedAt: '', revisionRequest: {
+        id: 'request', requestedAt: 'now', feedback: 'Apply this correction', feedbackAttachments: [], phaseStart: 1,
+      } };
+    expect(isClaudeRunFinished(info, true)).toBe(false);
+    info.revisionRequest!.settledAt = 'done';
+    expect(isClaudeRunFinished(info, true)).toBe(true);
+    info.revisionRequest!.settledAt = undefined;
+    info.revisionRequest!.supersededAt = 'superseded';
+    expect(isClaudeRunFinished(info, true)).toBe(true);
   });
 });

@@ -6,12 +6,19 @@
 import type { Task } from '../types/task';
 import type { ClaudeRunInfo } from '../types/claude-code';
 
+function hasPendingRevision(run: ClaudeRunInfo | undefined | null): boolean {
+  return !!(run?.revisionRequest && !run.revisionRequest.settledAt && !run.revisionRequest.supersededAt);
+}
+
 /**
  * Whether the run went all the way through: its last step is a finished validation, or a finished
  * implementation/revision when validation is off (same rule as the main process's
- * `isClaudeRunFinished`). A finished run has nothing left to resume.
+ * `isClaudeRunFinished`). An unsettled revision request still has work to continue even if
+ * the last recorded phase belongs to the earlier completed run or ended between phases.
+ * A finished run has nothing left to resume.
  */
 export function isRunFinished(run: ClaudeRunInfo | undefined | null, validation = true): boolean {
+  if (hasPendingRevision(run)) return false;
   const last = run?.phases.at(-1);
   if (!last?.endedAt || last.isError) return false;
   if (last.name === 'validate' || last.name === 'spec_review') return true;
@@ -21,13 +28,23 @@ export function isRunFinished(run: ClaudeRunInfo | undefined | null, validation 
 /**
  * A task that is not running, was stopped (Human Review, reason `stopped`), waits for a proposed split
  * (reason `split_proposed`; resuming continues with whatever was decided) or failed (Error, or
- * Human Review with reason `errors`) and whose run still has an unfinished step.
+ * Human Review with reason `errors`) and whose run still has an unfinished step. A rejected
+ * review can retain its reason while a later attempt is interrupted; resume that unfinished
+ * attempt, but do not reopen a completed review or a review with no recorded run.
  */
 export function canResumeTask(task: Task, validation = true): boolean {
   if (task.metadata?.archivedAt) return false;
   const stoppedOrFailed =
     task.status === 'error'
-    || (task.status === 'human_review' && (task.reviewReason === 'stopped' || task.reviewReason === 'errors' || task.reviewReason === 'split_proposed'));
+    || (task.status === 'human_review' && (
+      task.reviewReason === 'stopped'
+      || task.reviewReason === 'errors'
+      || task.reviewReason === 'split_proposed'
+      || (task.reviewReason === 'qa_rejected' && (
+        !!task.claudeRun?.phases.length
+        || hasPendingRevision(task.claudeRun)
+      ))
+    ));
   if (!stoppedOrFailed) return false;
   return !isRunFinished(task.claudeRun, validation);
 }
@@ -57,7 +74,7 @@ export function reviewInterruption(task: Task, validation = true): 'stopped' | '
   if (task.status !== 'human_review') return null;
   if (task.reviewReason === 'stopped') return 'stopped';
   if (task.reviewReason === 'auto_merged' || task.reviewReason === 'split_proposed' || task.reviewReason === 'errors') return null;
-  if (task.claudeRun?.phases.length && !isRunFinished(task.claudeRun, validation)) return 'interrupted';
+  if ((task.claudeRun?.phases.length || hasPendingRevision(task.claudeRun)) && !isRunFinished(task.claudeRun, validation)) return 'interrupted';
   // Same rule as the task store's isIncompleteHumanReview: no reason and no subtask completed
   if (!task.reviewReason && !task.subtasks?.some((s) => s.status === 'completed')) return 'interrupted';
   return null;

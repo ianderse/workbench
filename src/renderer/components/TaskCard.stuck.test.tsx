@@ -108,3 +108,40 @@ describe('the Done button on a Human Review card', () => {
   });
 });
 
+describe('a rejected review with an interrupted later attempt', () => {
+  const reviewTask = (unfinished: boolean): Task => ({
+    ...stuckTask(run([
+      { name: 'validate', startedAt: '2026-10-25T04:30:00Z', endedAt: '2026-10-25T04:40:00Z' },
+      ...(unfinished ? [{ name: 'triage' as const, startedAt: '2026-10-25T05:00:00Z' }] : []),
+    ])),
+    status: 'human_review',
+    reviewReason: 'qa_rejected',
+  });
+
+  it('offers Resume for the interrupted attempt while retaining the interrupted explanation', () => {
+    render(<TaskCard task={reviewTask(true)} onClick={() => undefined} />);
+    expect(screen.getByText('reviewInterruption.interrupted')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'actions.resume' })).toBeInTheDocument();
+  });
+
+  it('does not offer Resume for the completed rejected review', () => {
+    render(<TaskCard task={reviewTask(false)} onClick={() => undefined} />);
+    expect(screen.queryByText('reviewInterruption.interrupted')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'actions.resume' })).not.toBeInTheDocument();
+  });
+
+  it('offers Resume for a pending revision even before a new phase is recorded', () => {
+    const task = reviewTask(false);
+    task.claudeRun!.revisionRequest = {
+      id: 'revision-1',
+      requestedAt: '2026-10-25T05:00:00Z',
+      feedback: 'Recheck the reported blocker against this task scope',
+      feedbackAttachments: [],
+      phaseStart: 1,
+    };
+    render(<TaskCard task={task} onClick={() => undefined} />);
+    expect(screen.getByText('reviewInterruption.interrupted')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'actions.resume' })).toBeInTheDocument();
+  });
+});
+

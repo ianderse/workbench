@@ -627,6 +627,158 @@ describe('ClaudeTaskRun', () => {
     expect(loadClaudeRunInfo(specDir)!.phases.slice(-3).map((p) => p.name)).toEqual(['triage', 'revise', 'validate']);
   });
 
+  describe('durable reviewer requests', () => {
+    const settings = { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, aiReviewRounds: 1 };
+    const validation = (session: string, fields: Record<string, unknown> = {}) => ({ messages: [result(session, {
+      structured_output: { status: 'passed', summary: 'Checked', checks: [], findings: [], ...fields },
+    })] });
+
+    async function previouslyReviewed() {
+      triageMock.mockResolvedValue({ triage: triage() });
+      scripts.push({ messages: [result('revision-session')] }, validation('revision-session', {
+        findings: [{ severity: 'major', description: 'Participant study pending', requiresHuman: true, fixed: false }],
+      }));
+      await makeRun({ settings }).run();
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.status).toBe('failed');
+    }
+
+    it('restores exact feedback and image references after interrupted revision triage and restart', async () => {
+      await previouslyReviewed();
+      const imagePath = path.join(specDir, 'review.png');
+      writeFileSync(imagePath, Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64'));
+      const attachments = [{ path: imagePath, filename: 'review.png', mimeType: 'image/png' }];
+      const first = makeRun({ mode: 'revise', feedback: 'Correct the CI scope; preserve the existing implementation.', feedbackAttachments: attachments, settings });
+      triageMock.mockImplementationOnce(async () => {
+        expect(loadClaudeRunInfo(specDir)?.revisionRequest).toMatchObject({
+          feedback: 'Correct the CI scope; preserve the existing implementation.', feedbackAttachments: attachments,
+        });
+        first.stop();
+        throw new Error('App stopped during assessment');
+      });
+      expect((await first.run()).status).toBe('stopped');
+      const pending = loadClaudeRunInfo(specDir)!.revisionRequest!;
+      expect(pending.settledAt).toBeUndefined();
+      scripts.push({ messages: [result('revision-session')] }, validation('revision-session'));
+      const outcome = await makeRun({ mode: 'start', settings }).run();
+      expect(outcome.status).toBe('completed');
+      const input = spawned[2].input as Array<{ type: string; text?: string }>;
+      expect(input[0].text).toContain(pending.feedback);
+      expect(input.some((block) => block.type === 'image')).toBe(true);
+      expect(loadClaudeRunInfo(specDir)?.revisionRequest).toMatchObject({ id: pending.id, feedback: pending.feedback, settledAt: expect.any(String) });
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.status).toBe('passed');
+      expect(loadClaudeRunInfo(specDir)?.phases.slice(-3).map((phase) => phase.name)).toEqual(['triage', 'revise', 'validate']);
+    });
+
+    it('resumes validation without repeating a completed reviewer change and settles a failed human review', async () => {
+      await previouslyReviewed();
+      scripts.push({ messages: [result('revision-session')] }, { messages: [result('revision-session', { is_error: true, subtype: 'error_during_execution' })] });
+      expect((await makeRun({ mode: 'revise', feedback: 'Repair the implementation once.', settings }).run()).status).toBe('failed');
+      expect(loadClaudeRunInfo(specDir)?.revisionRequest?.settledAt).toBeUndefined();
+      const before = spawned.length;
+      scripts.push(validation('revision-session', {
+        findings: [{ severity: 'major', description: 'Study still pending', requiresHuman: true, fixed: false }],
+      }));
+      expect((await makeRun({ mode: 'start', settings }).run()).status).toBe('completed');
+      expect(spawned.length).toBe(before + 1);
+      expect((spawned.at(-1)!.input as Array<{ text?: string }>)[0].text).toContain('Before handing this off, validate the work');
+      const finished = loadClaudeRunInfo(specDir)!;
+      expect(finished.revisionRequest?.settledAt).toEqual(expect.any(String));
+      expect(finished.reviewVerdict?.status).toBe('failed');
+      await makeRun({ mode: 'start', settings }).run();
+      expect(spawned.length).toBe(before + 1);
+      expect(loadClaudeRunInfo(specDir)?.revisionRequest?.id).toBe(finished.revisionRequest?.id);
+    });
+
+    it('recovers a legacy interrupted human handoff only from a newer persisted owner decision', async () => {
+      await previouslyReviewed();
+      const saved = loadClaudeRunInfo(specDir)!;
+      const afterValidation = Date.parse(saved.phases.at(-1)!.endedAt!);
+      const stream = structuredClone(humanReceipts);
+      stream.revision = 14;
+      stream.approvalOverride = { scope: 'task-human-approval', approver: 'Ian', reason: 'Defer participant studies for this task; finish the CI correction.', at: new Date(afterValidation + 1).toISOString(), revision: 14 };
+      saved.phases.push({ name: 'triage', startedAt: new Date(afterValidation + 2).toISOString() });
+      writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(saved));
+      scripts.push({ messages: [result('revision-session')] }, validation('revision-session', {
+        findings: [{ severity: 'major', description: 'Study still pending', requiresHuman: true, fixed: false }],
+      }));
+      expect((await makeRun({ mode: 'start', humanWork: stream, humanApprovalOverride: stream.approvalOverride, settings }).run()).status).toBe('completed');
+      const recovered = loadClaudeRunInfo(specDir)!;
+      expect(recovered.revisionRequest?.feedback).toBe(buildHumanWorkFeedback(stream, stream.revision));
+      expect(recovered.revisionRequest).toMatchObject({ humanWorkRevision: 14, settledAt: expect.any(String) });
+      expect(recovered.reviewVerdict).toMatchObject({ status: 'passed', humanApprovalOverride: stream.approvalOverride });
+      expect(stream.items[1].response).toContain('no participant sessions have run');
+    });
+
+    it('fails clearly rather than returning an old verdict when legacy reviewer instructions are unavailable', async () => {
+      await previouslyReviewed();
+      const saved = loadClaudeRunInfo(specDir)!;
+      saved.phases.push({ name: 'triage', startedAt: new Date().toISOString() });
+      writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(saved));
+      const before = spawned.length;
+      const events: string[] = [];
+      const outcome = await makeRun({ settings }, { onTaskEvent: (type: string) => events.push(type) }).run();
+      expect(outcome).toMatchObject({ status: 'failed', error: expect.stringContaining('Use Request changes to resend the instructions') });
+      expect(events).toContain('CODING_FAILED');
+      expect(events).not.toContain('QA_FAILED');
+      expect(spawned.length).toBe(before);
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict).toEqual(saved.reviewVerdict);
+      expect(loadClaudeRunInfo(specDir)?.revisionRequest).toBeUndefined();
+    });
+
+    it('starts no assessment or session when the reviewer request cannot be persisted', async () => {
+      const run = makeRun({ mode: 'revise', feedback: 'Keep these instructions durable.', settings });
+      mkdirSync(path.join(specDir, 'claude_run.json'));
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        expect((await run.run()).status).toBe('failed');
+        expect(triageMock).not.toHaveBeenCalled();
+        expect(spawned).toHaveLength(0);
+      } finally { error.mockRestore(); }
+    });
+
+    it('repairs a recorded nonterminal review round when interruption preceded its repair phase', async () => {
+      await previouslyReviewed();
+      const saved = loadClaudeRunInfo(specDir)!;
+      const start = saved.phases.length;
+      const at = Date.parse(saved.phases.at(-1)!.endedAt!) + 1;
+      const timestamp = (offset: number) => new Date(at + offset).toISOString();
+      saved.revisionRequest = { id: 'pending-review', requestedAt: timestamp(0), feedback: 'Apply the requested correction.', feedbackAttachments: [], phaseStart: start };
+      saved.phases.push(
+        { name: 'triage', startedAt: timestamp(1), endedAt: timestamp(2) },
+        { name: 'revise', startedAt: timestamp(3), endedAt: timestamp(4) },
+        { name: 'validate', startedAt: timestamp(5), endedAt: timestamp(6) },
+      );
+      const finding = { severity: 'major' as const, description: 'Correct the Linux-only assumption', fixed: false };
+      saved.validation = { status: 'partial', summary: 'A code defect remains', checks: [], findings: [finding] };
+      saved.reviewVerdict = undefined;
+      saved.reviewRounds = [{ round: 1, status: 'partial', summary: 'A code defect remains', openFindings: [finding],
+        failingChecks: [], fixedCount: 0, newCount: 1, startedAt: timestamp(5), endedAt: timestamp(7) }];
+      writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(saved));
+      const before = spawned.length;
+      scripts.push({ messages: [result('revision-session')] }, validation('revision-session'));
+      expect((await makeRun({ settings: { ...settings, aiReviewRounds: 3 } }).run()).status).toBe('completed');
+      expect(spawned.length).toBe(before + 2);
+      const repair = (spawned[before].input as Array<{ text?: string }>)[0].text;
+      expect(repair).toContain('The AI review found problems that are still open');
+      expect(repair).toContain(finding.description);
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict).toMatchObject({ status: 'passed', rounds: 2 });
+    });
+
+    it.each([undefined, -100])('rejects an invalid saved revision phase boundary (%s) without inference', async (phaseStart) => {
+      await previouslyReviewed();
+      const saved = loadClaudeRunInfo(specDir)!;
+      saved.revisionRequest = { id: 'invalid-request', requestedAt: new Date().toISOString(), feedback: 'Preserve this request', feedbackAttachments: [], phaseStart: phaseStart! };
+      writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(saved));
+      const before = spawned.length;
+      const events: string[] = [];
+      const outcome = await makeRun({ settings }, { onTaskEvent: (type: string) => events.push(type) }).run();
+      expect(outcome).toMatchObject({ status: 'failed', error: expect.stringContaining('saved change request is incomplete or invalid') });
+      expect(events).not.toContain('QA_FAILED');
+      expect(spawned.length).toBe(before);
+      expect(loadClaudeRunInfo(specDir)?.reviewVerdict).toEqual(saved.reviewVerdict);
+    });
+  });
+
   describe('AI review loop', () => {
     const failing = (s: string, findings: Array<Record<string, unknown>>, status = 'partial') =>
       ({ messages: [result(s, { structured_output: { status, summary: 'Needs work. The parser is wrong.', checks: [], findings } })] });
