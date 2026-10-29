@@ -183,6 +183,11 @@ export function countFindings(findings: readonly ReviewFinding[]): Record<Review
   return counts;
 }
 
+/** Shared by fresh reviewers and validation, including resumed task sessions. */
+export const TASK_REVIEW_SCOPE_PROMPT = `Judge this task's change, not completion of the entire project. Before reporting a missing requirement, identify the current task acceptance criterion or explicit applicable prerequisite for merging this change, and cite its task/spec/instruction source. Inspect that source when applicability is unclear; do not assume every project gate applies to every ticket.
+An outstanding project/release acceptance gate owned by another task belongs in the summary as pending context, not a new blocking finding, unless it is also required for this task or explicitly required before this change may merge. For example, correcting a report does not itself require executing a separately owned playtest; a task to execute that playtest still requires actual participant evidence. Preserve explicit applicable project/spec requirements and recorded human decisions within their stated scope.
+Ordinary human review or permission to merge is a delivery step, not by itself a missing test or implementation defect. Never claim that out-of-scope work was completed, approved, waived or fixed.`;
+
 /** The validate prompt's section about the review */
 export function formatReviewForValidation(report: ReviewReport): string {
   if (report.findings.length === 0) {
@@ -190,14 +195,15 @@ export function formatReviewForValidation(report: ReviewReport): string {
   }
   const lines = report.findings.map((f, i) => {
     const where = f.file ? ` [${f.file}${f.line ? `:${f.line}` : ''}]` : '';
-    return `${i + 1}. ${f.severity.toUpperCase()}${where}: ${f.issue}${f.requiresHuman ? ' [requiresHuman: true — keep pending until actual human evidence exists]' : ''}${f.fix ? ` Suggested fix: ${f.fix}` : ''}`;
+    return `${i + 1}. ${f.severity.toUpperCase()}${where}: ${f.issue}${f.requiresHuman ? ' [requiresHuman: true — verify task applicability; applicable human requirements remain pending until actual evidence or a scoped owner decision exists]' : ''}${f.fix ? ` Suggested fix: ${f.fix}` : ''}`;
   });
-  return `A separate reviewer with fresh context read the diff and found:\n${lines.join('\n')}\n\nReviewer summary: ${report.summary || '(none)'}\nCheck each blocker and major finding against the code: fix the ones that are real, and skip any that are mistaken. Minor findings are optional.`;
+  return `A separate reviewer with fresh context read the diff and found:\n${lines.join('\n')}\n\nReviewer summary: ${report.summary || '(none)'}\nCheck each blocker and major finding against the code and this task's requirements: fix the ones that are real, and skip any that are mistaken or outside this task's scope, explaining why in the summary. A skipped external requirement stays pending; do not label it fixed or infer approval. Minor findings are optional.`;
 }
 
 export const REVIEW_SYSTEM_PROMPT = `You are a code reviewer with fresh eyes. You see the task, the diff of the change made for it, and any recorded human decisions supplied with them; you did not write it.
 Look for real problems: bugs, missed requirements from the task, broken edge cases, security issues, and changes that break other code. Use your read, grep and glob tools to read the code around the changes and the code that uses them before you report a problem; do not report guesses.
-Flag requiresHuman: true for missing real human approvals, decisions or participant observations. Keep them as unmet requirements; an agent cannot fabricate them.
+${TASK_REVIEW_SCOPE_PROMPT}
+Flag requiresHuman: true when an applicable unmet task requirement needs real human approval, a decision or participant observations. Keep it open unless an actual scoped human decision resolves it; an agent cannot fabricate that evidence.
 Do not report style, naming, formatting or missing nice-to-haves. Do not modify any file.
 Severity: blocker = the change is broken or misses a core requirement; major = a real bug or gap that should be fixed before merging; minor = small and optional.
 Report at most 12 findings, most important first, each with the file and line when you know them. An empty findings list is the right answer for a correct change.`;

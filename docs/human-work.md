@@ -60,6 +60,20 @@ sessions keep their original configuration; the override applies when the task i
 
 ## New reviews
 
+Task review checks the current ticket's acceptance criteria and explicit applicable pre-merge
+requirements. Reviewers must identify the task/spec/instruction that makes a missing requirement
+applicable, rather than treating every pending project gate as a blocker on every ticket. A separate
+project playtest can remain pending in the summary while a report-correction task passes; the
+playtest's own ticket still requires actual participant evidence. Ordinary human review or merge
+permission remains a delivery step and is not itself an implementation defect. Applicable project
+instructions and explicit pre-merge gates still apply.
+
+Validation can reject a mistaken or out-of-scope reviewer finding with an explanation, without
+claiming the external requirement was fixed, approved or waived. This is prompt guidance, not an
+automatic reclassification of saved findings or proof that a model will apply scope correctly.
+Existing task receipts and failed verdicts are preserved until the normal review/decision flow
+updates them. Full-spec review still checks the entire requested spec.
+
 The review and validation schemas support an explicit `requiresHuman` flag. When only unfixed
 human requirements remain and no check failed, Workbench ends the AI repair loop immediately
 with the failed verdict preserved. Human actions are created when the task enters Human Review.

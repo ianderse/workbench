@@ -37,4 +37,18 @@ describe('review findings', () => {
     expect(text).toContain('MAJOR [a.ts:2]: bug Suggested fix: fix it');
     expect(text).toContain('fix the ones that are real');
   });
+
+  it('preserves human findings while asking validation to verify applicability without inventing resolution', () => {
+    const report = {
+      findings: [{ severity: 'major' as const, issue: 'Gate F participant sessions are pending', requiresHuman: true }],
+      summary: 'Report correction is otherwise complete',
+    };
+    const text = formatReviewForValidation(report);
+    expect(text).toContain('Gate F participant sessions are pending');
+    expect(text).toContain('verify task applicability');
+    expect(text).toContain('applicable human requirements remain pending until actual evidence or a scoped owner decision exists');
+    expect(text).toContain('outside this task\'s scope, explaining why in the summary');
+    expect(text).toContain('do not label it fixed or infer approval');
+    expect(report.findings[0].requiresHuman).toBe(true);
+  });
 });

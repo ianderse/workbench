@@ -238,6 +238,23 @@ describe('ClaudeTaskRun', () => {
     });
   });
 
+  describe('task review scope', () => {
+    it.each([false, true])('keeps task scope in validation when resume=%s', (resume) => {
+      const run = makeRun({
+        title: 'Correct the Slice 04 report',
+        description: 'Refresh report counts. Participant sessions are owned by task 189.',
+      }) as unknown as { buildInput(name: string, continuing: boolean, resume: boolean): Array<{ text?: string }> };
+      const text = run.buildInput('validate', resume, resume)[0].text!;
+      expect(text).toContain(reviewDiff.TASK_REVIEW_SCOPE_PROMPT);
+      expect(text).toContain('cite its task/spec/instruction source');
+      expect(text).toContain('a task to execute that playtest still requires actual participant evidence');
+      expect(text).toContain('When an applicable unmet task requirement still needs real human approval');
+      expect(text).toContain('Keep it open, and never fabricate that evidence');
+      expect(run.buildInput('spec_review', resume, resume)[0].text).not.toContain(reviewDiff.TASK_REVIEW_SCOPE_PROMPT);
+      expect(run.buildInput('spec_review', resume, resume)[0].text).toContain('Set complete to true only when every section is done');
+    });
+  });
+
   describe('phase advisor checkpoints', () => {
     it.each([
       { kind: 'plan', result: undefined }, { kind: 'diff', result: undefined },
@@ -307,6 +324,8 @@ describe('ClaudeTaskRun', () => {
         await run.runOmpReview();
         await run.runOmpReview();
         expect(review).toHaveBeenCalledTimes(1);
+        expect(review.mock.calls[0][0].appendSystemPrompt).toContain(reviewDiff.TASK_REVIEW_SCOPE_PROMPT);
+        expect(review.mock.calls[0][0].appendSystemPrompt).toContain('applicable unmet task requirement needs real human approval');
         expect(run.reviewSection).toContain('found no issues');
         diff.mockResolvedValue('diff --git a/a.ts b/a.ts\n+different');
         review.mockRejectedValue(new Error('Provider unavailable'));

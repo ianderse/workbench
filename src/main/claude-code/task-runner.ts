@@ -130,6 +130,7 @@ import {
   normalizeReview,
   REVIEW_SCHEMA,
   REVIEW_SYSTEM_PROMPT,
+  TASK_REVIEW_SCOPE_PROMPT,
   type ReviewReport,
 } from './review-diff';
 import { beginCheckpoint, completeCheckpoint, failCheckpoint } from './checkpoint-journal';
@@ -2015,7 +2016,8 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
   ? this.reviewSection
   : `Review the full change against \`${this.config.baseBranch}\` (\`git diff ${this.config.baseBranch}...HEAD\` plus any uncommitted changes) with fresh eyes. ${this.config.backend === 'omp' ? 'Read the diff carefully as a reviewer who sees the diff, task and recorded human decisions.' : "Use the /code-review skill if it's available; otherwise use a subagent that sees the diff, task and recorded human decisions."} Fix only findings that affect correctness or the task's requirements; don't gold-plate.`}
 3. Commit any remaining changes.${this.isUiWork(triage) && this.info.plan ? DESIGN_VALIDATION_PROMPT : ''}
-Apply recorded human decisions within their stated scope before deciding what remains unresolved. When an unfixed finding still requires real human approval, a human decision, or participant observations, set requiresHuman: true. Keep it open, and never fabricate that evidence.
+${TASK_REVIEW_SCOPE_PROMPT}
+Apply recorded human decisions within their stated scope before deciding what remains unresolved. When an applicable unmet task requirement still needs real human approval, a human decision, or participant observations, set requiresHuman: true. Keep it open, and never fabricate that evidence.
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
       case 'spec_review':
