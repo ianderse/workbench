@@ -112,7 +112,7 @@ export function UsageSimulatorSettings() {
                 key={theme}
                 className={`${theme} w-[17rem] rounded-xl border border-border bg-popover text-xs text-popover-foreground shadow-[0_8px_24px_rgba(0,0,0,0.24)]`}
               >
-                <StatePreview state={state} />
+                <StatePreview state={state} pinned={moments[0]} />
               </div>
             ))}
             {/* What the row shows, in the space beside its cards */}
@@ -203,19 +203,15 @@ export function UsageSimulatorSettings() {
 /** The popover's states with no usage to draw */
 const STATE_PREVIEWS = ['apiProfile', 'reauth', 'unavailable'] as const;
 
-/** The stand-in API profile's provider */
-const PREVIEW_PROVIDER = 'api.example.com';
-
-/** One of the popover's states, its buttons doing nothing */
-function StatePreview({ state }: { state: (typeof STATE_PREVIEWS)[number] }) {
-  const { t } = useTranslation('settings');
+/** One of the popover's states at the morning row's moment, its buttons doing nothing */
+function StatePreview({ state, pinned }: { state: (typeof STATE_PREVIEWS)[number]; pinned: Date }) {
   const noop = () => {};
   switch (state) {
     case 'apiProfile':
-      return <ApiProfileUsageCard profileName={t('usageSimulator.sampleProfileName')} provider={PREVIEW_PROVIDER} onManageAccounts={noop} />;
+      return <ApiProfileUsageCard onManageAccounts={noop} active pinned={pinned} />;
     case 'unavailable':
-      return <UsageUnavailableCard />;
+      return <UsageUnavailableCard active pinned={pinned} />;
     case 'reauth':
-      return <ReauthRequiredCard onReauth={noop} />;
+      return <ReauthRequiredCard onReauth={noop} active pinned={pinned} />;
   }
 }

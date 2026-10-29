@@ -221,12 +221,6 @@ export function UsageIndicator() {
 
   // API profiles (pay as you go): no usage limits to track
   if (activeApiProfile) {
-    let providerName = activeApiProfile.baseUrl;
-    try {
-      providerName = new URL(activeApiProfile.baseUrl).host;
-    } catch {
-      // Not a URL: show it as entered
-    }
     const badgeLabel = t('common:usage.apiKeyBadge');
     const badgeColor = 'text-muted-foreground bg-muted/50 border-border';
 
@@ -253,7 +247,7 @@ export function UsageIndicator() {
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          <ApiProfileUsageCard profileName={activeApiProfile.name} provider={providerName} onManageAccounts={handleOpenAccounts} />
+          <ApiProfileUsageCard onManageAccounts={handleOpenAccounts} active={isOpen} />
         </PopoverContent>
       </Popover>
     );
@@ -299,7 +293,7 @@ export function UsageIndicator() {
           onMouseEnter={handleMouseEnter}
           onMouseLeave={handleMouseLeave}
         >
-          {needsReauth ? <ReauthRequiredCard onReauth={handleOpenAccounts} /> : <UsageUnavailableCard />}
+          {needsReauth ? <ReauthRequiredCard onReauth={handleOpenAccounts} active={isOpen} /> : <UsageUnavailableCard active={isOpen} />}
       </PopoverContent>
       </Popover>
     );
@@ -372,7 +366,7 @@ export function UsageIndicator() {
       >
         {/* Re-auth required prompt - shown when the active profile needs re-authentication */}
         {usage.needsReauthentication ? (
-          <ReauthRequiredCard onReauth={handleOpenAccounts} />
+          <ReauthRequiredCard onReauth={handleOpenAccounts} active={isOpen} />
         ) : (
           <UsageBreakdown usage={usage} open={isOpen} />
         )}

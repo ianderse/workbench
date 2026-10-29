@@ -142,6 +142,18 @@ function maskStepPath(w: number, x: number, y: number, b: number, rTop: number, 
     + `${inLeft}V ${y + t} A ${t} ${t} 0 0 1 ${x + t} ${y} Z`;
 }
 
+/** A rectangle with round corners, rTop at the top and rBottom at the bottom (a sky with no bar) */
+function roundedRectPath(x: number, y: number, width: number, height: number, rTop: number, rBottom: number): string {
+  const scale = Math.min(1, height / Math.max(rTop + rBottom, 1e-6));
+  const t = Math.min(rTop * scale, width / 2);
+  const u = Math.min(rBottom * scale, width / 2);
+  const r = x + width;
+  const b = y + height;
+  return `M ${x + t} ${y} H ${r - t} A ${t} ${t} 0 0 1 ${r} ${y + t} V ${b - u} `
+    + `A ${u} ${u} 0 0 1 ${r - u} ${b} H ${x + u} A ${u} ${u} 0 0 1 ${x} ${b - u} `
+    + `V ${y + t} A ${t} ${t} 0 0 1 ${x + t} ${y} Z`;
+}
+
 interface MaskLevel { d: string; opacity: number }
 
 /**
@@ -151,16 +163,25 @@ interface MaskLevel { d: string; opacity: number }
  * top corners round off from one fade into the other in circles, MASK_CORNER for the full part
  * and as much larger as the top fade is long (square with no fade); the bottom ones round off
  * behind the bar (maskStepPath). A sharpness under 1 makes the side and top fades that much
- * shorter.
+ * shorter. With no bar the bottom fades and rounds off as the top does.
  */
-function edgeMask(w: number, h: number, fadeY: [number, number][] | null, sharpness = 1): MaskLevel[] {
-  // The top fade gets shorter with the sides (the bottom one is behind the bar)
-  const fullAt = fadeY ? fadeY.findIndex(([, a]) => a === 1) : -1;
-  const down = fadeY?.map(([o, a], i): [number, number] => [i <= fullAt ? o * h * sharpness : o * h, a]);
+function edgeMask(w: number, h: number, fadeY: [number, number][] | null, sharpness = 1, bar = true): MaskLevel[] {
+  // With no bar under it the sky fades out at the bottom as it fades in at the top
+  let stops = fadeY;
+  if (fadeY && !bar) {
+    const top = fadeY.filter(([o]) => o < 0.5);
+    stops = [...top, ...[...top].reverse().map(([o, a]): [number, number] => [1 - o, a])];
+  }
+  // The top fade gets shorter with the sides; the bottom one too with no bar (else it is behind it)
+  const down = stops?.map(([o, a]): [number, number] => [
+    o < 0.5 ? o * h * sharpness : bar ? o * h : h - (1 - o) * h * sharpness,
+    a,
+  ]);
   const up = down && [...down].reverse().map(([y, a]): [number, number] => [h - y, a]);
   const steps = sideSteps(sharpness);
   // Where each fade is in full
   const fullTop = down ? firstAt(down, 1) : 0;
+  const fullBottom = up ? firstAt(up, 1) : 0;
   const corner = fadeY ? MASK_CORNER : 0;
   const levels: MaskLevel[] = [];
   let shown = 0;
@@ -170,8 +191,12 @@ function edgeMask(w: number, h: number, fadeY: [number, number][] | null, sharpn
     const width = w - 2 * x;
     const height = h - bottomInset - top;
     if (width <= 0 || height <= 0) break;
-    // Round top corners, as wide as they are tall: they follow the top fade
-    const d = maskStepPath(w, x, top, h - bottomInset, fullTop > 0 ? corner + fullTop - top : 0, h - SKY_BLEED_BOTTOM);
+    // Round top corners, as wide as they are tall: they follow the top fade (and the bottom ones
+    // the bottom fade, with no bar)
+    const rTop = fullTop > 0 ? corner + fullTop - top : 0;
+    const d = bar
+      ? maskStepPath(w, x, top, h - bottomInset, rTop, h - SKY_BLEED_BOTTOM)
+      : roundedRectPath(x, top, width, height, rTop, fullBottom > 0 ? corner + fullBottom - bottomInset : 0);
     // Each rectangle over the ones before it raises what shows inside it to v
     levels.push({ d, opacity: (v - shown) / (1 - shown) });
     shown = v;
@@ -284,7 +309,14 @@ export function useMinute(pinned: Date | null): Date {
  * night, dawn, day and dusk, the sun and the moon on their arc, stars at night - and the 5-hour
  * limit brings the weather: rain from 50%, snow in winter.
  */
-export function ClawdSky({ percent, pinned = null }: { percent: number | null; pinned?: Date | null }) {
+interface ClawdSkyProps {
+  percent: number | null;
+  pinned?: Date | null;
+  /** The 5-hour bar is under the sky, which goes on behind it; without it the sky ends at the ground */
+  bar?: boolean;
+}
+
+export function ClawdSky({ percent, pinned = null, bar = true }: ClawdSkyProps) {
   const [ref, w] = useWidth();
   const now = useMinute(pinned);
   // The preview in Settings can show a second sky; each one needs its own gradient and mask ids
@@ -298,7 +330,8 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
 
   // The ground (the bar's top edge): the clouds, stars and falling weather are laid out above it
   const ground = SCENE_H + SKY_BLEED_TOP;
-  const h = ground + SKY_BLEED_BOTTOM;
+  const bleedBottom = bar ? SKY_BLEED_BOTTOM : 0;
+  const h = ground + bleedBottom;
   const density = Math.max(1, w / DENSITY_W);
   const clouds = Math.min(CLOUDS.length, Math.round(weather.clouds * density));
   const fall = Math.round(weather.fall * density);
@@ -307,10 +340,10 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
   const sun = look.sun && lower(skyBodyPos(look.sun.p, w));
   const moonAt = look.moon && lower(skyBodyPos(look.moon.p, w));
   const masks = useMemo(() => ({
-    'sky-mask-y-bg': edgeMask(w, h, backgroundFadeY(h), EDGE_SHARPNESS),
-    'sky-mask-y': edgeMask(w, h, FADE_Y, EDGE_SHARPNESS),
-    'sky-mask-sides': edgeMask(w, h, null, EDGE_SHARPNESS),
-  }), [w, h]);
+    'sky-mask-y-bg': edgeMask(w, h, backgroundFadeY(h), EDGE_SHARPNESS, bar),
+    'sky-mask-y': edgeMask(w, h, FADE_Y, EDGE_SHARPNESS, bar),
+    'sky-mask-sides': edgeMask(w, h, null, EDGE_SHARPNESS, bar),
+  }), [w, h, bar]);
   const maskUrl = (name: keyof typeof masks) => `url(#${id(name)})`;
   // The sky's layers, drawn below its masks
   const skyLayers = (
@@ -454,7 +487,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
     <div
       ref={ref}
       className="pointer-events-none absolute"
-      style={{ left: -SKY_BLEED_X, right: -SKY_BLEED_X, top: -SKY_BLEED_TOP, bottom: -SKY_BLEED_BOTTOM }}
+      style={{ left: -SKY_BLEED_X, right: -SKY_BLEED_X, top: -SKY_BLEED_TOP, bottom: -bleedBottom }}
     >
       {w > 0 && (
         <svg

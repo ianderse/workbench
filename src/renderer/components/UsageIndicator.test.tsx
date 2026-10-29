@@ -271,11 +271,12 @@ describe('UsageIndicator', () => {
       expect(usageTrigger).not.toHaveTextContent('45');
     });
 
-    it('names the profile and its endpoint in the breakdown', async () => {
+    it('says there is no usage limit to show, with a way to manage accounts', async () => {
       render(<UsageIndicator />);
       const usageTrigger = await screen.findByRole('button', { name: 'common:usage.usageStatusAriaLabel' });
       fireEvent.click(usageTrigger);
-      expect(await screen.findByText('Gateway · gateway.example.com')).toBeInTheDocument();
+      expect(await screen.findByText('common:usage.apiKeyUnknown')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'common:usage.manageAccounts' })).toBeInTheDocument();
     });
   });
 });

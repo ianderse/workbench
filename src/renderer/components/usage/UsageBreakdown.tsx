@@ -14,7 +14,7 @@ import type { ClaudeUsageSnapshot } from '../../../shared/types/agent';
 import { useTaskStore } from '../../stores/task-store';
 import { BAR_SIDE_MASK, ClawdScene, ClawdSky, SCENE_H, useMinute } from './ClawdScene';
 import { Hearts } from './Hearts';
-import { skinForUsage, type SkinPicker } from './clawd/skins';
+import { createSkinPicker, skinForUsage, type SkinPicker } from './clawd/skins';
 import { useClawd } from './clawd/useClawd';
 import { holidayDecor } from './clawd/decor';
 import { getBarColorClass, getColorClass } from './usage-colors';
@@ -169,6 +169,43 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * The sky with Clawd asleep in it, for the popover's states with no usage to show (no number, no
+ * bar). The sky still follows the time of day; with no tasks to watch he sleeps.
+ */
+export function SleepingSky({ active, pinned = null }: {
+  /** Clawd only animates while this is on */
+  active: boolean;
+  /** A pinned moment for the sky and the skins (the usage simulator's), or null for now */
+  pinned?: Date | null;
+}) {
+  const [span, setSpan] = useState(0);
+  const [pointerX, setPointerX] = useState<number | null>(null);
+  // A skin memory of its own, so this view never changes the usage card's
+  const [pickSkin] = useState(createSkinPicker);
+  const pinnedAt = pinned?.getTime() ?? null;
+  const skin = useMemo(
+    () => pickSkin(
+      { session: 0, weekly: 0, clock: pinnedAt == null ? null : String(pinnedAt) },
+      pinnedAt == null ? new Date() : new Date(pinnedAt),
+    ),
+    [pickSkin, pinnedAt],
+  );
+  const { render, pet } = useClawd({
+    sessionPercent: null, busy: 0, waiting: 0, total: 0, span, pointerX, active, skin,
+  });
+  const now = useMinute(pinned);
+  const day = now.toDateString();
+  const decor = useMemo(() => holidayDecor(new Date(day)), [day]);
+
+  return (
+    <div className="relative flex items-end" style={{ height: SCENE_H }}>
+      <ClawdSky percent={null} pinned={pinned} bar={false} />
+      <ClawdScene render={render} onSpan={setSpan} onPointer={setPointerX} onPet={pet} decor={decor} />
     </div>
   );
 }
