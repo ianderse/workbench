@@ -1021,12 +1021,13 @@ const TASK_TOOL_PREFIX = 'mcp__workbench__';
 const taskToolName = (toolName: string): string | null =>
   toolName.startsWith(TASK_TOOL_PREFIX) ? toolName.slice(TASK_TOOL_PREFIX.length) : null;
 
-/** A Bash call of the GitHub or GitLab CLI: its icon and name (the command is shown as is) */
+/** A Bash call of the GitHub, GitLab or Graphify CLI: its icon and name (the command is shown as is) */
 const cliCall = (toolName: string, input?: string): { icon: React.ElementType; label: string } | null => {
   if (toolName !== 'Bash' || !input) return null;
-  const cli = /^\s*(gh|glab)\s/.exec(input)?.[1];
+  const cli = /^\s*(gh|glab|graphify)\s/.exec(input)?.[1];
   if (cli === 'gh') return { icon: GitHubIcon, label: 'GitHub' };
   if (cli === 'glab') return { icon: GitLabIcon, label: 'GitLab' };
+  if (cli === 'graphify') return { icon: GraphIcon, label: 'Graphify' };
   return null;
 };
 
@@ -1050,6 +1051,8 @@ const getToolIcon = (toolName: string) => {
     case 'Glob':
       return FolderSearch;
     case 'Grep':
+    case 'WebFetch':
+    case 'WebSearch':
       return Search;
     case 'CodebaseGraph':
       return GraphIcon;
@@ -1232,7 +1235,7 @@ function ToolUsageHistory({ tools, actions, trailing }: ToolUsageHistoryProps) {
       {expanded && (
         <div className="mt-2 space-y-1 rounded-xl border border-border p-3">
           {tools.map((tool, index) => {
-            // gh and glab calls show as GitHub and GitLab, like the task tools show as Kanban steps
+            // gh, glab and graphify calls show as GitHub, GitLab and Graphify, like the task tools show as Kanban steps
             const cli = cliCall(tool.name, tool.input);
             const Icon = cli?.icon ?? getToolIcon(tool.name);
             const taskTool = taskToolName(tool.name);
@@ -1285,6 +1288,9 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
         return { icon: GraphIcon, label: t('insights.tools.searchingGraph') };
       case 'Bash':
         return { icon: Terminal, label: t('insights.tools.runningCommand') };
+      case 'WebFetch':
+      case 'WebSearch':
+        return { icon: Search, label: toolName };
       default:
         return { icon: mcpToolIcon(toolName) ?? Wrench, label: toolName };
     }
