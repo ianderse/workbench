@@ -484,7 +484,6 @@ export class ClaudeTaskRun {
   constructor(private readonly config: TaskRunConfig, private readonly callbacks: TaskRunCallbacks = {}) {
     this.runFile = path.join(config.specDir, CLAUDE_RUN_FILE);
     this.info = loadClaudeRunInfo(config.specDir) ?? {
-      version: 1,
       phases: [],
       subagents: [],
       totalCostUsd: 0,
@@ -1640,7 +1639,7 @@ export function loadClaudeRunInfo(specDir: string): ClaudeRunInfo | null {
   if (!existsSync(file)) return null;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as ClaudeRunInfo;
-    if (parsed?.version !== 1 || !Array.isArray(parsed.phases)) return null;
+    if (!Array.isArray(parsed?.phases)) return null;
     parsed.subagents = parsed.subagents ?? [];
     parsed.totalCostUsd = parsed.totalCostUsd ?? 0;
     return parsed;
@@ -1663,7 +1662,6 @@ export function isClaudeRunFinished(info: ClaudeRunInfo | null, validation: bool
 /** Forget a task's run state so the next start triages and runs from scratch */
 export function resetClaudeRunInfo(specDir: string): void {
   writeFileSafe(path.join(specDir, CLAUDE_RUN_FILE), JSON.stringify({
-    version: 1,
     phases: [],
     subagents: [],
     totalCostUsd: 0,

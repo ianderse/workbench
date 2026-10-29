@@ -596,7 +596,7 @@ describe('ProjectStore', () => {
       );
       writeFileSync(
         path.join(specsDir, 'claude_run.json'),
-        JSON.stringify({ version: 1, phases: [{ name: 'triage', startedAt: '2026-01-01T00:00:00Z' }], subagents: [], totalCostUsd: 0.5, updatedAt: '2026-01-01T00:00:00Z' })
+        JSON.stringify({ phases: [{ name: 'triage', startedAt: '2026-01-01T00:00:00Z' }], subagents: [], totalCostUsd: 0.5, updatedAt: '2026-01-01T00:00:00Z' })
       );
 
       const { ProjectStore } = await import('../project-store');

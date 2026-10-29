@@ -150,7 +150,6 @@ export type ClaudeRuntime = 'native' | 'wsl';
 
 /** Persisted run state of a task (`<specDir>/claude_run.json`) */
 export interface ClaudeRunInfo {
-  version: 1;
   /** Claude Code session that holds the task's conversation (resumable) */
   sessionId?: string;
   /**

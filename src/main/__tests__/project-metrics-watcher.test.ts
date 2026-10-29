@@ -46,7 +46,6 @@ describe('watching a project\'s metrics', () => {
     writeFileSync(
       path.join(projectPath, '.workbench', 'agent-sessions.json'),
       JSON.stringify({
-        version: 1,
         sessions: [{ sessionId: 'abc', cwd: projectPath, startedAt: '2026-10-21T09:00:00.000Z' }],
       })
     );
@@ -73,7 +72,7 @@ describe('watching a project\'s metrics', () => {
     await watchProjectMetrics([project], onChange);
 
     const recordSession = () =>
-      writeFileSync(path.join(project.path, '.workbench', 'agent-sessions.json'), '{"version":1,"sessions":[]}');
+      writeFileSync(path.join(project.path, '.workbench', 'agent-sessions.json'), '{"sessions":[]}');
     expect(await reported(onChange, recordSession)).toBe(true);
   });
 
@@ -90,7 +89,7 @@ describe('watching a project\'s metrics', () => {
 
     await watchProjectMetrics([{ id: 'p2', name: 'Empty', path: empty } as Project], onChange);
 
-    const recordSession = () => writeFileSync(path.join(empty, '.workbench', 'agent-sessions.json'), '{"version":1,"sessions":[]}');
+    const recordSession = () => writeFileSync(path.join(empty, '.workbench', 'agent-sessions.json'), '{"sessions":[]}');
     expect(await reported(onChange, recordSession)).toBe(true);
   });
 });

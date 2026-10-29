@@ -117,7 +117,7 @@ describe('ClaudeTaskRun resync', () => {
   });
 
   function runInfo(phases: ClaudeRunInfo['phases'], sessionId: string | null = 's1'): void {
-    const info: ClaudeRunInfo = { version: 1, phases, subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(), triage, sessionId: sessionId ?? undefined, runtime: 'native' };
+    const info: ClaudeRunInfo = { phases, subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(), triage, sessionId: sessionId ?? undefined, runtime: 'native' };
     writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(info));
   }
   const done = (name: ClaudeRunInfo['phases'][number]['name'], extra = {}) =>
