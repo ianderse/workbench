@@ -164,7 +164,7 @@ export function UsageHero({ usage, active, pickSkin = skinForUsage, pinned = nul
           style={{ maskImage: BAR_SIDE_MASK, WebkitMaskImage: BAR_SIDE_MASK }}
         >
           <div
-            className={`h-full rounded-tr-[4px] rounded-b-[4px] transition-[width] duration-500 ease-out ${getBarColorClass(usage.sessionPercent)}`}
+            className={`h-full rounded-b-[4px] ${usage.sessionPercent >= 100 ? '' : 'rounded-tr-[4px]'} transition-[width] duration-500 ease-out ${getBarColorClass(usage.sessionPercent)}`}
             style={{ width: `${Math.min(usage.sessionPercent, 100)}%` }}
           />
         </div>
