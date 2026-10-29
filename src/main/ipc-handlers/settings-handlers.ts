@@ -19,6 +19,7 @@ import { isMacOS, isWindows } from '../platform';
 import { git } from '../utils/git-exec';
 import { getWslInfo, reprobeWslTools } from '../platform/shell-runtime';
 import { getWslExePath } from '../platform/wsl-detect';
+import { resetMcpAvailability } from '../mcp-availability';
 
 const settingsPath = getSettingsPath();
 
@@ -264,6 +265,13 @@ export function registerSettingsHandlers(
           settings.wslToolPaths !== undefined
         ) {
           configureTools(toolConfigFromSettings(newSettings));
+          // MCP servers run through Node.js: check them again with the new path
+          if (
+            newSettings.nodePath !== currentSettings.nodePath ||
+            JSON.stringify(newSettings.wslToolPaths) !== JSON.stringify(savedSettings?.wslToolPaths)
+          ) {
+            resetMcpAvailability();
+          }
 
           // Re-warm cache asynchronously after configuring (non-blocking)
           preWarmToolCache(['claude']).catch((error) => {

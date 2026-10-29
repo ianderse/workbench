@@ -9,8 +9,11 @@
  * "unavailable". Servers that need more than their own process (Puppeteer needs a browser) are
  * also asked to use it once. HTTP servers are reachable or not.
  *
- * Results are kept for the app session (per connector and its connection details) and sent to
- * every window as they change. The Connectors page, the task dialog and the chat's MCP menu keep
+ * Results are kept per connector and its connection details and sent to every window as they
+ * change. Ready results stay for the app session; an unavailable one is checked again when asked
+ * for after UNAVAILABLE_RECHECK_MS (it still reads unavailable until the new check ends), so a
+ * fix the user ran shows up. resetMcpAvailability() forgets everything (tool paths changed).
+ * A probe's server runs in its own process group and is stopped with everything it started. The Connectors page, the task dialog and the chat's MCP menu keep
  * a server's switch off and disabled until it is ready; runs leave out unavailable servers.
  */
 
@@ -19,15 +22,18 @@ import type { ChildProcess } from 'child_process';
 import type { McpConnectorSettings } from '../shared/types/settings';
 import type { McpAvailability } from '../shared/types/project';
 import { mcpServerEntry, type McpServerEntry } from './claude-code/mcp-config';
-import { findWslCommand, isCommandAvailable } from './mcp-commands';
+import { resetCommandLookups, resolveCommand } from './mcp-commands';
 import { getToolEnvAsync } from './cli-utils';
+import { isWindows } from './platform';
 import { getWslInfo, whenShellRuntimeReady } from './platform/shell-runtime';
-import { killRuntimeProcess, spawnTool } from './platform/runtime-exec';
+import { killRuntimeProcessTree, spawnTool } from './platform/runtime-exec';
 
 /** How long a server may take to answer: its first start downloads it */
 const START_TIMEOUT_MS = 5 * 60 * 1000;
 /** How long an HTTP server may take to answer */
 const HTTP_TIMEOUT_MS = 10 * 1000;
+/** How old an unavailable result may get before it is checked again */
+export const UNAVAILABLE_RECHECK_MS = 30 * 1000;
 
 /** A tool call that proves a server can do its work, not only start */
 interface VerifyCall {
@@ -55,8 +61,12 @@ const VERIFY_CALLS: Record<string, VerifyCall> = {
 
 const events = new EventEmitter();
 /** Latest result per connector id and the entry it was found for */
-const results = new Map<string, { key: string; availability: McpAvailability }>();
+const results = new Map<string, { key: string; availability: McpAvailability; checkedAt: number }>();
 const probes = new Map<string, Promise<McpAvailability>>();
+/** Servers being probed now */
+const running = new Set<ChildProcess>();
+/** Bumped by resetMcpAvailability: probes started before it don't report */
+let generation = 0;
 
 /** Called with each connector whose availability changed */
 export function onMcpAvailabilityChange(listener: (id: string, availability: McpAvailability) => void): () => void {
@@ -65,7 +75,7 @@ export function onMcpAvailabilityChange(listener: (id: string, availability: Mcp
 }
 
 function set(id: string, key: string, availability: McpAvailability): McpAvailability {
-  results.set(id, { key, availability });
+  results.set(id, { key, availability, checkedAt: Date.now() });
   events.emit('change', id, availability);
   return availability;
 }
@@ -88,36 +98,73 @@ function check(id: string, settings: McpConnectorSettings | undefined): McpAvail
   if (!entry) return { state: 'ready' };
   const key = JSON.stringify(entry);
   const known = results.get(id);
-  if (known?.key === key) return known.availability;
+  if (known?.key === key) {
+    const stale = known.availability.state === 'unavailable' && Date.now() - known.checkedAt >= UNAVAILABLE_RECHECK_MS;
+    // Checked again in the background: it reads unavailable (and runs leave it out) until then
+    if (stale && !probes.has(key)) startProbe(id, key, entry, true);
+    return known.availability;
+  }
   if (!probes.has(key)) {
     set(id, key, { state: 'preparing' });
-    const probe = probeEntry(entry, VERIFY_CALLS[id]).catch((error: unknown) => ({
-      state: 'unavailable' as const,
-      message: error instanceof Error ? error.message : String(error),
-    }));
-    probes.set(key, probe);
-    void probe.then((availability) => {
-      probes.delete(key);
-      // Only when the connector still has these connection details
-      if (results.get(id)?.key === key) set(id, key, availability);
-    });
+    startProbe(id, key, entry, false);
   }
   return { state: 'preparing' };
 }
 
-async function probeEntry(entry: McpServerEntry, verify?: VerifyCall): Promise<McpAvailability> {
+function startProbe(id: string, key: string, entry: McpServerEntry, recheck: boolean): void {
+  const started = generation;
+  const probe = probeEntry(entry, VERIFY_CALLS[id], recheck).catch((error: unknown) => ({
+    state: 'unavailable' as const,
+    message: error instanceof Error ? error.message : String(error),
+  }));
+  probes.set(key, probe);
+  void probe.then((availability) => {
+    if (started !== generation) return;
+    probes.delete(key);
+    // Only when the connector still has these connection details
+    if (results.get(id)?.key === key) set(id, key, availability);
+  });
+}
+
+/**
+ * Forget every result and command lookup, and stop the probes running now: the next request
+ * checks again. For when tool paths change (Node.js path, shell runtime)
+ */
+export function resetMcpAvailability(): void {
+  generation++;
+  results.clear();
+  probes.clear();
+  resetCommandLookups();
+  stopMcpProbes();
+}
+
+/**
+ * Stop every probe's server and what it started (on app quit: the servers are detached, so
+ * nothing else stops them). Nothing is waited for
+ */
+export function stopMcpProbes(): void {
+  for (const proc of running) stopServer(proc);
+}
+
+function stopServer(proc: ChildProcess): void {
+  running.delete(proc);
+  // An MCP server ends when its input closes; the process tree is stopped as well
+  try {
+    proc.stdin?.end();
+  } catch {
+    // Already closed
+  }
+  killRuntimeProcessTree(proc);
+}
+
+async function probeEntry(entry: McpServerEntry, verify: VerifyCall | undefined, refresh: boolean): Promise<McpAvailability> {
   if (entry.type === 'http') return probeHttp(entry.url, entry.headers);
 
   await whenShellRuntimeReady();
-  // In WSL the server runs inside the distribution, so its command is looked up and started there
-  let command = entry.command;
-  if (getWslInfo()) {
-    const found = (await findWslCommand(entry.command)).path;
-    if (!found) return { state: 'unavailable', missingCommand: entry.command };
-    command = found;
-  } else if (!(await isCommandAvailable(entry.command))) {
-    return { state: 'unavailable', missingCommand: entry.command };
-  }
+  // The command's full path where the server runs: inside the distribution in WSL; natively on
+  // Windows with its extension (`npx.cmd`), which spawn needs and then starts through a shell
+  const command = await resolveCommand(entry.command, { refresh });
+  if (!command) return { state: 'unavailable', missingCommand: entry.command };
   // Natively with the PATH Claude Code runs get (Node.js found through version managers too);
   // in WSL the distribution's login PATH applies
   const baseEnv = getWslInfo() ? process.env : await getToolEnvAsync();
@@ -164,12 +211,19 @@ function startAndInitialize(
         command,
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...baseEnv, ...env },
+        windowsHide: true,
+        // Its own process group, so the server npx starts (and the browser it opens) can be stopped
+        // with it; on Windows its tree is stopped with taskkill
+        detached: !isWindows(),
       });
     } catch (error) {
       resolve({ state: 'unavailable', message: error instanceof Error ? error.message : String(error) });
       return;
     }
 
+    running.add(proc);
+    // Writing to (or closing) the input of a server that already exited must not throw
+    proc.stdin?.on('error', () => undefined);
     let stdout = '';
     let stderr = '';
     let done = false;
@@ -177,7 +231,8 @@ function startAndInitialize(
       if (done) return;
       done = true;
       clearTimeout(timer);
-      killRuntimeProcess(proc);
+      // Unless stopMcpProbes already stopped it
+      if (running.has(proc)) stopServer(proc);
       resolve(availability);
     };
     const timer = setTimeout(() => finish({ state: 'unavailable', message: 'Did not start in time' }), START_TIMEOUT_MS);

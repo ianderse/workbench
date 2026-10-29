@@ -46,6 +46,7 @@ import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHE
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
 import { liveAgentRelay } from './live-agent/live-agent-relay';
+import { stopMcpProbes } from './mcp-availability';
 import { syncLiveAgentAtStartup } from './live-agent/live-agent-projects';
 import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
@@ -886,6 +887,7 @@ app.on('before-quit', (event) => {
   stopPeriodicUpdates();
   rateLimitResumeScheduler.dispose();
   taskQueue.dispose();
+  stopMcpProbes();
 
   const usageMonitor = getUsageMonitor();
   usageMonitor.stop();

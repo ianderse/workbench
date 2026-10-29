@@ -34,7 +34,8 @@ import { Transform, type Readable, type TransformCallback } from 'stream';
 import { promisify } from 'util';
 import { getToolPathAsync, type CLITool } from '../cli-tool-manager';
 import { getSpawnCommand, shouldUseShell } from '../env-utils';
-import { GRACEFUL_KILL_TIMEOUT_MS, killProcessGracefully, type KillProcessOptions } from './index';
+import { GRACEFUL_KILL_TIMEOUT_MS, isWindows, killProcessGracefully, type KillProcessOptions } from './index';
+import { getTaskkillExePath } from '../utils/windows-paths';
 import { getWslInfo, isWslRuntime, toRuntimePath, whenShellRuntimeReady } from './shell-runtime';
 import { getWslExePath, type WslProbeResult, type WslProbeTool } from './wsl-detect';
 import { isWslUncPath } from './wsl-paths';
@@ -74,6 +75,11 @@ export interface SpawnToolOptions {
   windowsHide?: boolean;
   /** Executable to run (a path the caller resolved); defaults to the tool's name on PATH. See RunToolOptions.command */
   command?: string;
+  /**
+   * Natively: start the process in its own process group (POSIX), so killRuntimeProcessTree can
+   * stop everything it starts. Ignored in WSL
+   */
+  detached?: boolean;
 }
 
 /** One invocation's outcome in a runToolScript batch */
@@ -95,9 +101,12 @@ interface NativeLaunch {
   shell: boolean;
 }
 
-/** Quote arguments containing spaces when the command runs through a shell (Windows .cmd shims) */
+/**
+ * Quote arguments containing spaces, quotes or cmd.exe operators (`& | < > ^ ( )`, literal inside
+ * quotes) when the command runs through a shell (Windows .cmd shims)
+ */
 function quoteForShell(args: string[], useShell: boolean): string[] {
-  return useShell ? args.map((a) => (a === '' || /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
+  return useShell ? args.map((a) => (a === '' || /[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
 }
 
 function nativeLaunch(command: string, args: string[]): NativeLaunch {
@@ -552,9 +561,10 @@ export function spawnTool(tool: RuntimeTool, args: string[], options: SpawnToolO
     return child;
   }
 
-  const { command, ...spawnOptions } = options;
+  const { command, detached, ...spawnOptions } = options;
   const launch = nativeLaunch(command ?? tool, args);
-  return spawn(launch.file, launch.args, { ...spawnOptions, shell: launch.shell });
+  // On Windows a detached process gets its own console instead: its tree is stopped with taskkill
+  return spawn(launch.file, launch.args, { ...spawnOptions, ...(detached && !isWindows() ? { detached: true } : {}), shell: launch.shell });
 }
 
 /**
@@ -569,6 +579,59 @@ export function killRuntimeProcess(child: ChildProcess, options: KillProcessOpti
     return;
   }
   killProcessGracefully(child, options);
+}
+
+/**
+ * Stop a process started with spawnTool and everything it started (a wrapper like npx runs the
+ * real program as its child, which outlives a kill of the wrapper alone):
+ * - POSIX: the process group (spawned with `detached: true`) gets SIGTERM, and SIGKILL after the
+ *   grace period if any of it is still running; without its own group only the process is stopped
+ * - Windows: `taskkill /T /F` on the process tree
+ * - WSL: the Linux process, its group and children as killRuntimeProcess does (wsl.exe is
+ *   stopped when that doesn't end it)
+ */
+export function killRuntimeProcessTree(child: ChildProcess, options: KillProcessOptions = {}): void {
+  const pid = child.pid;
+  const tracked = wslProcesses.get(child);
+  if (tracked) {
+    stopWslProcess(child, tracked, options);
+    return;
+  }
+  if (!pid) return;
+  if (isWindows()) {
+    taskkillTree(pid);
+    return;
+  }
+  const signalGroup = (signal: NodeJS.Signals | 0): boolean => {
+    try {
+      process.kill(-pid, signal);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!signalGroup('SIGTERM')) {
+    // Not a process group leader (spawned without `detached`): only the process itself
+    killProcessGracefully(child, options);
+    return;
+  }
+  // The group outlives the process that led it (its children keep it), so its own exit is no
+  // reason to skip the SIGKILL
+  const timer = setTimeout(() => {
+    if (signalGroup(0)) signalGroup('SIGKILL');
+  }, options.timeoutMs ?? GRACEFUL_KILL_TIMEOUT_MS);
+  timer.unref();
+}
+
+/** `taskkill /T /F` on a Windows process tree (best effort) */
+function taskkillTree(pid: number): void {
+  try {
+    const killer = spawn(getTaskkillExePath(), ['/pid', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, detached: true });
+    killer.on('error', () => undefined);
+    killer.unref();
+  } catch {
+    // Already gone, or taskkill could not start
+  }
 }
 
 /** POSIX shell quoting (single quotes) */

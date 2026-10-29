@@ -42,31 +42,54 @@ export async function findWslCommand(command: string): Promise<{ path: string | 
   return { path: found, windowsOnly: false };
 }
 
-async function lookUp(command: string): Promise<boolean> {
+/** Extensions Windows runs a bare command name with (PATHEXT) */
+function windowsExtensions(env: NodeJS.ProcessEnv): string[] {
+  return (env.PATHEXT || '.COM;.EXE;.BAT;.CMD').split(';').map((ext) => ext.trim().toLowerCase()).filter(Boolean);
+}
+
+/**
+ * The first of where.exe's matches Windows can start. where.exe also lists files without an
+ * extension (npm ships a POSIX `npx` script next to `npx.cmd`), which spawn can't run
+ */
+export function pickWindowsMatch(output: string, extensions: string[]): string | null {
+  const matches = output.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return matches.find((match) => extensions.includes(path.extname(match).toLowerCase())) ?? null;
+}
+
+async function lookUp(command: string): Promise<string | null> {
   await whenShellRuntimeReady();
-  if (getWslInfo()) return (await findWslCommand(command)).path !== null;
+  if (getWslInfo()) return (await findWslCommand(command)).path;
   // node and npx come from the Node.js detection (version managers included): npx sits next to node
   if (command === 'node' || command === 'npx') {
     const node = await getToolInfoAsync('node');
-    if (!node.found || !node.path) return false;
-    return command === 'node' || existsSync(path.join(path.dirname(node.path), isWindows() ? 'npx.cmd' : 'npx'));
+    if (!node.found || !node.path) return null;
+    if (command === 'node') return node.path;
+    const npx = path.join(path.dirname(node.path), isWindows() ? 'npx.cmd' : 'npx');
+    return existsSync(npx) ? npx : null;
   }
+  if (path.isAbsolute(command)) return existsSync(command) ? command : null;
   try {
+    const env = await getToolEnvAsync();
     const { stdout } = await execFileAsync(isWindows() ? getWhereExePath() : 'which', [command], {
       timeout: 5000,
       windowsHide: true,
-      env: await getToolEnvAsync(),
+      env,
     });
-    return stdout.trim().length > 0;
+    if (isWindows()) return pickWindowsMatch(stdout, windowsExtensions(env));
+    return stdout.trim().split(/\r?\n/)[0]?.trim() || null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-const lookups = new Map<string, Promise<boolean>>();
+const lookups = new Map<string, Promise<string | null>>();
 
-/** Whether a command is installed where Claude Code runs (cached; `refresh` looks again) */
-export function isCommandAvailable(command: string, options: { refresh?: boolean } = {}): Promise<boolean> {
+/**
+ * Where a command is installed where Claude Code runs, or null: a full path natively (on Windows
+ * with the extension spawn needs, such as `npx.cmd`), a Linux path in WSL. Cached; `refresh`
+ * looks again
+ */
+export function resolveCommand(command: string, options: { refresh?: boolean } = {}): Promise<string | null> {
   if (options.refresh) lookups.delete(command);
   let lookup = lookups.get(command);
   if (!lookup) {
@@ -74,4 +97,14 @@ export function isCommandAvailable(command: string, options: { refresh?: boolean
     lookups.set(command, lookup);
   }
   return lookup;
+}
+
+/** Whether a command is installed where Claude Code runs (cached; `refresh` looks again) */
+export async function isCommandAvailable(command: string, options: { refresh?: boolean } = {}): Promise<boolean> {
+  return (await resolveCommand(command, options)) !== null;
+}
+
+/** Forget every lookup (after tool paths or the shell runtime changed) */
+export function resetCommandLookups(): void {
+  lookups.clear();
 }
