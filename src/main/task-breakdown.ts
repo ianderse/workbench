@@ -14,6 +14,7 @@ import { READ_ONLY_TOOLS, runClaudeText } from './claude-code/run-text';
 import { resolveClaudeCodeTaskSettings } from './claude-code/settings';
 import { readSettingsFile } from './settings-utils';
 import type { RunProgress } from '../shared/utils/run-progress';
+import { TASK_DECOMPOSITION_GUIDANCE } from '../shared/utils/task-decomposition';
 
 export const MIN_BREAKDOWN_TASKS = 2;
 export const MAX_BREAKDOWN_TASKS = 12;
@@ -29,6 +30,8 @@ Rules:
 - Each task runs in a separate session that has no memory of the others and starts from the project's base branch. Write each description so it stands alone: what to build, which spec files and sections to follow (name the paths), the relevant constraints from the request, and concrete acceptance criteria.
 - dependsOn lists the keys of new tasks whose code this task needs, and the ids of existing open tickets (listed in <open_tickets>, when there are any) whose code this task needs and that are not merged yet. Add a dependency only when it is real; tasks that can be built independently must not depend on each other. A task that needs the result of an open ticket must depend on its id, or it would start before that ticket is merged.
 - key is a short id such as "t1", "t2". title is short, in sentence case, with no trailing period.
+
+${TASK_DECOMPOSITION_GUIDANCE}
 
 Spend a limited number of tool calls exploring. Answer with the structured output only.`;
 

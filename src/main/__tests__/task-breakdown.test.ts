@@ -3,10 +3,32 @@ import { describe, it, expect, vi } from 'vitest';
 vi.mock('../claude-code/run-text', () => ({ runClaudeText: vi.fn(), READ_ONLY_TOOLS: ['Read'] }));
 vi.mock('../settings-utils', () => ({ readSettingsFile: () => ({}) }));
 
-import { normalizeBreakdown } from '../task-breakdown';
+import { breakDownTask, normalizeBreakdown } from '../task-breakdown';
+import { runClaudeText } from '../claude-code/run-text';
 import { sortByDependencies } from '../../shared/utils/task-breakdown-order';
+import { TASK_DECOMPOSITION_GUIDANCE } from '../../shared/utils/task-decomposition';
 
 const t = (key: string, dependsOn: string[] = [], title = `Task ${key}`) => ({ key, title, description: `Do ${key}`, dependsOn });
+
+describe('breakdown model request', () => {
+  it('delivers shared-boundary guidance for spec batches and retains real prerequisite edges', async () => {
+    vi.mocked(runClaudeText).mockResolvedValueOnce({
+      text: '', structured: { tasks: [t('consumer', ['foundation', '005-existing']), t('foundation')] },
+    } as Awaited<ReturnType<typeof runClaudeText>>);
+    const result = await breakDownTask({
+      projectPath: '/project', description: 'Implement docs/SPEC.md',
+      openTickets: [{ id: '005-existing', title: 'Existing contract', status: 'in_progress' }],
+    });
+    expect(runClaudeText).toHaveBeenLastCalledWith(expect.objectContaining({
+      appendSystemPrompt: expect.stringContaining(TASK_DECOMPOSITION_GUIDANCE),
+      prompt: expect.stringContaining('Implement docs/SPEC.md'),
+      tools: ['Read'],
+    }));
+    expect(result.tasks.map((task) => [task.key, task.dependsOn, task.dependsOnExisting])).toEqual([
+      ['foundation', [], []], ['consumer', ['foundation'], ['005-existing']],
+    ]);
+  });
+});
 
 describe('normalizeBreakdown', () => {
   it('keeps valid tasks and dependencies', () => {

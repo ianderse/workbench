@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   batchReadiness,
+  buildReviewDescription,
   deriveSpecReviewNext,
   specReviewNextKey,
   extractSpecPaths,
@@ -11,9 +12,22 @@ import {
   specName,
 } from '../spec-review';
 import type { Task } from '../../types/task';
+import { TASK_DECOMPOSITION_GUIDANCE } from '../task-decomposition';
 
 const task = (id: string, status: Task['status'], reviewReason?: Task['reviewReason'], metadata: Task['metadata'] = {}): Task =>
   ({ id, specId: id, projectId: 'p', title: id, description: '', status, reviewReason, subtasks: [], logs: [], metadata }) as unknown as Task;
+
+describe('spec gap decomposition', () => {
+  it('carries the same boundaries into review tickets without expanding beyond evidenced gaps', () => {
+    const description = buildReviewDescription({
+      source: ['docs/SPEC.md'], promptExcerpt: 'Build', maxReviewRounds: 2,
+    }, [{ id: '001-a', title: 'Foundation' }], 0);
+    expect(description).toContain(TASK_DECOMPOSITION_GUIDANCE);
+    expect(description).toContain('only to evidence-backed gaps');
+    expect(description).toContain('docs/SPEC.md');
+    expect(description).toContain('001-a: Foundation');
+  });
+});
 
 describe('extractSpecPaths', () => {
   it('finds docs-style markdown paths, once each, and skips bare names and urls', () => {

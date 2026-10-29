@@ -123,8 +123,8 @@ describe('ClaudeTaskRun resync', () => {
     rmSync(tmp, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 
-  function runInfo(phases: ClaudeRunInfo['phases'], sessionId: string | null = 's1'): void {
-    const info: ClaudeRunInfo = { version: 1, phases, subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(), triage, sessionId: sessionId ?? undefined, runtime: 'native',
+  function runInfo(phases: ClaudeRunInfo['phases'], sessionId: string | null = 's1', savedTriage: TaskTriage = triage): void {
+    const info: ClaudeRunInfo = { version: 1, phases, subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(), triage: savedTriage, sessionId: sessionId ?? undefined, runtime: 'native',
       // A finished validation leaves its report (the AI review loop checks for it)
       ...(phases.some((p) => p.name === 'validate' && p.endedAt) ? { validation: { status: 'passed' as const, summary: 'Still works', checks: [], findings: [] } } : {}) };
     writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(info));
@@ -148,7 +148,7 @@ describe('ClaudeTaskRun resync', () => {
   }
 
   it("merges in the task's own session, keeps a finished task's work as it is, and validates again", async () => {
-    runInfo([done('triage'), done('implement'), done('validate')]);
+    runInfo([done('triage'), done('implement'), done('validate')], 's1', { ...triage, effort: 'max', scope: 'large' });
     const request = mergeIntoMain();
     scripts.push(
       { effect: () => git(worktree, 'merge', '--no-edit', 'main'), messages: [result({ result: 'Merged main, no conflicts' })] },
@@ -168,6 +168,7 @@ describe('ClaudeTaskRun resync', () => {
     expect(argValue(spawned[0].args, '--resume')).toBe('s1');
     expect(spawned[0].args).toContain('--dangerously-skip-permissions');
     expect(argValue(spawned[0].args, '--model')).toBe('sonnet');
+    expect(argValue(spawned[0].args, '--effort')).toBe('medium');
     const prompt = promptOf(0);
     expect(prompt).toMatch(/^Your base branch moved on: other work was merged into `main`/);
     expect(prompt).toContain('- task 001-a "A" (changed `c.txt`)');
@@ -183,7 +184,7 @@ describe('ClaudeTaskRun resync', () => {
   });
 
   it('carries on with an implementation that was stopped, in the same turn', async () => {
-    runInfo([done('triage'), done('implement', { isError: true, error: 'Stopped' })]);
+    runInfo([done('triage'), done('implement', { isError: true, error: 'Stopped' })], 's1', { ...triage, effort: 'max', scope: 'large' });
     const request = mergeIntoMain();
     scripts.push(
       { effect: () => git(worktree, 'merge', '--no-edit', 'main'), messages: [result({ result: 'Merged and finished B' })] },
@@ -194,6 +195,7 @@ describe('ClaudeTaskRun resync', () => {
     expect(outcome.status).toBe('completed');
     // No separate implementation step: the resync carried on with it
     expect(spawned).toHaveLength(2);
+    expect(argValue(spawned[0].args, '--effort')).toBe('high');
     expect(promptOf(0)).toContain('Then continue the task from where you left off');
     const info = loadClaudeRunInfo(specDir)!;
     expect(info.phases.map((p) => p.name)).toEqual(['triage', 'implement', 'resync', 'validate']);
@@ -224,7 +226,7 @@ describe('ClaudeTaskRun resync', () => {
   });
 
   it('gives the session one more pass when its merge lost changes from the base branch', async () => {
-    runInfo([done('triage'), done('implement'), done('validate')]);
+    runInfo([done('triage'), done('implement'), done('validate')], 's1', { ...triage, effort: 'max', scope: 'large' });
     commitFile(worktree, 'a.txt', 'one\nTWO FROM B\nthree\n', 'task b changes a');
     const request = mergeIntoMain('a');
     scripts.push(
@@ -249,6 +251,8 @@ describe('ClaudeTaskRun resync', () => {
     expect(fix).toContain('The merge lost changes from `main` in a.txt');
     expect(fix).toContain('    four from a');
     expect(argValue(spawned[1].args, '--json-schema')).toContain('intentionallyDropped');
+    expect(argValue(spawned[0].args, '--effort')).toBe('medium');
+    expect(argValue(spawned[1].args, '--effort')).toBe('high');
     expect(loadClaudeRunInfo(specDir)!.phases.map((p) => p.name)).toEqual(['triage', 'implement', 'validate', 'resync', 'resync', 'validate']);
     expect(readResyncRequest(specDir)).toBeUndefined();
   });

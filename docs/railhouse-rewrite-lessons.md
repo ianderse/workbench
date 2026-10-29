@@ -55,6 +55,41 @@ A suspected planning-only routing bug was not established; do not preserve it as
 
 ## Throughput changes and their boundaries
 
+### Phase effort and edit scope (2026-10-29)
+
+A subsequent review of larger Anomaly and Railhouse tickets found initial planning took about
+3–8 minutes, while repeated full-file generation, context overhead, and integration repair
+accounted for substantial later work. Independent review found real correctness defects and
+remains required. Reasoning-token shares and elapsed durations are not wasted-time measurements.
+See Railhouse's [dated evidence and independent follow-through](https://github.com/ianderse/railhouse/blob/main/docs/research/2026-10-29-execution-efficiency.md).
+
+Workbench now selects effort by phase when triage is automatic. Architectural planning, design,
+and spec review retain their depth; large implementation (including continued work during sync),
+review revisions, merge repair, and validation that must review or repair major findings cap
+automatic effort at high. Smaller implementation, check execution after a clean independent
+review, and ordinary sync cap it at medium. Low effort is not raised for those execution phases.
+Explicit task effort pins and fixed/fallback settings are preserved. Fresh independent diff review retains its own
+high-effort policy. Missing or failed independent review never selects the lighter check-only policy.
+
+Task prompts prefer targeted edits over regenerating large existing files and recover completed
+work from the saved plan/diff after interruption or compaction. Initial breakdowns and spec-gap
+follow-ups identify shared foundations as real prerequisites before parallel consumers, with
+justified ownership boundaries. This is planning guidance, not exclusive file locking or a
+change to queue capacity; existing queued tickets are not rewritten. Required checks, merge-loss
+checks, recovery safeguards, and human decisions remain authoritative.
+
+The phase policy is enforced in the runner; edit/decomposition guidance still depends on model
+adherence. Source checks do not establish faster live delivery. Load the new build for later runs
+without interrupting active tasks, then compare useful completions and review defects alongside
+latency, retries, and output volume.
+
+Validation: strict TypeScript, all 306 test files (3,778 passed, one skipped), and the production
+build passed. Regression checks cover effective phase arguments on both transports, pins/fixed
+settings, unavailable or actionable independent reviews, and continued implementation during sync.
+No provider productivity gain or existing-worker activation is claimed.
+
+### Existing batching and recovery controls
+
 The approved implementation order is batching → advisor checkpoints → preserved fresh context →
 progress recovery. Keep these as separate mechanisms with explicit settings and durable evidence.
 

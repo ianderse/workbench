@@ -1,6 +1,6 @@
 # Workbench progress
 
-Observed 2026-10-28. This is the authored project entry point, not a completion ledger or approval.
+Observed 2026-10-29. This is the authored project entry point, not a completion ledger or approval.
 Baseline: 5527b9c (throughput/recovery delivery). Inspect current Git state for later changes.
 
 ## Current implementation
@@ -34,6 +34,21 @@ The live snapshot labels current checkout identity, recorded task status, agent-
 and recorded autonomous integration targets separately. Board Done, passing checks, merge, push,
 and explicit spec acceptance are distinct. Omitted rows remain available in task records. The
 snapshot never reads the documentation archive or makes an AI call. It does not prove live activation.
+
+## Execution efficiency
+
+Automatic triage now feeds phase-specific effort instead of carrying the hardest task effort
+through every step. Planning/design/spec review and fresh independent review retain depth;
+routine execution/check/sync phases have lower caps, while large implementation and corrective
+work retain up to high effort. Validation only uses the lower cap after a clean independent review.
+Explicit task effort pins and fixed/fallback settings are preserved.
+Task prompts prefer targeted edits and preserve completed work after compaction. Initial
+breakdowns and spec-gap follow-ups plan shared foundations before parallel consumers; this is
+guidance, not file locking or rescheduling of existing tickets. See the
+[dated behavior and qualification boundary](docs/railhouse-rewrite-lessons.md#phase-effort-and-edit-scope-2026-10-29).
+Live latency and first-pass quality still need observation after the main process loads the build.
+Validation for this change: strict TypeScript and all 306 test files passed (3,778 tests,
+one skipped); production build passed. No running task was interrupted for activation.
 
 ## Working boundaries and next checks
 

@@ -37,6 +37,7 @@ import { TASK_RUN_TOOL_NAMES } from '../task-messaging/tools';
 import type { TaskMessage, TaskRunMessaging } from '../task-messaging/types';
 import { taskSessionName } from '../../shared/utils/task-messaging';
 import { triageTask, fixedTriage, applyPlanningPolicy, applyAgentOverrideToTriage, applyUiWorkPlanning } from './triage';
+import { phaseEffort } from './phase-effort';
 import { DESIGN_REVIEW_PROMPT, DESIGN_SPEC_PROMPT, DESIGN_VALIDATION_PROMPT, designModelFor, extractDesignSpec } from './ui-design';
 import { resolveUiWork, usesDesignModel, type UiImplementer } from '../../shared/utils/ui-work';
 import type { MergeBaseDuring } from '../../shared/utils/merge-base-timing';
@@ -103,7 +104,7 @@ import {
   type NormalizedSplit,
 } from '../../shared/utils/task-split';
 import type { SplitSubmission } from '../queue-grooming';
-import { PHASE_PROMPT_OPENINGS } from './phase-prompts';
+import { PHASE_PROMPT_OPENINGS, TASK_EXECUTION_GUIDANCE } from './phase-prompts';
 import { SPEC_REVIEW_SCHEMA, normalizeSpecReview } from '../../shared/utils/spec-review';
 import { appLog } from '../app-logger';
 import { writeOmpMessagingExtension } from '../task-messaging/omp-extension';
@@ -454,6 +455,7 @@ ${ompSubagentGuidance(ompSubagentsPerTask(getAgentBackendSettings().omp))}`
 `}- Verify your work with the project's own checks (tests, type checker, linter, build) for the code you changed, and fix failures you caused. Show evidence rather than asserting success.
 - While working, run the tests that cover what you changed; run the full suite once before you commit, not after every edit.
 - Keep file reads and command output focused: search symbols or document headings first, then read relevant ranges. Use concise test output and inspect failure details as needed.
+${TASK_EXECUTION_GUIDANCE}
 - Batch independent file reads, searches and checks into the same tool turn. Group independent shell inspections into one invocation with clearly separated results. Keep edits and commands that depend on earlier results sequential.
 - Use the supplied phase-start snapshot before repeating opening Git inspections. Request fresh state when it affects a change or when work has moved on; avoid status-only model turns that add no new decision.
 - Keep generated folders (node_modules, build output, virtual environments) out of commits: if the project has no .gitignore for them, create or extend one before installing dependencies or committing.
@@ -1305,7 +1307,6 @@ export class ClaudeTaskRun {
     const design = this.runsOnDesignModel(name);
     let model = design && !triage.pinned?.model ? designModelFor(this.config.backend, getOmpRoles())
       : name === 'plan' && !triage.pinned?.model ? (triage.model === 'fable' ? 'fable' : 'opus') : triage.model;
-    const effort: ClaudeEffort = (name === 'plan' || design) && !triage.pinned?.effort && (triage.effort === 'low' || triage.effort === 'medium') ? 'high' : triage.effort;
     const logPhase: TaskLogPhase = name === 'plan' ? 'planning' : name === 'validate' || name === 'spec_review' ? 'validation' : 'coding';
     const role = ompRoleForJob(design ? 'design' : name);
     const reviewingSpec = name === 'spec_review';
@@ -1347,6 +1348,7 @@ export class ClaudeTaskRun {
     // A resync of a task stopped mid-implementation carries on with the work in the same turn
     const resyncContinues = name === 'resync' && !resync?.fix && implementStarted && !this.hasCompleted('implement')
       && !this.info.phases.some((p) => p.name === 'resync' && p.resync?.continued && p.endedAt && !p.isError);
+    let effort = phaseEffort(triage, name, { design, mergeFix: !!resync?.fix, continuesImplementation: resyncContinues });
     const roundNote = this.loop && this.loop.max > 1 ? ` (round ${this.loop.round}/${this.loop.max})` : '';
     const label = {
       plan: 'Planning',
@@ -1376,17 +1378,24 @@ export class ClaudeTaskRun {
     } else {
       this.callbacks.onTaskEvent?.('QA_STARTED', { iteration: this.loop?.round ?? 1, maxIterations: this.loop?.max ?? 1 });
       this.emitProgress('qa_review', 0.85, label);
-      this.log.startPhase('validation', `${label} (${this.modelLabel(model, effort, role)})`);
+      this.log.startPhase('validation', `${label}: preparing review and checks`);
     }
 
     // OMP: Workbench runs the fresh-context review itself, before the session validates
     this.reviewSection = undefined;
+    let independentReview: ReviewReport | undefined;
     if (name === 'validate' && backend === 'omp') {
-      await this.runOmpReview();
+      independentReview = await this.runOmpReview();
       if (this.stopped) {
         this.log.endPhase(logPhase, 'stopped', 'Stopped');
         return { status: 'stopped' };
       }
+    }
+    if (name === 'validate') {
+      const cleanIndependentReview = !!independentReview
+        && !independentReview.findings.some((finding) => finding.severity === 'blocker' || finding.severity === 'major');
+      effort = phaseEffort(triage, name, { design, cleanIndependentReview });
+      this.log.startPhase('validation', `${label} (${this.modelLabel(model, effort, role)})`);
     }
 
     // Messages the task got while it was not running go with the step's first prompt
@@ -2740,7 +2749,7 @@ no notes came with the request, so review the change against the task with fresh
   }
 
   /** Fresh OMP diff review, reused only when the complete worktree and acceptance inputs match. */
-  private async runOmpReview(): Promise<void> {
+  private async runOmpReview(): Promise<ReviewReport | undefined> {
     this.reviewSection = undefined;
     let diff: string | undefined;
     try { diff = await collectReviewDiff(this.config.worktreePath, this.config.baseBranch); }
@@ -2754,7 +2763,10 @@ no notes came with the request, so review the change against the task with fresh
     const effort: ClaudeEffort = triage?.pinned?.effort ? triage.effort : 'high';
     const request = `${taskBlock(this.config)}${this.config.feedback && !isRecordedHumanFeedback(this.config) ? `\n\nRecorded reviewer feedback / evidence (verify its references):\n${this.config.feedback}` : ''}\n\nThis is the change made for the task:\n\n<diff>\n${diff}\n</diff>${this.isUiWork() && this.info.plan ? `${DESIGN_REVIEW_PROMPT}\n\n<design_spec>\n${extractDesignSpec(this.info.plan)}\n</design_spec>` : ''}`;
     const report = await this.runReviewCheckpoint('diff-review', model, ompRoleForJob('review'), effort, request, 'validation');
-    if (report) this.reviewSection = formatReviewForValidation(report);
+    if (report) {
+      this.reviewSection = formatReviewForValidation(report);
+    }
+    return report;
   }
 
   /** Apply one stream message; returns a signal for rate-limit or auth problems */

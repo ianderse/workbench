@@ -31,6 +31,12 @@ export const PHASE_PROMPT_OPENINGS = {
 /** Every opening, for matching a transcript turn against all of them */
 export const PHASE_PROMPT_OPENING_LIST: readonly string[] = Object.values(PHASE_PROMPT_OPENINGS);
 
+/** Execution guidance shared by the Claude Code and OMP task system prompts. */
+export const TASK_EXECUTION_GUIDANCE = `- Use targeted edits for existing files. Do not regenerate a large file to change a few sections; preserve unrelated code, comments, and concurrent changes. For a genuinely new large file, write coherent sections and then patch them instead of repeatedly emitting the entire file.
+- After interruption or compaction, use the saved plan, current diff, and focused reads to recover what is already implemented. Continue from that state; do not rewrite completed modules or repeat checks whose results still apply to the current revision.
+- Keep routine reads, searches, status checks, and test execution direct. Spend deeper reasoning on unresolved design choices, correctness failures, concurrency, and security boundaries. Stop re-planning once the next safe change or check is clear; investigate further when new evidence changes the decision.
+- When another task owns a coupled interface or foundational module, coordinate the smallest required change instead of independently redesigning it. Preserve independent parallel work and all required checks, review, recovery, and human-acceptance gates.`;
+
 /**
  * How the turns Workbench writes into a session start (`formatMessage()` in
  * `task-messaging/broker.ts`): notices and peer messages, never something the user said. The

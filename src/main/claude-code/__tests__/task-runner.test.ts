@@ -108,6 +108,7 @@ import { DEFAULT_OMP_BACKEND_SETTINGS, ompSubagentsPerTask } from '../../../shar
 import type { TaskMessage, TaskRunMessaging } from '../../task-messaging/types';
 import { SELF_IMPROVE_NUDGE } from '../../self-improve/nudge';
 import { resetOmpRolesForTests } from '../../agent-backend/omp-roles';
+import { TASK_EXECUTION_GUIDANCE } from '../phase-prompts';
 
 function result(sessionId: string, fields: Record<string, unknown> = {}): ClaudeStreamMessage {
   return {
@@ -321,10 +322,12 @@ describe('ClaudeTaskRun', () => {
       const diff = vi.spyOn(reviewDiff, 'collectReviewDiff').mockResolvedValue('diff --git a/a.ts b/a.ts\n+fixed');
       const review = vi.spyOn(runText, 'runClaudeText').mockResolvedValue({ text: '', structured: { summary: 'No defects found', findings: [] } });
       try {
-        const run = makeRun({ backend: 'omp' }) as unknown as { runOmpReview(): Promise<void>; reviewSection?: string };
+        const run = makeRun({ backend: 'omp' }) as unknown as { info: { triage: TaskTriage }; runOmpReview(): Promise<void>; reviewSection?: string };
+        run.info.triage = triage({ effort: 'max', scope: 'large' });
         await run.runOmpReview();
         await run.runOmpReview();
         expect(review).toHaveBeenCalledTimes(1);
+        expect(review.mock.calls[0][0].effort).toBe('high');
         expect(review.mock.calls[0][0].appendSystemPrompt).toContain(reviewDiff.TASK_REVIEW_SCOPE_PROMPT);
         expect(review.mock.calls[0][0].appendSystemPrompt).toContain('applicable unmet task requirement needs real human approval');
         expect(run.reviewSection).toContain('found no issues');
@@ -568,6 +571,89 @@ describe('ClaudeTaskRun', () => {
     expect(argValue(spawned[0].args, '--model')).toBe('opus');
     expect(argValue(spawned[0].args, '--effort')).toBe('high');
     expect(loadClaudeRunInfo(specDir)?.triage?.source).toBe('fixed');
+  });
+
+  it.each(['claude', 'omp'])('selects phase effort on %s while preserving task pins and fixed settings', async (backend) => {
+    const cases = [
+      { source: 'auto', scope: 'large', agentOverride: undefined, expected: ['max', 'high', 'high'] },
+      { source: 'auto', scope: 'medium', agentOverride: undefined, expected: ['max', 'medium', 'high'] },
+      { source: 'auto', scope: 'large', agentOverride: { effort: 'xhigh' }, expected: ['xhigh', 'xhigh', 'xhigh'] },
+      { source: 'fixed', scope: 'large', agentOverride: undefined, expected: ['max', 'max', 'max'] },
+      { source: 'fallback', scope: 'large', agentOverride: undefined, expected: ['max', 'max', 'max'] },
+    ] as const;
+    for (const { source, scope, agentOverride, expected } of cases) {
+      spawned.length = 0;
+      ompSpawned.length = 0;
+      triageMock.mockReset();
+      triageMock.mockResolvedValue({ triage: triage({ effort: 'max', needsPlan: true, scope }) });
+      if (source === 'fallback') triageMock.mockRejectedValue(new Error('Triage unavailable'));
+      const runSpecDir = path.join(specDir, `${source}-${scope}${agentOverride ? '-pinned' : ''}`);
+      mkdirSync(runSpecDir);
+      scripts.push(
+        { messages: [result('effort', { structured_output: { plan: '# Plan' } })] },
+        { messages: [result('effort')] },
+        { messages: [result('effort', { structured_output: { status: 'passed', summary: 'Verified', checks: [], findings: [] } })] },
+      );
+      const outcome = await makeRun({ backend, specDir: runSpecDir, agentOverride,
+        settings: { ...DEFAULT_CLAUDE_CODE_TASK_SETTINGS, triage: source === 'fixed' ? 'fixed' : 'auto', fixedEffort: 'max', planning: 'always' },
+      }).run();
+      expect(outcome.status).toBe('completed');
+      const actual = backend === 'omp' ? ompSpawned.map((options) => options.effort)
+        : spawned.map((options) => argValue(options.args, '--effort'));
+      expect(actual).toEqual(expected);
+      const system = backend === 'omp' ? String(ompSpawned[0].appendSystemPrompt)
+        : argValue(spawned[0].args, '--append-system-prompt')!;
+      expect(system).toContain(TASK_EXECUTION_GUIDANCE);
+      expect(loadClaudeRunInfo(runSpecDir)?.phases.filter((phase) => phase.name !== 'triage').map((phase) => phase.effort)).toEqual(expected);
+    }
+  });
+
+  it.each([
+    { reviewCase: 'clean', findings: [], expected: 'medium' },
+    { reviewCase: 'minor only', findings: [{ severity: 'minor', issue: 'Optional copy polish' }], expected: 'medium' },
+    { reviewCase: 'major', findings: [{ severity: 'major', issue: 'Retry duplicates the mutation' }], expected: 'high' },
+    { reviewCase: 'blocker', findings: [{ severity: 'blocker', issue: 'Foreign workspace can mutate the record' }], expected: 'high' },
+    { reviewCase: 'failed', findings: [], expected: 'high' },
+    { reviewCase: 'malformed', findings: [], expected: 'high' },
+    { reviewCase: 'skipped', findings: [], expected: 'high' },
+  ])('uses $expected validation effort after a $reviewCase independent OMP review', async ({ reviewCase, findings, expected }) => {
+    resetOmpRolesForTests({ default: 'omlx/worker', judge: 'omlx/judge' });
+    const fingerprint = vi.spyOn(handoffs, 'fingerprintWorktree').mockResolvedValue('reviewed-worktree');
+    const diff = vi.spyOn(reviewDiff, 'collectReviewDiff').mockResolvedValue(reviewCase === 'skipped' ? undefined : 'diff --git a/a.ts b/a.ts\n+fixed');
+    const events: string[] = [];
+    const review = vi.spyOn(runText, 'runClaudeText').mockImplementation(async () => {
+      expect(events).toContain('QA_STARTED');
+      if (reviewCase === 'failed') throw new Error('Reviewer unavailable');
+      return { text: '', structured: reviewCase === 'malformed' ? { summary: 'Missing findings' } : { summary: 'Reviewed the task diff', findings } };
+    });
+    try {
+      triageMock.mockResolvedValue({ triage: triage({ effort: 'max', scope: 'large' }) });
+      scripts.push(
+        { messages: [result('validation-effort')] },
+        { messages: [result('validation-effort', { structured_output: { status: 'passed', summary: 'Verified', checks: [], findings: [] } })] },
+      );
+      const outcome = await makeRun({ backend: 'omp' }, { onTaskEvent: (event: string) => events.push(event) }).run();
+      expect(outcome.status).toBe('completed');
+      expect(ompSpawned.map((options) => options.effort)).toEqual(['high', expected]);
+      expect(loadClaudeRunInfo(specDir)?.phases.find((phase) => phase.name === 'validate')?.effort).toBe(expected);
+      const log = JSON.parse(readFileSync(path.join(specDir, 'task_logs.json'), 'utf8'));
+      const validationStart = log.phases.validation.entries.filter((entry: { type: string }) => entry.type === 'phase_start').at(-1);
+      expect(validationStart.content).toContain(`thinking ${DEFAULT_OMP_BACKEND_SETTINGS.thinking[expected as 'medium' | 'high']}`);
+      if (reviewCase === 'skipped') expect(review).not.toHaveBeenCalled();
+      else {
+        expect(review).toHaveBeenCalledTimes(1);
+        expect(review.mock.calls[0][0].effort).toBe('high');
+      }
+      const input = ompSpawned[1].prompt as Array<{ type: string; text?: string }>;
+      const prompt = input.map((block) => block.text ?? '').join('\n');
+      if (reviewCase === 'clean') expect(prompt).toContain("You don't need to review the diff again");
+      if (reviewCase === 'major' || reviewCase === 'blocker') expect(prompt).toContain(findings[0].issue);
+    } finally {
+      review.mockRestore();
+      diff.mockRestore();
+      fingerprint.mockRestore();
+      resetOmpRolesForTests();
+    }
   });
 
   it('falls back to the default model when triage fails', async () => {

@@ -9,6 +9,7 @@
 import type { Task } from '../types/task';
 import type { SpecBatch, SpecBatchStatus, SpecReviewGap, SpecReviewReport, SpecReviewSection, SpecSectionStatus } from '../types/spec-review';
 import { breakDependencyCycles, sortByDependencies } from './task-breakdown-order';
+import { TASK_DECOMPOSITION_GUIDANCE } from './task-decomposition';
 
 export const DEFAULT_MAX_REVIEW_ROUNDS = 2;
 export const MAX_SPEC_GAPS = 12;
@@ -276,6 +277,9 @@ How to review:
 1. Go through the spec section by section. For each section decide done, partial or missing, and name the evidence (files, tests, behaviour you observed).
 2. Run the project's tests (and type check or build when the project has them) and note what fails.
 3. List a gap only when you can name the spec section and concrete evidence: a missing test, observed behaviour that differs from the spec, a missing file. Do not list style opinions or ideas beyond the spec. Each gap is a self-contained ticket that a coding agent can build on its own.
+
+${TASK_DECOMPOSITION_GUIDANCE}
+Apply these boundaries only to evidence-backed gaps above; do not create extra work outside the spec to reorganize the project.
 
 This is review ${round + 1} of at most ${batch.maxReviewRounds + 1}${round >= batch.maxReviewRounds ? '; gaps found now stay open for you to decide' : '; gaps found now become new tickets'}.`;
 }
