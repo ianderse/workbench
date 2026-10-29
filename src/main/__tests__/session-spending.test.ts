@@ -295,6 +295,54 @@ describe('session spending', () => {
       expect(latest?.configDir).toBe(path.join(root, '.claude-profiles/work'));
     });
 
+    /** Sets a transcript's modification time to a day in October 2026 */
+    const touched = async (file: string, date: number) => {
+      const { utimesSync } = await import('fs');
+      utimesSync(file, new Date(2026, 9, date), new Date(2026, 9, date));
+    };
+    /** A prompt as a run records it: `cli` interactive, `sdk-cli` headless (`claude -p`) */
+    const prompt = (entrypoint?: string) =>
+      JSON.stringify({ type: 'user', message: { role: 'user', content: 'hi' }, ...(entrypoint ? { entrypoint } : {}), cwd: '/home/user/project' });
+
+    it('is never a headless run, such as a Claude page chat in the project root', async () => {
+      await touched(writeTranscript('.claude', 'window', [prompt('cli'), turn(at('2026-10-19', 9), 10_000)]), 19);
+      await touched(writeTranscript('.claude', 'chat', [prompt('sdk-cli'), turn(at('2026-10-20', 9), 10_000)]), 20);
+      await touched(writeTranscript('.claude', 'sdk', [prompt('sdk-ts'), turn(at('2026-10-21', 9), 10_000)]), 21);
+
+      const latest = await latestTranscript(configDirs('.claude'), '/home/user/project');
+
+      expect(latest?.sessionId).toBe('window');
+    });
+
+    it('is never a transcript with nothing but a title', async () => {
+      await touched(writeTranscript('.claude', 'window', [prompt('cli'), turn(at('2026-10-19', 9), 10_000)]), 19);
+      await touched(writeTranscript('.claude', 'title-only', [JSON.stringify({ type: 'custom-title', customTitle: 'x' })]), 20);
+
+      expect((await latestTranscript(configDirs('.claude'), '/home/user/project'))?.sessionId).toBe('window');
+    });
+
+    it('counts a transcript that records no entrypoint (older Claude Code) as interactive', async () => {
+      await touched(writeTranscript('.claude', 'chat', [prompt('sdk-cli')]), 19);
+      await touched(writeTranscript('.claude', 'old', [prompt()]), 20);
+
+      expect((await latestTranscript(configDirs('.claude'), '/home/user/project'))?.sessionId).toBe('old');
+    });
+
+    it('tells a headless run whose first record is larger than the part read first', async () => {
+      const huge = JSON.stringify({ type: 'user', message: { role: 'user', content: 'x'.repeat(200 * 1024) } });
+      await touched(writeTranscript('.claude', 'window', [prompt('cli')]), 19);
+      // The entrypoint only comes after the large first record
+      await touched(writeTranscript('.claude', 'chat', [huge, prompt('sdk-cli')]), 20);
+
+      expect((await latestTranscript(configDirs('.claude'), '/home/user/project'))?.sessionId).toBe('window');
+    });
+
+    it('is nothing when the directory holds only headless runs', async () => {
+      writeTranscript('.claude', 'chat', [prompt('sdk-cli'), turn(at('2026-10-20', 9), 10_000)]);
+
+      expect(await latestTranscript(configDirs('.claude'), '/home/user/project')).toBeNull();
+    });
+
     it('is nothing when Claude Code never ran in the directory', async () => {
       writeTranscript('.claude', 'elsewhere', [turn(at('2026-10-19', 9), 10_000)], '/other/project');
 

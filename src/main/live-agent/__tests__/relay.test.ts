@@ -593,3 +593,77 @@ describe('relay', { timeout: 20_000 }, () => {
     expect(discoveryFiles()).toEqual([]);
   });
 });
+
+// Headless runs (`claude -p`: the Claude page's chats) share the project's transcript folder with the
+// agent windows' sessions, and carry no agent window id: none of them is ever shown in a window
+describe('relay and headless sessions', { timeout: 20_000 }, () => {
+  const WINDOW_SESSION = '11111111-2222-3333-4444-555555555555';
+  const CHAT_SESSION = '66666666-7777-8888-9999-000000000000';
+  let root: string;
+  let workspace: string;
+  let flowDir: string;
+  let projectDir: string;
+  let relay: Relay;
+  const sent: Array<{ clientIds: string[]; message: { type: string; [key: string]: unknown } }> = [];
+  /** The ids of the sessions the relay announced */
+  const announced = () => sent.flatMap((entry) => [
+    ...(entry.message.type === 'session-started' ? [(entry.message.session as { id: string }).id] : []),
+    ...(entry.message.type === 'session-list' ? (entry.message.sessions as Array<{ id: string }>).map((session) => session.id) : []),
+  ]);
+  const prompt = (entrypoint?: string) =>
+    JSON.stringify({ type: 'user', uuid: 'u1', ...(entrypoint ? { entrypoint } : {}), cwd: workspace, message: { role: 'user', content: 'Hello' } }) + '\n';
+
+  beforeEach(async () => {
+    sent.length = 0;
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'live-agent-relay-headless-')));
+    workspace = path.join(root, 'project');
+    flowDir = path.join(workspace, '.workbench', 'flow');
+    fs.mkdirSync(flowDir, { recursive: true });
+    const claudeDir = path.join(root, 'claude-config');
+    projectDir = path.join(claudeDir, 'projects', workspace.replace(/[^a-zA-Z0-9]/g, '-'));
+    fs.mkdirSync(projectDir, { recursive: true });
+    relay = await createRelay({
+      claudeDirs: [claudeDir],
+      send: (clientIds, data) => sent.push({ clientIds, message: JSON.parse(data) }),
+    });
+  });
+
+  afterEach(() => {
+    relay.dispose();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('never sends a chat run in the project root, only the window\'s session', () => {
+    fs.writeFileSync(path.join(projectDir, `${WINDOW_SESSION}.jsonl`), prompt('cli'));
+    fs.writeFileSync(path.join(projectDir, `${CHAT_SESSION}.jsonl`), prompt('sdk-cli'));
+
+    relay.subscribe('window-a', workspace, flowDir);
+
+    expect(announced()).toContain(WINDOW_SESSION);
+    expect(announced()).not.toContain(CHAT_SESSION);
+  });
+
+  it('shows a session whose transcript records no entrypoint (older Claude Code)', () => {
+    fs.writeFileSync(path.join(projectDir, `${WINDOW_SESSION}.jsonl`), prompt());
+
+    relay.subscribe('window-a', workspace, flowDir);
+
+    expect(announced()).toContain(WINDOW_SESSION);
+  });
+
+  it('ignores a chat that starts while a window shows the directory', async () => {
+    fs.writeFileSync(path.join(projectDir, `${WINDOW_SESSION}.jsonl`), prompt('cli'));
+    relay.subscribe('window-a', workspace, flowDir);
+    sent.length = 0;
+
+    // A chat writes its name and queue entries before the prompt that says how it was run
+    const chat = path.join(projectDir, `${CHAT_SESSION}.jsonl`);
+    fs.writeFileSync(chat, JSON.stringify({ type: 'agent-name', agentName: 'Workbench chat: x', sessionId: CHAT_SESSION }) + '\n');
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    fs.appendFileSync(chat, prompt('sdk-cli'));
+    // Scanned again on every change and every second
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+
+    expect(announced()).not.toContain(CHAT_SESSION);
+  });
+});

@@ -650,20 +650,16 @@ async function resumeOwnSessionFlag(
     }
 
     // The window has no session of its own: adopt the one it would have continued anyway,
-    // leaving the conversations the project's other windows are in to those windows
+    // leaving the conversations the project's other windows are in to those windows.
+    // `latestTranscript` only offers interactive sessions with a conversation: never a title-only
+    // transcript, nor a headless `claude -p` one such as a Claude page chat in the project root
     const taken = new Set(
       (await readAgentSessions(terminal.projectPath))
         .filter((session) => session.terminalId && session.terminalId !== terminal.id)
         .map((session) => session.sessionId)
     );
     const cwd = terminal.projectPath || terminal.cwd;
-    const searchDirs = claudeConfigDirs([own?.configDir]);
-    let latest = await latestTranscript(searchDirs, toRuntimePath(cwd), taken);
-    // A transcript with nothing but a title can't be resumed: the next newest one, a few at most
-    for (let skipped = 0; latest && skipped < 10 && !(await hasConversation(latest.file)); skipped++) {
-      taken.add(latest.sessionId);
-      latest = await latestTranscript(searchDirs, toRuntimePath(cwd), taken);
-    }
+    const latest = await latestTranscript(claudeConfigDirs([own?.configDir]), toRuntimePath(cwd), taken);
     if (!latest || !isValidClaudeSessionId(latest.sessionId)) return continueLatest;
     trackAgentWindowSession(terminal, latest.sessionId, latest.configDir, cwd);
     return { flag: buildResumeSessionFlag(latest.sessionId), sessionId: latest.sessionId, configDir: latest.configDir };

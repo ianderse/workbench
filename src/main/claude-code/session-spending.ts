@@ -43,6 +43,7 @@ import { createReadStream, promises as fsp } from 'fs';
 import { createInterface } from 'readline';
 import { getSessionFilePath } from '../claude-profile/session-utils';
 import { requestCostUsd, type RequestUsage } from './session-pricing';
+import { isHeadlessEntrypoint, transcriptEntrypoint } from './session-entrypoint';
 import { appLog } from '../app-logger';
 
 /** What a session cost in total, and what it cost on each local calendar day (`YYYY-MM-DD`) */
@@ -137,18 +138,57 @@ export interface SessionTranscript extends TranscriptFile {
   configDir: string;
 }
 
+/** Transcripts looked into at most when picking the one a window continues */
+const MAX_ADOPTION_CANDIDATES = 200;
+/** Bytes read from the start of a transcript first: usually enough to tell how it was run */
+const ADOPTION_HEAD_BYTES = 64 * 1024;
+
+/** Whether text from a transcript holds a conversation (not just a session title and name) */
+function holdsConversation(text: string): boolean {
+  return text.includes('"type":"user"') || text.includes('"type":"assistant"');
+}
+
 /**
- * The session Claude Code was last writing in a working directory, which is the one `--continue`
- * would pick up. Restoring an agent window resumes it by id instead, so what it goes on to spend
- * is recorded against the project (`agent-session-store.ts`). Sessions in `exclude` are skipped,
- * so two windows restored together do not both land in the same conversation.
+ * Whether an agent window can take a transcript over: it holds a conversation (Claude Code also
+ * writes transcripts with nothing but a title, which `--resume` refuses) and it was run
+ * interactively. Headless `claude -p` sessions - the Claude page's chats, task runs - are kept by
+ * whatever runs them, and a window resuming one would mix its turns into theirs. Unreadable counts
+ * as adoptable, so the resume runs and reports what is wrong itself.
+ */
+async function isAdoptableTranscript(file: string, size: number): Promise<boolean> {
+  try {
+    let text: string;
+    const handle = await fsp.open(file, 'r');
+    try {
+      const buffer = Buffer.alloc(Math.min(size, ADOPTION_HEAD_BYTES));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      text = buffer.subarray(0, bytesRead).toString('utf-8');
+    } finally {
+      await handle.close();
+    }
+    // The first records can be large (a pasted image): read on when the start doesn't tell
+    if (size > ADOPTION_HEAD_BYTES && (!transcriptEntrypoint(text) || !holdsConversation(text))) {
+      text = await fsp.readFile(file, 'utf-8');
+    }
+    return holdsConversation(text) && !isHeadlessEntrypoint(transcriptEntrypoint(text));
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * The interactive session Claude Code was last writing in a working directory, which is the one
+ * `--continue` would pick up. Restoring an agent window resumes it by id instead, so what it goes
+ * on to spend is recorded against the project (`agent-session-store.ts`). Sessions in `exclude`
+ * are skipped, so two windows restored together do not both land in the same conversation, and so
+ * are transcripts a window can't take over (see isAdoptableTranscript).
  */
 export async function latestTranscript(
   configDirs: string[],
   cwd: string,
   exclude?: ReadonlySet<string>
 ): Promise<SessionTranscript | null> {
-  let latest: SessionTranscript | null = null;
+  const candidates: SessionTranscript[] = [];
 
   for (const dir of configDirs) {
     // Claude Code names the folder after the working directory
@@ -168,20 +208,19 @@ export async function latestTranscript(
       try {
         const stats = await fsp.stat(file);
         if (!stats.isFile()) continue;
-        if (latest && stats.mtimeMs <= latest.modifiedMs) continue;
-        latest = {
-          sessionId,
-          configDir: dir,
-          file,
-          size: stats.size,
-          modifiedMs: stats.mtimeMs,
-        };
+        candidates.push({ sessionId, configDir: dir, file, size: stats.size, modifiedMs: stats.mtimeMs });
       } catch {
         // Removed while the folder was being read
       }
     }
   }
-  return latest;
+
+  // Newest first; on a tie the earlier account wins, as it always has
+  candidates.sort((a, b) => b.modifiedMs - a.modifiedMs);
+  for (const candidate of candidates.slice(0, MAX_ADOPTION_CANDIDATES)) {
+    if (await isAdoptableTranscript(candidate.file, candidate.size)) return candidate;
+  }
+  return null;
 }
 
 /**

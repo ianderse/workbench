@@ -15,6 +15,7 @@ import { readCompleteLines, readNewFileLines, foldPathCase } from './lib/fs-util
 import { createLogger } from './lib/logger'
 import { scanSubagentsDir, readSubagentNewLines, stopTailing, fileIdleMs } from './lib/subagent-watcher'
 import { isWslUncPath, windowsToWsl, wslToWindows, type WslPathOptions } from '../../platform/wsl-paths'
+import { isHeadlessEntrypoint, transcriptEntrypoint } from '../../claude-code/session-entrypoint'
 import {
   INACTIVITY_TIMEOUT_MS, BUSY_INACTIVITY_TIMEOUT_MS, SCAN_INTERVAL_MS, ACTIVE_SESSION_AGE_S, POLL_FALLBACK_MS,
   SESSION_ID_DISPLAY, ORCHESTRATOR_NAME, WORKSPACE_HASH_LENGTH, MAX_EVENT_BUFFER, HIDDEN_TOOLS, SUBAGENT_STALE_MS,
@@ -533,6 +534,12 @@ function hasActivitySinceDisposed(filePath: string): boolean {
 
 /** Session files' working directories (they never change), by path */
 const sessionCwds = new Map<string, string>()
+/** How long a session file that records no cwd yet must stay unchanged before
+ *  it's watched anyway (rescanned every SCAN_INTERVAL_MS) */
+const CWDLESS_SESSION_WAIT_MS = 3000
+/** Session files run headless (`claude -p`: the Claude page's chats, task runs), by path: told
+ *  by the `entrypoint` on the record that gives the cwd (see ../../claude-code/session-entrypoint) */
+const headlessSessions = new Set<string>()
 
 /** A transcript entry's `cwd` field, matched in raw text: entries can be huge
  *  (a pasted image), and user entries write it after the message */
@@ -555,9 +562,14 @@ function sessionCwd(filePath: string): string | undefined {
     fd = fs.openSync(filePath, 'r')
     const chunk = Buffer.alloc(CWD_SEARCH_BYTES)
     const read = fs.readSync(fd, chunk, 0, chunk.length, start)
-    const match = CWD_FIELD.exec(chunk.subarray(0, read).toString('utf8'))
+    const text = chunk.subarray(0, read).toString('utf8')
+    const match = CWD_FIELD.exec(text)
     if (match) {
       const cwd = JSON.parse(`"${match[1]}"`) as string
+      // The record holding the cwd says how the session was run
+      const lineEnd = text.indexOf('\n', match.index)
+      const record = text.slice(text.lastIndexOf('\n', match.index) + 1, lineEnd < 0 ? undefined : lineEnd)
+      if (isHeadlessEntrypoint(transcriptEntrypoint(record))) headlessSessions.add(filePath)
       sessionCwds.set(filePath, cwd)
       cwdSearched.delete(filePath)
       return cwd
@@ -654,10 +666,15 @@ function scanForActiveSessions(workspace: Workspace) {
         if ((Date.now() - newestMtime) / 1000 > ACTIVE_SESSION_AGE_S) continue
         const cwd = sessionCwd(filePath)
         if (cwd === undefined) {
-          // None recorded yet: taken once its whole file has been searched
-          // (until then it waits)
-          if ((cwdSearched.get(filePath) ?? 0) < stat.size) continue
-        } else if (!isWorkspaceDir(cwd, workspace)) continue
+          // None recorded yet: taken once its whole file has been searched and has
+          // been quiet for a moment (until then it waits). A headless run writes its
+          // name and queue entries just before the record that says how it was run.
+          if ((cwdSearched.get(filePath) ?? 0) < stat.size || Date.now() - stat.mtimeMs < CWDLESS_SESSION_WAIT_MS) continue
+        } else if (!isWorkspaceDir(cwd, workspace) || headlessSessions.has(filePath)) {
+          // Run elsewhere, or a headless run here (a Claude page chat, `claude -p`):
+          // never an agent window's session
+          continue
+        }
         if (hasActivitySinceDisposed(filePath)) found.push({ sessionId, filePath, newestMtime })
       }
     } catch {}
