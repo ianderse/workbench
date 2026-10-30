@@ -1,7 +1,7 @@
 /**
  * Claude accounts (Accounts page): the Claude Code setups found in its own configuration (see
- * claude-code-detection). One account is in use; with automatic switching on, tasks move to the
- * next account when it hits a limit. Each row shows the account's email and usage (or its
+ * claude-code-detection). Each project window has its own account in use (saved for its project);
+ * with automatic switching on, tasks move to the next account when it hits a limit. Each row shows the account's email and usage (or its
  * provider); its menu switches to it, signs it in again and shows its details. Adding an account
  * (or signing one in again) runs Claude Code's own sign-in (`claude auth login`) in the user's
  * terminal; the accounts are then detected again until the sign-in shows up.
@@ -15,6 +15,7 @@ import { cn } from '../../lib/utils';
 import { SettingsRow } from './SettingsRow';
 import { DetectedAccountDialog } from './DetectedAccountDialog';
 import { useClaudeAccounts } from './hooks/useClaudeAccounts';
+import { switchClaudeAccount, useWindowClaudeAccountId } from '../../hooks/useWindowClaudeAccount';
 import type { ClaudeProfile } from '../../../shared/types';
 
 /** How often (and how long) the accounts are detected again while a sign-in runs in a terminal */
@@ -23,7 +24,9 @@ const LOGIN_WATCH_MAX_TRIES = 200;
 
 export function ClaudeAccountsSection() {
   const { t } = useTranslation('settings');
-  const { profiles: allProfiles, activeProfileId, usage, reload } = useClaudeAccounts();
+  const { profiles: allProfiles, usage, reload } = useClaudeAccounts();
+  // The account this window's project runs on
+  const accountId = useWindowClaudeAccountId();
   // Only Claude Code's own setups are accounts
   const profiles = allProfiles.filter((profile) => profile.detected);
 
@@ -41,7 +44,8 @@ export function ClaudeAccountsSection() {
     setBusyId(profile.id);
     setRowError(null);
     try {
-      const result = await window.electronAPI.setActiveClaudeProfile(profile.id);
+      // Saved for this window's project; other windows keep their own account
+      const result = await switchClaudeAccount(profile.id);
       if (!result.success) {
         const title = t('claudeAccounts.toast.switchFailed');
         setRowError({ id: profile.id, message: result.error ? `${title}: ${result.error}` : title });
@@ -135,7 +139,7 @@ export function ClaudeAccountsSection() {
   return (
     <>
       {profiles.map((profile) => {
-        const isActive = profile.id === activeProfileId;
+        const isActive = profile.id === accountId;
         const isBusy = busyId === profile.id;
         return (
           <SettingsRow

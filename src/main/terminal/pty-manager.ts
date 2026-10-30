@@ -14,6 +14,7 @@ import { buildWslPtyLaunch } from './wsl-terminal';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { safeSendToRenderer } from '../ipc-handlers/utils';
 import { getClaudeProfileManager } from '../claude-profile-manager';
+import { projectAccount } from '../project-account';
 import { debugLog, debugError } from '../../shared/utils/debug-logger';
 import { withClaudeConfigDir } from '../claude-profile/config-dir-paths';
 import { noteTerminalWrite } from '../live-agent/terminal-activity';
@@ -513,9 +514,11 @@ export function killPty(terminal: TerminalProcess, waitForExit?: boolean): Promi
 }
 
 /**
- * Get the active Claude profile environment variables
+ * The Claude account environment a window starts with: its project's own account (`projectPath`),
+ * else the account in use
  */
-export function getActiveProfileEnv(): Record<string, string> {
+export function getActiveProfileEnv(projectPath?: string): Record<string, string> {
   const profileManager = getClaudeProfileManager();
-  return profileManager.getActiveProfileEnv();
+  const own = projectAccount(profileManager, projectPath);
+  return own ? profileManager.getProfileEnv(own.id) : profileManager.getActiveProfileEnv();
 }

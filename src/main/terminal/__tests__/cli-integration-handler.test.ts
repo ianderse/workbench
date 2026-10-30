@@ -66,6 +66,10 @@ vi.mock('../../claude-profile-manager', () => ({
   initializeClaudeProfileManager: mockInitializeClaudeProfileManager,
 }));
 
+// The account saved for the window's project (none unless a test sets one)
+const mockProjectAccount = vi.hoisted(() => vi.fn((): unknown => undefined));
+vi.mock('../../project-account', () => ({ projectAccount: mockProjectAccount }));
+
 // Which transcript files exist: a restored window asks for the exact path its session has under
 // each account, and nothing in a test writes those files. Hoisted, because the mock of `fs` is
 // built while this file's own `import 'fs'` is resolved, before its variables exist
@@ -786,6 +790,31 @@ describe('invokeCLIAsync', () => {
       expectPathPrefix(written, platform, '/opt/claude/bin:/usr/bin', '/opt/claude/bin/claude');
       expect(mockPersistSession).toHaveBeenCalledWith(terminal);
       expect(profileManager.markProfileUsed).toHaveBeenCalledWith('default');
+    });
+
+    it('starts on the account saved for the window\'s project when none is given', async () => {
+      mockGetClaudeCliInvocationAsync.mockResolvedValue({
+        command: '/opt/claude/bin/claude',
+        env: { PATH: '/opt/claude/bin:/usr/bin' },
+      });
+      const profileManager = {
+        getActiveProfile: vi.fn(() => ({ id: 'default', name: 'Default', isDefault: true })),
+        getProfile: vi.fn(),
+        getProfileToken: vi.fn(() => null),
+        markProfileUsed: vi.fn(),
+      };
+      mockInitializeClaudeProfileManager.mockResolvedValue(profileManager);
+      mockProjectAccount.mockReturnValueOnce({ id: 'prof-config', name: 'Work', isDefault: false, configDir: PROFILE_CONFIG_DIR });
+
+      const terminal = createMockTerminal();
+
+      const { invokeCLIAsync } = await import('../cli-integration-handler');
+      await invokeCLIAsync(terminal, '/tmp/project', undefined, () => null);
+
+      expect(mockProjectAccount).toHaveBeenCalledWith(profileManager, '/tmp/project');
+      expect(terminal.claudeProfileId).toBe('prof-config');
+      expect(mockWriteToPty.mock.calls[0][1] as string).toContain(getConfigDirCommand(platform, PROFILE_CONFIG_DIR));
+      expect(profileManager.markProfileUsed).toHaveBeenCalledWith('prof-config');
     });
 
     it('should handle profile with configDir', async () => {

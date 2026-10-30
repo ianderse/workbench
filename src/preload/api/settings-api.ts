@@ -14,8 +14,10 @@ export interface SettingsAPI {
   // CLI Tools Detection (`refresh`: detect again, for tools installed since; in WSL also looks them up there again)
   getCliToolsInfo: (options?: { refresh?: boolean }) => Promise<IPCResult<{
     python: ToolDetectionResult;
+    node: ToolDetectionResult;
     git: ToolDetectionResult;
     gh: ToolDetectionResult;
+    glab: ToolDetectionResult;
     claude: ToolDetectionResult;
   }>>;
 
@@ -41,8 +43,10 @@ export const createSettingsAPI = (): SettingsAPI => ({
   // CLI Tools Detection
   getCliToolsInfo: (options?: { refresh?: boolean }): Promise<IPCResult<{
     python: ToolDetectionResult;
+    node: ToolDetectionResult;
     git: ToolDetectionResult;
     gh: ToolDetectionResult;
+    glab: ToolDetectionResult;
     claude: ToolDetectionResult;
   }>> =>
     ipcRenderer.invoke(IPC_CHANNELS.SETTINGS_GET_CLI_TOOLS_INFO, options),

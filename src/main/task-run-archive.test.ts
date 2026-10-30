@@ -29,7 +29,6 @@ function writeRun(costUsd: number, updatedAt: string): void {
     }
   }));
   writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify({
-    version: 1,
     phases: [{ name: 'triage', startedAt: updatedAt, endedAt: updatedAt, costUsd }],
     subagents: [],
     totalCostUsd: costUsd,

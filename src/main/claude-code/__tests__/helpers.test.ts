@@ -42,7 +42,7 @@ describe('planning policy', () => {
 });
 
 describe('isClaudeRunFinished', () => {
-  const run = (phases: Array<Record<string, unknown>>) => ({ version: 1 as const, phases, subagents: [], totalCostUsd: 0, updatedAt: '' }) as never;
+  const run = (phases: Array<Record<string, unknown>>) => ({ phases, subagents: [], totalCostUsd: 0, updatedAt: '' }) as never;
   const done = { startedAt: 'a', endedAt: 'b' };
 
   it('is finished after a successful validation, or implementation when validation is off', () => {

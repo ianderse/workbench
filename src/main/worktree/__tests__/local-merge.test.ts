@@ -84,7 +84,8 @@ const config = (overrides: Partial<LocalMergeConfig> = {}): LocalMergeConfig => 
   ...overrides,
 });
 
-describe('localMerge', () => {
+// Real git repos: git is slow to start on Windows runners
+describe('localMerge', { timeout: 30_000 }, () => {
   it('merges the task branch into the base branch', async () => {
     commitFile(worktree, 'b.txt', 'from the task\n', 'task work');
 

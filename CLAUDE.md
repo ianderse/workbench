@@ -5,7 +5,10 @@ This file provides guidance to Claude Code when working with this repository.
 ## Product Overview
 
 Workbench is a TypeScript Electron desktop app where users describe a goal and the **Claude Code CLI** does the work
-autonomously. Every task runs in its own git worktree so the main branch stays safe.
+autonomously. Every task runs in its own git worktree so the main branch stays safe. Beyond running tasks, it brings
+together what Claude Code and the tools around it already offer and sets each piece up for a project with a switch
+(project memory, a Graphify graph of the code, MCP connectors, the live agent graph), adding what is missing between
+them (messaging between parallel tasks), so sessions do better work for less without hand-written configuration.
 
 **Core workflow:** User creates a task (description, images, connectors, git options) → a short Claude Code **triage**
 run picks model, effort and whether to plan → Claude Code **plans** (plan mode, optional) → **implements** in the task's
@@ -16,31 +19,35 @@ reviews, requests changes (same session continues) or merges.
 
 - **Autonomous Tasks** — Each task is delegated to Claude Code (`claude -p`) in its worktree; Claude Code decides
   when to use subagents, skills, MCP tools and its task list
-- **Kanban Board** — Visual task management from planning through completion
-- **Agent Terminals** — Parallel AI-powered terminals (12 by default, up to 24) with task context injection
-- **Insights** — Chat for exploring a codebase (runs through Claude Code; can't change files) that can also manage
-  the project's tasks: Workbench's task tools (`src/main/insights/task-tools.ts`, served over local MCP HTTP by
-  `task-tools-server.ts` with a token per chat turn) create, edit, start, stop, retry, move, review, PR, merge, archive
-  and delete tasks through the same IPC handlers as the UI (`ipc-handlers/ipc-registry.ts`); ideas the user didn't ask
-  for stay task suggestions (`__TASK_SUGGESTION__`)
+- **Kanban Board** — Visual task management from planning through completion; the Queue column starts tasks as
+  slots free up (Maximum parallel tasks, `src/main/services/task-queue.ts`)
+- **Agent windows** — Parallel Claude Code terminals on the Agents page (12 by default, up to 24) with task context
+  injection; each window runs its own session (`claude --session-id`, recorded in `.workbench/agent-sessions.json`)
+- **Claude chat** — The Claude page (code: `src/main/insights/`): chats about the project, each a persistent Claude
+  Code session that can't change the project's files; with the Kanban button on it also manages the project's tasks
+  (see [Claude chat](#claude-chat))
 - **Pull Requests** — Create a GitHub pull request from a task's worktree and merge it (via the `gh` CLI). A task with
   an open PR stays in Human Review (PR Created); Merge PR (`src/main/ai/runners/github/pr-merger.ts`) pulls the target
   branch into the task branch, lets the merge agent (`src/main/ai/runners/merge-agent.ts`, Claude Code) resolve
   conflicts, checks that no line the target added was lost, pushes and merges the PR, then moves the task to Done
 - **Connectors** — MCP servers added to a task's Claude Code session (`--mcp-config`: Context7, Electron, Puppeteer,
-  user-added servers) with app-wide defaults in Settings and per-task choices in the task dialog
+  user-added servers) with app-wide defaults in Settings and per-task choices in the task dialog; a server stays
+  disabled until it can start
 - **Graphify memory graph** — Optional [Graphify](https://github.com/Graphify-Labs/graphify) knowledge graph of a
   project's code, built into `.workbench/knowledge` and offered to agents
+- **Self-improve** — Optional project memory: Claude Code's auto memory kept in `.workbench/compeng` and shared by
+  every session in the project (see [Self-improve](#self-improve-project-memory))
+- **Live agent graph** — Optional live graph of a project's Claude Code sessions next to each agent window
 - **Isolated Workspaces** — Git worktree isolation for every build; AI-powered semantic merge
 - **Authentication** — Claude subscription accounts (each a `CLAUDE_CONFIG_DIR`) or API profiles with any
   Anthropic-compatible endpoint
 - **Multi-Account Swapping** — When one Claude account hits a rate limit, switch to an available one automatically
-- **Cross-Platform** — Windows, macOS, and Linux with auto-updates
+- **Cross-Platform** — Windows, macOS, and Linux with in-app updates (Settings > Updates)
 
 ## Critical Rules
 
-**Claude Code CLI only** — All AI work (tasks, triage, Insights, titles, PR text, commit messages, merge conflict help)
-runs through the locally installed Claude Code CLI via `src/main/claude-code/`. Use `ClaudeTaskRun` for tasks and
+**Claude Code CLI only** — All AI work (tasks, triage, Claude chat, titles, PR text, commit messages, merge conflict
+help) runs through the locally installed Claude Code CLI via `src/main/claude-code/`. Use `ClaudeTaskRun` for tasks and
 `runClaudeText()` for one-shot calls; never call the Anthropic API or an AI SDK directly for these.
 
 **i18n required** — All user-facing text uses `react-i18next` translation keys (see [i18n](#i18n)).
@@ -110,8 +117,14 @@ remains about what the user wants.
 ```bash
 npm install            # Install dependencies (postinstall rebuilds native modules; on Linux it also fixes chrome-sandbox)
 npm run dev            # Development mode with HMR and remote debugging on port 9222 (Electron MCP)
+npm run build          # Production build (electron-vite, into out/)
 npm test               # Type check (strict) + all tests (Vitest)
+npm run lint           # knip: fixes unused exports and types, then reports unused production code
 ```
+
+**Versioning** — The version in `package.json` follows the git history: the `.husky/post-commit` hook runs
+`.github/scripts/sync-version.cjs` and amends the new version into the commit (a patch per commit, a minor per pull
+request merged into main; the major is set by hand). `WORKBENCH_SKIP_VERSION_BUMP=1` skips it.
 
 ### Packaging
 
@@ -127,12 +140,19 @@ Packages are written to `dist/`.
 
 Releases are created by hand on GitHub, never by a workflow. Publishing a release runs `release.yml`; publishing a
 pre-release runs `beta-release.yml`. Each one builds the four platforms in a matrix (`npm ci`, `npm run build`,
-`npm run package:*`), takes the version from the release tag (`package.json` keeps the plain base version, and the beta
-workflow adds `-beta` when the tag has no pre-release suffix) and uploads the installers and update manifests to that
-release with `gh release upload`.
+`npm run package:*`), takes the version from the release tag (the beta workflow adds `-beta` when the tag has no
+pre-release suffix) and uploads the installers and update manifests to that release with `gh release upload`.
 
-Builds are unsigned and not notarized: the repo holds no signing secrets. The release repository is public, so
-auto-update reads releases unauthenticated and the build needs no token.
+Builds are unsigned and not notarized: the repo holds no signing secrets. The release repository is public, so the
+updater reads releases unauthenticated and the build needs no token.
+
+### App updates
+
+`src/main/app-updater.ts` checks GitHub Releases 3 seconds after launch, then every 4 hours in packaged builds.
+`src/main/updater/release-selection.ts` offers the highest eligible version (stable releases, plus pre-releases with
+Beta updates on); electron-updater only downloads and installs that release, when the user asks on Settings > Updates.
+A new version opens Settings > Updates when Auto-update projects (`autoUpdateAutoBuild`) is on, otherwise a desktop
+notification does. There is no update modal.
 
 ## Project Structure
 
@@ -140,21 +160,27 @@ auto-update reads releases unauthenticated and the build needs no token.
 workbench/
 ├── src/
 │   ├── main/                # Electron main process
-│   │   ├── claude-code/     # Claude Code CLI integration (task runner, triage, one-shot calls, inventory)
-│   │   ├── ai/              # Remaining helpers: runners (PR, commit, merge help), merge/, project/
+│   │   ├── claude-code/     # Claude Code CLI integration (task runner, triage, one-shot calls, session costs)
+│   │   ├── ai/              # Remaining helpers: runners (PR, commit, merge help), merge/
 │   │   ├── worktree/        # Task worktree creation
-│   │   ├── insights/        # Insights chat through Claude Code
+│   │   ├── insights/        # Claude chat (the Claude page) through Claude Code, task tools server
 │   │   ├── agent/           # AgentManager: starts/stops Claude Code task runs, relays events
+│   │   ├── task-messaging/  # Parallel tasks message each other, Workbench notices, merge sync
+│   │   ├── task-resync/     # Out-of-date tasks take in a merged branch
+│   │   ├── self-improve/    # Project memory (Claude Code auto memory in .workbench/compeng)
+│   │   ├── live-agent/      # Live agent graph: hooks setup and relay worker
+│   │   ├── updater/         # Release selection for app updates
 │   │   ├── claude-profile/  # Multi-profile credentials, token refresh, usage
-│   │   ├── terminal/        # PTY daemon, lifecycle, CLI integration
+│   │   ├── terminal/        # PTY processes, lifecycle, CLI integration, session menu
 │   │   ├── platform/        # Cross-platform abstraction
 │   │   ├── ipc-handlers/    # IPC handler modules by domain
-│   │   └── services/        # App services (session recovery, rate-limit resume)
+│   │   └── services/        # App services (task queue, rate-limit resume, profile service)
 │   ├── preload/             # Preload scripts (electronAPI bridge)
 │   ├── renderer/            # React UI (components, stores, contexts, hooks, styles)
 │   └── shared/              # Shared types, i18n, constants, utils
 ├── resources/               # App and tray icons, macOS entitlements
-└── .github/                 # Workflows and the postinstall script
+├── .husky/                  # post-commit hook (version from the git history)
+└── .github/                 # Workflows, the postinstall and version scripts
 ```
 
 ## Claude Code Layer (`src/main/claude-code/`)
@@ -162,7 +188,8 @@ workbench/
 - **Task runner** (`task-runner.ts`, `ClaudeTaskRun`) — runs one task in its worktree:
   - `triage` (`triage.ts`): read-only `claude -p --json-schema` run → `TaskTriage` (model `haiku|sonnet|opus|fable`,
     effort `low…max`, needsPlan, scope, title, verification commands). Rules follow Claude Code's model-config and
-    best-practices docs; Settings > Claude Code can fix model/effort or force planning on/off.
+    best-practices docs; Settings > Agents (`claudeCodeTasks`) can fix model/effort, force planning on/off, turn off
+    validation or allow Fable.
   - `plan`: `--permission-mode plan` + structured plan (headless plan mode has no `ExitPlanMode`), saved to `plan.md`.
   - `implement`: resumes the same session (`--resume`) with `--dangerously-skip-permissions` (worktree isolation;
     without a worktree it uses `--permission-mode auto`) and the triage model/effort.
@@ -175,8 +202,11 @@ workbench/
   off unless asked, optional `--json-schema`.
 - **Process + env** (`process.ts`, `env.ts`) — async spawn, stream-json parsing (`stream-types.ts`), best available
   Claude profile (rate-limit aware) or the active API profile.
-- **Inventory** (`inventory.ts`) — subagents, skills, commands, hooks, MCP servers, CLAUDE.md and settings files that
-  Claude Code loads for a project (Settings > Claude Code).
+- **Session costs** (`project-sessions.ts`, `session-spending.ts`, `session-pricing.ts`) — a project's other Claude
+  Code sessions (agent windows, Claude chat, `claude` in a terminal), found by the directory they ran in, and what they
+  cost per day from their transcripts (Metrics, `src/main/project-metrics.ts`).
+- **Session entrypoint** (`session-entrypoint.ts`) — tells headless sessions (`sdk-*`: task runs, chats, one-shot
+  calls) from interactive ones, so agent windows' Session menu and the Live agent graph leave headless ones out.
 - **AgentManager** (`src/main/agent/agent-manager.ts`) — creates the worktree, builds the run config (attachments,
   connectors, Graphify, settings) and relays run events (`log`, `execution-progress`, `task-event`, `run-info`,
   `subtasks`, `run-finished`) to the IPC layer and the XState task machine.
@@ -187,7 +217,9 @@ permission modes, worktrees, hooks, skills).
 ### Task Directory
 
 Each task's `.workbench/tasks/XXX-name/` contains `task_metadata.json`, `implementation_plan.json` (status and
-mirrored task list), `claude_run.json`, `task_logs.json`, `plan.md` (when planned) and `attachments/`.
+mirrored task list), `claude_run.json`, `task_logs.json`, `plan.md` (when planned) and `attachments/`; also
+`task_inbox.json` (messages waiting for the task), `resync_request.json` and `previous_runs/<nnn>/` (the runs a task
+was started over from, `src/main/task-run-archive.ts`). Worktrees live in `.workbench/worktrees/tasks/`.
 
 ### Task Changelog (parallel tasks)
 
@@ -199,6 +231,15 @@ At every phase, `buildParallelTasksPrompt()` (`src/main/task-changelog.ts`) adds
 task's system prompt: the other tasks with unmerged changes and the files they touch, so Claude Code can stay clear of
 them and avoid merge conflicts.
 
+### Task messaging and resync
+
+With Task messaging on (Settings > Agents, `claudeCodeTasks.taskMessaging`, on by default), task runs get Workbench's
+`message_task` and `list_parallel_tasks` tools (`src/main/task-messaging/`, served by the task tools server with a
+token per run) and `[Workbench]` notices (`notices.ts`: a task started, finished or was merged, two tasks change the
+same files). The broker (`broker.ts`) writes a message to a live run's stdin or keeps it in the target's
+`task_inbox.json` for its next phase. When a task is merged, the other tasks based on that branch go back to In
+Progress to take it in (`task-messaging/merge-sync.ts` → `src/main/task-resync/`), also while messaging is off.
+
 ### MCP Connectors
 
 Settings > Connectors (`settings.mcpConnectors`, `McpConnectorSettings`) holds the defaults: Context7, Electron and
@@ -207,18 +248,71 @@ enabled ids into `TaskMetadata.mcpConnectors` and can change them in the task di
 `buildMcpConfig()` (`src/main/claude-code/mcp-config.ts`) turns that task's ids into `--mcp-config` for its Claude Code
 session, on top of the user's own Claude Code MCP configuration. Helpers live in `src/shared/utils/mcp-connectors.ts`.
 
+`src/main/mcp-availability.ts` starts each connector's server once where Claude Code runs, as a run would, until it
+answers `initialize` (Puppeteer is also asked to navigate once, since it needs a browser; `mcp-commands.ts` finds the
+command, and the built-in servers need npx from Node.js). Until a server is ready, its switch is off and disabled on
+the Connectors page, in the task dialog and in the chat's MCP menu, and runs leave out unavailable servers. An
+unavailable result is checked again when asked for after 30 seconds.
+
 ### Graphify Memory Graph
 
 `src/main/graphify.ts` detects the `graphify` CLI (PyPI package `graphifyy`; status, version and install on
 Settings > Updates) and builds a project's graph with `graphify extract <project> --code-only --out
-.workbench/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and an
-`index.json` summary. The project's "Use Graphify" switch (Project page) is on while `.workbench/knowledge` exists
-(`isGraphifyEnabled()`); switching it on builds the graph (the switch is disabled while a build from the app runs,
-`memory-graph-store.ts`), switching it off stops a running build and removes the folder, which hides the Graph item. While it is on,
-task runs and the Claude page (Insights) get `GRAPHIFY_OUT`, the graphify CLI on `PATH` and a prompt section about
-graphify's search commands (Insights limits Bash to those commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for
-`~/.claude` and each Claude profile's config dir, after an install or update), and agent windows
-get `GRAPHIFY_OUT` and an `--append-system-prompt` hint pointing `/graphify` at `.workbench/knowledge`.
+.workbench/knowledge` (Settings > Project > Knowledge index), writing `graphify-out/graph.json`, `GRAPH_REPORT.md` and
+an `index.json` summary. The project's "Use Graphify" switch (Settings > Project > Knowledge) is on while
+`.workbench/knowledge` exists (`isGraphifyEnabled()`, `graphify-paths.ts`); switching it on builds the graph (the switch
+is disabled while a build from the app runs, `memory-graph-store.ts`), switching it off stops a running build and
+removes the folder, which hides the Graph item. While it is on, task runs and Claude chat get `GRAPHIFY_OUT`, the
+graphify CLI on `PATH` and a prompt section about graphify's search commands (Claude chat limits Bash to those
+commands). Installing Graphify also adds its `/graphify` skill to Claude Code (`graphify install` for `~/.claude` and
+each Claude profile's config dir, after an install or update), and agent windows get `GRAPHIFY_OUT` and an
+`--append-system-prompt` hint pointing `/graphify` at `.workbench/knowledge`.
+
+### Claude chat
+
+The Claude page (sidebar item "Claude"). Code and IPC keep the older Insights name: `src/main/insights/`,
+`insights-service.ts`, `ipc-handlers/insights-handlers.ts`, `Insights.tsx`, `insights-store.ts`. Each turn is a
+headless stream-json run built in `insights/claude-code-runner.ts`, on the project's Claude account:
+
+- **One session per chat** — the first message starts a session (`--session-id`, named `Workbench chat: <title>`),
+  later turns `--resume` it, and editing a sent message or regenerating a reply forks it at the earlier reply
+  (`--resume <id> --resume-session-at <uuid> --fork-session`), leaving the original session as it was. Chats are saved
+  in `.workbench/chats/` (`session-storage.ts`); a new chat is saved only once it has a message. Stop ends the reply,
+  as does leaving its chat.
+- **Can't change the project's files** — `--tools` gives Read, Glob, Grep, WebFetch and WebSearch, plus Bash only for
+  graphify's searches (Use Graphify on) and read-only `gh` / `glab` commands (the GitHub / GitLab buttons,
+  `INSIGHTS_GITHUB_COMMANDS` / `INSIGHTS_GITLAB_COMMANDS` in `insights/prompts.ts`), and Edit/Write only for
+  `.workbench/compeng/**` (Self-improve on). `--permission-mode dontAsk` denies everything else without asking.
+- **MCP per chat** — `--strict-mcp-config` loads only the servers chosen in the chat's MCP menu
+  (`InsightsMcpMenu.tsx`, the Connectors defaults until changed) and, with the Kanban button on, Workbench's task tools
+  (`insights/task-tools.ts`, served over local MCP HTTP by `task-tools-server.ts` with a token per turn): they create,
+  edit, start, stop, retry, move, review, PR, merge, archive and delete tasks through the same IPC handlers as the UI
+  (`ipc-handlers/ipc-registry.ts`). The buttons are kept per chat (`InsightsModelConfig`).
+- **System prompt** — `buildSystemPrompt()` (`insights/prompts.ts`) describes what the turn is given; it is sent every
+  turn with `--append-system-prompt-file` and `--system-prompt-snapshot off` (Claude Code 2.1.267 or newer), so a
+  resumed session doesn't keep its first turn's prompt.
+- **Task suggestions** — ideas the user didn't ask for come back as `__TASK_SUGGESTION__:{...}` lines, which
+  `src/shared/utils/task-suggestions.ts` turns into cards with a Create task button.
+
+### Self-improve (project memory)
+
+The project's Self-improve switch (Settings > Project > Knowledge, `selfImprove` in `.workbench/settings.json`) points
+Claude Code's auto memory at `.workbench/compeng` (`src/main/self-improve/`): `autoMemoryDirectory` in the project's
+`.claude/settings.local.json`, an import of the memory index (`MEMORY.md`) at the end of CLAUDE.md, inside the
+`workbench:project-memory` comment markers (`relocation.ts` finds them by their full text, so never write them anywhere
+else in the file), and the capture instruction (`nudge.ts`: when to save, and how to tell a lasting rule from a
+one-off instruction) appended to task runs', chats' and agent windows' system prompts and kept in `.claude/MEMORY.md`
+for other sessions. Memories use Claude Code's own format (`memory-writer.ts`). Memory index (Settings > Project)
+builds memories from past sessions (`backfill.ts`), skipping Workbench's own turns (`claude-code/phase-prompts.ts`).
+Switching off moves the memories aside to `.workbench/compeng.disabled` unless git tracks them.
+
+### Live agent graph
+
+The Live agent switch (Settings > Agents) shows agent-flow's graph of a project's Claude Code sessions next to each
+agent window (`src/main/live-agent/`, `src/renderer/components/live-agent/`). It installs `.workbench/flow/hook.cjs`
+and Claude Code hooks in the project's and its worktrees' `.claude/settings.local.json` (`project-setup.ts`); the
+`.workbench/flow` folder's existence is the setting. A relay worker (`live-agent-relay.ts`, `relay/`) runs while any
+project has it on; each window's graph shows only the sessions run in it, never headless ones.
 
 ### Electron MCP (testing the app from a task)
 
@@ -228,15 +322,21 @@ then drive the running app over the Chrome DevTools Protocol with `get_electron_
 
 ## Frontend
 
-**Stack:** Electron 40, React 19, TypeScript (strict), Claude Code CLI, Zustand 5, Tailwind CSS v4, Radix UI,
-xterm.js 6, electron-vite 5 (Vite 7), Vitest 4 + React Testing Library + jsdom, Motion.
+**Stack:** Electron 40, React 19, TypeScript (strict), Claude Code CLI, Zustand 5, XState 5, Tailwind CSS v4, Radix
+UI, xterm.js 6, PixiJS 8 + d3-force-3d (Graph page), electron-vite 5 (Vite 7), Vitest 4 + React Testing Library +
+jsdom.
 
 **Path aliases:** `@/*` → `src/renderer/*`, `@shared/*` → `src/shared/*`, `@preload/*` → `src/preload/*`.
 
+**Component files** — A `.tsx` component file exports only components (Fast Refresh); constants and helpers go in a
+sibling `.ts` file (e.g. `settings/connector-meta.ts`, `icons/icon-paths.ts`).
+
 **State (Zustand)** — Renderer stores live in `src/renderer/stores/` (`project-store.ts`, `task-store.ts`,
-`terminal-store.ts`, `settings-store.ts`, `insights-store.ts`, `context-store.ts`, `kanban-settings-store.ts`,
-`terminal-font-settings-store.ts`). Main-process stores: `src/main/project-store.ts`,
-`src/main/terminal-session-store.ts`.
+`terminal-store.ts`, `settings-store.ts`, `insights-store.ts` (Claude chat), `claude-profile-store.ts`,
+`usage-store.ts`, `live-agent-store.ts`, `memory-graph-store.ts`, `self-improve-store.ts`, `project-index-store.ts`,
+`terminal-font-settings-store.ts`, and `*-simulator-store.ts` for the Simulation page). Main-process stores:
+`src/main/project-store.ts`, `src/main/terminal-session-store.ts`, `src/main/agent-session-store.ts`. Task and
+terminal state machines (XState) live in `src/shared/state-machines/`.
 
 **Styling** — Tailwind CSS v4 via `@tailwindcss/postcss`; `clsx` + `tailwind-merge` through `cn()`; variants with
 `class-variance-authority`. One color theme (**Default**, `src/shared/constants/themes.ts`) with light/dark variants
@@ -248,12 +348,34 @@ loaded with the FontFace API before xterm measures), Anthropic Serif (sidebar "W
 (optional interface font). Settings > General > Appearance picks the interface and command line fonts.
 
 **Settings UI (claude.ai style)** — The dialog (`settings/AppSettings.tsx`) has one menu: General, Accounts, Agents,
-Project, Connectors, Developer, Updates (Project is the selected project's page: Project, Knowledge, Tasks, Branches).
-The project's `useClaudeMd`, `maxBudgetUsd` (budget per task) and `claudeProfileId` (its Claude account;
-unset = the account in use) are kept in the project's own `.workbench/settings.json` (`src/main/project-store.ts`). Build pages from `SettingsSection` +
-`SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`, borderless selects, or dropdown menus with
-`SETTINGS_MENU_TRIGGER_CLASS` (no collapsible rows). UI copy conventions: sentence case, no em dashes, no trailing
-period in setting descriptions, and no green check / red x status icons (state the status in text).
+Project, Connectors, Developer, Simulation (`npm run dev` builds only, `IS_DEV_BUILD`), Updates.
+
+- **General** — Appearance (theme, graph colors, Shell on Windows, interface and command line fonts, display) and
+  notifications.
+- **Accounts** — Claude accounts, API profiles and Metrics (spending per project, `src/main/project-metrics.ts`).
+- **Agents** — how tasks run (triage, planning, validation, Fable, fallback model, Task messaging, Live agent) and
+  limits such as Maximum parallel tasks.
+- **Project** — the selected project's page: Project (Project index: CLAUDE.md written by Claude Code's `/init`,
+  `src/main/project-index.ts`; Knowledge index: Graphify; Memory index: Self-improve), Knowledge (Use CLAUDE.md, Use
+  Graphify, Self-improve), Tasks, Branches. The project's `useClaudeMd`, `maxBudgetUsd` (budget per task),
+  `claudeProfileId` (its Claude account; unset = the account in use) and `selfImprove` are kept in its own
+  `.workbench/settings.json` (`src/main/project-store.ts`). Each window shows and runs on its project's account:
+  switching the account in a window saves it there, moves only that project's agent windows and makes it the
+  account in use for projects without one (`src/main/project-account.ts`, `hooks/useWindowClaudeAccount.ts`).
+- **Developer** — the CLI tools Workbench detects (`src/main/cli-tool-manager.ts`: Python, Node.js, git, gh, glab,
+  claude) with path overrides (`nodePath`, `gitPath`, ...). Node.js (npx for MCP servers) is looked for in the
+  configured path, PATH and version managers' folders, and only then asked of the login shell, with a timeout.
+- **Simulation** — previews of the Live agent graph, the Graphify graph and the usage popover in any state and in
+  both themes (`*SimulatorSettings.tsx`).
+- **Updates** — Workbench updates (Beta updates, Auto-update projects), the Claude Code CLI and the Graphify CLI.
+
+Build pages from `SettingsSection` + `SettingsRows`/`SettingsRow`; controls are switches, `SegmentedControl`,
+borderless selects, or dropdown menus (no collapsible rows). UI copy conventions: sentence case, no em dashes, no
+trailing period in setting descriptions, and no green check / red x status icons (state the status in text).
+
+**Usage popover** — The header's usage indicator (`UsageIndicator.tsx`) opens `components/usage/`: the 5-hour limit
+under Clawd's pixel sky (local time, moon phase, seasonal decor; `usage/clawd/`) and the weekly limits. Loading
+overlays use `AgentLoader` (`ui/agent-loader.tsx`, the live agent node bouncing) instead of a spinner.
 
 **IPC** — Handlers in `src/main/ipc-handlers/` (by domain), safe APIs exposed in `src/preload/`, renderer calls
 `window.electronAPI.*`.
@@ -269,8 +391,11 @@ lists them as accounts (`ClaudeProfile.detected`): usable and renamable, never r
 runs without `CLAUDE_CONFIG_DIR`, keeps its sign-in in `~/.claude.json` and its plain keychain entry
 (`config-dir-paths.ts`).
 
-**Terminals** (`src/main/terminal/`) — `pty-daemon.ts` / `pty-manager.ts` (PTY processes), `terminal-lifecycle.ts`,
-`cli-integration-handler.ts`. Renderer uses xterm.js 6 with WebGL, fit, web-links, and serialize addons.
+**Terminals** (`src/main/terminal/`) — `pty-manager.ts` (PTY processes), `terminal-lifecycle.ts`,
+`cli-integration-handler.ts` (the `claude` command an agent window types: `--session-id`, one `--append-system-prompt`),
+`claude-sessions.ts` (the Session menu: a directory's interactive sessions, newest first), `session-follower.ts` (shows
+a running task's session in a window, read-only). Renderer uses xterm.js 6 with WebGL, fit, web-links, and serialize
+addons.
 
 ## i18n
 
@@ -284,9 +409,9 @@ import { useTranslation } from 'react-i18next';
 
 const { t } = useTranslation(['navigation', 'common']);
 
-<span>{t('navigation:items.kanban')}</span>          // CORRECT
-<span>Kanban</span>                                   // WRONG
-<span>{t('errors:task.parseError', { error })}</span> // With interpolation
+<span>{t('navigation:items.kanban')}</span>                      // CORRECT
+<span>Kanban</span>                                              // WRONG
+<span>{t('errors:task.jsonError.description', { error })}</span> // With interpolation
 ```
 
 ## Cross-Platform
@@ -297,9 +422,12 @@ Supports Windows, macOS, and Linux; CI runs tests on all three. Use `src/main/pl
 |-------------------------------------------|-----------------------------------|
 | `isWindows()` / `isMacOS()` / `isLinux()` | OS detection                      |
 | `getPathDelimiter()`                      | `;` (Win) or `:` (Unix)           |
-| `findExecutable(name)`                    | Cross-platform executable lookup  |
+| `getExecutableExtension()`                | `.exe` (Win) or empty             |
 | `requiresShell(command)`                  | `.cmd/.bat` shell detection (Win) |
 | `joinPaths(...parts)`                     | Platform-correct path joining     |
+| `killProcessGracefully(proc)`             | Stop a process, force after 5s    |
+
+Executable lookup is `findExecutable()` / `findExecutableAsync()` in `src/main/env-utils.ts`.
 
 ### Shell runtime (Windows: PWSH or WSL)
 
@@ -326,7 +454,7 @@ start, the session runs natively and the Settings row says why. These modules ar
 - **Agent windows** know their `shellKind` (`'cmd' | 'powershell' | 'posix'`); command builders in
   `terminal/cli-integration-handler.ts` and `shared/utils/shell-escape.ts` choose syntax from it, not from
   `isWindows()`. WSL windows type bash syntax (wrapped in `bash -c` when the login shell is fish).
-- **WSL2 NAT networking** can't reach the app's `127.0.0.1`: Insights task tools go through a stdio bridge
+- **WSL2 NAT networking** can't reach the app's `127.0.0.1`: Claude chat's task tools go through a stdio bridge
   (`insights/task-tools-bridge.cjs`) run as a Windows process through interop, and the Live agent hook command has
   a WSL branch. Watchers poll `\\wsl.localhost` paths (`fs.watch` fails there).
 - **Worktrees** use relative links only when both runtimes' git is 2.48 or newer; on a runtime switch,

@@ -6,6 +6,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  Pencil,
   Search,
   FileText,
   FolderSearch,
@@ -14,6 +15,9 @@ import {
   PanelLeft,
   SquarePen,
   ArrowUp,
+  ArrowDown,
+  RotateCcw,
+  Square,
   CornerDownLeft,
   ChevronDown,
   Paperclip,
@@ -23,12 +27,19 @@ import { MarkdownContent } from './ui/markdown-content';
 import { Button } from './ui/button';
 import { ScrollArea } from './ui/scroll-area';
 import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
-import { cn } from '../lib/utils';
-import { GraphIcon, KanbanIcon } from './icons/app-icons';
+import { cn, formatLongRelativeTime } from '../lib/utils';
+import { stripTaskSuggestions } from '../../shared/utils/task-suggestions';
+import { GitHubIcon, GitLabIcon, GraphIcon, KanbanIcon, McpIcon } from './icons/app-icons';
+import { BUILTIN_CONNECTOR_META } from './settings/connector-meta';
 import {
   useInsightsStore,
+  DRAFT_SESSION_ID,
   loadInsightsSession,
+  openInsightsPage,
   sendMessage,
+  stopMessage,
+  regenerateMessage,
+  editMessage,
   newSession,
   switchSession,
   deleteSession,
@@ -42,6 +53,9 @@ import { useImageUpload } from './task-form/useImageUpload';
 import { loadTasks } from '../stores/task-store';
 import { ChatHistorySidebar } from './ChatHistorySidebar';
 import { InsightsModelSelector } from './InsightsModelSelector';
+import { InsightsMcpMenu } from './InsightsMcpMenu';
+import { useSettingsStore } from '../stores/settings-store';
+import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
 import { AttachmentPreviewDialog } from './AttachmentPreviewDialog';
 import type { InsightsChatMessage, InsightsModelConfig, TaskMetadata, ImageAttachment } from '../../shared/types';
 import {
@@ -68,7 +82,6 @@ export function Insights({ projectId }: InsightsProps) {
   const [taskCreated, setTaskCreated] = useState<Set<string>>(new Set());
   const [showSidebar, setShowSidebar] = useState(true);
   const showArchived = useInsightsStore((state) => state.showArchived);
-  const [isUserAtBottom, setIsUserAtBottom] = useState(true);
   const [viewportEl, setViewportEl] = useState<HTMLElement | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
 
@@ -84,6 +97,16 @@ export function Insights({ projectId }: InsightsProps) {
   const effectiveModelConfig = session?.modelConfig ?? draftModelConfig;
 
   const isLoading = status.phase === 'thinking' || status.phase === 'streaming';
+
+  // Stop turns disabled once clicked, until the reply has ended
+  const [stopRequested, setStopRequested] = useState(false);
+  useEffect(() => {
+    if (!isLoading) setStopRequested(false);
+  }, [isLoading]);
+  const handleStop = () => {
+    setStopRequested(true);
+    void stopMessage(projectId);
+  };
 
   // Image upload hook
   const {
@@ -119,26 +142,44 @@ export function Insights({ projectId }: InsightsProps) {
     return scrollHeight - scrollTop - clientHeight <= SCROLL_BOTTOM_THRESHOLD;
   }, []);
 
-  // Handle scroll events to track user position
-  const handleScroll = useCallback(() => {
-    if (viewportEl) {
-      setIsUserAtBottom(checkIfAtBottom(viewportEl));
-    }
-  }, [viewportEl, checkIfAtBottom]);
+  // The chat stays pinned to the bottom (an opened chat starts there, a reply being written is
+  // followed) until the user scrolls up; scrolling back down pins it again
+  const stickToBottomRef = useRef(true);
+  // Shows the scroll-to-bottom button while the user is away from the latest messages
+  const [isAwayFromBottom, setIsAwayFromBottom] = useState(false);
+  const scrollToBottom = useCallback(() => {
+    if (viewportEl) viewportEl.scrollTop = viewportEl.scrollHeight;
+  }, [viewportEl]);
 
-  // Set up scroll listener and check initial position when viewport becomes available
   useEffect(() => {
-    if (viewportEl) {
-      // Check initial scroll position
-      setIsUserAtBottom(checkIfAtBottom(viewportEl));
-      viewportEl.addEventListener('scroll', handleScroll, { passive: true });
-      return () => viewportEl.removeEventListener('scroll', handleScroll);
-    }
-  }, [viewportEl, handleScroll, checkIfAtBottom]);
+    if (!viewportEl) return;
+    const updatePosition = () => {
+      const atBottom = checkIfAtBottom(viewportEl);
+      stickToBottomRef.current = atBottom;
+      setIsAwayFromBottom(!atBottom);
+    };
+    viewportEl.addEventListener('scroll', updatePosition, { passive: true });
+    // Content grows while a reply streams and while messages, code and images lay out; a chat
+    // that becomes too short to scroll is at its bottom without a scroll event
+    const content = viewportEl.firstElementChild;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottomRef.current) scrollToBottom();
+      updatePosition();
+    });
+    if (content) observer.observe(content);
+    observer.observe(viewportEl);
+    stickToBottomRef.current = true;
+    setIsAwayFromBottom(false);
+    scrollToBottom();
+    return () => {
+      viewportEl.removeEventListener('scroll', updatePosition);
+      observer.disconnect();
+    };
+  }, [viewportEl, checkIfAtBottom, scrollToBottom]);
 
-  // Load the project's session on mount (IPC listeners are registered app-wide in useIpcListeners)
+  // The page always opens on a new chat (IPC listeners are registered app-wide in useIpcListeners)
   useEffect(() => {
-    loadInsightsSession(projectId, showArchived);
+    openInsightsPage(projectId, showArchived);
   }, [projectId]);
 
   // Reload sessions when showArchived changes (skip first run to avoid duplicate load with mount effect)
@@ -151,14 +192,12 @@ export function Insights({ projectId }: InsightsProps) {
     loadInsightsSessions(projectId, showArchived);
   }, [showArchived]);
 
-  // Smart auto-scroll: only scroll if user is already at bottom
-  // This allows users to scroll up to read previous messages without being
-  // yanked back down during streaming responses
-  useEffect(() => {
-    if (isUserAtBottom && viewportEl) {
-      viewportEl.scrollTop = viewportEl.scrollHeight;
-    }
-  }, [isUserAtBottom, viewportEl]);
+  // Opening a chat from the history shows its latest messages
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true;
+    setIsAwayFromBottom(false);
+    scrollToBottom();
+  }, [session?.id, scrollToBottom]);
 
   // Focus textarea on mount
   useEffect(() => {
@@ -180,7 +219,8 @@ export function Insights({ projectId }: InsightsProps) {
     sendMessage(projectId, message, effectiveModelConfig, hasImages ? pendingImages : undefined);
     setPendingImages([]);
     setImageError(null);
-    setIsUserAtBottom(true); // Resume auto-scroll when user sends a message
+    stickToBottomRef.current = true; // Follow the reply to a message just sent
+    scrollToBottom();
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -257,7 +297,7 @@ export function Insights({ projectId }: InsightsProps) {
   const handleModelConfigChange = async (config: InsightsModelConfig) => {
     // Always apply locally so the choice sticks before the conversation exists on disk
     setDraftModelConfig(config);
-    if (session?.id) {
+    if (session?.id && session.id !== DRAFT_SESSION_ID) {
       await updateModelConfig(projectId, session.id, config);
     }
   };
@@ -310,15 +350,51 @@ export function Insights({ projectId }: InsightsProps) {
   // Kanban button: gives Claude the project's task tools in this conversation (kept with the
   // conversation's model settings)
   const kanbanTools = effectiveModelConfig?.kanbanTools === true;
-  const toggleKanbanTools = () => {
-    const balanced = DEFAULT_AGENT_PROFILES.find((profile) => profile.id === 'balanced');
-    const base: InsightsModelConfig = effectiveModelConfig ?? {
-      profileId: 'balanced',
-      model: balanced?.model ?? 'sonnet',
-      thinkingLevel: balanced?.thinkingLevel ?? 'medium',
-    };
-    void handleModelConfigChange({ ...base, kanbanTools: !kanbanTools });
+  const balanced = DEFAULT_AGENT_PROFILES.find((profile) => profile.id === 'balanced');
+  const baseModelConfig: InsightsModelConfig = effectiveModelConfig ?? {
+    profileId: 'balanced',
+    model: balanced?.model ?? 'sonnet',
+    thinkingLevel: balanced?.thinkingLevel ?? 'medium',
   };
+  const toggleKanbanTools = () => {
+    void handleModelConfigChange({ ...baseModelConfig, kanbanTools: !kanbanTools });
+  };
+
+  // GitHub and GitLab buttons: Claude can use the gh or glab CLI in this conversation (kept with
+  // the conversation's model settings). A CLI that isn't installed leaves its button off and
+  // disabled
+  const detectedClis = useDetectedClis();
+  const cliToggle = (key: 'githubTools' | 'gitlabTools', cli: 'gh' | 'glab', Icon: React.ElementType, label: string) => {
+    const installed = detectedClis[cli];
+    const on = installed && effectiveModelConfig?.[key] === true;
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* The wrapper keeps the tooltip on a disabled button */}
+          <span className="inline-flex">
+            <button
+              type="button"
+              onClick={() => void handleModelConfigChange({ ...baseModelConfig, [key]: !on })}
+              disabled={isLoading || !installed}
+              aria-pressed={on}
+              aria-label={label}
+              className={cn(
+                'flex h-8 w-8 items-center justify-center rounded-lg transition-colors disabled:pointer-events-none disabled:opacity-40',
+                on
+                  ? 'bg-primary/15 text-primary hover:bg-primary/20'
+                  : 'text-muted-foreground hover:bg-nav-hover hover:text-foreground'
+              )}
+            >
+              <Icon className="h-4 w-4" />
+            </button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>{installed ? label : t('insights.cliNotFound', { name: label })}</TooltipContent>
+      </Tooltip>
+    );
+  };
+  const githubButton = cliToggle('githubTools', 'gh', GitHubIcon, t('insights.githubTools'));
+  const gitlabButton = cliToggle('gitlabTools', 'glab', GitLabIcon, t('insights.gitlabTools'));
   const kanbanButton = (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -340,6 +416,17 @@ export function Insights({ projectId }: InsightsProps) {
       </TooltipTrigger>
       <TooltipContent>{t(kanbanTools ? 'insights.kanbanTools.on' : 'insights.kanbanTools.off')}</TooltipContent>
     </Tooltip>
+  );
+
+  // MCP button: the conversation's MCP servers, starting from the Connectors defaults (kept with
+  // the conversation's model settings)
+  const connectorSettings = useSettingsStore((state) => state.settings.mcpConnectors);
+  const mcpButton = (
+    <InsightsMcpMenu
+      value={effectiveModelConfig?.mcpConnectors ?? getDefaultMcpConnectorIds(connectorSettings)}
+      onChange={(mcpConnectors) => void handleModelConfigChange({ ...baseModelConfig, mcpConnectors })}
+      disabled={isLoading}
+    />
   );
 
   const modelSelector = (
@@ -453,11 +540,22 @@ export function Insights({ projectId }: InsightsProps) {
         {isEmpty ? (
           /* Toolbar (new chat): attach on the left; the model and send on the right */
           <div className="flex items-center justify-between gap-2 px-2.5 pb-2.5">
-            <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
+            <div className="flex items-center gap-1">{attachButton}{mcpButton}{githubButton}{gitlabButton}{kanbanButton}</div>
             <div className="flex min-w-0 items-center gap-1.5">
               {modelSelector}
-              {/* Send button only appears once there is something to send */}
-              {canSend && (
+              {/* Send button only appears once there is something to send; it turns into stop while Claude works */}
+              {isLoading ? (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  disabled={stopRequested}
+                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground transition-opacity hover:opacity-90 disabled:pointer-events-none disabled:opacity-40"
+                  aria-label={t('insights.stop')}
+                  title={t('insights.stop')}
+                >
+                  <Square className="h-3 w-3 fill-current" />
+                </button>
+              ) : canSend && (
                 <button
                   type="button"
                   onClick={handleSend}
@@ -471,7 +569,20 @@ export function Insights({ projectId }: InsightsProps) {
             </div>
           </div>
         ) : (
-          /* Reply: send sits inside the single-line field, always visible (disabled until there is something to send) */
+          /* Reply: send sits inside the single-line field, always visible (disabled until there is something
+             to send); it turns into stop while Claude works */
+          isLoading ? (
+            <button
+              type="button"
+              onClick={handleStop}
+              disabled={stopRequested}
+              className="absolute bottom-2 right-2 flex h-8 w-8 items-center justify-center rounded-lg text-foreground transition-colors hover:bg-nav-hover disabled:pointer-events-none disabled:opacity-40"
+              aria-label={t('insights.stop')}
+              title={t('insights.stop')}
+            >
+              <Square className="h-3 w-3 fill-current" />
+            </button>
+          ) : (
           <button
             type="button"
             onClick={handleSend}
@@ -482,6 +593,7 @@ export function Insights({ projectId }: InsightsProps) {
           >
             <CornerDownLeft className="h-4 w-4" />
           </button>
+          )
         )}
 
         {/* Drag-over overlay */}
@@ -508,7 +620,8 @@ export function Insights({ projectId }: InsightsProps) {
         <ChatHistorySidebar
           sessions={sessions}
           currentSessionId={session?.id || null}
-          isLoading={isLoadingSessions}
+          // Reloads (new chat, model or MCP changes) keep the list on screen; the spinner is for the first load
+          isLoading={isLoadingSessions && sessions.length === 0}
           onNewSession={handleNewSession}
           onSelectSession={handleSelectSession}
           onDeleteSession={handleDeleteSession}
@@ -579,10 +692,30 @@ export function Insights({ projectId }: InsightsProps) {
             {/* Messages */}
             <ScrollArea className="min-h-0 flex-1" onViewportRef={setViewportEl}>
               <div className="mx-auto max-w-3xl space-y-6 px-4 py-8">
-                {messages.map((message) => (
+                {messages.map((message, index) => (
                   <MessageBubble
                     key={message.id}
                     message={message}
+                    onRegenerate={
+                      // The latest reply can be written again once Claude is done
+                      index === messages.length - 1 && message.role === 'assistant' && !isLoading
+                        ? () => {
+                          setTaskCreated(new Set());
+                          regenerateMessage(projectId, effectiveModelConfig);
+                        }
+                        : undefined
+                    }
+                    onEdit={
+                      // A sent message can be edited once Claude is done; the chat after it is
+                      // replaced by the edited message's reply
+                      message.role === 'user' && !isLoading
+                        ? (content) => {
+                          setTaskCreated(new Set());
+                          stickToBottomRef.current = true; // Follow the edited message's reply
+                          editMessage(projectId, message.id, content, effectiveModelConfig);
+                        }
+                        : undefined
+                    }
                     onCreateTask={handleCreateTask}
                     creatingTask={creatingTask}
                     taskCreated={taskCreated}
@@ -591,24 +724,19 @@ export function Insights({ projectId }: InsightsProps) {
                 ))}
 
                 {/* Streaming message */}
-                {(streamingContent || currentTool) && (
-                  <div className="space-y-2">
-                    {streamingContent && (
-                      <MarkdownContent>{streamingContent}</MarkdownContent>
-                    )}
-                    {/* Tool usage indicator */}
-                    {currentTool && (
-                      <ToolIndicator name={currentTool.name} input={currentTool.input} />
-                    )}
-                    <SparkMark className="h-5 w-5" animate />
-                  </div>
-                )}
+                {/* Suggestion lines become cards when the reply is done; they are hidden while it streams */}
+                {stripTaskSuggestions(streamingContent) && <MarkdownContent>{stripTaskSuggestions(streamingContent)}</MarkdownContent>}
 
-                {/* Thinking indicator */}
-                {status.phase === 'thinking' && !streamingContent && !currentTool && (
-                  <div className="flex items-center gap-2.5 text-sm text-muted-foreground">
-                    <SparkMark className="h-5 w-5" animate />
-                    {t('insights.thinking')}
+                {/* While Claude works: the spinning mark, with the tool being called, or "Thinking"
+                    between tools (nothing next to it while text streams in) */}
+                {isLoading && (
+                  <div className="flex min-w-0 items-center gap-2.5 text-sm text-muted-foreground">
+                    <SparkMark className="h-5 w-5 shrink-0" animate />
+                    {currentTool ? (
+                      <ToolIndicator name={currentTool.name} input={currentTool.input} />
+                    ) : !streamingContent ? (
+                      t('insights.thinking')
+                    ) : null}
                   </div>
                 )}
 
@@ -619,11 +747,25 @@ export function Insights({ projectId }: InsightsProps) {
             {/* Composer pinned to the bottom */}
             <div className="relative shrink-0 px-4 pb-3">
               <div className="pointer-events-none absolute inset-x-0 -top-6 h-6 bg-linear-to-t from-background to-transparent" />
+              <button
+                type="button"
+                onClick={() => viewportEl?.scrollTo({ top: viewportEl.scrollHeight, behavior: 'smooth' })}
+                className={cn(
+                  'absolute -top-12 left-1/2 z-10 flex h-8 w-8 -translate-x-1/2 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-md transition-opacity hover:text-foreground',
+                  isAwayFromBottom ? 'opacity-100' : 'pointer-events-none opacity-0'
+                )}
+                aria-label={t('insights.scrollToBottom')}
+                title={t('insights.scrollToBottom')}
+                aria-hidden={!isAwayFromBottom}
+                tabIndex={isAwayFromBottom ? 0 : -1}
+              >
+                <ArrowDown className="h-4 w-4" />
+              </button>
               <div className="mx-auto max-w-3xl">
                 {composer}
                 {/* Under the field: attach, disclaimer, model */}
                 <div className="mt-1.5 grid grid-cols-[1fr_auto_1fr] items-center gap-2 text-sm">
-                  <div className="flex items-center gap-1">{attachButton}{kanbanButton}</div>
+                  <div className="flex items-center gap-1">{attachButton}{mcpButton}{githubButton}{gitlabButton}{kanbanButton}</div>
                   <span className="truncate text-xs text-muted-foreground">{t('insights.disclaimer')}</span>
                   <div className="flex justify-end">{modelSelector}</div>
                 </div>
@@ -664,16 +806,42 @@ function SparkMark({ className, animate }: SparkMarkProps) {
   );
 }
 
+/** Detected gh and glab CLIs; the main process detects them once at startup */
+let detectedClisCache: { gh: boolean; glab: boolean } | null = null;
+
+function useDetectedClis(): { gh: boolean; glab: boolean } {
+  const [clis, setClis] = useState(detectedClisCache ?? { gh: false, glab: false });
+  useEffect(() => {
+    if (detectedClisCache) return;
+    let cancelled = false;
+    window.electronAPI.getCliToolsInfo().then((result) => {
+      if (!result.success || !result.data) return;
+      detectedClisCache = { gh: result.data.gh.found, glab: result.data.glab.found };
+      if (!cancelled) setClis(detectedClisCache);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return clis;
+}
+
 interface MessageBubbleProps {
   message: InsightsChatMessage;
   onCreateTask: (messageId: string, taskIndex: number, taskData: { title: string; description: string; metadata?: TaskMetadata }) => void;
   creatingTask: Set<string>;
   taskCreated: Set<string>;
   onPreviewImage: (image: ImageAttachment) => void;
+  /** Writes this reply again (the latest reply only) */
+  onRegenerate?: () => void;
+  /** Sends an edited version of this message (user messages, while Claude isn't replying) */
+  onEdit?: (content: string) => void;
 }
 
 function MessageBubble({
   message,
+  onRegenerate,
+  onEdit,
   onPreviewImage,
   onCreateTask,
   creatingTask,
@@ -681,11 +849,19 @@ function MessageBubble({
 }: MessageBubbleProps) {
   const { t } = useTranslation('common');
   const isUser = message.role === 'user';
+  const [editing, setEditing] = useState(false);
+  // The time shown on hover is worked out again each time the message is hovered
+  const [now, setNow] = useState(() => Date.now());
+  const time = <MessageTime timestamp={message.timestamp} now={now} />;
+  // Editing ends when editing is no longer possible (Claude started replying)
+  useEffect(() => {
+    if (!onEdit) setEditing(false);
+  }, [onEdit]);
 
   if (isUser) {
     const attachments = message.images || [];
     return (
-      <div className="flex flex-col items-end gap-1.5">
+      <div className="group flex flex-col items-end gap-1.5" onMouseEnter={() => setNow(Date.now())}>
         {attachments.length > 0 && (
           <div className="flex max-w-[85%] flex-wrap justify-end gap-2">
             {attachments.map((file) =>
@@ -716,27 +892,76 @@ function MessageBubble({
             )}
           </div>
         )}
-        {message.content && (
-          <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-muted px-4 py-2.5 text-[0.9375rem] [.dark_&]:bg-[#202020] leading-relaxed text-foreground">
-            {message.content}
-          </div>
+        {editing ? (
+          <MessageEditor
+            initial={message.content}
+            canBeEmpty={attachments.length > 0}
+            onCancel={() => setEditing(false)}
+            onSave={(content) => {
+              setEditing(false);
+              // Saving without changes is the same as cancelling
+              if (content !== message.content.trim()) onEdit?.(content);
+            }}
+          />
+        ) : (
+          <>
+            {message.content && (
+              <div className="ml-auto max-w-[85%] whitespace-pre-wrap break-words rounded-xl bg-muted px-4 py-2.5 text-[0.9375rem] [.dark_&]:bg-[#202020] leading-relaxed text-foreground">
+                {message.content}
+              </div>
+            )}
+            {/* Copy and edit appear on hover (edit only while Claude isn't replying) */}
+            {(message.content || onEdit) && (
+              <div className="flex items-center gap-1 opacity-0 transition-opacity focus-within:opacity-100 group-hover:opacity-100">
+                <span className="mr-1 flex items-center">{time}</span>
+                {onEdit && (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(true)}
+                    className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
+                    aria-label={t('insights.editMessage')}
+                    title={t('insights.editMessage')}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                {message.content && <CopyMessageButton text={message.content} label={t('insights.copyMessage')} />}
+              </div>
+            )}
+          </>
         )}
       </div>
     );
   }
 
+  // Suggestion lines left in replies saved before they were taken out show as cards only
+  const content = stripTaskSuggestions(message.content);
+
+  // Copy (the reply's markdown) and regenerate, before the tools used; the time shows on hover
+  const actions = content || onRegenerate ? (
+    <div className="flex items-center gap-1">
+      {content && <CopyMessageButton text={content} />}
+      {onRegenerate && <RegenerateMessageButton onClick={onRegenerate} />}
+    </div>
+  ) : undefined;
+  const hoverTime = <span className="flex items-center opacity-0 transition-opacity group-hover:opacity-100">{time}</span>;
+
   return (
-    <div className="space-y-3">
-      {message.content && (
-        <MarkdownContent>{message.content}</MarkdownContent>
+    <div className="group space-y-3" onMouseEnter={() => setNow(Date.now())}>
+      {content && <MarkdownContent>{content}</MarkdownContent>}
+      {/* A stopped reply says so, under what it had written by then */}
+      {message.stopped && (
+        <p className="text-[0.9375rem] text-muted-foreground">{t('insights.stoppedByUser')}</p>
       )}
 
-      {/* A button that copies the reply's markdown, then the tools used */}
       {message.toolsUsed && message.toolsUsed.length > 0 ? (
-        <ToolUsageHistory tools={message.toolsUsed} actions={message.content ? <CopyMessageButton text={message.content} /> : undefined} />
-      ) : message.content ? (
-        <CopyMessageButton text={message.content} />
-      ) : null}
+        <ToolUsageHistory tools={message.toolsUsed} actions={actions} trailing={hoverTime} />
+      ) : (
+        <div className="flex items-center gap-2">
+          {actions}
+          {hoverTime}
+        </div>
+      )}
 
       {/* Task suggestion cards */}
       {message.suggestedTasks && message.suggestedTasks.length > 0 && (
@@ -796,14 +1021,38 @@ const TASK_TOOL_PREFIX = 'mcp__workbench__';
 const taskToolName = (toolName: string): string | null =>
   toolName.startsWith(TASK_TOOL_PREFIX) ? toolName.slice(TASK_TOOL_PREFIX.length) : null;
 
+/** A Bash call of the GitHub, GitLab or Graphify CLI: its icon and name (the command is shown as is) */
+const cliCall = (toolName: string, input?: string): { icon: React.ElementType; label: string } | null => {
+  if (toolName !== 'Bash' || !input) return null;
+  const cli = /^\s*(gh|glab|graphify)\s/.exec(input)?.[1];
+  if (cli === 'gh') return { icon: GitHubIcon, label: 'GitHub' };
+  if (cli === 'glab') return { icon: GitLabIcon, label: 'GitLab' };
+  if (cli === 'graphify') return { icon: GraphIcon, label: 'Graphify' };
+  return null;
+};
+
+/**
+ * Icon of an MCP server's tool (mcp__<server>__<tool>): a built-in connector's own icon, the MCP
+ * mark for other servers, null for tools that aren't MCP tools
+ */
+const mcpToolIcon = (toolName: string): React.ElementType | null => {
+  const server = /^mcp__(.+?)__/.exec(toolName)?.[1];
+  if (!server) return null;
+  return BUILTIN_CONNECTOR_META.find(({ id }) => id === server.toLowerCase())?.icon ?? McpIcon;
+};
+
 const getToolIcon = (toolName: string) => {
   if (taskToolName(toolName)) return KanbanIcon;
+  const mcpIcon = mcpToolIcon(toolName);
+  if (mcpIcon) return mcpIcon;
   switch (toolName) {
     case 'Read':
       return FileText;
     case 'Glob':
       return FolderSearch;
     case 'Grep':
+    case 'WebFetch':
+    case 'WebSearch':
       return Search;
     case 'CodebaseGraph':
       return GraphIcon;
@@ -823,13 +1072,26 @@ interface ToolUsageHistoryProps {
   }>;
   /** Shown before the toggle (e.g., the copy button) */
   actions?: React.ReactNode;
+  /** Shown after the toggle (the message's time) */
+  trailing?: React.ReactNode;
+}
+
+/** When a message was sent, relative to `now` ("2 hours ago"); the exact date on hover */
+function MessageTime({ timestamp, now }: { timestamp: Date | string; now: number }) {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  return (
+    <time dateTime={date.toISOString()} title={date.toLocaleString()} className="whitespace-nowrap text-[0.6875rem] leading-none text-muted-foreground/70">
+      {formatLongRelativeTime(date, now)}
+    </time>
+  );
 }
 
 // How long the copy button shows that the reply was copied
 const COPIED_RESET_MS = 1500;
 
 /** Copies an assistant reply's original markdown */
-function CopyMessageButton({ text }: { text: string }) {
+function CopyMessageButton({ text, label: idleLabel }: { text: string; /** Defaults to "Copy response" */ label?: string }) {
   const { t } = useTranslation('common');
   const [copied, setCopied] = useState(false);
 
@@ -839,7 +1101,7 @@ function CopyMessageButton({ text }: { text: string }) {
     return () => clearTimeout(timer);
   }, [copied]);
 
-  const label = copied ? t('insights.copied') : t('insights.copyResponse');
+  const label = copied ? t('insights.copied') : idleLabel ?? t('insights.copyResponse');
   return (
     <button
       type="button"
@@ -857,7 +1119,98 @@ function CopyMessageButton({ text }: { text: string }) {
   );
 }
 
-function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
+/**
+ * A sent message being edited in place: the bubble keeps its look and place and its text
+ * becomes editable. Enter (or Save) sends it, Escape (or Cancel) leaves it as it was
+ */
+function MessageEditor({ initial, canBeEmpty, onCancel, onSave }: {
+  initial: string;
+  /** The message has attachments, so it can be sent without text */
+  canBeEmpty: boolean;
+  onCancel: () => void;
+  onSave: (content: string) => void;
+}) {
+  const { t } = useTranslation('common');
+  const [value, setValue] = useState(initial);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Save turns on once the text changed (and isn't empty, unless the message has attachments)
+  const changed = value.trim() !== initial.trim();
+  const canSave = changed && (canBeEmpty || value.trim().length > 0);
+
+  // The caret starts at the end of the text
+  useEffect(() => {
+    const el = textareaRef.current;
+    el?.focus();
+    el?.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+
+  return (
+    <>
+      {/* The hidden copy of the text sizes the bubble like the read-only one; the field sits on top */}
+      <div className="ml-auto grid max-w-[85%] rounded-xl bg-muted px-4 py-2.5 text-[0.9375rem] [.dark_&]:bg-[#202020] leading-relaxed text-foreground focus-within:shadow-(--shadow-focus)">
+        <span aria-hidden="true" className="invisible col-start-1 row-start-1 whitespace-pre-wrap break-words">
+          {`${value}\u200b`}
+        </span>
+        <textarea
+          ref={textareaRef}
+          // One column and row: the field takes the hidden text's size, not a default width
+          rows={1}
+          cols={1}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              onCancel();
+            } else if (e.key === 'Enter' && !e.shiftKey) {
+              // Enter without changes closes the editor, like Cancel
+              e.preventDefault();
+              if (canSave) onSave(value.trim());
+              else if (!changed) onCancel();
+            }
+          }}
+          aria-label={t('insights.editMessage')}
+          className="col-start-1 row-start-1 h-full w-full min-w-0 resize-none overflow-hidden border-0 bg-transparent p-0 [font:inherit] text-foreground whitespace-pre-wrap break-words focus:outline-none"
+        />
+      </div>
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={onCancel}
+          className="h-8 rounded-lg px-3 text-sm text-foreground transition-colors hover:bg-nav-hover"
+        >
+          {t('buttons.cancel')}
+        </button>
+        <button
+          type="button"
+          onClick={() => onSave(value.trim())}
+          disabled={!canSave}
+          className="h-8 rounded-lg bg-foreground px-3 text-sm text-background transition-colors hover:bg-foreground/90 disabled:pointer-events-none disabled:bg-muted disabled:text-muted-foreground"
+        >
+          {t('buttons.save')}
+        </button>
+      </div>
+    </>
+  );
+}
+
+/** Writes the latest reply again */
+function RegenerateMessageButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation('common');
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-nav-hover hover:text-foreground"
+      aria-label={t('insights.regenerate')}
+      title={t('insights.regenerate')}
+    >
+      <RotateCcw className="h-3.5 w-3.5" />
+    </button>
+  );
+}
+
+function ToolUsageHistory({ tools, actions, trailing }: ToolUsageHistoryProps) {
   const { t } = useTranslation('common');
   const [expanded, setExpanded] = useState(false);
 
@@ -876,25 +1229,29 @@ function ToolUsageHistory({ tools, actions }: ToolUsageHistoryProps) {
           <span>{t('insights.tools.toolsUsed', { count: tools.length })}</span>
           <ChevronDown className={cn('h-3 w-3 transition-transform', expanded && 'rotate-180')} />
         </button>
+        {trailing}
       </div>
 
       {expanded && (
         <div className="mt-2 space-y-1 rounded-xl border border-border p-3">
           {tools.map((tool, index) => {
-            const Icon = getToolIcon(tool.name);
+            // gh, glab and graphify calls show as GitHub, GitLab and Graphify, like the task tools show as Kanban steps
+            const cli = cliCall(tool.name, tool.input);
+            const Icon = cli?.icon ?? getToolIcon(tool.name);
+            const taskTool = taskToolName(tool.name);
+            const label = cli?.label
+              ?? (taskTool ? t(`insights.taskTools.${taskTool}`, { defaultValue: taskTool }) : tool.name);
+            // The whole call, cut with an ellipsis only when it doesn't fit the row
             return (
               <div
                 key={`${tool.name}-${index}`}
-                className="flex items-center gap-2 text-xs"
+                className="flex min-w-0 items-center gap-2 text-xs"
+                title={tool.input}
               >
                 <Icon className="h-3 w-3 shrink-0 text-muted-foreground" />
-                <span className="font-medium text-foreground">
-                  {taskToolName(tool.name)
-                    ? t(`insights.taskTools.${taskToolName(tool.name)}`, { defaultValue: taskToolName(tool.name) })
-                    : tool.name}
-                </span>
+                <span className="shrink-0 font-medium text-foreground">{label}</span>
                 {tool.input && (
-                  <span className="max-w-[250px] truncate text-muted-foreground">
+                  <span className="min-w-0 truncate text-muted-foreground">
                     {tool.input}
                   </span>
                 )}
@@ -931,22 +1288,21 @@ function ToolIndicator({ name, input }: ToolIndicatorProps) {
         return { icon: GraphIcon, label: t('insights.tools.searchingGraph') };
       case 'Bash':
         return { icon: Terminal, label: t('insights.tools.runningCommand') };
+      case 'WebFetch':
+      case 'WebSearch':
+        return { icon: Search, label: toolName };
       default:
-        return { icon: Wrench, label: toolName };
+        return { icon: mcpToolIcon(toolName) ?? Wrench, label: toolName };
     }
   };
 
-  const { icon: Icon, label } = getToolInfo(name);
+  const { icon: Icon, label } = cliCall(name, input) ?? getToolInfo(name);
 
   return (
-    <div className="inline-flex max-w-full items-center gap-2 rounded-xl border border-border px-3 py-1.5 text-sm">
-      <Icon className="h-4 w-4 shrink-0 animate-pulse text-muted-foreground" />
-      <span className="font-medium text-foreground">{label}</span>
-      {input && (
-        <span className="max-w-[300px] truncate text-muted-foreground">
-          {input}
-        </span>
-      )}
-    </div>
+    <span className="flex min-w-0 items-center gap-2" title={input}>
+      <Icon className="h-4 w-4 shrink-0" />
+      <span className="shrink-0 font-medium text-foreground">{label}</span>
+      {input && <span className="min-w-0 truncate">{input}</span>}
+    </span>
   );
 }

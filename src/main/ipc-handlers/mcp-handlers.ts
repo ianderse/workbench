@@ -10,32 +10,14 @@ import type { CustomMcpServer, McpHealthCheckResult, McpHealthStatus, McpTestCon
 import { spawn, type ChildProcess } from 'child_process';
 import { appLog } from '../app-logger';
 import { isWindows } from '../platform';
-import { getWhereExePath } from '../utils/windows-paths';
 import { getWslInfo, whenShellRuntimeReady } from '../platform/shell-runtime';
 import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
-import { execInWsl } from '../platform/wsl-exec-basic';
-import { isUnderMountRoot } from '../platform/wsl-detect';
-
-/**
- * Where a command lives inside WSL (`command -v` with the login PATH), when the app runs its
- * tools there. `windowsOnly` when only a Windows program of that name was found (on the Windows
- * PATH WSL appends), which Claude Code inside WSL can't use as an MCP server.
- */
-export async function findWslCommand(command: string): Promise<{ path: string | null; windowsOnly: boolean }> {
-  const wsl = getWslInfo();
-  if (!wsl) return { path: null, windowsOnly: false };
-  let found = '';
-  try {
-    // Without the login PATH's Windows entries removed, so a Windows-only program can be named
-    const { stdout } = await execInWsl('/bin/sh', ['-c', 'command -v "$1"', 'sh', command], { timeout: 15000 });
-    found = stdout.trim().split(/\r?\n/)[0]?.trim() ?? '';
-  } catch {
-    return { path: null, windowsOnly: false };
-  }
-  if (!found.startsWith('/')) return { path: null, windowsOnly: false };
-  if (isUnderMountRoot(found, wsl.mountRoot)) return { path: null, windowsOnly: true };
-  return { path: found, windowsOnly: false };
-}
+import { findWslCommand, isCommandAvailable } from '../mcp-commands';
+import { getToolEnvAsync } from '../cli-utils';
+import { getMcpAvailability, onMcpAvailabilityChange } from '../mcp-availability';
+import { readSettingsFileAsync } from '../settings-utils';
+import { getAllWindows } from '../window-manager';
+import type { AppSettings } from '../../shared/types';
 
 /** Why a command can't run in WSL, for the health check and the connection test */
 function wslMissingMessage(command: string, windowsOnly: boolean): string {
@@ -240,64 +222,16 @@ async function checkCommandHealth(server: CustomMcpServer, startTime: number): P
     };
   }
 
-  return new Promise((resolve) => {
-    const command = isWindows() ? getWhereExePath() : 'which';
-    const proc = spawn(command, [server.command!], {
-      timeout: 5000,
-      windowsHide: true,
-    });
-
-    let found = false;
-
-    proc.on('close', (code) => {
-      const responseTime = Date.now() - startTime;
-
-      if (code === 0 || found) {
-        resolve({
-          serverId: server.id,
-          status: 'healthy',
-          message: `Command '${server.command}' found`,
-          responseTime,
-          checkedAt: new Date().toISOString(),
-        });
-      } else {
-        resolve({
-          serverId: server.id,
-          status: 'unhealthy',
-          message: `Command '${server.command}' not found in PATH`,
-          responseTime,
-          checkedAt: new Date().toISOString(),
-        });
-      }
-    });
-
-    proc.stdout.on('data', () => {
-      found = true;
-    });
-
-    proc.on('error', (error: Error) => {
-      const responseTime = Date.now() - startTime;
-      const errCode = (error as NodeJS.ErrnoException).code;
-      let message = `Failed to check command '${server.command}'`;
-
-      // Provide actionable error messages for common failures
-      if (errCode === 'ENOENT') {
-        message = isWindows()
-          ? `System utility 'where.exe' not found. Check Windows installation.`
-          : `System utility 'which' not found. Check system PATH configuration.`;
-      } else if (errCode === 'EACCES') {
-        message = `Permission denied checking command '${server.command}'`;
-      }
-
-      resolve({
-        serverId: server.id,
-        status: 'unhealthy',
-        message,
-        responseTime,
-        checkedAt: new Date().toISOString(),
-      });
-    });
-  });
+  // Looked up with the PATH runs get (Node.js through version managers too), not the app's own,
+  // which lacks the shell's PATH when the app was started from the desktop
+  const found = await isCommandAvailable(server.command, { refresh: true });
+  return {
+    serverId: server.id,
+    status: found ? 'healthy' : 'unhealthy',
+    message: found ? `Command '${server.command}' found` : `Command '${server.command}' not found in PATH`,
+    responseTime: Date.now() - startTime,
+    checkedAt: new Date().toISOString(),
+  };
 }
 
 /**
@@ -491,6 +425,8 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
     wslCommand = found;
   }
 
+  // The PATH runs get, so npx and node are found as Claude Code would find them
+  const toolEnv = wslCommand ? undefined : await getToolEnvAsync();
   return new Promise((resolve) => {
     const args = server.args || [];
 
@@ -500,6 +436,7 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
       ? spawnTool('python', args, { command: wslCommand, stdio: ['pipe', 'pipe', 'pipe'] })
       : spawn(server.command!, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: toolEnv,
         timeout: 15000, // OS-level timeout for reliable process termination
         shell: isWindows(), // Required for Windows to run npx.cmd
       });
@@ -619,6 +556,22 @@ async function testCommandConnection(server: CustomMcpServer, startTime: number)
  * Register MCP IPC handlers.
  */
 export function registerMcpHandlers(): void {
+  // Whether connectors' servers can start; unknown ones start being checked and each change is
+  // sent to every window
+  ipcMain.handle(IPC_CHANNELS.MCP_GET_AVAILABILITY, async (_event, ids: string[]) => {
+    try {
+      const settings = (await readSettingsFileAsync()) as Partial<AppSettings> | undefined;
+      return { success: true, data: getMcpAvailability(Array.isArray(ids) ? ids : [], settings?.mcpConnectors) };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : 'Availability check failed' };
+    }
+  });
+  onMcpAvailabilityChange((id, availability) => {
+    for (const window of getAllWindows()) {
+      if (!window.isDestroyed()) window.webContents.send(IPC_CHANNELS.MCP_AVAILABILITY_CHANGED, id, availability);
+    }
+  });
+
   // Quick health check
   ipcMain.handle(IPC_CHANNELS.MCP_CHECK_HEALTH, async (_event, server: CustomMcpServer) => {
     try {

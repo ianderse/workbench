@@ -74,6 +74,7 @@ import {
   WSL_WRAPPER,
   buildWslEnv,
   killRuntimeProcess,
+  killRuntimeProcessTree,
   parseBatchOutput,
   runTool,
   runToolScript,
@@ -207,6 +208,92 @@ describe('killRuntimeProcess', () => {
     const child = { pid: 42 } as never;
     killRuntimeProcess(child, { debugPrefix: '[Test]' });
     expect(mocks.killProcessGracefully).toHaveBeenCalledWith(child, { debugPrefix: '[Test]' });
+  });
+});
+
+describe('spawnTool process groups and shell quoting', () => {
+  it('starts a detached process in its own group on POSIX only', () => {
+    spawnTool('python', ['-y', 'server'], { command: '/usr/bin/npx', detached: true });
+    expect(mocks.spawn).toHaveBeenLastCalledWith('/usr/bin/npx', ['-y', 'server'], { detached: true, shell: false });
+
+    mocks.windows = true;
+    spawnTool('python', ['-y', 'server'], { command: 'C:\\Program Files\\nodejs\\npx.cmd', detached: false });
+    expect(mocks.spawn).toHaveBeenLastCalledWith('"C:\\Program Files\\nodejs\\npx.cmd"', ['-y', 'server'], { shell: true });
+    spawnTool('python', ['-y', 'server'], { command: 'C:\\nodejs\\npx.cmd', detached: true });
+    expect(mocks.spawn).toHaveBeenLastCalledWith('"C:\\nodejs\\npx.cmd"', ['-y', 'server'], { shell: true });
+  });
+
+  it('quotes arguments with cmd.exe operators for a .cmd shim', () => {
+    mocks.windows = true;
+    spawnTool('python', ['--url', 'http://x/?a=1&b=2', 'a|b', 'plain'], { command: 'C:\\npm\\server.cmd' });
+    expect(mocks.spawn.mock.calls[0][1]).toEqual(['--url', '"http://x/?a=1&b=2"', '"a|b"', 'plain']);
+  });
+});
+
+describe('killRuntimeProcessTree', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('stops the whole process group on POSIX, forcing whatever is left after the grace period', () => {
+    vi.useFakeTimers();
+    const alive = new Set([4242]);
+    const kill = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+      if (!alive.has(-pid)) throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+      return true;
+    }) as typeof process.kill);
+    const child = { pid: 4242 } as never;
+
+    killRuntimeProcessTree(child, { timeoutMs: 1000 });
+    expect(kill).toHaveBeenCalledWith(-4242, 'SIGTERM');
+    expect(mocks.killProcessGracefully).not.toHaveBeenCalled();
+
+    // The wrapper exited but the server it started is still in the group
+    vi.advanceTimersByTime(1000);
+    expect(kill).toHaveBeenCalledWith(-4242, 0);
+    expect(kill).toHaveBeenCalledWith(-4242, 'SIGKILL');
+  });
+
+  it('sends no SIGKILL when the group ended', () => {
+    vi.useFakeTimers();
+    let alive = true;
+    const kill = vi.spyOn(process, 'kill').mockImplementation(((pid: number) => {
+      if (!alive || pid !== -7) throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+      return true;
+    }) as typeof process.kill);
+    killRuntimeProcessTree({ pid: 7 } as never, { timeoutMs: 1000 });
+    alive = false;
+    vi.advanceTimersByTime(1000);
+    expect(kill).not.toHaveBeenCalledWith(-7, 'SIGKILL');
+  });
+
+  it('stops only the process when it has no group of its own', () => {
+    vi.spyOn(process, 'kill').mockImplementation((() => {
+      throw Object.assign(new Error('ESRCH'), { code: 'ESRCH' });
+    }) as typeof process.kill);
+    const child = { pid: 9 } as never;
+    killRuntimeProcessTree(child);
+    expect(mocks.killProcessGracefully).toHaveBeenCalledWith(child, {});
+  });
+
+  it('stops the process tree with taskkill on Windows', () => {
+    mocks.windows = true;
+    const killer = { on: vi.fn(), unref: vi.fn() };
+    mocks.spawn.mockReturnValue(killer);
+    killRuntimeProcessTree({ pid: 42 } as never);
+    const [file, args, options] = mocks.spawn.mock.calls[0];
+    expect(file).toMatch(/taskkill\.exe$/);
+    expect(args).toEqual(['/pid', '42', '/T', '/F']);
+    expect(options).toMatchObject({ stdio: 'ignore', windowsHide: true });
+    expect(killer.unref).toHaveBeenCalled();
+  });
+
+  it('does nothing for a process that never started', () => {
+    const kill = vi.spyOn(process, 'kill');
+    killRuntimeProcessTree({ pid: undefined } as never);
+    expect(kill).not.toHaveBeenCalled();
+    expect(mocks.spawn).not.toHaveBeenCalled();
   });
 });
 

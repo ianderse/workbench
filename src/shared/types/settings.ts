@@ -92,6 +92,7 @@ export interface WslToolPaths {
   gh?: string;
   glab?: string;
   python?: string;
+  node?: string;
 }
 
 // Developer tools preferences - IDE and terminal selection
@@ -286,6 +287,8 @@ export interface AppSettings {
   theme: 'light' | 'dark' | 'system';
   colorTheme?: ColorTheme;
   pythonPath?: string;
+  // Node.js (npx starts MCP servers such as Context7); empty = detected
+  nodePath?: string;
   gitPath?: string;
   githubCLIPath?: string;
   gitlabCLIPath?: string;
@@ -322,14 +325,35 @@ export interface AppSettings {
   customCLIPath?: string;
   // YOLO mode: invoke Claude with --dangerously-skip-permissions flag
   dangerouslySkipPermissions?: boolean;
-  // Version the user has permanently skipped for update notifications
-  skippedUpdateVersion?: string;
-  // Timestamp (ms) after which update notifications should resume (snooze)
-  updateRemindAfter?: number;
   // Sidebar collapsed state (icons only when true)
   sidebarCollapsed?: boolean;
   // GPU acceleration for terminal rendering (WebGL)
   gpuAcceleration?: GpuAcceleration;
+  // The open windows (project, place, size, state), reopened on the next launch (kept by the main process)
+  windows?: SavedWindowState[];
+}
+
+/** A window's place and state, saved when the app quits and restored on the next launch */
+export interface WindowState {
+  /** Normal bounds (the size the window returns to from maximized or full screen) */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  isMaximized: boolean;
+  isFullScreen: boolean;
+  /** The display the window was on */
+  displayId?: number;
+}
+
+/** One open window as saved for the next launch */
+export interface SavedWindowState extends WindowState {
+  /** The project it showed (null: none) */
+  projectId: string | null;
+  /** The window the user worked in last */
+  focused?: boolean;
+  /** Not opened for a project: it keeps the shared tabs and reopens the project it showed last */
+  main?: boolean;
 }
 
 // GPU acceleration mode for terminal WebGL rendering

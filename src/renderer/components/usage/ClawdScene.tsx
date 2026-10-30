@@ -69,23 +69,188 @@ const BODY_R = 4.5;
 /** The sunlit part of the moon, pale gold */
 const MOON_LIT = '#F3E6B8';
 
-/** Opacity along the sky's width and height ([offset, opacity]), eased so no edge shows */
-const FADE_X: [number, number][] = [
-  [0, 0], [0.05, 0.1], [0.1, 0.35], [0.16, 0.75], [0.22, 1],
-  [0.78, 1], [0.84, 0.75], [0.9, 0.35], [0.95, 0.1], [1, 0],
-];
-/** Top and bottom fade alike, so the sky leaves the same small gap under the header as over the bar */
+/** The sky fades in under the header and stays in full down behind the bar */
 const FADE_Y: [number, number][] = [
-  [0, 0.1], [0.08, 0.5], [0.2, 1], [0.8, 1], [0.92, 0.5], [1, 0.1],
+  [0, 0.1], [0.08, 0.5], [0.2, 1], [1, 1],
 ];
+
+/** How far apart (px) the steps of an edge mask's side fade are, too close to show */
+const MASK_STEP_PX = 0.5;
+
+/** The standard normal distribution (Abramowitz and Stegun's erf, 7.1.26) */
+function normalCdf(z: number): number {
+  const x = Math.abs(z) / Math.SQRT2;
+  const t = 1 / (1 + 0.3275911 * x);
+  const erf = 1 - t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-x * x);
+  return z < 0 ? (1 - erf) / 2 : (1 + erf) / 2;
+}
 
 /**
- * How far the sky reaches past its row: out through the popover's side padding to its edges, and
- * up through the gap to the header's line, so it fills the whole area with no bare strips
+ * The side fade's steps ([inset, opacity]): an edge blurred around a line two fifths in, over
+ * SIDE_FADE pixels from the sky's side, in full from there. A sharpness under 1 squeezes it
+ * toward the bar's end (SKY_BLEED_X in), so a crisper edge still lines up with the bar.
  */
-const SKY_BLEED_X = 12;
-const SKY_BLEED_TOP = 10;
+function sideSteps(sharpness = 1): [number, number][] {
+  const soft = SIDE_FADE / 5;
+  const steps: [number, number][] = [];
+  for (let x = MASK_STEP_PX; x < SIDE_FADE; x += MASK_STEP_PX) {
+    steps.push([x, normalCdf((x - 2 * soft) / soft)]);
+  }
+  steps.push([SIDE_FADE, 1]);
+  return steps.map(([x, v]) => [SKY_BLEED_X + (x - SKY_BLEED_X) * sharpness, v]);
+}
 
+/**
+ * How long the sky's side and top fades are, out of their full length (SIDE_FADE, the top fades):
+ * short, so the sky's edges stay soft without reading as a smudge or a glow on either card
+ */
+const EDGE_SHARPNESS = 0.3;
+
+/** Where opacity v is first reached along a fade's stops ([y, opacity], in order) */
+function firstAt(stops: [number, number][], v: number): number {
+  if (v <= stops[0][1]) return stops[0][0];
+  for (let i = 1; i < stops.length; i++) {
+    const [y0, a0] = stops[i - 1];
+    const [y1, a1] = stops[i];
+    if (a1 >= v && a0 < v) return y0 + ((v - a0) / (a1 - a0)) * (y1 - y0);
+  }
+  return stops[stops.length - 1][0];
+}
+
+/** How round the corners of the part of the sky that shows in full are (px) */
+const MASK_CORNER = 4;
+
+/**
+ * One step of an edge mask: from x in from the sides and y down to b, with round top corners
+ * (rTop). Where a step is wider than the bar, its sides curve in to the bar's ends at the bar's
+ * top edge (ground), no taller than the bar, so the sky's bottom corners round into the bar's.
+ * Behind the bar its bottom corners curve down to b, no taller than the bar either.
+ */
+function maskStepPath(w: number, x: number, y: number, b: number, rTop: number, ground: number): string {
+  const r = w - x;
+  const t = Math.min(rTop, (r - x) / 2, Math.max(0, ground - y));
+  const left = Math.max(x, SKY_BLEED_X);
+  const right = Math.min(r, w - SKY_BLEED_X);
+  // The curve in to the bar's ends: as wide as the step reaches past them, twice as tall
+  const ix = left - x;
+  const iy = Math.min(2 * ix, SKY_BLEED_BOTTOM, Math.max(0, ground - y - t));
+  const u = Math.max(0, Math.min(b - ground, (right - left) / 2));
+  const inRight = ix > 0 && iy > 0 ? `V ${ground - iy} A ${ix} ${iy} 0 0 1 ${right} ${ground} ` : `V ${ground} H ${right} `;
+  const inLeft = ix > 0 && iy > 0 ? `V ${ground} A ${ix} ${iy} 0 0 1 ${x} ${ground - iy} ` : `V ${ground} H ${x} `;
+  return `M ${x + t} ${y} H ${r - t} A ${t} ${t} 0 0 1 ${r} ${y + t} ${inRight}`
+    + `V ${b - u} A ${u} ${u} 0 0 1 ${right - u} ${b} H ${left + u} A ${u} ${u} 0 0 1 ${left} ${b - u} `
+    + `${inLeft}V ${y + t} A ${t} ${t} 0 0 1 ${x + t} ${y} Z`;
+}
+
+/** A rectangle with round corners, rTop at the top and rBottom at the bottom (a sky with no bar) */
+function roundedRectPath(x: number, y: number, width: number, height: number, rTop: number, rBottom: number): string {
+  const scale = Math.min(1, height / Math.max(rTop + rBottom, 1e-6));
+  const t = Math.min(rTop * scale, width / 2);
+  const u = Math.min(rBottom * scale, width / 2);
+  const r = x + width;
+  const b = y + height;
+  return `M ${x + t} ${y} H ${r - t} A ${t} ${t} 0 0 1 ${r} ${y + t} V ${b - u} `
+    + `A ${u} ${u} 0 0 1 ${r - u} ${b} H ${x + u} A ${u} ${u} 0 0 1 ${x} ${b - u} `
+    + `V ${y + t} A ${t} ${t} 0 0 1 ${x + t} ${y} Z`;
+}
+
+interface MaskLevel { d: string; opacity: number }
+
+/**
+ * An edge mask as nested rounded rectangles, one per step of the side fade, each as far in from
+ * the sides as the side fade and from the top and bottom as their fades (fadeY, offsets of the
+ * height; none for the sides only). So the sides fade the same way all the way up and down. The
+ * top corners round off from one fade into the other in circles, MASK_CORNER for the full part
+ * and as much larger as the top fade is long (square with no fade); the bottom ones round off
+ * behind the bar (maskStepPath). A sharpness under 1 makes the side and top fades that much
+ * shorter. With no bar the bottom fades and rounds off as the top does.
+ */
+function edgeMask(w: number, h: number, fadeY: [number, number][] | null, sharpness = 1, bar = true): MaskLevel[] {
+  // With no bar under it the sky fades out at the bottom as it fades in at the top
+  let stops = fadeY;
+  if (fadeY && !bar) {
+    const top = fadeY.filter(([o]) => o < 0.5);
+    stops = [...top, ...[...top].reverse().map(([o, a]): [number, number] => [1 - o, a])];
+  }
+  // The top fade gets shorter with the sides; the bottom one too with no bar (else it is behind it)
+  const down = stops?.map(([o, a]): [number, number] => [
+    o < 0.5 ? o * h * sharpness : bar ? o * h : h - (1 - o) * h * sharpness,
+    a,
+  ]);
+  const up = down && [...down].reverse().map(([y, a]): [number, number] => [h - y, a]);
+  const steps = sideSteps(sharpness);
+  // Where each fade is in full
+  const fullTop = down ? firstAt(down, 1) : 0;
+  const fullBottom = up ? firstAt(up, 1) : 0;
+  const corner = fadeY ? MASK_CORNER : 0;
+  const levels: MaskLevel[] = [];
+  let shown = 0;
+  for (const [x, v] of steps) {
+    const top = down ? firstAt(down, v) : 0;
+    const bottomInset = up ? firstAt(up, v) : 0;
+    const width = w - 2 * x;
+    const height = h - bottomInset - top;
+    if (width <= 0 || height <= 0) break;
+    // Round top corners, as wide as they are tall: they follow the top fade (and the bottom ones
+    // the bottom fade, with no bar)
+    const rTop = fullTop > 0 ? corner + fullTop - top : 0;
+    const d = bar
+      ? maskStepPath(w, x, top, h - bottomInset, rTop, h - SKY_BLEED_BOTTOM)
+      : roundedRectPath(x, top, width, height, rTop, fullBottom > 0 ? corner + fullBottom - bottomInset : 0);
+    // Each rectangle over the ones before it raises what shows inside it to v
+    levels.push({ d, opacity: (v - shown) / (1 - shown) });
+    shown = v;
+  }
+  return levels;
+}
+
+/** How long the sky's side fades are (px) */
+const SIDE_FADE = 12;
+/**
+ * How far the sky reaches past its row: past each end of the bar as far as the side fade is
+ * faint (about 10%), so the edge you see lines up with the bar's ends; and up through the gap to
+ * the header
+ */
+const SKY_BLEED_X = 4;
+
+/**
+ * The bar's own side fades, as a CSS mask: at each point of its ends as strong as the sky's side
+ * fade is there (the sky reaches SKY_BLEED_X past the bar), so the two fade out as one piece
+ */
+export const BAR_SIDE_MASK = (() => {
+  const stops = sideSteps(EDGE_SHARPNESS)
+    .filter(([x]) => x >= SKY_BLEED_X)
+    .map(([x, v]) => [x - SKY_BLEED_X, v] as const);
+  const left = stops.map(([x, v]) => `rgba(0, 0, 0, ${v.toFixed(3)}) ${x.toFixed(2)}px`);
+  const right = [...stops].reverse().map(([x, v]) => `rgba(0, 0, 0, ${v.toFixed(3)}) calc(100% - ${x.toFixed(2)}px)`);
+  return `linear-gradient(to right, ${[...left, ...right].join(', ')})`;
+})();
+const SKY_BLEED_TOP = 10;
+/** Down behind the 8px progress bar to its bottom edge; the bar is drawn over the sky */
+const SKY_BLEED_BOTTOM = 8;
+/**
+ * How long the top and bottom fades of the sky's background and of its clouds are (px): short,
+ * so they are in full just under the header, where the highest clouds float, and the bottom
+ * one fades out behind the bar
+ */
+const BG_FADE = 4;
+
+/**
+ * Opacity down the sky's background and its clouds: the sky's own top fade squeezed into
+ * BG_FADE pixels, and the same at the bottom
+ */
+function backgroundFadeY(h: number): [number, number][] {
+  const topEnd = FADE_Y.find(([o, a]) => o < 0.5 && a === 1)?.[0] ?? 0.2;
+  const top = FADE_Y.filter(([o]) => o < 0.5);
+  const fade = (o: number) => ((o / topEnd) * BG_FADE) / h;
+  return [
+    ...top.map(([o, a]): [number, number] => [fade(o), a]),
+    ...[...top].reverse().map(([o, a]): [number, number] => [1 - fade(o), a]),
+  ];
+}
+
+/** The gray sky's background (0 the dark card's colour, 1 the light one's): halfway, at any hour */
+const GRAY_BACKDROP_LIGHT = 0.5;
 /** Weather counts are tuned for a 140px strip; a wider sky gets more */
 const DENSITY_W = 140;
 
@@ -146,7 +311,16 @@ export function useMinute(pinned: Date | null): Date {
  * night, dawn, day and dusk, the sun and the moon on their arc, stars at night - and the 5-hour
  * limit brings the weather: rain from 50%, snow in winter.
  */
-export function ClawdSky({ percent, pinned = null }: { percent: number | null; pinned?: Date | null }) {
+interface ClawdSkyProps {
+  percent: number | null;
+  pinned?: Date | null;
+  /** The 5-hour bar is under the sky, which goes on behind it; without it the sky ends at the ground */
+  bar?: boolean;
+  /** Everything in gray but the sun and the moon (the popover's states with no usage to show) */
+  gray?: boolean;
+}
+
+export function ClawdSky({ percent, pinned = null, bar = true, gray = false }: ClawdSkyProps) {
   const [ref, w] = useWidth();
   const now = useMinute(pinned);
   // The preview in Settings can show a second sky; each one needs its own gradient and mask ids
@@ -158,7 +332,10 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
   // sky opens, so a passing cloud only sometimes covers them
   const [thick] = useState(() => CLOUDS.map(() => Math.random() < 0.5));
 
-  const h = SCENE_H + SKY_BLEED_TOP;
+  // The ground (the bar's top edge): the clouds, stars and falling weather are laid out above it
+  const ground = SCENE_H + SKY_BLEED_TOP;
+  const bleedBottom = bar ? SKY_BLEED_BOTTOM : 0;
+  const h = ground + bleedBottom;
   const density = Math.max(1, w / DENSITY_W);
   const clouds = Math.min(CLOUDS.length, Math.round(weather.clouds * density));
   const fall = Math.round(weather.fall * density);
@@ -166,12 +343,160 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
   const lower = (pos: { cx: number; cy: number }) => ({ cx: pos.cx, cy: pos.cy + SKY_BLEED_TOP / 2 });
   const sun = look.sun && lower(skyBodyPos(look.sun.p, w));
   const moonAt = look.moon && lower(skyBodyPos(look.moon.p, w));
+  const masks = useMemo(() => ({
+    'sky-mask-y-bg': edgeMask(w, h, backgroundFadeY(h), EDGE_SHARPNESS, bar),
+    'sky-mask-y': edgeMask(w, h, FADE_Y, EDGE_SHARPNESS, bar),
+    'sky-mask-sides': edgeMask(w, h, null, EDGE_SHARPNESS, bar),
+  }), [w, h, bar]);
+  const maskUrl = (name: keyof typeof masks) => `url(#${id(name)})`;
+  // The layers that go gray (all but the sun and the moon)
+  const grayFilter = gray ? `url(#${id('gray')})` : undefined;
+  // The sky's layers, drawn below its masks
+  const skyLayers = (
+    <>
+      {/* The sky's own background, whatever the app's theme: the dark popover with the light
+          one over it, as light as the day (the rest of the card stays in the theme) */}
+      <g mask={maskUrl('sky-mask-y-bg')} filter={gray ? `url(#${id('gray-flat')})` : undefined}>
+        <rect x="0" y="0" width={w} height={h} className="dark fill-popover" />
+        <rect x="0" y="0" width={w} height={h} className="light fill-popover" opacity={gray ? GRAY_BACKDROP_LIGHT : look.light} />
+
+        {/* The sky's colour, with the background's fades so it covers it out to its edges. The
+            same in both themes, as the background under it is. A gray sky has none: its
+            background stays a neutral gray at any hour */}
+        {!gray && (
+          <rect
+            x="0" y="0" width={w} height={h} fill={`url(#${id('sky-tint')})`} fillOpacity={0.8}
+          />
+        )}
+      </g>
+
+      <g mask={maskUrl('sky-mask-y')}>
+        {/* Stars twinkle at night */}
+        {look.stars > 0 && (
+          <g opacity={look.stars} filter={grayFilter}>
+            {STARS.map((s, i) => (
+              <rect
+                key={i}
+                x={Math.round(s.fx * (w - 2))} y={Math.round(2 + s.fy * ground)}
+                width={1.2} height={1.2} fill="#F8FAFC"
+                className="clawd-star"
+                style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
+              />
+            ))}
+          </g>
+        )}
+
+        {/* The moon in its real phase, from sunset to sunrise: pale gold where the sun
+            lights it, the rest of the disc a dim slate. True circles, so it reads as a moon. */}
+        {look.moon && moonAt && (
+          <g opacity={look.moon.opacity} shapeRendering="geometricPrecision">
+            <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R * 2.2} fill={`url(#${id('moon-glow')})`} />
+            <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R} fill="#64748B" opacity={0.45} />
+            <path d={moonLitPath(now, moonAt.cx, moonAt.cy, BODY_R)} fill={MOON_LIT} />
+          </g>
+        )}
+
+        {/* The sun by day, yellow high up and orange near the horizon */}
+        {look.sun && sun && (
+          <g opacity={look.sun.opacity} shapeRendering="geometricPrecision">
+            <circle cx={sun.cx} cy={sun.cy} r={BODY_R * 2.4} fill={`url(#${id('sun-glow')})`} />
+            <circle cx={sun.cx} cy={sun.cy} r={BODY_R} fill={look.sun.color} />
+          </g>
+        )}
+      </g>
+
+      {/* The clouds fade in and out as briefly as the background, so the highest ones show */}
+      <g mask={maskUrl('sky-mask-y-bg')} filter={grayFilter}>
+        {/* Clouds drift past in front of the sun and the moon. Thick ones are solid and hide
+            them; which ones are thick changes each time the sky opens. */}
+        {CLOUDS.slice(0, clouds).map((c, i) => (
+          <g
+            key={i}
+            className="motion-safe:[animation:clawd-cloud-drift_linear_infinite]"
+            style={{
+              animationDuration: `${c.dur}s`,
+              animationDelay: `${c.delay}s`,
+              ['--clawd-cloud-from' as string]: `${-CLOUD_W[c.shape]}px`,
+              ['--clawd-cloud-to' as string]: `${w}px`,
+            }}
+          >
+            <g transform={`translate(0 ${Math.round(c.top * ground)})`}>
+              <g opacity={thick[i] ? 1 : weather.kind === 'fair' ? 0.85 : 0.75}>
+                <Pixels
+                  rects={CLOUD_RECTS[c.shape].filter((r) => r.y < CLOUD_BASE_Y[c.shape])}
+                  fill={look.cloud}
+                />
+                <Pixels
+                  rects={CLOUD_RECTS[c.shape].filter((r) => r.y >= CLOUD_BASE_Y[c.shape])}
+                  fill={look.cloudShade}
+                />
+              </g>
+            </g>
+          </g>
+        ))}
+      </g>
+
+      <g mask={maskUrl('sky-mask-y')} filter={grayFilter}>
+        {/* Rain, slanting a little with the wind */}
+        {weather.kind === 'rain' && DROPS.slice(0, Math.min(DROPS.length, fall)).map((d, i) => (
+          <rect
+            key={i}
+            x={Math.round(d.fx * w)} y={0} width={1} height={3.5}
+            className="clawd-drop" fill="#BFDBFE" opacity={0.75}
+            // Anti-aliased, so a drop keeps its size while it moves by sub-pixels
+            shapeRendering="geometricPrecision"
+            style={{
+              animationDuration: `${d.dur}s`,
+              animationDelay: `${d.delay}s`,
+              ['--clawd-y0' as string]: `${Math.round(d.fy * ground)}px`,
+              ['--clawd-fall' as string]: `${ground + 4}px`,
+            }}
+          />
+        ))}
+
+        {/* Snow falls slowly and sways */}
+        {weather.kind === 'snow' && FLAKES.slice(0, Math.min(FLAKES.length, fall)).map((f, i) => (
+          <g
+            key={i}
+            className="clawd-flake"
+            shapeRendering="geometricPrecision"
+            style={{
+              animationDuration: `${f.dur}s`,
+              animationDelay: `${f.delay}s`,
+              ['--clawd-y0' as string]: `${Math.round(f.fy * ground)}px`,
+              ['--clawd-fall' as string]: `${ground + 2}px`,
+            }}
+          >
+            <rect
+              x={Math.round(f.fx * w)} y={0} width={1.6} height={1.6}
+              fill="#F8FAFC" opacity={0.9}
+              className="clawd-flake-sway"
+              style={{ animationDuration: `${f.sway}s`, animationDelay: `${f.delay}s` }}
+            />
+          </g>
+        ))}
+
+        {/* A thunderstorm flashes now and then, sometimes twice in a row */}
+        {weather.storm && (
+          <rect x="0" y="0" width={w} height={h} fill="#F8FAFC" className="clawd-flash" />
+        )}
+      </g>
+
+      {/* Settled snow: a thin strip on the ground */}
+      {weather.kind === 'snow' && (
+        <rect
+          x={0} y={ground - 1.5} width={w} height={1.5} fill="#E2E8F0" opacity={0.6 + 0.3 * look.light}
+          mask={maskUrl('sky-mask-sides')} filter={grayFilter}
+        />
+      )}
+    </>
+  );
 
   return (
     <div
       ref={ref}
       className="pointer-events-none absolute"
-      style={{ left: -SKY_BLEED_X, right: -SKY_BLEED_X, top: -SKY_BLEED_TOP, bottom: 0 }}
+      style={{ left: -SKY_BLEED_X, right: -SKY_BLEED_X, top: -SKY_BLEED_TOP, bottom: -bleedBottom }}
     >
       {w > 0 && (
         <svg
@@ -184,19 +509,31 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
         >
           <defs>
             {/* Eased fades on every side, so the sky melts into the popover in either theme
-                instead of ending in an edge */}
-            <linearGradient id={id('sky-fade-x')} x1="0" x2="1" y1="0" y2="0">
-              {FADE_X.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
-            </linearGradient>
-            <linearGradient id={id('sky-fade-y')} x1="0" x2="0" y1="0" y2="1">
-              {FADE_Y.map(([o, a]) => <stop key={o} offset={o} stopColor="#fff" stopOpacity={a} />)}
-            </linearGradient>
-            <mask id={id('sky-mask-x')}>
-              <rect x="0" y="0" width={w} height={h} fill={`url(#${id('sky-fade-x')})`} />
-            </mask>
-            <mask id={id('sky-mask-y')}>
-              <rect x="0" y="0" width={w} height={h} fill={`url(#${id('sky-fade-y')})`} />
-            </mask>
+                instead of ending in an edge: the same soft edge on both sides, the sky's own fade
+                at the top and bottom, and a short one for the background and the clouds */}
+            {Object.entries(masks).map(([name, levels]) => (
+              <mask key={name} id={id(name)} maskUnits="userSpaceOnUse" x={0} y={0} width={w} height={h}>
+                {levels.map((level, i) => (
+                  <path key={i} d={level.d} fill="#fff" opacity={level.opacity} shapeRendering="geometricPrecision" />
+                ))}
+              </mask>
+            ))}
+            {gray && (
+              <filter id={id('gray-flat')} colorInterpolationFilters="sRGB">
+                <feColorMatrix type="saturate" values="0" />
+              </filter>
+            )}
+            {gray && (
+              <filter id={id('gray')} colorInterpolationFilters="sRGB">
+                <feColorMatrix type="saturate" values="0" />
+                {/* Half as bright again */}
+                <feComponentTransfer>
+                  <feFuncR type="linear" slope={1.5} />
+                  <feFuncG type="linear" slope={1.5} />
+                  <feFuncB type="linear" slope={1.5} />
+                </feComponentTransfer>
+              </filter>
+            )}
             {/* The sky's own colour for the time of day */}
             <linearGradient id={id('sky-tint')} x1="0" x2="0" y1="0" y2="1">
               <stop offset="0" stopColor={look.top} />
@@ -211,126 +548,7 @@ export function ClawdSky({ percent, pinned = null }: { percent: number | null; p
               <stop offset="1" stopColor={MOON_LIT} stopOpacity="0" />
             </radialGradient>
           </defs>
-          <g mask={`url(#${id('sky-mask-x')})`}>
-            <g mask={`url(#${id('sky-mask-y')})`}>
-              {/* Half strength over the white popover; stronger over the dark one, which would
-                  otherwise dull a day sky into dusk */}
-              <rect
-                x="0" y="0" width={w} height={h} fill={`url(#${id('sky-tint')})`}
-                className="[fill-opacity:0.5] dark:[fill-opacity:0.8]"
-              />
-
-              {/* Stars twinkle at night */}
-              {look.stars > 0 && (
-                <g opacity={look.stars}>
-                  {STARS.map((s, i) => (
-                    <rect
-                      key={i}
-                      x={Math.round(s.fx * (w - 2))} y={Math.round(2 + s.fy * h)}
-                      width={1.2} height={1.2} fill="#F8FAFC"
-                      className="clawd-star"
-                      style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
-                    />
-                  ))}
-                </g>
-              )}
-
-              {/* The moon in its real phase, from sunset to sunrise: pale gold where the sun
-                  lights it, the rest of the disc a dim slate. True circles, so it reads as a moon. */}
-              {look.moon && moonAt && (
-                <g opacity={look.moon.opacity} shapeRendering="geometricPrecision">
-                  <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R * 2.2} fill={`url(#${id('moon-glow')})`} />
-                  <circle cx={moonAt.cx} cy={moonAt.cy} r={BODY_R} fill="#64748B" opacity={0.45} />
-                  <path d={moonLitPath(now, moonAt.cx, moonAt.cy, BODY_R)} fill={MOON_LIT} />
-                </g>
-              )}
-
-              {/* The sun by day, yellow high up and orange near the horizon */}
-              {look.sun && sun && (
-                <g opacity={look.sun.opacity} shapeRendering="geometricPrecision">
-                  <circle cx={sun.cx} cy={sun.cy} r={BODY_R * 2.4} fill={`url(#${id('sun-glow')})`} />
-                  <circle cx={sun.cx} cy={sun.cy} r={BODY_R} fill={look.sun.color} />
-                </g>
-              )}
-
-              {/* Clouds drift past in front of the sun and the moon. Thick ones are solid and hide
-                  them; which ones are thick changes each time the sky opens. */}
-              {CLOUDS.slice(0, clouds).map((c, i) => (
-                <g
-                  key={i}
-                  className="motion-safe:[animation:clawd-cloud-drift_linear_infinite]"
-                  style={{
-                    animationDuration: `${c.dur}s`,
-                    animationDelay: `${c.delay}s`,
-                    ['--clawd-cloud-from' as string]: `${-CLOUD_W[c.shape]}px`,
-                    ['--clawd-cloud-to' as string]: `${w}px`,
-                  }}
-                >
-                  <g transform={`translate(0 ${Math.round(c.top * h)})`}>
-                    <g opacity={thick[i] ? 1 : weather.kind === 'fair' ? 0.85 : 0.75}>
-                      <Pixels
-                        rects={CLOUD_RECTS[c.shape].filter((r) => r.y < CLOUD_BASE_Y[c.shape])}
-                        fill={look.cloud}
-                      />
-                      <Pixels
-                        rects={CLOUD_RECTS[c.shape].filter((r) => r.y >= CLOUD_BASE_Y[c.shape])}
-                        fill={look.cloudShade}
-                      />
-                    </g>
-                  </g>
-                </g>
-              ))}
-
-              {/* Rain, slanting a little with the wind */}
-              {weather.kind === 'rain' && DROPS.slice(0, Math.min(DROPS.length, fall)).map((d, i) => (
-                <rect
-                  key={i}
-                  x={Math.round(d.fx * w)} y={0} width={1} height={3.5}
-                  className="clawd-drop" fill="#BFDBFE" opacity={0.75}
-                  // Anti-aliased, so a drop keeps its size while it moves by sub-pixels
-                  shapeRendering="geometricPrecision"
-                  style={{
-                    animationDuration: `${d.dur}s`,
-                    animationDelay: `${d.delay}s`,
-                    ['--clawd-y0' as string]: `${Math.round(d.fy * h)}px`,
-                    ['--clawd-fall' as string]: `${h + 4}px`,
-                  }}
-                />
-              ))}
-
-              {/* Snow falls slowly and sways */}
-              {weather.kind === 'snow' && FLAKES.slice(0, Math.min(FLAKES.length, fall)).map((f, i) => (
-                <g
-                  key={i}
-                  className="clawd-flake"
-                  shapeRendering="geometricPrecision"
-                  style={{
-                    animationDuration: `${f.dur}s`,
-                    animationDelay: `${f.delay}s`,
-                    ['--clawd-y0' as string]: `${Math.round(f.fy * h)}px`,
-                    ['--clawd-fall' as string]: `${h + 2}px`,
-                  }}
-                >
-                  <rect
-                    x={Math.round(f.fx * w)} y={0} width={1.6} height={1.6}
-                    fill="#F8FAFC" opacity={0.9}
-                    className="clawd-flake-sway"
-                    style={{ animationDuration: `${f.sway}s`, animationDelay: `${f.delay}s` }}
-                  />
-                </g>
-              ))}
-
-              {/* A thunderstorm flashes now and then, sometimes twice in a row */}
-              {weather.storm && (
-                <rect x="0" y="0" width={w} height={h} fill="#F8FAFC" className="clawd-flash" />
-              )}
-            </g>
-
-            {/* Settled snow: a thin strip on the ground, outside the bottom fade so it stays */}
-            {weather.kind === 'snow' && (
-              <rect x={0} y={h - 1.5} width={w} height={1.5} fill="#E2E8F0" opacity={0.6 + 0.3 * look.light} />
-            )}
-          </g>
+          {skyLayers}
         </svg>
       )}
     </div>

@@ -68,7 +68,7 @@ vi.mock('../../cli-tool-manager', () => ({
 }));
 vi.mock('../../agent', () => ({ AgentManager: class {} }));
 vi.mock('../../app-language', () => ({ setAppLanguage: vi.fn() }));
-vi.mock('../../app-updater', () => ({ setUpdateChannel: vi.fn(), setUpdateChannelWithDowngradeCheck: vi.fn(() => Promise.resolve()) }));
+vi.mock('../../app-updater', () => ({ setBetaUpdates: vi.fn() }));
 vi.mock('../../services/task-queue', () => ({ taskQueue: { request: vi.fn() } }));
 vi.mock('../../utils/git-exec', () => ({ git: vi.fn() }));
 

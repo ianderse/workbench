@@ -86,7 +86,7 @@ import type {
   AllProfilesUsage
 } from './agent';
 import type { AppSettings } from './settings';
-import type { AppUpdateCheckResult, AppUpdateInfo, AppUpdateProgress, AppUpdateAvailableEvent, AppUpdateDownloadedEvent, AppUpdateErrorEvent } from './app-update';
+import type { AppUpdateCheckResult, AppUpdateInfo, AppUpdateProgress, AppUpdateDownloadedEvent, AppUpdateErrorEvent } from './app-update';
 import type {
   InsightsSession,
   InsightsSessionSummary,
@@ -217,7 +217,6 @@ export interface ElectronAPI {
   resizeTerminal: (id: string, cols: number, rows: number) => Promise<IPCResult<{ success: boolean }>>;
   invokeCLIInTerminal: (id: string, cwd?: string) => void;
   resumeTaskSessionInTerminal: (id: string, options: TerminalTaskSessionOptions) => void;
-  generateTerminalName: (command: string, cwd?: string) => Promise<IPCResult<string>>;
   setTerminalTitle: (id: string, title: string) => void;
   setTerminalWorktreeConfig: (id: string, config: TerminalWorktreeConfig | undefined) => void;
 
@@ -287,7 +286,8 @@ export interface ElectronAPI {
   loginClaudeAccount: (profileId?: string) => Promise<IPCResult>;
   redetectClaudeAccounts: () => Promise<IPCResult<ClaudeProfileSettings>>;
   renameClaudeProfile: (profileId: string, newName: string) => Promise<IPCResult>;
-  setActiveClaudeProfile: (profileId: string) => Promise<IPCResult>;
+  /** Switch the Claude account; with `projectId`, saved as that project's account (the window's) */
+  setActiveClaudeProfile: (profileId: string, projectId?: string) => Promise<IPCResult>;
   /** Switch terminal to use a different Claude profile (restarts Claude with new config) */
   switchClaudeProfile: (terminalId: string, profileId: string) => Promise<IPCResult>;
   /** Initialize authentication for a Claude profile (legacy - uses hidden terminal) */
@@ -347,6 +347,7 @@ export interface ElectronAPI {
 
   getCliToolsInfo: () => Promise<IPCResult<{
     python: import('./cli').ToolDetectionResult;
+    node: import('./cli').ToolDetectionResult;
     git: import('./cli').ToolDetectionResult;
     gh: import('./cli').ToolDetectionResult;
     glab: import('./cli').ToolDetectionResult;
@@ -378,15 +379,13 @@ export interface ElectronAPI {
   downloadStableUpdate: () => Promise<IPCResult>;
   installAppUpdate: () => void;
   getDownloadedAppUpdate: () => Promise<IPCResult<AppUpdateInfo | null>>;
-  skipAppUpdate: (version: string) => Promise<IPCResult>;
-  snoozeAppUpdate: () => Promise<IPCResult>;
-  isAppUpdateSuppressed: (version: string) => Promise<IPCResult<boolean>>;
+  getLastAppUpdateCheck: () => Promise<IPCResult<AppUpdateCheckResult | null>>;
 
   setTitleBarColors: (colors: { color: string; symbolColor: string }) => void;
 
   // Electron app update event listeners
-  onAppUpdateAvailable: (
-    callback: (info: AppUpdateAvailableEvent) => void
+  onAppUpdateChecked: (
+    callback: (result: AppUpdateCheckResult) => void
   ) => () => void;
   onAppUpdateDownloaded: (
     callback: (info: AppUpdateDownloadedEvent) => void
@@ -394,9 +393,7 @@ export interface ElectronAPI {
   onAppUpdateProgress: (
     callback: (progress: AppUpdateProgress) => void
   ) => () => void;
-  onAppUpdateStableDowngrade: (
-    callback: (info: AppUpdateInfo) => void
-  ) => () => void;
+  onAppUpdateOpenSettings: (callback: () => void) => () => void;
   onAppUpdateReadOnlyVolume: (
     callback: (info: { appPath: string }) => void
   ) => () => void;
@@ -411,6 +408,9 @@ export interface ElectronAPI {
   // Insights operations
   getInsightsSession: (projectId: string) => Promise<IPCResult<InsightsSession | null>>;
   sendInsightsMessage: (projectId: string, message: string, modelConfig?: InsightsModelConfig, images?: ImageAttachment[]) => void;
+  stopInsightsMessage: (projectId: string) => Promise<boolean>;
+  regenerateInsightsMessage: (projectId: string, modelConfig?: InsightsModelConfig, sessionId?: string) => void;
+  editInsightsMessage: (projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig, sessionId?: string) => void;
   clearInsightsSession: (projectId: string) => Promise<IPCResult>;
   createTaskFromInsights: (
     projectId: string,
@@ -419,7 +419,7 @@ export interface ElectronAPI {
     metadata?: TaskMetadata
   ) => Promise<IPCResult<Task>>;
   listInsightsSessions: (projectId: string, includeArchived?: boolean) => Promise<IPCResult<InsightsSessionSummary[]>>;
-  newInsightsSession: (projectId: string) => Promise<IPCResult<InsightsSession>>;
+  newInsightsSession: (projectId: string) => Promise<IPCResult>;
   switchInsightsSession: (projectId: string, sessionId: string) => Promise<IPCResult<InsightsSession | null>>;
   deleteInsightsSession: (projectId: string, sessionId: string) => Promise<IPCResult>;
   deleteInsightsSessions: (projectId: string, sessionIds: string[]) => Promise<IPCResult<{ deletedIds: string[]; failedIds: string[] }>>;
@@ -525,6 +525,8 @@ export interface ElectronAPI {
   // MCP Server health check operations
   checkMcpHealth: (server: CustomMcpServer) => Promise<IPCResult<McpHealthCheckResult>>;
   testMcpConnection: (server: CustomMcpServer) => Promise<IPCResult<McpTestConnectionResult>>;
+  getMcpAvailability: (ids: string[]) => Promise<IPCResult<Record<string, import('./project').McpAvailability>>>;
+  onMcpAvailabilityChanged: (callback: (id: string, availability: import('./project').McpAvailability) => void) => () => void;
 
   // Project windows (one project per window)
   /** Project this window was opened for (null for the first window) */

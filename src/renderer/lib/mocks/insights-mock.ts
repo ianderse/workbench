@@ -21,27 +21,7 @@ export const insightsMock = {
     data: mockInsightsSessions
   }),
 
-  newInsightsSession: async (projectId: string) => {
-    const newSession = {
-      id: `session-${Date.now()}`,
-      projectId,
-      title: 'New conversation',
-      messageCount: 0,
-      createdAt: new Date(),
-      updatedAt: new Date()
-    };
-    mockInsightsSessions.unshift(newSession);
-    return {
-      success: true,
-      data: {
-        id: newSession.id,
-        projectId: newSession.projectId,
-        messages: [],
-        createdAt: newSession.createdAt,
-        updatedAt: newSession.updatedAt
-      }
-    };
-  },
+  newInsightsSession: async () => ({ success: true }),
 
   switchInsightsSession: async (_projectId: string, sessionId: string) => {
     const session = mockInsightsSessions.find(s => s.id === sessionId);
@@ -112,6 +92,12 @@ export const insightsMock = {
   sendInsightsMessage: () => {
     console.warn('[Browser Mock] sendInsightsMessage called');
   },
+
+  stopInsightsMessage: async () => false,
+
+  regenerateInsightsMessage: () => {},
+
+  editInsightsMessage: () => {},
 
   clearInsightsSession: async () => ({ success: true }),
 

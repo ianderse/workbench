@@ -12,16 +12,27 @@
  * Appended to a task run's system prompt and, flattened, to an agent window's
  * `--append-system-prompt`.
  *
- * Written without apostrophes on purpose: the agent-window flag is wrapped in shell single quotes,
- * and rewriting the text to escape them would change the instruction the model reads.
+ * Written without apostrophes or double quotes on purpose (example phrases are plain words): the
+ * agent-window flag is wrapped in single quotes in POSIX shells and in double quotes in cmd, and
+ * escaping them would change the instruction the model reads.
  */
 export const SELF_IMPROVE_NUDGE = `## Project memory
-This project keeps what you learn about it in its own memory directory, loaded into every later session.
+This project keeps what you learn about it in its own memory directory, loaded into every later session. Save a memory (\`type: feedback\`) when the user tells you how work in this project should be done beyond the current task. Save it when it comes up, without asking, and say in one short line that you saved it.
 
-- Save a memory (\`type: feedback\`) when this session surfaces a durable preference, rule or convention the user stated: something a later session would otherwise get wrong again. A correction the user has had to give more than once is the strongest signal.
-- Do not save what the code, tests, types or CLAUDE.md already make clear, and do not save detail that only matters for this task.
-- When a new preference contradicts an existing memory, the newer one wins: update that memory in place so only one remains. Never leave both.
-- Write it as a general instruction in the words the user used, never as a quote of the conversation, and never record secrets or credentials.`;
+How to recognize one:
+- Standing wording: always, never, from now on, going forward, every time, whenever, by default, as a rule, in general, in this project, make sure to, stop doing, do not ever, remember that, keep in mind, next time.
+- A stated preference or convention: I prefer, I like it when, I want, we use, we do not, our convention is, the rule here is, the way we do this is.
+- Repetition: a correction the user has given before in this project, or wording such as again, as I said, I already told you, how many times. This is the strongest signal.
+- Approval of a choice that was not obvious: yes exactly like that, perfect, keep doing it this way.
+- No signal words at all: ask whether a later session, working on a different task, would make the same mistake. If it would, save it.
+
+What not to save:
+- One-off instructions scoped to the current work: for this task, just this once, for now, this time, here, in this file, or anything that only concerns the change at hand.
+- What the code, tests, types or CLAUDE.md already make clear, and detail that only matters for this task.
+
+How to save it:
+- Check the existing memories first. When a new preference contradicts or refines one, the newer one wins: update that memory in place so only one remains. Never leave both.
+- Write it as a general instruction in the words the user used, never as a quote of the conversation, with the reason when the user gave one, and never record secrets or credentials.`;
 
 /** The same text on one line, for a flag that is written into a shell command */
 export const SELF_IMPROVE_NUDGE_ONE_LINE = SELF_IMPROVE_NUDGE.replace(/\s+/g, ' ').trim();

@@ -1,6 +1,7 @@
-import { Globe, Monitor, Search, Terminal } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { cn } from '../../lib/utils';
-import type { CustomMcpServer } from '../../../shared/types';
+import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+import { Tooltip, TooltipContent, TooltipTrigger } from '../ui/tooltip';
 
 /** Leading icon tile used by connector rows (claude.ai Connectors style) */
 function ConnectorIconTile({ icon: Icon }: { icon: React.ElementType }) {
@@ -33,20 +34,35 @@ export function ConnectorRow({ icon, name, description, children, disabled = fal
   );
 }
 
-/** Built-in connectors that can be switched on or off: icon and translation keys (settings ns) */
-export const BUILTIN_CONNECTOR_META: { id: 'context7' | 'electron' | 'puppeteer'; icon: React.ElementType; /** Off unless switched on (browser automation) */ defaultOff?: boolean }[] = [
-  { id: 'context7', icon: Search },
-  { id: 'electron', icon: Monitor, defaultOff: true },
-  { id: 'puppeteer', icon: Globe, defaultOff: true },
-];
-
-/** Icon for a custom server (command or HTTP) */
-export function customServerIcon(server: CustomMcpServer): React.ElementType {
-  return server.type === 'command' ? Terminal : Globe;
-}
-
-/** A custom server's own description, otherwise its command or URL */
-export function customServerSummary(server: CustomMcpServer): string {
-  return server.description?.trim()
-    || (server.type === 'command' ? `${server.command} ${server.args?.join(' ') || ''}`.trim() : server.url || '');
+/**
+ * A connector's switch; while it is disabled, hovering it shows why (`reason`, where the row
+ * doesn't say it already) and the command that makes it usable (the wrapper keeps the tooltip on
+ * the disabled switch)
+ */
+export function ConnectorSwitchTip({ reason, fixCommand, children }: {
+  reason?: string;
+  fixCommand?: string;
+  children: React.ReactNode;
+}) {
+  const { t } = useTranslation(['settings']);
+  if (!reason && !fixCommand) return <>{children}</>;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex">{children}</span>
+      </TooltipTrigger>
+      {/* Rendered at the top of the page, so the disabled row's fading doesn't show through */}
+      <TooltipPrimitive.Portal>
+        <TooltipContent className="max-w-xs">
+          {reason && <p>{reason}</p>}
+          {fixCommand && (
+            <>
+              <p className={cn(reason && 'mt-1.5')}>{t('settings:mcp.fixHint')}</p>
+              <code className="mt-1 block font-mono text-xs">{fixCommand}</code>
+            </>
+          )}
+        </TooltipContent>
+      </TooltipPrimitive.Portal>
+    </Tooltip>
+  );
 }

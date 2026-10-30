@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-**Workbench is a desktop app based on the Claude Code harness, built for proactive engineers.** It gives you a space to manage your project tasks and hand each one to an agent that works in its own git worktree, so your main branch stays untouched until you review and merge. Every task starts with a short triage run that efficiently picks the model and the thinking effort based on the task description, and decides whether the work needs planning, so a one-line fix doesn't burn an Opus run and a refactor across a dozen files doesn't get handed to Haiku. From there, the same session plans, implements, runs your project's checks, reviews its own diff with fresh eyes, and commits, while parallel tasks are told which files the other unmerged branches touch so they stay out of each other's way.
+**Workbench is a cross-platform desktop app based on Claude Code harness, built for proactive engineers.** It brings together what Claude Code and the tools around it already offer, sets each piece up for your project with a switch instead of a config file, and gives you a space to manage your project tasks and hand each one to an agent that works in its own git worktree, so your main branch stays untouched until you review and merge. Every task starts with a short triage run that efficiently picks the model and the thinking effort based on the task description, and decides whether the work needs planning, so a one-line fix doesn't burn an Opus run and a refactor across a dozen files doesn't get handed to Haiku. From there, the same session plans, implements, runs your project's checks, reviews its own diff with fresh eyes, and commits, while parallel tasks are told which files the other unmerged branches touch so they stay out of each other's way.
 
 <p align="center">
   <picture class="github-only">
@@ -16,7 +16,7 @@
   </picture>
 </p>
 
-Workbench also improves over time by learning and retaining preferences from your sessions, enabling a built-in compounding engineering workflow. You become the manager/architect of your project, setting the direction and priorities while the agents do the work. Nothing lands until you have reviewed it, and you always know what the result costs.
+Workbench also makes every session better than one you would start by hand. It improves over time by learning and retaining preferences from your sessions in Claude Code's own memory, enabling a built-in compounding engineering workflow, letting parallel tasks message each other while they run, and giving the agents a Graphify knowledge graph of your code, so they find what they need without reading file after file and spend less time doing it. You become the manager/architect of your project, setting the direction and priorities while the agents do the work. Nothing lands until you have reviewed it, and you always know what the result costs.
 
 <p align="center">
   <picture class="github-only">
@@ -38,7 +38,7 @@ Every creative builder has a graveyard of ideas. Each idea wants an evening you 
   </picture>
 </p>
 
-Most tools in this space write their own agent harness, and none of them outperforms the one you already have installed. You see it in the results: a loop that plans worse, retries more, and spends more than Claude Code does on the same task. So why build another harness when one already works? Workbench runs on Claude Code rather than competing with it, using the same CLI with your own accounts, subagents, skills, and MCP servers, and spending its own effort on everything around the session instead.
+Most tools in this space write their own agent harness, and none of them outperforms the one you already have installed. You see it in the results: a loop that plans worse, retries more, and spends more than Claude Code does on the same task. So why build another harness when one already works? Workbench runs on Claude Code rather than competing with it, using the same CLI with your own accounts, subagents, skills, and MCP servers, and spending its own effort on everything around the session instead: setting up the features that already exist but few projects take the time to configure, adding what is missing between them, and making each one a switch away, so the quality of the work goes up while its cost goes down.
 
 ## Contribute
 

@@ -1,4 +1,5 @@
 {
   "useClaudeMd": true,
-  "selfImprove": true
+  "selfImprove": true,
+  "claudeProfileId": "claude-code"
 }

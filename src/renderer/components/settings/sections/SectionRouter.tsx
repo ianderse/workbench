@@ -47,7 +47,7 @@ export function SectionRouter({
           {project.autoBuildPath && (
             <>
               <KnowledgeSettings projectId={project.id} settings={settings} setSettings={setSettings} />
-              <ProjectTaskSettings settings={settings} setSettings={setSettings} />
+              <ProjectTaskSettings projectId={project.id} settings={settings} setSettings={setSettings} />
               <BranchSettings
                 projectPath={project.path}
                 settings={settings}

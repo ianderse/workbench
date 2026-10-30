@@ -19,6 +19,11 @@ let stdin = '';
 process.stdin.on('data', (d) => (stdin += d));
 process.stdin.on('end', () => {
   const args = process.argv.slice(2);
+  fs.appendFileSync(process.env.FAKE_RECORD + '.runs', JSON.stringify(args) + '\\n');
+  if (process.env.FAKE_RESUME_FAILS && args.includes('--resume')) {
+    process.stderr.write('No conversation found with session ID: ' + args[args.indexOf('--resume') + 1]);
+    process.exit(1);
+  }
   const promptFile = args[args.indexOf('--append-system-prompt-file') + 1];
   fs.writeFileSync(process.env.FAKE_RECORD, JSON.stringify({
     args,
@@ -29,6 +34,7 @@ process.stdin.on('end', () => {
     graphifyOut: process.env.GRAPHIFY_OUT ?? null,
     mcpConfig: args.includes('--mcp-config') ? JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')) : null,
     mcpToolTimeout: process.env.MCP_TOOL_TIMEOUT ?? null,
+    mcpTimeout: process.env.MCP_TIMEOUT ?? null,
     bridgeSource: (() => {
       if (!args.includes('--mcp-config')) return null;
       const server = JSON.parse(fs.readFileSync(args[args.indexOf('--mcp-config') + 1], 'utf8')).mcpServers.workbench;
@@ -43,6 +49,8 @@ process.stdin.on('end', () => {
 );
 
 let cliFound = true;
+/** Version of the installed claude, as getToolInfoAsync reports it */
+let cliVersion: string | undefined = '2.1.312';
 
 vi.mock('child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('child_process')>();
@@ -54,7 +62,7 @@ vi.mock('child_process', async (importOriginal) => {
   };
 });
 vi.mock('../../cli-tool-manager', () => ({
-  getToolInfoAsync: async () => (cliFound ? { found: true, path: '/usr/bin/claude' } : { found: false, message: 'Claude CLI not found' }),
+  getToolInfoAsync: async () => (cliFound ? { found: true, path: '/usr/bin/claude', version: cliVersion } : { found: false, message: 'Claude CLI not found' }),
 }));
 vi.mock('../../claude-code/env', () => ({
   resolveClaudeEnv: async () => ({
@@ -74,7 +82,7 @@ vi.mock('../../env-utils', () => ({
  * CLI itself still runs natively: spawning stays native (isWslRuntime false)
  */
 const wslRef = vi.hoisted(() => ({
-  info: null as null | { distro: string; networkingMode: string | null; interop?: boolean; tools: { claude: { path: string | null } } },
+  info: null as null | { distro: string; networkingMode: string | null; interop?: boolean; tools: { claude: { path: string | null; version?: string | null } } },
   version: 2,
 }));
 vi.mock('../../platform/shell-runtime', () => ({
@@ -89,9 +97,14 @@ vi.mock('../../platform/shell-runtime', () => ({
 import {
   runInsights,
   INSIGHTS_READ_ONLY_TOOLS,
+  INSIGHTS_WEB_TOOLS,
   INSIGHTS_GRAPHIFY_COMMANDS,
   INSIGHTS_TASK_TOOLS_RULE,
+  INSIGHTS_GITHUB_RULES,
+  INSIGHTS_MEMORY_RULE,
+  INSIGHTS_GITLAB_RULES,
   resetTaskToolsBridgeForTests,
+  supportsSystemPromptSnapshot,
   toClaudeModel,
   type InsightsStreamEvent,
 } from '../claude-code-runner';
@@ -118,6 +131,8 @@ const conversation = [
 ];
 
 function setRun(events: unknown[], exitCode = 0, stderr = '') {
+  rmSync(`${recordFile}.runs`, { force: true });
+  delete process.env.FAKE_RESUME_FAILS;
   process.env.FAKE_EVENTS = JSON.stringify(events);
   process.env.FAKE_EXIT = String(exitCode);
   process.env.FAKE_STDERR = stderr;
@@ -125,6 +140,8 @@ function setRun(events: unknown[], exitCode = 0, stderr = '') {
 }
 
 const record = () => JSON.parse(readFileSync(recordFile, 'utf8'));
+/** The arguments of every run of the turn, in order */
+const runs = (): string[][] => readFileSync(`${recordFile}.runs`, 'utf8').trim().split('\n').map((line) => JSON.parse(line));
 
 async function run(overrides: Record<string, unknown> = {}) {
   const events: InsightsStreamEvent[] = [];
@@ -138,6 +155,7 @@ async function run(overrides: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   cliFound = true;
+  cliVersion = '2.1.312';
   wslRef.info = null;
   wslRef.version = 2;
   resetTaskToolsBridgeForTests();
@@ -168,13 +186,15 @@ describe('runInsights', () => {
     const { args, configDir, apiKey, systemPrompt } = record();
 
     expect(args).toEqual(expect.arrayContaining(['-p', '--input-format', 'stream-json', '--output-format', 'stream-json']));
-    expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
+    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS].join(','));
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
     expect(args[args.indexOf('--model') + 1]).toBe('claude-sonnet-4-6');
     expect(args[args.indexOf('--effort') + 1]).toBe('high');
     expect(args).toContain('--strict-mcp-config');
-    expect(args).toContain('--no-session-persistence');
-    expect(systemPrompt).toContain('helping developers understand');
+    // A new session (no session given): a fresh id, the conversation folded into the prompt
+    expect(args[args.indexOf('--session-id') + 1]).toMatch(/^[0-9a-f-]{36}$/);
+    expect(args).not.toContain('--resume');
+    expect(systemPrompt).toContain('You are the Claude page of Workbench');
     expect(configDir).toBe('/profiles/main');
     expect(apiKey).toBeNull();
   });
@@ -191,7 +211,7 @@ describe('runInsights', () => {
     })).promise;
     const { args, systemPrompt, graphifyOut } = record();
 
-    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, 'Bash'].join(','));
+    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS, 'Bash'].join(','));
     const allowed = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--allowedTools') + 1 + INSIGHTS_GRAPHIFY_COMMANDS.length);
     expect(allowed).toEqual([...INSIGHTS_GRAPHIFY_COMMANDS]);
     expect(args[args.indexOf('--permission-mode') + 1]).toBe('dontAsk');
@@ -225,17 +245,198 @@ describe('runInsights', () => {
     expect(args.join(' ')).not.toContain('secret');
     expect(args).toContain('--strict-mcp-config');
     expect(args.slice(args.indexOf('--allowedTools') + 1)).toContain(INSIGHTS_TASK_TOOLS_RULE);
-    expect(args[args.indexOf('--tools') + 1]).toBe(INSIGHTS_READ_ONLY_TOOLS.join(','));
+    expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS].join(','));
     expect(Number(mcpToolTimeout)).toBeGreaterThan(10 * 60 * 1000);
     expect(systemPrompt).toContain('mcp__workbench__');
     expect(systemPrompt).toContain('__TASK_SUGGESTION__');
+  });
+
+  it("gives the CLI the chat's MCP servers next to the task tools", async () => {
+    setRun(conversation);
+    const taskTools = { type: 'http' as const, url: 'http://127.0.0.1:4567/mcp' };
+    const context7 = { type: 'stdio' as const, command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'] };
+    await (await run({ taskTools, mcpServers: { context7, workbench: context7 } })).promise;
+    const { args, mcpConfig } = record();
+
+    // A chat server can't replace the task tools
+    expect(mcpConfig).toEqual({ mcpServers: { context7, workbench: taskTools } });
+    const allowed = args.slice(args.indexOf('--allowedTools') + 1);
+    expect(allowed).toContain('mcp__context7');
+    expect(allowed).toContain(INSIGHTS_TASK_TOOLS_RULE);
+  });
+
+  it("gives the CLI the chat's MCP servers without the task tools", async () => {
+    setRun(conversation);
+    const context7 = { type: 'stdio' as const, command: 'npx', args: ['-y', '@upstash/context7-mcp@latest'] };
+    await (await run({ mcpServers: { context7 } })).promise;
+    const { args, mcpConfig, mcpToolTimeout, mcpTimeout } = record();
+
+    expect(mcpConfig).toEqual({ mcpServers: { context7 } });
+    // Time for the server's first start, when npx downloads it
+    expect(Number(mcpTimeout)).toBeGreaterThan(60 * 1000);
+    expect(args).toContain('mcp__context7');
+    expect(args).not.toContain(INSIGHTS_TASK_TOOLS_RULE);
+    expect(mcpToolTimeout).toBeNull();
+  });
+
+  it("lets Claude use gh's and glab's read-only commands, and no other command, when their buttons are on", async () => {
+    setRun(conversation);
+    await (await run({ cliTools: { github: true, gitlab: true } })).promise;
+    const { args, systemPrompt } = record();
+
+    expect(args[args.indexOf('--tools') + 1]).toContain('Bash');
+    const allowed: string[] = args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--permission-mode'));
+    expect(allowed).toEqual(expect.arrayContaining([...INSIGHTS_GITHUB_RULES, ...INSIGHTS_GITLAB_RULES]));
+    expect(allowed).toContain('Bash(gh pr view:*)');
+    expect(allowed).toContain('Bash(glab mr view:*)');
+    // No wildcard over the whole CLI, nor commands that change files, git state or the remote
+    expect(allowed).not.toContain('Bash(gh:*)');
+    expect(allowed).not.toContain('Bash(glab:*)');
+    const bashRules = allowed.filter((rule) => rule.startsWith('Bash('));
+    for (const command of ['gh pr checkout', 'gh repo sync', 'gh run download', 'gh release download', 'gh api', 'gh alias', 'gh extension', 'gh pr create', 'gh pr merge', 'gh issue comment', 'glab mr checkout', 'glab api', 'glab ci status', 'glab ci view', 'glab mr merge']) {
+      expect(bashRules.some((rule) => command.startsWith(rule.slice('Bash('.length, -':*)'.length)))).toBe(false);
+    }
+    expect(allowed.some((rule) => rule.startsWith('Bash(graphify'))).toBe(false);
+    expect(systemPrompt).toContain('GitHub CLI (`gh`)');
+    expect(systemPrompt).toContain('GitLab CLI (`glab`)');
+    expect(systemPrompt).toContain('`gh pr view`');
+    expect(systemPrompt).toContain('`glab mr view`');
+  });
+
+  it('offers only gh with just the GitHub button on', async () => {
+    setRun(conversation);
+    await (await run({ cliTools: { github: true } })).promise;
+    const { args, systemPrompt } = record();
+
+    expect(args).toEqual(expect.arrayContaining(INSIGHTS_GITHUB_RULES));
+    for (const rule of INSIGHTS_GITLAB_RULES) expect(args).not.toContain(rule);
+    expect(systemPrompt).not.toContain('glab');
+  });
+
+  it('lets Claude write only its project memory when self-improve is on', async () => {
+    setRun(conversation);
+    await (await run({ memory: true })).promise;
+    const { args, systemPrompt } = record();
+    const tools = args[args.indexOf('--tools') + 1].split(',');
+    expect(tools).toEqual(expect.arrayContaining(['Write', 'Edit']));
+    expect(args.slice(args.indexOf('--allowedTools') + 1)).toContain(INSIGHTS_MEMORY_RULE);
+    expect(INSIGHTS_MEMORY_RULE).toBe('Edit(.workbench/compeng/**)');
+    expect(systemPrompt).toContain('## Project memory');
+  });
+
+  it('takes suggestion lines out of the reply and returns each one', async () => {
+    setRun([
+      conversation[0],
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'Two ideas.\n__TASK_SUGGESTION__:{"title": "A", "description": "Do A"}\n__TASK_SUGGESTION__:{"title": "B", "description": "Do B"}' } } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'x' },
+    ]);
+    const result = await (await run()).promise;
+    expect(result.text).toBe('Two ideas.');
+    expect(result.taskSuggestions).toEqual([{ title: 'A', description: 'Do A' }, { title: 'B', description: 'Do B' }]);
+  });
+
+  describe('Claude Code sessions', () => {
+    const withIds = [
+      { type: 'system', subtype: 'init', session_id: 'sess-1', tools: [] },
+      { type: 'assistant', uuid: 'msg-a', session_id: 'sess-1', message: { content: [] } },
+      blockStart(0, { type: 'text', text: '' }),
+      delta(0, { type: 'text_delta', text: 'Done.' }),
+      blockStop(0),
+      { type: 'assistant', uuid: 'msg-b', session_id: 'sess-1', message: { content: [] } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'Done.', session_id: 'sess-1' },
+    ];
+    const history = [{ role: 'user' as const, content: 'Earlier question' }, { role: 'assistant' as const, content: 'Earlier answer' }];
+
+    it('starts a named session with the conversation folded in, and says where the reply ends', async () => {
+      setRun(withIds);
+      const result = await (await run({ history, title: 'Auth' })).promise;
+      const { args, stdin } = record();
+      expect(args[args.indexOf('--name') + 1]).toBe('Workbench chat: Auth');
+      expect(stdin).toContain('Earlier answer');
+      expect(result.claudeRef).toEqual({ sessionId: 'sess-1', messageUuid: 'msg-b', profileId: 'main' });
+    });
+
+    it('resumes the session with the new message only', async () => {
+      setRun(withIds);
+      await (await run({ history, session: { mode: 'resume', sessionId: 'sess-1', profileId: 'main' } })).promise;
+      const { args, stdin } = record();
+      expect(args[args.indexOf('--resume') + 1]).toBe('sess-1');
+      expect(args).not.toContain('--fork-session');
+      expect(args).not.toContain('--session-id');
+      expect(stdin).not.toContain('Earlier answer');
+      expect(stdin).toContain('How does auth work?');
+    });
+
+    it('forks the session at an earlier reply, leaving the original as it was', async () => {
+      setRun(withIds);
+      await (await run({ history, session: { mode: 'fork', sessionId: 'sess-1', atMessageUuid: 'msg-a', profileId: 'main' } })).promise;
+      const { args, stdin } = record();
+      expect(args.slice(args.indexOf('--resume'), args.indexOf('--resume') + 5)).toEqual([
+        '--resume', 'sess-1', '--resume-session-at', 'msg-a', '--fork-session',
+      ]);
+      expect(stdin).not.toContain('Earlier answer');
+    });
+
+    it("gives a resumed session only this turn's tools and MCP servers", async () => {
+      setRun(withIds);
+      await (await run({ session: { mode: 'resume', sessionId: 'sess-1', profileId: 'main' } })).promise;
+      const { args, mcpConfig } = record();
+      expect(args[args.indexOf('--tools') + 1]).toBe([...INSIGHTS_READ_ONLY_TOOLS, ...INSIGHTS_WEB_TOOLS].join(','));
+      expect(args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--permission-mode'))).toEqual([...INSIGHTS_WEB_TOOLS]);
+      expect(args).toContain('--strict-mcp-config');
+      expect(mcpConfig).toBeNull();
+    });
+
+    it('starts a new session when the session belongs to another account', async () => {
+      setRun(withIds);
+      await (await run({ history, session: { mode: 'resume', sessionId: 'sess-1', profileId: 'other' } })).promise;
+      const { args, stdin } = record();
+      expect(args).not.toContain('--resume');
+      expect(stdin).toContain('Earlier answer');
+    });
+
+    it('sends the turn\'s own system prompt to new, resumed and forked sessions, not a recorded one', async () => {
+      const sessions = [
+        { mode: 'new' },
+        { mode: 'resume', sessionId: 'sess-1', profileId: 'main' },
+        { mode: 'fork', sessionId: 'sess-1', atMessageUuid: 'msg-a', profileId: 'main' },
+      ];
+      for (const session of sessions) {
+        setRun(withIds);
+        await (await run({ session })).promise;
+        const { args } = record();
+        expect(args[args.indexOf('--system-prompt-snapshot') + 1]).toBe('off');
+        expect(args).toContain('--append-system-prompt-file');
+      }
+    });
+
+    it('leaves --system-prompt-snapshot out for Claude Code versions without it', async () => {
+      for (const version of ['2.1.266', undefined]) {
+        cliVersion = version;
+        setRun(withIds);
+        await (await run({ session: { mode: 'resume', sessionId: 'sess-1', profileId: 'main' } })).promise;
+        expect(record().args).not.toContain('--system-prompt-snapshot');
+      }
+    });
+
+    it('starts a new session when the session can no longer be resumed', async () => {
+      setRun(withIds);
+      process.env.FAKE_RESUME_FAILS = '1';
+      const result = await (await run({ history, session: { mode: 'resume', sessionId: 'gone', profileId: 'main' } })).promise;
+      const [first, second] = runs();
+      expect(first).toContain('--resume');
+      expect(second).not.toContain('--resume');
+      expect(second).toContain('--session-id');
+      expect(record().stdin).toContain('Earlier answer');
+      expect(result.text).toBe('Done.');
+    });
   });
 
   it('keeps Bash out without a memory graph', async () => {
     setRun(conversation);
     await (await run()).promise;
     const { args, graphifyOut } = record();
-    expect(args).not.toContain('--allowedTools');
+    expect(args.slice(args.indexOf('--allowedTools') + 1, args.indexOf('--permission-mode'))).toEqual([...INSIGHTS_WEB_TOOLS]);
     expect(args[args.indexOf('--tools') + 1]).not.toContain('Bash');
     expect(graphifyOut).toBeNull();
   });
@@ -342,6 +543,19 @@ describe('runInsights', () => {
       expect(record().mcpConfig).toEqual({ mcpServers: { 'workbench': mcpServer } });
     });
 
+    it("checks the distribution's claude version for --system-prompt-snapshot", async () => {
+      wslRef.info = { distro: 'Ubuntu', networkingMode: 'mirrored', tools: { claude: { path: '/home/me/.local/bin/claude', version: '2.1.267' } } };
+      cliVersion = undefined;
+      setRun(conversation);
+      await (await run()).promise;
+      expect(record().args).toContain('--system-prompt-snapshot');
+
+      wslRef.info.tools.claude.version = '2.0.0';
+      setRun(conversation);
+      await (await run()).promise;
+      expect(record().args).not.toContain('--system-prompt-snapshot');
+    });
+
     it('keeps the task tools with mirrored networking', async () => {
       wslRef.info = { distro: 'Ubuntu', networkingMode: 'mirrored', tools: { claude: { path: '/home/me/.local/bin/claude' } } };
       setRun(conversation);
@@ -355,6 +569,18 @@ describe('runInsights', () => {
       const error = await promise.catch((e: Error) => e);
       expect(parseInsightsError((error as Error).message).code).toBe(INSIGHTS_ERROR_CODES.claudeCodeMissing);
     });
+  });
+});
+
+describe('supportsSystemPromptSnapshot', () => {
+  it('is true from Claude Code 2.1.267, whatever the version text around the number', () => {
+    expect(supportsSystemPromptSnapshot('2.1.267')).toBe(true);
+    expect(supportsSystemPromptSnapshot('2.1.312 (Claude Code)')).toBe(true);
+    expect(supportsSystemPromptSnapshot('2.2.0')).toBe(true);
+    expect(supportsSystemPromptSnapshot('2.1.266')).toBe(false);
+    expect(supportsSystemPromptSnapshot('1.0.128')).toBe(false);
+    expect(supportsSystemPromptSnapshot(undefined)).toBe(false);
+    expect(supportsSystemPromptSnapshot('unknown')).toBe(false);
   });
 });
 

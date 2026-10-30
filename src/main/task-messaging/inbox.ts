@@ -12,7 +12,6 @@ export const TASK_INBOX_FILE = 'task_inbox.json';
 const KEEP_READ = 100;
 
 interface InboxFile {
-  version: 1;
   messages: TaskMessage[];
 }
 
@@ -71,7 +70,7 @@ export function updateInbox(specDir: string, mutate: (messages: TaskMessage[]) =
     const updated = prune(mutate(messages) ?? messages);
     await mkdir(specDir, { recursive: true });
     const tmp = `${file}.${process.pid}.tmp`;
-    await writeFile(tmp, JSON.stringify({ version: 1, messages: updated } satisfies InboxFile, null, 2), 'utf-8');
+    await writeFile(tmp, JSON.stringify({ messages: updated } satisfies InboxFile, null, 2), 'utf-8');
     await rename(tmp, file);
     return updated;
   });

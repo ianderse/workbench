@@ -30,11 +30,6 @@ export const terminalMock = {
     console.warn('[Browser Mock] resumeTaskSessionInTerminal called');
   },
 
-  generateTerminalName: async () => ({
-    success: true,
-    data: 'Mock Terminal'
-  }),
-
   setTerminalTitle: () => {
     console.warn('[Browser Mock] setTerminalTitle called');
   },
