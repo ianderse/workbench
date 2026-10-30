@@ -53,6 +53,8 @@ vi.mock('../claude-profile-manager', () => ({
   initializeClaudeProfileManager: vi.fn(),
 }));
 
+vi.mock('../project-account', () => ({ projectAccount: vi.fn() }));
+
 vi.mock('../claude-profile/credential-utils', () => ({
   getFullCredentialsFromKeychain: vi.fn(),
   clearKeychainCache: vi.fn(),

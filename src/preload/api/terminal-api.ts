@@ -87,7 +87,8 @@ export interface TerminalAPI {
   loginClaudeAccount: (profileId?: string) => Promise<IPCResult>;
   redetectClaudeAccounts: () => Promise<IPCResult<ClaudeProfileSettings>>;
   renameClaudeProfile: (profileId: string, newName: string) => Promise<IPCResult>;
-  setActiveClaudeProfile: (profileId: string) => Promise<IPCResult>;
+  /** Switch the Claude account; with `projectId`, saved as that project's account (the window's) */
+  setActiveClaudeProfile: (profileId: string, projectId?: string) => Promise<IPCResult>;
   switchClaudeProfile: (terminalId: string, profileId: string) => Promise<IPCResult>;
   initializeClaudeProfile: (profileId: string) => Promise<IPCResult>;
   setClaudeProfileToken: (profileId: string, token: string, email?: string) => Promise<IPCResult>;
@@ -363,8 +364,8 @@ export const createTerminalAPI = (): TerminalAPI => ({
   renameClaudeProfile: (profileId: string, newName: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_RENAME, profileId, newName),
 
-  setActiveClaudeProfile: (profileId: string): Promise<IPCResult> =>
-    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_SET_ACTIVE, profileId),
+  setActiveClaudeProfile: (profileId: string, projectId?: string): Promise<IPCResult> =>
+    ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_SET_ACTIVE, profileId, projectId),
 
   switchClaudeProfile: (terminalId: string, profileId: string): Promise<IPCResult> =>
     ipcRenderer.invoke(IPC_CHANNELS.CLAUDE_PROFILE_SWITCH, terminalId, profileId),

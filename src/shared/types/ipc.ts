@@ -286,7 +286,8 @@ export interface ElectronAPI {
   loginClaudeAccount: (profileId?: string) => Promise<IPCResult>;
   redetectClaudeAccounts: () => Promise<IPCResult<ClaudeProfileSettings>>;
   renameClaudeProfile: (profileId: string, newName: string) => Promise<IPCResult>;
-  setActiveClaudeProfile: (profileId: string) => Promise<IPCResult>;
+  /** Switch the Claude account; with `projectId`, saved as that project's account (the window's) */
+  setActiveClaudeProfile: (profileId: string, projectId?: string) => Promise<IPCResult>;
   /** Switch terminal to use a different Claude profile (restarts Claude with new config) */
   switchClaudeProfile: (terminalId: string, profileId: string) => Promise<IPCResult>;
   /** Initialize authentication for a Claude profile (legacy - uses hidden terminal) */

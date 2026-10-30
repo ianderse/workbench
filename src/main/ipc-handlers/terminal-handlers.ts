@@ -8,6 +8,7 @@ import { getUsageMonitor } from '../claude-profile/usage-monitor';
 import { TerminalManager } from '../terminal-manager';
 import type { AgentManager } from '../agent/agent-manager';
 import { projectStore } from '../project-store';
+import { keepOpenProjectsOnAccount, projectAccount } from '../project-account';
 import { readSettingsFileAsync } from '../settings-utils';
 import { appLog } from '../app-logger';
 import { createProfileDirectory } from '../claude-profile/profile-utils';
@@ -334,31 +335,49 @@ export function registerTerminalHandlers(
     }
   );
 
+  // Switch the Claude account in a window: saved as the window's project's account (`projectId`)
+  // and made the account in use, which projects without an account of their own run on
   ipcMain.handle(
     IPC_CHANNELS.CLAUDE_PROFILE_SET_ACTIVE,
-    async (_, profileId: string): Promise<IPCResult> => {
+    async (_, profileId: string, projectId?: string): Promise<IPCResult> => {
       try {
         const profileManager = getClaudeProfileManager();
-        const previousProfile = profileManager.getActiveProfile();
-        const previousProfileId = previousProfile.id;
-
-        const success = profileManager.setActiveProfile(profileId);
-
-        if (!success) {
+        const newProfile = profileManager.getProfile(profileId);
+        if (!newProfile) {
           return { success: false, error: 'Profile not found' };
         }
 
-        const newProfile = profileManager.getProfile(profileId);
+        const previousProfileId = profileManager.getActiveProfile().id;
+        const project = projectId ? projectStore.getProject(projectId) : undefined;
+        // The account the project's agent windows were started on
+        const previousProjectProfileId = project
+          ? projectAccount(profileManager, project.path)?.id ?? previousProfileId
+          : previousProfileId;
 
-        // Agent windows running Claude Code continue their own session on the new account, in
-        // place: same shell, id and place in the grid. Plain terminals are left as they are. Each
-        // window ends Claude Code first (up to a few seconds), so this runs after the reply
-        if (previousProfileId !== profileId) {
-          for (const terminal of terminalManager.getTerminalsForProfileChange()) {
-            terminalManager.moveAgentWindowToAccount(terminal.id, profileId, newProfile?.configDir).catch((error) => {
-              appLog.warn('[terminal-handlers] Could not move an agent window to the new account:', error);
-            });
-          }
+        if (project) {
+          // Projects shown in other windows keep their account, then this one saves its own
+          const kept = keepOpenProjectsOnAccount(profileManager, previousProfileId, project.id);
+          projectStore.updateProjectSettings(project.id, { claudeProfileId: profileId });
+          // The other windows read their project's account again
+          if (kept) safeSendToRenderer(getMainWindow, IPC_CHANNELS.PROJECT_LIST_CHANGED);
+        }
+
+        profileManager.setActiveProfile(profileId);
+
+        // The project's agent windows running Claude Code continue their own session on the new
+        // account, in place: same shell, id and place in the grid (without a project, the windows
+        // of projects that have no account of their own). Other projects' windows and plain
+        // terminals are left as they are. Each window ends Claude Code first (up to a few
+        // seconds), so this runs after the reply
+        for (const terminal of terminalManager.getTerminalsForProfileChange()) {
+          const follows = project
+            ? terminal.projectPath === project.path
+            : !projectAccount(profileManager, terminal.projectPath);
+          if (!follows) continue;
+          if ((terminal.claudeProfileId ?? previousProjectProfileId) === profileId) continue;
+          terminalManager.moveAgentWindowToAccount(terminal.id, profileId, newProfile.configDir).catch((error) => {
+            appLog.warn('[terminal-handlers] Could not move an agent window to the new account:', error);
+          });
         }
 
         return { success: true };

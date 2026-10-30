@@ -49,6 +49,7 @@ import type { ClaudeSessionItem } from '../../shared/types';
 import { findSessionTranscript, latestTranscript } from '../claude-code/session-spending';
 import { claudeConfigDirs } from '../claude-profile/profile-config-dirs';
 import { appLog } from '../app-logger';
+import { projectAccount } from '../project-account';
 import { claudeThemeFlag } from '../claude-cli-theme';
 
 // ============================================================================
@@ -1663,9 +1664,12 @@ export function invokeClaude(
     const projectPath = cwd || terminal.projectPath || terminal.cwd;
 
     const profileManager = getClaudeProfileManager();
+    // The given account, else the window's project's own, else the account in use (which the
+    // window's environment carries)
+    const projectProfile = profileId ? undefined : projectAccount(profileManager, terminal.projectPath);
     const activeProfile = profileId
       ? profileManager.getProfile(profileId)
-      : profileManager.getActiveProfile();
+      : projectProfile ?? profileManager.getActiveProfile();
 
     terminal.claudeProfileId = activeProfile?.id;
     trackAgentWindowSession(terminal, newSessionId, activeProfile?.configDir, cwd);
@@ -1681,7 +1685,8 @@ export function invokeClaude(
     const cwdCommand = buildCdCommand(windowPath(terminal, cwd), shellKindOf(terminal));
     const { command: claudeCmd, env: claudeEnv } = getClaudeCliInvocation();
     const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
-    const needsEnvOverride: boolean = !!(profileId && profileId !== previousProfileId);
+    // The project's account is named on the command: the window's environment may carry another
+    const needsEnvOverride: boolean = !!(profileId && profileId !== previousProfileId) || !!projectProfile;
 
     debugLog('[ClaudeIntegration:invokeClaude] Environment override check:', {
       profileIdProvided: !!profileId,
@@ -1858,9 +1863,12 @@ export async function invokeCLIAsync(
 
     // Ensure profile manager is initialized (async, yields to event loop)
     const profileManager = await initializeClaudeProfileManager();
+    // The given account, else the window's project's own, else the account in use (which the
+    // window's environment carries)
+    const projectProfile = profileId ? undefined : projectAccount(profileManager, terminal.projectPath);
     const activeProfile = profileId
       ? profileManager.getProfile(profileId)
-      : profileManager.getActiveProfile();
+      : projectProfile ?? profileManager.getActiveProfile();
 
     terminal.claudeProfileId = activeProfile?.id;
     if (newSessionId) trackAgentWindowSession(terminal, newSessionId, activeProfile?.configDir, cwd);
@@ -1888,7 +1896,8 @@ export async function invokeCLIAsync(
       });
 
     const { escapedClaudeCmd, pathPrefix } = windowClaudeCommand(terminal, claudeCmd, claudeEnv);
-    const needsEnvOverride: boolean = !!(profileId && profileId !== previousProfileId);
+    // The project's account is named on the command: the window's environment may carry another
+    const needsEnvOverride: boolean = !!(profileId && profileId !== previousProfileId) || !!projectProfile;
 
     debugLog('[ClaudeIntegration:invokeCLIAsync] Environment override check:', {
       profileIdProvided: !!profileId,
@@ -2084,13 +2093,16 @@ async function prepareResumeCommand(terminal: TerminalProcess): Promise<string> 
 
 /**
  * The account an agent window's sessions are listed and opened under: its own session's account,
- * else the account in use (undefined is Claude Code's default `~/.claude`)
+ * else its project's account, else the account in use (undefined is Claude Code's default `~/.claude`)
  */
 async function windowSessionAccount(
   terminal: Pick<TerminalProcess, 'id' | 'projectPath'>
 ): Promise<{ own: Awaited<ReturnType<typeof lastAgentSession>>; configDir: string | undefined }> {
   const own = terminal.projectPath ? await lastAgentSession(terminal.projectPath, terminal.id) : undefined;
-  const configDir = own ? own.configDir : getClaudeProfileManager().getActiveProfile()?.configDir;
+  const profileManager = getClaudeProfileManager();
+  const configDir = own
+    ? own.configDir
+    : (projectAccount(profileManager, terminal.projectPath) ?? profileManager.getActiveProfile())?.configDir;
   return { own, configDir };
 }
 

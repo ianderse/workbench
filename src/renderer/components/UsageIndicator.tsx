@@ -17,16 +17,34 @@ import {
   PopoverTrigger,
 } from './ui/popover';
 import { useTranslation } from 'react-i18next';
-import type { ClaudeUsageSnapshot } from '../../shared/types/agent';
+import type { ClaudeUsageSnapshot, ProfileUsageSummary } from '../../shared/types/agent';
 import type { AppSection } from './settings/AppSettings';
 import { useSettingsStore } from '../stores/settings-store';
 import { cn } from '../lib/utils';
 import { UsageBreakdown } from './usage/UsageBreakdown';
 import { ApiProfileUsageCard, ReauthRequiredCard, UsageUnavailableCard } from './usage/UsageStateCards';
 import { useUsageStore } from '../stores/usage-store';
+import { useClaudeProfileStore } from '../stores/claude-profile-store';
+import { useWindowClaudeAccountId } from '../hooks/useWindowClaudeAccount';
 import {
   THRESHOLD_ELEVATED, THRESHOLD_WARNING, getBadgeColorClasses, getColorClass,
 } from './usage/usage-colors';
+
+/** An account's usage summary as a snapshot, once its usage was fetched (null before) */
+function summaryUsage(summary: ProfileUsageSummary): ClaudeUsageSnapshot | null {
+  if (!summary.lastFetchedAt || summary.fetchError || !summary.isAuthenticated) return null;
+  return {
+    sessionPercent: summary.sessionPercent,
+    weeklyPercent: summary.weeklyPercent,
+    sessionResetTimestamp: summary.sessionResetTimestamp,
+    weeklyResetTimestamp: summary.weeklyResetTimestamp,
+    profileId: summary.profileId,
+    profileName: summary.profileName,
+    profileEmail: summary.profileEmail,
+    fetchedAt: new Date(summary.lastFetchedAt),
+    needsReauthentication: summary.needsReauthentication,
+  };
+}
 
 /** How long the badge waits for a newly selected account's usage before showing it as unavailable */
 export const USAGE_LOADING_TIMEOUT_MS = 20_000;
@@ -34,12 +52,14 @@ export const USAGE_LOADING_TIMEOUT_MS = 20_000;
 export function UsageIndicator() {
   const { t } = useTranslation(['common']);
   // Starts from the last snapshot, so mounting again (the sidebar opening) never blanks the store
-  const [usage, setUsage] = useState<ClaudeUsageSnapshot | null>(() => useUsageStore.getState().usage);
+  const [rawUsage, setUsage] = useState<ClaudeUsageSnapshot | null>(() => useUsageStore.getState().usage);
   // Shared, so the usage simulator's preview in Settings shows the same numbers without asking again
-  useEffect(() => { useUsageStore.getState().setUsage(usage); }, [usage]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isAvailable, setIsAvailable] = useState(false);
-  const [activeProfileNeedsReauth, setActiveProfileNeedsReauth] = useState(false);
+  useEffect(() => { useUsageStore.getState().setUsage(rawUsage); }, [rawUsage]);
+  const [isPolledLoading, setIsLoading] = useState(true);
+  const [isPolledAvailable, setIsAvailable] = useState(false);
+  // Every account's usage summary, so a window whose project runs on another account than the one
+  // the app polls in detail (the account in use) shows its own
+  const [allProfiles, setAllProfiles] = useState<ProfileUsageSummary[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [isPinned, setIsPinned] = useState(false);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -167,11 +187,9 @@ export function UsageIndicator() {
       if (!snapshot) loadingTimer = setTimeout(() => setIsLoading(false), USAGE_LOADING_TIMEOUT_MS);
     });
 
-    // Listen for all profiles usage updates (to know whether the active profile needs re-auth)
+    // Listen for all profiles usage updates (re-auth state, and the window's own account's usage)
     const unsubscribeAllProfiles = window.electronAPI.onAllProfilesUsageUpdated?.((allProfilesUsage) => {
-      // Track if active profile needs re-auth
-      const activeProfile = allProfilesUsage.allProfiles.find(p => p.isActive);
-      setActiveProfileNeedsReauth(activeProfile?.needsReauthentication ?? false);
+      setAllProfiles(allProfilesUsage.allProfiles);
     });
 
     // Request initial usage on mount
@@ -188,15 +206,9 @@ export function UsageIndicator() {
       setIsAvailable(false);
     });
 
-    // Request all profiles usage immediately on mount (re-auth state for the active profile)
+    // Request all profiles usage immediately on mount (re-auth state, even if main usage is unavailable)
     window.electronAPI.requestAllProfilesUsage?.().then((result) => {
-      if (result.success && result.data) {
-        // Track if active profile needs re-auth (even if main usage is unavailable)
-        const activeProfile = result.data.allProfiles.find(p => p.isActive);
-        if (activeProfile?.needsReauthentication) {
-          setActiveProfileNeedsReauth(true);
-        }
-      }
+      if (result.success && result.data) setAllProfiles(result.data.allProfiles);
     }).catch(() => {
       // Silently ignore
     });
@@ -207,6 +219,20 @@ export function UsageIndicator() {
       unsubscribeAllProfiles?.();
     };
   }, []);
+
+  // The account this window's project runs on. The detailed snapshot is the account in use's; a
+  // project on another account shows that account's summary (session and weekly limits)
+  const windowAccountId = useWindowClaudeAccountId();
+  const globalAccountId = useClaudeProfileStore((state) => state.activeProfileId);
+  const showsOwn = windowAccountId !== globalAccountId && rawUsage?.profileId !== windowAccountId;
+  const ownSummary = showsOwn ? allProfiles.find((summary) => summary.profileId === windowAccountId) : undefined;
+  const usage = showsOwn ? (ownSummary ? summaryUsage(ownSummary) : null) : rawUsage;
+  const isAvailable = showsOwn ? !!usage : isPolledAvailable;
+  const isLoading = showsOwn ? !ownSummary && allProfiles.length === 0 && isPolledLoading : isPolledLoading;
+  const windowSummary = ownSummary
+    ?? allProfiles.find((summary) => summary.profileId === (rawUsage?.profileId ?? windowAccountId))
+    ?? allProfiles.find((summary) => summary.isActive);
+  const activeProfileNeedsReauth = windowSummary?.needsReauthentication ?? false;
 
   // Show loading state - only for Anthropic OAuth accounts awaiting usage data (an account that
   // needs signing in again shows that instead: its usage won't arrive)

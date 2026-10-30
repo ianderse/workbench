@@ -359,7 +359,9 @@ Project, Connectors, Developer, Simulation (`npm run dev` builds only, `IS_DEV_B
   `src/main/project-index.ts`; Knowledge index: Graphify; Memory index: Self-improve), Knowledge (Use CLAUDE.md, Use
   Graphify, Self-improve), Tasks, Branches. The project's `useClaudeMd`, `maxBudgetUsd` (budget per task),
   `claudeProfileId` (its Claude account; unset = the account in use) and `selfImprove` are kept in its own
-  `.workbench/settings.json` (`src/main/project-store.ts`).
+  `.workbench/settings.json` (`src/main/project-store.ts`). Each window shows and runs on its project's account:
+  switching the account in a window saves it there, moves only that project's agent windows and makes it the
+  account in use for projects without one (`src/main/project-account.ts`, `hooks/useWindowClaudeAccount.ts`).
 - **Developer** — the CLI tools Workbench detects (`src/main/cli-tool-manager.ts`: Python, Node.js, git, gh, glab,
   claude) with path overrides (`nodePath`, `gitPath`, ...). Node.js (npx for MCP servers) is looked for in the
   configured path, PATH and version managers' folders, and only then asked of the login shell, with a timeout.

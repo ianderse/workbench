@@ -77,8 +77,9 @@ export async function createTerminal(
   if (projectPath) SessionHandler.clearPendingDelete(projectPath, id);
 
   try {
-    // For auth terminals, don't inject existing OAuth token - we want a fresh login
-    const profileEnv = skipOAuthToken ? {} : PtyManager.getActiveProfileEnv();
+    // For auth terminals, don't inject existing OAuth token - we want a fresh login. Others start
+    // on their project's account
+    const profileEnv = skipOAuthToken ? {} : PtyManager.getActiveProfileEnv(projectPath);
 
     // Merge environment variables (lowest to highest precedence):
     // 1. Profile env (CLAUDE_CONFIG_DIR, CLAUDE_CODE_OAUTH_TOKEN)

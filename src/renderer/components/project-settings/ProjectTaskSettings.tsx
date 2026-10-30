@@ -5,28 +5,34 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { SettingsSection } from '../settings/SettingsSection';
 import { SettingsRow, SettingsRows } from '../settings/SettingsRow';
 import { useClaudeProfileStore } from '../../stores/claude-profile-store';
+import { projectClaudeAccountId, switchClaudeAccount } from '../../hooks/useWindowClaudeAccount';
 import type { ProjectSettings as ProjectSettingsType } from '../../../shared/types';
 
 interface ProjectTaskSettingsProps {
+  projectId: string;
   settings: ProjectSettingsType;
   setSettings: React.Dispatch<React.SetStateAction<ProjectSettingsType>>;
 }
 
 /**
- * Project page "Tasks" section: the Claude account the project's tasks and chats run on, and the
- * budget per task. Saved in the project's `.workbench/settings.json`.
+ * Project page "Tasks" section: the Claude account the project's tasks, chats and agent windows
+ * run on, and the budget per task. Saved in the project's `.workbench/settings.json`.
  */
-export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettingsProps) {
+export function ProjectTaskSettings({ projectId, settings, setSettings }: ProjectTaskSettingsProps) {
   const { t } = useTranslation('settings');
   const profiles = useClaudeProfileStore((state) => state.profiles);
   const activeProfileId = useClaudeProfileStore((state) => state.activeProfileId);
 
   // Only the configured accounts are listed; without a choice (or after the chosen account was
   // removed) the project uses, and shows, the account in use
-  const isAccount = (id: string | undefined) => !!id && profiles.some((profile) => profile.id === id);
-  const accountValue = isAccount(settings.claudeProfileId)
-    ? settings.claudeProfileId
-    : isAccount(activeProfileId) ? activeProfileId : undefined;
+  const accountId = projectClaudeAccountId(profiles, activeProfileId, settings.claudeProfileId);
+  const accountValue = profiles.some((profile) => profile.id === accountId) ? accountId : undefined;
+
+  // Choosing the account here switches it as the window does: the project's agent windows move to it
+  const handleAccountChange = (value: string) => {
+    setSettings({ ...settings, claudeProfileId: value });
+    void switchClaudeAccount(value, projectId);
+  };
 
   // The budget is typed as text so partial values ("1.") survive; saved when it parses
   const [budgetDraft, setBudgetDraft] = useState(settings.maxBudgetUsd?.toString() ?? '');
@@ -57,7 +63,7 @@ export function ProjectTaskSettings({ settings, setSettings }: ProjectTaskSettin
         >
           <Select
             value={accountValue}
-            onValueChange={(value) => setSettings({ ...settings, claudeProfileId: value })}
+            onValueChange={handleAccountChange}
             disabled={profiles.length === 0}
           >
             <SelectTrigger id="project-claude-account" className="h-8">

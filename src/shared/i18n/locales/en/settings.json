@@ -511,7 +511,7 @@
     "tasks": {
       "title": "Tasks",
       "account": "Account",
-      "accountDescription": "The Claude account this project's tasks and chats run on",
+      "accountDescription": "The Claude account this project's tasks, chats and agent windows run on",
       "noAccounts": "No Claude accounts",
       "budget": "Budget per task",
       "budgetDescription": "Stop a task when its estimated cost reaches this amount in US dollars. Leave empty for no limit",
