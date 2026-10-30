@@ -46,6 +46,7 @@ import { createRunMessaging } from '../task-messaging/run-messaging';
 import { branchMergeBlocker, waitForBranchSync } from '../worktree/merge-guard';
 import { keepsLocalMergeOut, readResyncRequest } from '../task-resync/request';
 import { resolveSourceDecisionContext } from '../decision-source-context';
+import { resolveSpecHumanDecisionContext } from '../spec-human-decision-context';
 
 
 /** Restarts after a rate limit or auth problem before giving up (prevents swap loops) */
@@ -607,9 +608,12 @@ export class AgentManager extends EventEmitter {
       projectStore.invalidateTasksCache(project.id);
       const projectTasks = projectStore.getTasks(project.id);
       config.sourceDecisionContext = resolveSourceDecisionContext(task, projectTasks, project.id, path.join(project.path, getSpecsDir(project.autoBuildPath)));
+      config.specHumanDecisionContext = resolveSpecHumanDecisionContext(task, projectTasks, project.id, project.path, path.join(project.path, getSpecsDir(project.autoBuildPath)));
       config.progressPrompt = await refreshProjectProgress(project, projectTasks);
     } catch (error) {
       config.sourceDecisionContext ??= resolveSourceDecisionContext(task, [], project.id, path.join(project.path, getSpecsDir(project.autoBuildPath)));
+      const unavailable = resolveSpecHumanDecisionContext(task, [], project.id, project.path, path.join(project.path, getSpecsDir(project.autoBuildPath)));
+      if (unavailable) config.specHumanDecisionContext ??= { ...unavailable, lookupUnavailable: true };
       appLog.warn(`[AgentManager] Could not prepare project progress for ${taskId}:`, error);
     }
 

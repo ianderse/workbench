@@ -285,6 +285,44 @@ describe('AgentManager', () => {
     }
   });
 
+  it.each(['start', 'revise'] as const)('carries canonical related-spec decisions across batches on %s without inheriting approval', async (mode) => {
+    const { projectStore } = await import('../project-store');
+    const words = 'No human playtesting is needed at this point, finish and merge';
+    const original = makeTask({ id: '189-playtest', specId: '189-playtest', metadata: {
+      specBatch: { id: 'original', source: ['/project/docs/SPEC.md'], round: 1 },
+      userDescription: 'Execute §13.3 / §14 Gate F / §15.5 human sessions.',
+      humanWork: { revision: 3, items: [], approvalOverride: {
+        scope: 'task-human-approval', approver: 'Ian', reason: words, at: '2026-10-29T15:28:10.295Z', revision: 3,
+      } },
+    } });
+    const task = makeTask({ id: '210-gap', specId: '210-gap', metadata: {
+      specBatch: { id: 'second', source: ['docs/SPEC.md'], round: 2 },
+    } });
+    vi.mocked(projectStore.getTasks).mockReturnValue([original, task]);
+    await manager.startTask(task.id, { project, task, mode });
+    const run = await nextRun(1);
+    expect(run.config.specHumanDecisionContext?.records[0]).toMatchObject({ taskId: original.id,
+      metadataPath: path.join('/project', '.workbench', 'tasks', '189-playtest', 'task_metadata.json'),
+      description: original.metadata!.userDescription, override: { reason: words, revision: 3 },
+    });
+    expect(run.config.humanApprovalOverride).toBeUndefined();
+    expect(run.config.humanWork).toBeUndefined();
+    original.metadata!.humanWork!.approvalOverride!.reason = 'A changed decision';
+    expect(run.config.specHumanDecisionContext!.records[0].override!.reason).toBe(words);
+    run.finish({ status: 'completed' });
+  });
+
+  it('marks related spec decision lookup unavailable rather than treating a failed task read as absent approval', async () => {
+    const { projectStore } = await import('../project-store');
+    const task = makeTask({ metadata: { specBatch: { id: 'batch', source: ['docs/SPEC.md'], round: 0 } } });
+    vi.mocked(projectStore.getTasks).mockImplementationOnce(() => { throw new Error('Task records unavailable'); });
+    await manager.startTask(task.id, { project, task, mode: 'revise' });
+    const run = await nextRun(1);
+    expect(run.config.specHumanDecisionContext).toMatchObject({ lookupUnavailable: true, records: [], specs: ['docs/SPEC.md'] });
+    expect(run.config.humanApprovalOverride).toBeUndefined();
+    run.finish({ status: 'completed' });
+  });
+
   it('applies a pending local merge on start only to a task without a pull request', async () => {
     pendingResync.value = { ref: 'develop', into: 'develop', via: 'local', merged: [], at: '2026-10-01T00:00:00Z' };
     try {

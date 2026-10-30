@@ -1,6 +1,7 @@
 import type { HumanApprovalOverride, HumanWorkstream } from '../../shared/types/human-work';
 import { buildHumanApprovalOverridePrompt, buildHumanWorkFeedback, buildHumanWorkPrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
 import { formatSourceDecisionContext, type SourceDecisionContext } from '../decision-source-context';
+import { formatSpecHumanDecisionContext, type SpecHumanDecisionContext } from '../spec-human-decision-context';
 /**
  * Claude Code task runner
  * =======================
@@ -182,6 +183,8 @@ export interface TaskRunConfig {
   humanWork?: HumanWorkstream;
   /** Exact originating decisions resolved from host task records, including legacy lineage. */
   sourceDecisionContext?: SourceDecisionContext;
+  /** Related-spec human decisions are evidence for scope reconciliation, never an inherited override. */
+  specHumanDecisionContext?: SpecHumanDecisionContext;
   taskId: string;
   projectId?: string;
   specId: string;
@@ -486,7 +489,7 @@ ${TASK_EXECUTION_GUIDANCE}
 
 function humanDecisionPrompt(config: TaskRunConfig, context: 'task' | 'triage' = 'task'): string {
   const receiptPath = toRuntimePath(path.join(config.specDir, 'task_metadata.json'));
-  return [formatSourceDecisionContext(config.sourceDecisionContext, toRuntimePath), buildHumanApprovalOverridePrompt(config.humanApprovalOverride), buildHumanWorkPrompt(config.humanWork, receiptPath, context)].filter(Boolean).join('\n\n');
+  return [formatSourceDecisionContext(config.sourceDecisionContext, toRuntimePath), formatSpecHumanDecisionContext(config.specHumanDecisionContext, toRuntimePath), buildHumanApprovalOverridePrompt(config.humanApprovalOverride), buildHumanWorkPrompt(config.humanWork, receiptPath, context)].filter(Boolean).join('\n\n');
 }
 
 /** Only an exact generated handoff is redundant with the durable system context. */

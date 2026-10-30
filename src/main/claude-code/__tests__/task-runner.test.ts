@@ -15,6 +15,8 @@ import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-
 import { mutateProjectMemory, readMemoryContexts } from '../../self-improve/project-memory';
 import { closeTaskToolsServer } from '../../insights/task-tools-server';
 import type { SourceDecisionContext } from '../../decision-source-context';
+import type { Task } from '../../../shared/types/task';
+import { resolveSpecHumanDecisionContext } from '../../spec-human-decision-context';
 
 vi.mock('../env', () => ({
   resolveClaudeEnv: vi.fn(async (options?: { extraEnv?: Record<string, string> }) => ({
@@ -136,6 +138,19 @@ function triage(overrides: Partial<TaskTriage> = {}): TaskTriage {
     source: 'auto',
     ...overrides,
   };
+}
+
+function relatedStudyDecision(reason = 'No human playtesting is needed at this point, finish and merge') {
+  const source = { id: '189-playtests', specId: '189-playtests', projectId: 'p', title: 'Execute playtests',
+    description: 'Run three uncoached testers for Slice 04 §13.3 and Gate F.', metadata: {
+      specBatch: { id: 'old-batch', source: ['/project/docs/SLICE_04_SPEC.md'], round: 1 },
+      humanWork: { revision: 3, items: [], approvalOverride: { scope: 'task-human-approval', approver: 'Ian',
+        reason, at: '2026-10-29T15:28:10.295Z', revision: 3 } },
+    } } as unknown as Task;
+  const target = { id: '210-disposition', specId: '210-disposition', projectId: 'p', metadata: {
+    specBatch: { id: 'new-batch', source: ['docs/SLICE_04_SPEC.md'], round: 2 },
+  } } as unknown as Task;
+  return resolveSpecHumanDecisionContext(target, [source, target], 'p', '/project', '/project/.workbench/tasks')!;
 }
 
 function argValue(args: string[], flag: string): string | undefined {
@@ -367,6 +382,47 @@ describe('ClaudeTaskRun', () => {
       expect(prompt).not.toContain('## Owner override:');
     }
     expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.humanApprovalOverride).toBeUndefined();
+  });
+
+  it.each(['claude', 'omp'])('carries related-spec study dispositions through every %s phase without copying an override', async (backend) => {
+    const related = relatedStudyDecision();
+    triageMock.mockResolvedValue({ triage: triage({ needsPlan: true }) });
+    scripts.push(
+      { messages: [result('related', { structured_output: { plan: '# Plan' } })] },
+      { messages: [result('related')] },
+      { messages: [result('related', { structured_output: { status: 'passed', summary: 'Reconciled existing disposition', checks: [], findings: [] } })] },
+    );
+    const outcome = await makeRun({ backend, specHumanDecisionContext: related }).run();
+    expect(outcome.status).toBe('completed');
+    expect(triageMock.mock.calls[0][0].description).toContain(related.records[0].override!.reason);
+    const prompts = backend === 'omp' ? ompSpawned.map((options) => String(options.appendSystemPrompt))
+      : spawned.map((options) => argValue(options.args, '--append-system-prompt')!);
+    expect(prompts).toHaveLength(3);
+    for (const prompt of prompts) {
+      expect(prompt).toContain(related.records[0].override!.reason);
+      expect(prompt).toContain('189-playtests');
+      expect(prompt).toContain('three uncoached testers');
+      expect(prompt).toContain('not an inherited task-wide override');
+      expect(prompt).not.toContain('## Owner override: human approval requirements for this task');
+    }
+    expect(loadClaudeRunInfo(specDir)?.reviewVerdict?.humanApprovalOverride).toBeUndefined();
+  });
+
+  it('includes related human decisions in fresh review and invalidates its checkpoint when source words change', async () => {
+    const fingerprint = vi.spyOn(handoffs, 'fingerprintWorktree').mockResolvedValue('unchanged-tree');
+    const diff = vi.spyOn(reviewDiff, 'collectReviewDiff').mockResolvedValue('diff --git a/a.ts b/a.ts\n+fixed');
+    const review = vi.spyOn(runText, 'runClaudeText').mockResolvedValue({ text: '', structured: { summary: 'Checked dispositions', findings: [] } });
+    try {
+      const first = makeRun({ backend: 'omp', specHumanDecisionContext: relatedStudyDecision() }) as unknown as { runOmpReview(): Promise<unknown> };
+      await first.runOmpReview();
+      const second = makeRun({ backend: 'omp', specHumanDecisionContext: relatedStudyDecision('Defer only the longer session; other requirements remain.') }) as unknown as { runOmpReview(): Promise<unknown> };
+      await second.runOmpReview();
+      expect(review).toHaveBeenCalledTimes(2);
+      expect(review.mock.calls[0][0].appendSystemPrompt).toContain('No human playtesting is needed');
+      expect(review.mock.calls[1][0].appendSystemPrompt).toContain('Defer only the longer session');
+      expect(review.mock.calls[1][0].appendSystemPrompt).toContain('source task\'s actual requirements');
+      expect(readdirSync(path.join(specDir, 'checkpoints'))).toHaveLength(2);
+    } finally { review.mockRestore(); diff.mockRestore(); fingerprint.mockRestore(); }
   });
 
   it('includes source decision provenance in fresh review input and checkpoint identity', async () => {

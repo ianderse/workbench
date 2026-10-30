@@ -35,6 +35,15 @@ and recorded autonomous integration targets separately. Board Done, passing chec
 and explicit spec acceptance are distinct. Omitted rows remain available in task records. The
 snapshot never reads the documentation archive or makes an AI call. It does not prove live activation.
 
+Related-spec human decisions now reach later task phases and independent reviews across batches,
+including absolute/relative references to the same project-contained spec. Source requirements,
+exact decisions and dated requests stay evidence context; task-wide overrides are not inherited.
+Reviews reconcile an already waived/deferred activity instead of requesting it again under a
+new scope label. Newly added requirements and whole-spec acceptance remain separate. See
+[human-work provenance and scope](docs/human-work.md#related-specification-decisions).
+Validation: 307 test files passed (3,792 tests, one skipped), strict TypeScript and build passed.
+New runs use this change after the main process loads the build; active workers were not interrupted.
+
 ## Execution efficiency
 
 Automatic triage now feeds phase-specific effort instead of carrying the hardest task effort
@@ -47,8 +56,7 @@ breakdowns and spec-gap follow-ups plan shared foundations before parallel consu
 guidance, not file locking or rescheduling of existing tickets. See the
 [dated behavior and qualification boundary](docs/railhouse-rewrite-lessons.md#phase-effort-and-edit-scope-2026-10-29).
 Live latency and first-pass quality still need observation after the main process loads the build.
-Validation for this change: strict TypeScript and all 306 test files passed (3,778 tests,
-one skipped); production build passed. No running task was interrupted for activation.
+The combined validation above also covers this phase policy; live productivity remains unqualified.
 
 ## Working boundaries and next checks
 

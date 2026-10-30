@@ -97,6 +97,23 @@ This prevents missing source evidence from being replaced by a history of pendin
 requests. Existing receipts remain preserved; display grouping is not semantic
 reconciliation, and these changes do not silently approve or waive their contents.
 
+### Related specification decisions
+
+Spec reviews and gap tickets also receive the canonical human decisions on other tasks tied to
+the same project-contained specification, including across batches and absolute/relative path
+spellings. The context retains the source task's requirements, original findings, exact decision,
+revision/time and metadata reference. Large records are referenced rather than clipped. Changed
+source evidence changes the review checkpoint input; unavailable evidence is not proof that an
+owner decision is missing.
+
+This context is evidence for requirement reconciliation, not an inherited task-wide override.
+Reviewers compare the actual activity, artifacts and named requirements before asking again.
+A waived or deferred playtest must not become a new request for the same playtest merely because
+a later task calls it slice-wide or spec-level. Documentation should carry the original scoped
+disposition, with the study still labeled unexecuted. A different requirement, later revision
+outside that decision, or distinct whole-spec acceptance remains separate. No code path copies
+another task's override into this task, marks human observations complete, or accepts the spec.
+
 ### Task scope
 
 Task review checks the current ticket's acceptance criteria and explicit applicable pre-merge
