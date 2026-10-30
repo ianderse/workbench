@@ -5,7 +5,10 @@ This file provides guidance to Claude Code when working with this repository.
 ## Product Overview
 
 Workbench is a TypeScript Electron desktop app where users describe a goal and the **Claude Code CLI** does the work
-autonomously. Every task runs in its own git worktree so the main branch stays safe.
+autonomously. Every task runs in its own git worktree so the main branch stays safe. Beyond running tasks, it brings
+together what Claude Code and the tools around it already offer and sets each piece up for a project with a switch
+(project memory, a Graphify graph of the code, MCP connectors, the live agent graph), adding what is missing between
+them (messaging between parallel tasks), so sessions do better work for less without hand-written configuration.
 
 **Core workflow:** User creates a task (description, images, connectors, git options) → a short Claude Code **triage**
 run picks model, effort and whether to plan → Claude Code **plans** (plan mode, optional) → **implements** in the task's
