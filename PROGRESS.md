@@ -41,7 +41,7 @@ exact decisions and dated requests stay evidence context; task-wide overrides ar
 Reviews reconcile an already waived/deferred activity instead of requesting it again under a
 new scope label. Newly added requirements and whole-spec acceptance remain separate. See
 [human-work provenance and scope](docs/human-work.md#related-specification-decisions).
-Validation: 307 test files passed (3,792 tests, one skipped), strict TypeScript and build passed.
+Validation: 308 test files passed (3,806 tests, one skipped), strict TypeScript and build passed.
 New runs use this change after the main process loads the build; active workers were not interrupted.
 
 ## Execution efficiency
@@ -51,12 +51,13 @@ through every step. Planning/design/spec review and fresh independent review ret
 routine execution/check/sync phases have lower caps, while large implementation and corrective
 work retain up to high effort. Validation only uses the lower cap after a clean independent review.
 Explicit task effort pins and fixed/fallback settings are preserved.
-Task prompts prefer targeted edits and preserve completed work after compaction. Initial
-breakdowns and spec-gap follow-ups plan shared foundations before parallel consumers; this is
-guidance, not file locking or rescheduling of existing tickets. See the
+Task prompts prefer targeted edits and shared foundations before parallel consumers. This is
+guidance, not file locking or rescheduling. See the
 [dated behavior and qualification boundary](docs/railhouse-rewrite-lessons.md#phase-effort-and-edit-scope-2026-10-29).
-Live latency and first-pass quality still need observation after the main process loads the build.
-The combined validation above also covers this phase policy; live productivity remains unqualified.
+Agent-launched Vitest commands inherit one worker by default, capped at two for explicit settings;
+direct Workbench tests default to two. [Test resource limits](docs/test-resource-limits.md) describe
+the native probes, WSL forwarding and per-command boundary. Existing agents keep their original
+environment; loading this build affects new CLI launches. Live productivity remains unqualified.
 
 ## Working boundaries and next checks
 

@@ -11,6 +11,7 @@ import type { ChildProcess } from 'child_process';
 import { randomBytes } from 'crypto';
 import { appLog } from '../app-logger';
 import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
+import { withBoundedTestWorkers } from '../agent-backend/test-worker-env';
 import { recordClaudeUsage, type UsageContext } from '../usage/usage-record';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from './stream-types';
 
@@ -209,7 +210,7 @@ export function startClaudeProcess(options: ClaudeProcessOptions): ClaudeProcess
   const child = spawnTool('claude', options.args, {
     command: options.command,
     cwd: options.cwd,
-    env: options.env,
+    env: withBoundedTestWorkers(options.env),
     windowsHide: true,
     stdio: 'pipe',
     // The tools the agent runs (npm test -> vitest workers) end with it

@@ -56,7 +56,9 @@ npm test          # strict TypeScript + Vitest
 npm run build     # production build
 ```
 
-Use npm test -- --maxWorkers=2 when local parallel Git fixtures overload the host. Packaging:
+Vitest defaults to at most two workers. Keep broad suites sequential and foreground; do not run
+full suites in parallel subagents. Use one worker when the host is busy, and settle interrupted
+test processes before retrying. Packaging:
 npm run package:mac, package:win, or package:linux. Releases are published manually on GitHub;
 release workflows build installers. Builds are unsigned. Never publish or deploy without authority.
 

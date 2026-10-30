@@ -39,6 +39,7 @@ vi.mock('../../app-logger', () => ({ appLog: { error: vi.fn(), warn: vi.fn(), in
 
 import { INITIAL_INPUT_ID, matchReplayedInput, startClaudeProcess } from '../process';
 import type { ClaudeStreamMessage } from '../stream-types';
+import { spawnTool } from '../../platform/runtime-exec';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 const replay = (text: string | unknown[]) => ({
@@ -52,6 +53,17 @@ const result = (fields: Record<string, unknown> = {}) => ({ type: 'result', subt
 describe('startClaudeProcess with stdin kept open', () => {
   beforeEach(() => {
     children.length = 0;
+  });
+
+  it('passes bounded Vitest limits to the actual CLI spawn without losing the profile environment', async () => {
+    const handle = startClaudeProcess({ command: 'claude', args: [], cwd: '/tmp',
+      env: { CLAUDE_CONFIG_DIR: '/profiles/current', VITEST_MAX_WORKERS: '20', VITEST_MAX_FORKS: '1' }, input: 'go' });
+    expect(vi.mocked(spawnTool).mock.calls.at(-1)?.[2]?.env).toMatchObject({
+      CLAUDE_CONFIG_DIR: '/profiles/current', VITEST_MAX_WORKERS: '2', VITEST_MAX_FORKS: '1',
+      VITEST_MAX_THREADS: '1', VITEST_MIN_THREADS: '1', VITEST_MIN_FORKS: '1',
+    });
+    children[0].exit();
+    await handle.done;
   });
 
   it('keeps stdin open, matches read receipts and closes stdin when the turn ends', async () => {

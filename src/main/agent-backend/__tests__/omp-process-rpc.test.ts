@@ -57,6 +57,10 @@ describe('omp rpc framing', () => {
 /** A stand-in for `omp`: speaks the RPC protocol with `--mode rpc`, prints json events with `-p` */
 const FAKE_OMP = `#!/usr/bin/env node
 const mode = process.env.FAKE_MODE || 'ok';
+if (process.env.FAKE_WORKER_ENV_OUT) {
+  const names = ['VITEST_MAX_WORKERS', 'VITEST_MAX_THREADS', 'VITEST_MIN_THREADS', 'VITEST_MAX_FORKS', 'VITEST_MIN_FORKS', 'KEEP_PROFILE'];
+  require('fs').writeFileSync(process.env.FAKE_WORKER_ENV_OUT, JSON.stringify(Object.fromEntries(names.map(name => [name, process.env[name]]))));
+}
 if (process.env.FAKE_ARGV_OUT) {
   const argv = process.argv.slice(2);
   const configs = argv.flatMap((a, i) => (argv[i - 1] === '--config' ? [require('fs').readFileSync(a, 'utf-8')] : []));
@@ -221,6 +225,18 @@ describe('startOmpProcess with live messages', () => {
     return { messages, read, promise };
   };
   const text = (messages: ClaudeStreamMessage[]) => (messages.find((m) => m.type === 'result') as { result?: string } | undefined)?.result;
+
+  it.each([false, true])('passes worker limits through the real OMP CLI spawn (print utility: %s)', async (oneShot) => {
+    const output = path.join(dir, 'worker-env.json');
+    const { promise } = run('rpc-ok', { oneShot, env: { FAKE_MODE: 'rpc-ok', FAKE_WORKER_ENV_OUT: output,
+      KEEP_PROFILE: 'current', VITEST_MAX_WORKERS: '13', VITEST_MAX_THREADS: '1', VITEST_MAX_FORKS: '13' } });
+    const handle = await promise;
+    expect((await handle.done).result?.is_error).toBe(false);
+    expect(JSON.parse(await readFile(output, 'utf8'))).toEqual({
+      KEEP_PROFILE: 'current', VITEST_MAX_WORKERS: '2', VITEST_MAX_THREADS: '1', VITEST_MIN_THREADS: '1',
+      VITEST_MAX_FORKS: '2', VITEST_MIN_FORKS: '1',
+    });
+  });
 
   it('switches immediately through the real CLI transport, then skips the exhausted provider on the next run', async () => {
     recoveryFixture.chains = { 'quota-fixture/*': ['available-fixture/model'] };

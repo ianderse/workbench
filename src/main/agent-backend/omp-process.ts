@@ -23,6 +23,7 @@ import os from 'os';
 import path from 'path';
 import { appLog } from '../app-logger';
 import { killRuntimeProcess, spawnTool } from '../platform/runtime-exec';
+import { withBoundedTestWorkers } from './test-worker-env';
 import { toHostPath } from '../platform/shell-runtime';
 import type { ClaudeProcessHandle } from '../claude-code/process';
 import type { ClaudeResultMessage, ClaudeStreamMessage, ClaudeUserContentBlock } from '../claude-code/stream-types';
@@ -226,10 +227,7 @@ async function startOmpProcessOnce(options: OmpRunOptions): Promise<ClaudeProces
     throw error;
   }
 
-  const env: Record<string, string> = {};
-  for (const [key, value] of Object.entries({ ...process.env, ...(options.env ?? {}) })) {
-    if (typeof value === 'string') env[key] = value;
-  }
+  const env = withBoundedTestWorkers({ ...process.env, ...(options.env ?? {}) });
   env.NO_COLOR = '1';
 
   let aborted = false;
