@@ -101,3 +101,13 @@ export interface SpecReviewReport {
   /** Gaps the model listed without a spec section or evidence, which were dropped */
   droppedGaps?: number;
 }
+
+/** Host-published documentation; neither a passed review gate nor owner/spec acceptance. */
+export interface SpecReviewProgressReceipt {
+  commit: string;
+  branch: string;
+  reportDigest: string;
+  reviewedAt: string;
+  reviewedRevision?: string;
+  changed: boolean;
+}

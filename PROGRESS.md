@@ -1,90 +1,61 @@
 # Workbench progress
 
-Observed 2026-10-29. This is the authored project entry point, not a completion ledger or approval.
-Baseline: 5527b9c (throughput/recovery delivery). Inspect current Git state for later changes.
+Observed 2026-10-30. This is the authored project entry point, not a completion ledger or approval.
+Inspect current Git state and task records for later changes; historical evidence remains linked.
 
 ## Current implementation
 
 Workbench OMP supports autonomous coding tasks, isolated worktrees, queue/dependency coordination,
 review and integration, project memory, human decisions, and model-specific usage accounting through
-CLI backends. The baseline adds batched task-start briefings, task advisor scheduling, preserved
-fresh context, and bounded phase-boundary progress recovery. These are source/build capabilities;
-existing workers can retain old configuration and live recovery qualification remains separate.
+CLI backends. Recent work adds batched start briefings, advisor scheduling, preserved fresh context,
+bounded phase recovery, and related-spec human decisions across later tasks and independent reviews.
+An already waived/deferred activity must be reconciled rather than requested again under a new scope
+label. Newly added requirements and whole-spec acceptance remain separate.
 
-Validation recorded at that baseline: 302 test files, 3,681 passed and one skipped, strict typecheck
-and production build passed. Installed OMP 18.13.2 returned a native session ID in a get_state-only
-RPC probe without a model prompt. That does not certify full provider execution or crash recovery.
+Automatic triage now applies phase-specific effort; explicit effort pins and fixed/fallback settings
+remain authoritative. Prompts prefer targeted edits and shared foundations before parallel consumers.
+Agent-launched Vitest uses one worker by default, capped at two for explicit settings; direct Workbench
+tests default to two. Keep broad suites sequential and use one worker on a busy host.
 
-## Current documentation/context work
+Each spec-review ticket now requires a host-published, documentation-only update to root PROGRESS.md
+on its reviewed local base branch before completion. The audit stays read-only. One bounded latest-review
+block records the inspected revision, agent-reported findings and check-observation status. Publication
+failure preserves the report; Resume retries publication without another model review. Authored text
+outside the block and unrelated checkout work are preserved. No automatic push or historical backfill.
+See [review publication and retry](docs/review-progress.md).
 
-Use a small status entry point and task-relevant references instead of repeatedly scanning all docs.
-Standing guidance is in CLAUDE.md; detailed guidance was preserved in docs/workbench-reference.md.
-Workbench generates a bounded live PROGRESS.md inside the project's ignored tool-state directory
-(.workbench/PROGRESS.md by default), refreshes it after task state/integration changes and at task launch, and supplies
-it to task/triage prompts. This avoids runtime writes to tracked root progress files, which would
-dirty integration checkouts. Failure to persist the projection does not fail a merge or task.
+Workbench separately refreshes a bounded live projection in ignored `.workbench/PROGRESS.md` at task
+launch and state/integration changes. It supplies recorded task state and observed Git identity without
+reading the documentation archive or calling a model. Board Done, reported checks, integration, push
+and owner/spec acceptance remain distinct. Neither progress file can waive required checks.
 
-Validation during this context change: 304 test files, 3,707 passed and one skipped; final focused
-context/host checks, strict typecheck, and production build passed. The Windows archive-flush
-regression found in baseline CI was corrected in f85a0e5 with writable-handle/failure tests.
-That CI run also had older Windows path-fixture and Git-timeout failures; native Windows
-qualification of the combined update remains pending. No provider productivity gain is claimed.
+## Validation and next boundaries
 
-The live snapshot labels current checkout identity, recorded task status, agent-reported checks,
-and recorded autonomous integration targets separately. Board Done, passing checks, merge, push,
-and explicit spec acceptance are distinct. Omitted rows remain available in task records. The
-snapshot never reads the documentation archive or makes an AI call. It does not prove live activation.
+Review-publication validation passed 309 test files (3,856 tests, one skipped), followed by 207
+focused tests for final receipt recovery and Git normalization, plus strict TypeScript and production
+build. All tests used one Vitest worker. Fixtures do not establish live activation or provider productivity.
+New or resumed runs use changes after the main process loads the build; active workers were not
+interrupted to force activation. Existing workers may retain old settings and environment.
 
-Related-spec human decisions now reach later task phases and independent reviews across batches,
-including absolute/relative references to the same project-contained spec. Source requirements,
-exact decisions and dated requests stay evidence context; task-wide overrides are not inherited.
-Reviews reconcile an already waived/deferred activity instead of requesting it again under a
-new scope label. Newly added requirements and whole-spec acceptance remain separate. See
-[human-work provenance and scope](docs/human-work.md#related-specification-decisions).
-Validation: 308 test files passed (3,806 tests, one skipped), strict TypeScript and build passed.
-New runs use this change after the main process loads the build; active workers were not interrupted.
-
-## Execution efficiency
-
-Automatic triage now feeds phase-specific effort instead of carrying the hardest task effort
-through every step. Planning/design/spec review and fresh independent review retain depth;
-routine execution/check/sync phases have lower caps, while large implementation and corrective
-work retain up to high effort. Validation only uses the lower cap after a clean independent review.
-Explicit task effort pins and fixed/fallback settings are preserved.
-Task prompts prefer targeted edits and shared foundations before parallel consumers. This is
-guidance, not file locking or rescheduling. See the
-[dated behavior and qualification boundary](docs/railhouse-rewrite-lessons.md#phase-effort-and-edit-scope-2026-10-29).
-Agent-launched Vitest commands inherit one worker by default, capped at two for explicit settings;
-direct Workbench tests default to two. [Test resource limits](docs/test-resource-limits.md) describe
-the native probes, WSL forwarding and per-command boundary. Existing agents keep their original
-environment; loading this build affects new CLI launches. Live productivity remains unqualified.
-
-## Working boundaries and next checks
-
-- Verify current code and the task's mandatory specs/checks; stale progress cannot waive them.
-- Use task records and scoped human decisions for active work, blockers, approvals, and acceptance.
-- Observe the new behavior in new/resumed runs after the main process loads the current build;
-  don't interrupt user-owned work to force activation.
-- Provider-wide admission including nested requests remains separate capacity work.
-- Keep historical evidence intact. Resolve duplicate/superseded docs through an explicit canonical
-  map and reviewed archival changes; this change does not delete or silently rename project specs.
+Native Windows qualification, full provider/crash-recovery qualification and provider-wide admission
+including nested requests remain separate. An installed OMP handshake is not production execution
+or recovery proof. Consult scoped human decisions and authoritative specs for acceptance boundaries.
 
 ## Relevant references
 
 - [Standing rules and commands](CLAUDE.md)
 - [Engineering architecture/reference](docs/workbench-reference.md)
-- [Human work and decisions](docs/human-work.md)
-- [Project memory](docs/project-memory.md)
-- [Merge status](docs/merge-status.md)
-- [Prompt measurements and context limits](docs/omp-prompt-sizes.md)
-- [Provider holds](docs/omp-provider-cooldowns.md)
+- [Human work and related-spec decisions](docs/human-work.md#related-specification-decisions)
+- [Review progress publication](docs/review-progress.md)
+- [Test resource limits](docs/test-resource-limits.md)
+- [Project memory](docs/project-memory.md) and [merge status](docs/merge-status.md)
+- [Prompt measurements](docs/omp-prompt-sizes.md) and [provider holds](docs/omp-provider-cooldowns.md)
 - [Independent Railhouse lessons](docs/railhouse-rewrite-lessons.md)
 - [Fork/upstream decisions](docs/upstream-sync/DECISIONS.md)
 
 ## Ownership and freshness
 
-The integration owner updates this authored snapshot after inspected integration or a material
-change to qualification. Keep it to one or two pages (roughly 6 KB); replace stale status, link
-full evidence, and never append an endless chronological log. Parallel workers/read-only reviews
-must not edit it. Workbench owns its ignored live projection. Neither file replaces authoritative
-specs, task state, immutable evidence, human decisions, or acceptance records.
+The integration owner replaces stale authored status after inspected integration or material
+qualification changes. Keep the whole file below 6 KiB and leave room for the host-managed review
+block. Parallel workers/read-only reviewers must not edit shared progress; the host owns its review
+block and ignored live projection. Preserve specs, immutable evidence and authoritative acceptance records.

@@ -15,9 +15,11 @@ scope, permissions, acceptance, or budgets.
 
 Keep this file to roughly 6 KB of standing guidance. Detailed material belongs in linked references.
 Root PROGRESS.md is an authored, dated navigation snapshot maintained by the integration owner.
-Workbench refreshes live status in ignored project state and supplies it at task launch. Parallel
-workers and read-only reviewers must not edit either shared progress file; task-local reports and
-handoffs retain detailed evidence. Replace stale summaries rather than appending a new history.
+After each spec-review ticket, the host commits a bounded latest-review block to that file on the
+reviewed local base branch before the ticket completes. [Publication and retry rules](docs/review-progress.md)
+keep this separate from acceptance. Workbench also refreshes live status in ignored project state
+and supplies it at task launch. Parallel workers and read-only reviewers must not edit either shared
+file; task-local reports retain detailed evidence. Replace stale summaries rather than appending history.
 
 ## Required rules
 

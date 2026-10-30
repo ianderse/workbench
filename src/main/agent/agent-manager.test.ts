@@ -33,6 +33,8 @@ vi.mock('../claude-code/task-runner', () => ({
   isClaudeRunFinished: vi.fn(() => false),
 }));
 
+vi.mock('../spec-review-progress', () => ({ isSpecReviewProgressPublished: vi.fn(async () => true) }));
+
 vi.mock('../worktree', () => ({
   createOrGetWorktree: vi.fn(async (_projectPath: string, specId: string) => ({
     worktreePath: `/project/.workbench/worktrees/tasks/${specId}`,
@@ -220,6 +222,7 @@ describe('AgentManager', () => {
     const run = await nextRun(1);
 
     expect(run.config.worktreePath).toBe('/project/.workbench/worktrees/tasks/001-add-login');
+    expect(run.config.projectPath).toBe(project.path);
     expect(run.config.branch).toBe('workbench/001-add-login');
     expect(run.config.baseBranch).toBe('develop');
     expect(run.config.specDir).toBe(path.join('/project', '.workbench', 'tasks', '001-add-login'));
@@ -236,6 +239,22 @@ describe('AgentManager', () => {
     expect(registry.registerOperation).toHaveBeenCalledWith(
       'task:project-1:001-add-login', 'task-execution', 'profile-a', 'Account A', expect.any(Function), expect.anything()
     );
+  });
+
+  it.each([false, true])('preserves a saved spec review unless its progress commit is reachable: %s', async (reachable) => {
+    const runner = await import('../claude-code/task-runner');
+    const publisher = await import('../spec-review-progress');
+    const receipt = { commit: 'a'.repeat(40), branch: 'develop', reportDigest: 'd'.repeat(64), reviewedAt: '2026-10-30T10:00:00Z', changed: true };
+    vi.mocked(runner.loadClaudeRunInfo).mockReturnValueOnce({ version: 1, phases: [], subagents: [], totalCostUsd: 0, updatedAt: '', specReviewProgress: receipt });
+    vi.mocked(runner.isClaudeRunFinished).mockReturnValueOnce(true);
+    vi.mocked(publisher.isSpecReviewProgressPublished).mockResolvedValueOnce(reachable);
+    const task = makeTask({ metadata: { specReview: { batchId: 'batch', round: 2 } } });
+    await manager.startTask(task.id, { project, task, mode: 'start' });
+    const run = await nextRun(1);
+    expect(publisher.isSpecReviewProgressPublished).toHaveBeenCalledWith(project.path, receipt);
+    expect(runner.resetClaudeRunInfo).toHaveBeenCalledTimes(reachable ? 1 : 0);
+    expect(run.config.specReviewRound).toBe(2);
+    run.finish({ status: 'completed' });
   });
 
   it('passes only this task’s persisted human approval override into the run configuration', async () => {

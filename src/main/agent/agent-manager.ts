@@ -12,6 +12,7 @@ import {
 } from '../claude-code/task-runner';
 import { resolveClaudeCodeTaskSettings } from '../claude-code/settings';
 import { isClaudeRunFinished, loadClaudeRunInfo, resetClaudeRunInfo } from '../claude-code/task-runner';
+import { isSpecReviewProgressPublished } from '../spec-review-progress';
 import { detectClaudeLimitMessage } from '../claude-code/limit';
 import { createOrGetWorktree } from '../worktree';
 import { addToWorktree } from '../live-agent/project-setup';
@@ -471,9 +472,9 @@ export class AgentManager extends EventEmitter {
     // names it as what the worktree was cut from and the validation step diffs against it. The
     // branch the user chose is the honest answer there - it is what this worktree really came from -
     // and when it is gone that diff fails in the agent's own shell, where it can say so, which beats
-    // naming some other branch the work was never based on. Nothing else reads this value: the
-    // parallel-tasks changelog goes to the task's own metadata for its base branch
-    // (`task-changelog-writer.ts`), not here.
+    // naming some other branch the work was never based on. Spec reviews also publish their
+    // progress to this local branch; publication fails clearly if it is unavailable rather than
+    // silently substituting a different target. The parallel-tasks changelog uses task metadata.
     //
     // A task with no base branch chosen asks the repository for its default, which substitutes for
     // no choice of the user's rather than for a choice. That answer is required only when a branch
@@ -553,12 +554,17 @@ export class AgentManager extends EventEmitter {
     // Starting a task whose last run went all the way through begins a new run (fresh triage
     // and session) in the same worktree, instead of finishing again immediately. Not for a resync:
     // the session that did the work merges the base branch in and resumes
-    if (mode === 'start' && !resync && isClaudeRunFinished(loadClaudeRunInfo(specDir), taskSettings.validation)) {
+    const savedRun = loadClaudeRunInfo(specDir);
+    if (mode === 'start' && !resync && isClaudeRunFinished(savedRun, taskSettings.validation,
+      { specId: task.specId, baseBranch, specReviewRound: task.metadata?.specReview?.round })
+      && (!task.metadata?.specReview || (!!savedRun?.specReviewProgress
+        && await isSpecReviewProgressPublished(project.path, savedRun.specReviewProgress)))) {
       resetClaudeRunInfo(specDir);
     }
 
     const effectiveAgent = resolveEffectiveAgent(task.metadata?.agentOverride, getAgentBackendSettings().kind);
     const config: TaskRunConfig = {
+      projectPath: project.path,
       taskId,
       ...(task.metadata?.freshContextRequestId ? { freshContextRequestId: task.metadata.freshContextRequestId } : {}),
       ...(task.metadata?.humanWork?.approvalOverride ? { humanApprovalOverride: task.metadata.humanWork.approvalOverride } : {}),
@@ -592,7 +598,7 @@ export class AgentManager extends EventEmitter {
       uiImplementer: resolveUiImplementer(project.settings),
       mergeBaseDuring: resolveMergeBaseDuring(project.settings),
       // A Spec review ticket runs one read-only review step
-      ...(task.metadata?.specReview ? { specReview: true } : {}),
+      ...(task.metadata?.specReview ? { specReview: true, specReviewRound: task.metadata.specReview.round } : {}),
       ...(resync ? { resync } : {}),
     };
 

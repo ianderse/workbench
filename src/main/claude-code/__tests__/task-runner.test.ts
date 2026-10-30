@@ -15,6 +15,8 @@ import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS } from '../../../shared/types/claude-
 import { mutateProjectMemory, readMemoryContexts } from '../../self-improve/project-memory';
 import { closeTaskToolsServer } from '../../insights/task-tools-server';
 import type { SourceDecisionContext } from '../../decision-source-context';
+import { specReviewProgressDigest, type SpecReviewProgressInput } from '../../spec-review-progress';
+import type { SpecReviewReport } from '../../../shared/types/spec-review';
 import type { Task } from '../../../shared/types/task';
 import { resolveSpecHumanDecisionContext } from '../../spec-human-decision-context';
 
@@ -98,6 +100,14 @@ vi.mock('../triage', async (importOriginal) => {
   return { ...actual, triageTask: (...args: unknown[]) => triageMock(...args) };
 });
 
+const publishSpecReviewProgressMock = vi.hoisted(() => vi.fn());
+const isSpecReviewProgressPublishedMock = vi.hoisted(() => vi.fn());
+vi.mock('../../spec-review-progress', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../spec-review-progress')>()),
+  publishSpecReviewProgress: (...args: unknown[]) => publishSpecReviewProgressMock(...args),
+  isSpecReviewProgressPublished: (...args: unknown[]) => isSpecReviewProgressPublishedMock(...args),
+}));
+
 // The reviewer summary is a background model call; keep it from consuming the scripted runs
 const reviewSummaryMock = vi.hoisted(() => vi.fn(async (): Promise<unknown> => null));
 vi.mock('../review-summary', async (importOriginal) => {
@@ -158,6 +168,13 @@ function argValue(args: string[], flag: string): string | undefined {
   return index === -1 ? undefined : args[index + 1];
 }
 
+function progressReceipt(input: SpecReviewProgressInput) {
+  return {
+    commit: 'c'.repeat(40), branch: input.targetBranch, reportDigest: specReviewProgressDigest(input),
+    reviewedAt: input.reviewedAt, reviewedRevision: input.reviewedRevision, changed: true,
+  };
+}
+
 const humanReceipts: HumanWorkstream = { revision: 13, items: [{
   id: 'art-receipt', revision: 2, owner: 'Ian', status: 'submitted', response: 'Reviewed the art asset, approved as is.',
   evidence: 'docs/art-review.md', at: '2026-10-28T16:00:00Z', createdAt: '2026-10-27T16:00:00Z', history: [],
@@ -186,6 +203,10 @@ describe('ClaudeTaskRun', () => {
     ompSpawned.length = 0;
     ompExtensions.length = 0;
     triageMock.mockReset();
+    publishSpecReviewProgressMock.mockReset();
+    publishSpecReviewProgressMock.mockImplementation(async (input: SpecReviewProgressInput) => progressReceipt(input));
+    isSpecReviewProgressPublishedMock.mockReset();
+    isSpecReviewProgressPublishedMock.mockResolvedValue(true);
     specDir = mkdtempSync(path.join(tmpdir(), 'spec-'));
     worktree = mkdtempSync(path.join(tmpdir(), 'wt-'));
     runtimeRef.wsl = false;
@@ -202,6 +223,7 @@ describe('ClaudeTaskRun', () => {
       taskId: 't1',
       specId: '001-task',
       specDir,
+      projectPath: worktree,
       worktreePath: worktree,
       branch: 'workbench/001-task',
       baseBranch: 'main',
@@ -252,6 +274,219 @@ describe('ClaudeTaskRun', () => {
       expect(prompt).toContain('root PROGRESS.md when present');
       expect(prompt).toContain('if it is missing or stale, continue');
       expect(prompt).not.toContain('## Live project progress');
+    });
+  });
+
+  describe('host publication of spec-review progress', () => {
+    const complete: SpecReviewReport = {
+      complete: true, checksObserved: true, summary: 'All reviewed sections have observed evidence.',
+      sections: [{ section: '§1', status: 'done', evidence: 'Observed the required suite finish successfully.' }], gaps: [],
+    };
+    const withGaps: SpecReviewReport = {
+      complete: false, checksObserved: true, summary: 'The review found an uncovered retry boundary.',
+      sections: [{ section: '§2', status: 'partial', evidence: 'No duplicate-command regression exists.' }],
+      gaps: [{ key: 'g1', title: 'Cover duplicate commands', description: 'Add the required retry regression.', specSection: '§2', evidence: 'No duplicate-command regression exists.', dependsOn: [] }],
+    };
+    const unobserved: SpecReviewReport = {
+      complete: false, checksObserved: false, summary: 'Required checks were not observed.', sections: [], gaps: [],
+    };
+    const modelCount = (backend: string) => backend === 'omp' ? ompSpawned.length : spawned.length;
+    const reviewedHead = 'a'.repeat(40);
+    function inspectReviewRun(run: ClaudeTaskRun) {
+      const methods = run as unknown as {
+        currentHead(): Promise<string | undefined>;
+        undoReviewChanges(startHead: string | undefined): Promise<void>;
+      };
+      const head = vi.spyOn(methods, 'currentHead').mockResolvedValue(reviewedHead);
+      const restored = vi.spyOn(methods, 'undoReviewChanges').mockResolvedValue();
+      return { head, restored };
+    }
+
+    it.each(['claude', 'omp'].flatMap((backend) => [
+      { backend, reportCase: 'complete', report: complete },
+      { backend, reportCase: 'gaps', report: withGaps },
+      { backend, reportCase: 'checks unobserved', report: unobserved },
+    ]))('publishes canonical progress before QA_PASSED for $backend / $reportCase', async ({ backend, report }) => {
+      scripts.push({ messages: [result('spec-progress', { structured_output: report })] });
+      const events: string[] = [];
+      const canonicalProjectPath = path.join(worktree, 'canonical-project');
+      const run = makeRun({ backend, specReview: true, projectPath: canonicalProjectPath, specReviewRound: 3 }, {
+        onTaskEvent: (event: string) => {
+          events.push(event);
+          if (event === 'QA_PASSED') {
+            expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(1);
+            expect(loadClaudeRunInfo(specDir)?.specReviewProgress?.commit).toBe('c'.repeat(40));
+          }
+        },
+      });
+      const { restored } = inspectReviewRun(run);
+      publishSpecReviewProgressMock.mockImplementationOnce(async (input: SpecReviewProgressInput) => {
+        expect(restored).toHaveBeenCalledWith(reviewedHead);
+        expect(events).not.toContain('QA_PASSED');
+        return progressReceipt(input);
+      });
+      expect((await run.run()).status).toBe('completed');
+      expect(modelCount(backend)).toBe(1);
+      const info = loadClaudeRunInfo(specDir)!;
+      const phase = info.phases.find((entry) => entry.name === 'spec_review')!;
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledWith(expect.objectContaining({
+        projectPath: canonicalProjectPath, targetBranch: 'main', taskId: '001-task', title: 'Task', round: 3,
+        reviewedRevision: reviewedHead, reviewedAt: phase.endedAt,
+        report: expect.objectContaining({ complete: report.complete, checksObserved: report.checksObserved, gaps: report.gaps }),
+        signal: expect.any(AbortSignal),
+      }));
+      expect(info.specReviewRevision).toBe(reviewedHead);
+      expect(info.specReviewProgress).toEqual(progressReceipt(publishSpecReviewProgressMock.mock.calls[0][0]));
+      expect(events).toContain('QA_PASSED');
+      const prompt = backend === 'omp' ? String(ompSpawned[0].appendSystemPrompt)
+        : argValue(spawned[0].args, '--append-system-prompt')!;
+      expect(prompt).toContain('Do not edit, create or delete project files');
+      expect(prompt).toMatch(/Workbench.*publish[\s\S]*PROGRESS\.md/i);
+    });
+
+    it.each(['claude', 'omp'])('does not publish a stopped or malformed %s spec review', async (backend) => {
+      const stopped = makeRun({ backend, specReview: true });
+      inspectReviewRun(stopped);
+      stopped.stop();
+      expect((await stopped.run()).status).toBe('stopped');
+      expect(publishSpecReviewProgressMock).not.toHaveBeenCalled();
+
+      scripts.push({ messages: [result('bad-review', { structured_output: 'not a usable report', result: 'not JSON' })] });
+      const events: string[] = [];
+      const failed = makeRun({ backend, specReview: true }, { onTaskEvent: (event: string) => events.push(event) });
+      inspectReviewRun(failed);
+      expect((await failed.run()).status).toBe('failed');
+      expect(publishSpecReviewProgressMock).not.toHaveBeenCalled();
+      expect(events).not.toContain('QA_PASSED');
+    });
+
+    it.each(['claude', 'omp'])('retries only host publication after a %s publication failure', async (backend) => {
+      scripts.push({ messages: [result('publish-retry', { structured_output: withGaps })] });
+      publishSpecReviewProgressMock.mockRejectedValueOnce(new Error('Canonical progress branch is locked'));
+      const events: string[] = [];
+      const first = makeRun({ backend, specReview: true }, { onTaskEvent: (event: string) => events.push(event) });
+      inspectReviewRun(first);
+      const failure = await first.run();
+      expect(failure.status).toBe('failed');
+      expect(failure.error).toContain('Canonical progress branch is locked');
+      expect(events).not.toContain('QA_PASSED');
+      expect(loadClaudeRunInfo(specDir)?.specReview).toMatchObject(withGaps);
+      expect(loadClaudeRunInfo(specDir)?.specReviewProgress).toBeUndefined();
+      expect(modelCount(backend)).toBe(1);
+
+      const resumed = makeRun({ backend, specReview: true });
+      const { head } = inspectReviewRun(resumed);
+      head.mockResolvedValue('b'.repeat(40));
+      expect((await resumed.run()).status).toBe('completed');
+      expect(modelCount(backend)).toBe(1);
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(2);
+      expect(publishSpecReviewProgressMock.mock.calls[1][0]).toMatchObject({ reviewedRevision: reviewedHead, report: withGaps });
+      expect(loadClaudeRunInfo(specDir)?.specReviewProgress?.commit).toBe('c'.repeat(40));
+      // A later start with the durable receipt must not republish or rerun the audit.
+      expect((await makeRun({ backend, specReview: true }).run()).status).toBe('completed');
+      expect(modelCount(backend)).toBe(1);
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['claude', 'omp'].flatMap((backend) => [
+      'digest', 'branch', 'reviewed revision', 'reviewed timestamp', 'report', 'task id', 'round', 'target branch',
+    ].map((mismatch) => ({ backend, mismatch }))))('republishes a mismatched $mismatch receipt on $backend without rerunning the model', async ({ backend, mismatch }) => {
+      scripts.push({ messages: [result('bound-receipt', { structured_output: complete })] });
+      const first = makeRun({ backend, specReview: true, specReviewRound: 3 });
+      inspectReviewRun(first);
+      expect((await first.run()).status).toBe('completed');
+      const saved = loadClaudeRunInfo(specDir)!;
+      const receipt = saved.specReviewProgress!;
+      const overrides: Record<string, unknown> = { backend, specReview: true, specReviewRound: 3 };
+      switch (mismatch) {
+        case 'digest': receipt.reportDigest = '0'.repeat(64); break;
+        case 'branch': receipt.branch = 'other-target'; break;
+        case 'reviewed revision': receipt.reviewedRevision = 'b'.repeat(40); break;
+        case 'reviewed timestamp': receipt.reviewedAt = '2020-01-01T00:00:00.000Z'; break;
+        case 'report': saved.specReview!.summary = 'Updated report evidence'; break;
+        case 'task id': overrides.specId = '002-other-review'; break;
+        case 'round': overrides.specReviewRound = 4; break;
+        case 'target branch': overrides.baseBranch = 'release'; break;
+      }
+      writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(saved));
+      const resumed = makeRun(overrides);
+      inspectReviewRun(resumed);
+      expect((await resumed.run()).status).toBe('completed');
+      expect(modelCount(backend)).toBe(1);
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(2);
+      const request = publishSpecReviewProgressMock.mock.calls[1][0] as SpecReviewProgressInput;
+      expect(request).toMatchObject({
+        targetBranch: overrides.baseBranch ?? 'main', taskId: overrides.specId ?? '001-task',
+        round: overrides.specReviewRound, reviewedRevision: reviewedHead,
+        reviewedAt: saved.phases.find((phase) => phase.name === 'spec_review')!.endedAt, report: saved.specReview,
+      });
+      expect(loadClaudeRunInfo(specDir)?.specReviewProgress).toEqual(progressReceipt(request));
+      expect((await makeRun(overrides).run()).status).toBe('completed');
+      expect(modelCount(backend)).toBe(1);
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(2);
+    });
+
+    it('republishes a receipt whose commit is no longer reachable without rerunning the audit', async () => {
+      scripts.push({ messages: [result('unreachable-receipt', { structured_output: complete })] });
+      const first = makeRun({ backend: 'omp', specReview: true });
+      inspectReviewRun(first);
+      expect((await first.run()).status).toBe('completed');
+      const originalReceipt = loadClaudeRunInfo(specDir)!.specReviewProgress!;
+      isSpecReviewProgressPublishedMock.mockResolvedValueOnce(false);
+      expect((await makeRun({ backend: 'omp', specReview: true }).run()).status).toBe('completed');
+      expect(isSpecReviewProgressPublishedMock).toHaveBeenCalledWith(worktree, originalReceipt);
+      expect(ompSpawned).toHaveLength(1);
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(2);
+      // The replacement publication is reachable and must be reused by later starts.
+      expect((await makeRun({ backend: 'omp', specReview: true }).run()).status).toBe('completed');
+      expect(ompSpawned).toHaveLength(1);
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['claude', 'omp'])('honors a stop after a usable %s report and before host publication', async (backend) => {
+      scripts.push({ messages: [result('stop-after-report', { structured_output: complete })] });
+      const events: string[] = [];
+      const run = makeRun({ backend, specReview: true }, { onTaskEvent: (event: string) => events.push(event) });
+      const { restored } = inspectReviewRun(run);
+      restored.mockImplementationOnce(async () => { run.stop(); });
+      expect((await run.run()).status).toBe('stopped');
+      expect(modelCount(backend)).toBe(1);
+      expect(loadClaudeRunInfo(specDir)?.specReview).toMatchObject(complete);
+      expect(publishSpecReviewProgressMock).not.toHaveBeenCalled();
+      expect(events).not.toContain('QA_PASSED');
+    });
+
+    it.each(['claude', 'omp'])('fails clearly when a %s spec review has no canonical project path', async (backend) => {
+      scripts.push({ messages: [result('missing-project', { structured_output: complete })] });
+      const events: string[] = [];
+      const run = makeRun({ backend, specReview: true, projectPath: undefined }, { onTaskEvent: (event: string) => events.push(event) });
+      inspectReviewRun(run);
+      const outcome = await run.run();
+      expect(outcome.status).toBe('failed');
+      expect(outcome.error).toMatch(/project/i);
+      expect(publishSpecReviewProgressMock).not.toHaveBeenCalled();
+      expect(events).not.toContain('QA_PASSED');
+    });
+
+    it('clears the prior publication receipt when requested changes produce a new report', async () => {
+      scripts.push({ messages: [result('first-review', { structured_output: complete })] });
+      const first = makeRun({ specReview: true });
+      inspectReviewRun(first);
+      expect((await first.run()).status).toBe('completed');
+      expect(loadClaudeRunInfo(specDir)?.specReviewProgress).toBeDefined();
+
+      scripts.push({ messages: [result('revised-review', { structured_output: withGaps })] });
+      publishSpecReviewProgressMock.mockImplementationOnce(async (input: SpecReviewProgressInput) => {
+        expect(loadClaudeRunInfo(specDir)?.specReviewProgress).toBeUndefined();
+        expect(input.report).toMatchObject(withGaps);
+        return { ...progressReceipt(input), commit: 'e'.repeat(40) };
+      });
+      const revised = makeRun({ mode: 'revise', specReview: true, feedback: 'Review the new spec revision.' });
+      inspectReviewRun(revised);
+      expect((await revised.run()).status).toBe('completed');
+      expect(spawned).toHaveLength(2);
+      expect(publishSpecReviewProgressMock).toHaveBeenCalledTimes(2);
+      expect(loadClaudeRunInfo(specDir)?.specReviewProgress?.commit).toBe('e'.repeat(40));
     });
   });
 

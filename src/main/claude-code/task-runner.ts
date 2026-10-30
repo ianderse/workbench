@@ -2,6 +2,7 @@ import type { HumanApprovalOverride, HumanWorkstream } from '../../shared/types/
 import { buildHumanApprovalOverridePrompt, buildHumanWorkFeedback, buildHumanWorkPrompt, isHumanApprovalOverride } from '../../shared/utils/human-work';
 import { formatSourceDecisionContext, type SourceDecisionContext } from '../decision-source-context';
 import { formatSpecHumanDecisionContext, type SpecHumanDecisionContext } from '../spec-human-decision-context';
+import { isSpecReviewProgressPublished, publishSpecReviewProgress, specReviewProgressDigest } from '../spec-review-progress';
 /**
  * Claude Code task runner
  * =======================
@@ -106,7 +107,7 @@ import {
 } from '../../shared/utils/task-split';
 import type { SplitSubmission } from '../queue-grooming';
 import { PHASE_PROMPT_OPENINGS, TASK_EXECUTION_GUIDANCE } from './phase-prompts';
-import { SPEC_REVIEW_SCHEMA, normalizeSpecReview } from '../../shared/utils/spec-review';
+import { SPEC_REVIEW_SCHEMA, isSpecReviewProgressReceipt, normalizeSpecReview } from '../../shared/utils/spec-review';
 import { appLog } from '../app-logger';
 import { writeOmpMessagingExtension } from '../task-messaging/omp-extension';
 import { getAgentBackendSettings } from '../agent-backend/settings';
@@ -176,6 +177,8 @@ export interface TaskAttachment {
 }
 
 export interface TaskRunConfig {
+  /** Canonical project checkout; review progress is published to its local reviewed base branch. */
+  projectPath?: string;
   /** Durable manual request; consumed only after the replacement session is acknowledged. */
   freshContextRequestId?: string;
   humanApprovalOverride?: HumanApprovalOverride;
@@ -248,6 +251,7 @@ export interface TaskRunConfig {
    * that reads the spec and the code on the base branch, runs the tests and returns a SpecReviewReport.
    */
   specReview?: boolean;
+  specReviewRound?: number;
   /**
    * Task messaging (Settings > Agents): the session keeps stdin open for messages, gets
    * Workbench's `message_task` / `list_parallel_tasks` tools. Native messages from other sessions
@@ -388,6 +392,7 @@ function buildSpecReviewSystemPrompt(config: TaskRunConfig, specDirRelative: str
 - Judge each spec section from evidence you saw: files you read, tests you ran, behaviour you observed. Do not assume a section is done because a ticket exists for it.
 - A gap needs the spec section it comes from and concrete evidence (a missing test, observed behaviour that differs from the spec, a missing file). Do not list opinions, style, or ideas beyond the spec. Write each gap's description so a coding agent with no other context can build it: what to build, the spec section to follow, acceptance criteria.
 - Answer with the structured report only.`,
+    `Workbench publishes this completed report to a bounded section in canonical PROGRESS.md and commits only that documentation on the reviewed base branch. Keep your audit read-only; do not edit progress yourself. A publication failure leaves this review unfinished for a retry, without requiring another model review. Publication is not owner/spec acceptance.`,
     ...[config.progressPrompt, humanDecisionPrompt(config), config.selfImprovePrompt].filter(Boolean),
   ].join('\n\n');
 }
@@ -1026,8 +1031,8 @@ export class ClaudeTaskRun {
 
   /**
    * A Spec review ticket: one review step in a worktree cut from the base branch, with no triage,
-   * plan, implement, validate or commit. It ends in Human Review (QA_PASSED) with its report in
-   * the run info; it changes no code, so there is nothing to merge.
+   * plan, implement or validate. After the read-only audit, the host publishes a documentation-only
+   * progress commit before it ends in Human Review (QA_PASSED means the review executed).
    */
   private async runSpecReview(): Promise<TaskRunOutcome> {
     if (!this.info.triage) {
@@ -1044,13 +1049,58 @@ export class ClaudeTaskRun {
       this.saveInfo();
     }
     // Request changes on a finished review runs it again
-    if (this.config.mode === 'revise') this.info.specReview = undefined;
+    if (this.config.mode === 'revise') {
+      this.info.specReview = undefined;
+      this.info.specReviewProgress = undefined;
+      this.info.specReviewRevision = undefined;
+    }
     if (!this.hasCompleted('spec_review') || !this.info.specReview) {
       const startHead = await this.currentHead();
+      this.info.specReviewRevision = startHead;
+      this.info.specReviewProgress = undefined;
+      this.flushInfo();
       const stopped = await this.runSessionPhase('spec_review');
       await this.undoReviewChanges(startHead);
       if (stopped) return stopped;
     }
+    if (this.stopped) return { status: 'stopped' };
+    const publicationCurrent = isSpecReviewPublicationCurrent(this.info, this.config)
+      && !!this.config.projectPath && await isSpecReviewProgressPublished(this.config.projectPath, this.info.specReviewProgress!);
+    if (!publicationCurrent) {
+      this.info.specReviewProgress = undefined;
+      try {
+        if (!this.config.projectPath) throw new Error('The canonical project path is unavailable');
+        const report = this.info.specReview;
+        if (!report) throw new Error('No usable spec-review report is available');
+        const reviewedAt = [...this.info.phases].reverse().find((phase) => phase.name === 'spec_review' && phase.endedAt && !phase.isError)?.endedAt;
+        if (!reviewedAt) throw new Error('The completed review timestamp is unavailable');
+        const receipt = await publishSpecReviewProgress({
+          projectPath: this.config.projectPath,
+          targetBranch: this.config.baseBranch,
+          taskId: this.config.specId,
+          title: this.config.title,
+          round: this.config.specReviewRound,
+          reviewedRevision: this.info.specReviewRevision,
+          reviewedAt,
+          report,
+          signal: this.abortController.signal,
+        });
+        if (!isSpecReviewPublicationCurrent({ ...this.info, specReviewProgress: receipt }, this.config)) {
+          throw new Error('Canonical progress publication returned a receipt that does not match this review');
+        }
+        this.info.specReviewProgress = receipt;
+        // Save the actual publication even when a stop arrived just after the branch advance.
+        this.flushInfo();
+        this.noteLog('validation', `Updated canonical PROGRESS.md on ${this.info.specReviewProgress.branch} (${this.info.specReviewProgress.commit})`);
+      } catch (error) {
+        if (this.stopped) return { status: 'stopped' };
+        const message = `Could not update canonical PROGRESS.md: ${error instanceof Error ? error.message : String(error)}. Resume retries publication using the saved review report.`;
+        this.log.endPhase('validation', false, message);
+        this.failEvent('spec_review', message);
+        return { status: 'failed', error: message };
+      }
+    }
+    if (this.stopped) return { status: 'stopped' };
     this.flushInfo();
     this.emitProgress('complete', 1, 'Ready for review');
     this.callbacks.onTaskEvent?.('QA_PASSED', { iteration: 1, maxIterations: 1, testsRun: {} });
@@ -3217,15 +3267,28 @@ export function loadClaudeRunInfo(specDir: string): ClaudeRunInfo | null {
   }
 }
 
-/**
- * Whether a run went all the way through: its last step is a finished validation, or a finished
- * implementation/revision when validation is off. Starting such a task again begins a new run.
- */
-export function isClaudeRunFinished(info: ClaudeRunInfo | null, validation: boolean): boolean {
+type SpecReviewPublicationContext = Pick<TaskRunConfig, 'specId' | 'baseBranch' | 'specReviewRound'>;
+
+/** A saved receipt establishes delivery only for this exact audit and publication target. */
+export function isSpecReviewPublicationCurrent(info: ClaudeRunInfo | null, context?: SpecReviewPublicationContext): boolean {
+  const receipt = info?.specReviewProgress;
+  if (!context || !info?.specReview || !isSpecReviewProgressReceipt(receipt)) return false;
+  const reviewedAt = [...info.phases].reverse().find((phase) => phase.name === 'spec_review' && phase.endedAt && !phase.isError)?.endedAt;
+  return !!reviewedAt && receipt.branch === context.baseBranch
+    && receipt.reviewedAt === reviewedAt && receipt.reviewedRevision === info.specReviewRevision
+    && receipt.reportDigest === specReviewProgressDigest({
+      taskId: context.specId, round: context.specReviewRound, reviewedAt,
+      reviewedRevision: info.specReviewRevision, report: info.specReview,
+    });
+}
+
+/** Starting a finished run begins a new audit/session; failed progress publication stays resumable. */
+export function isClaudeRunFinished(info: ClaudeRunInfo | null, validation: boolean, reviewContext?: SpecReviewPublicationContext): boolean {
   if (info?.revisionRequest && !info.revisionRequest.settledAt && !info.revisionRequest.supersededAt) return false;
   const last = info?.phases.at(-1);
   if (!last?.endedAt || last.isError) return false;
-  if (last.name === 'validate' || last.name === 'spec_review') return true;
+  if (last.name === 'spec_review') return isSpecReviewPublicationCurrent(info, reviewContext);
+  if (last.name === 'validate') return true;
   return !validation && (last.name === 'implement' || last.name === 'revise' || last.name === 'resync');
 }
 

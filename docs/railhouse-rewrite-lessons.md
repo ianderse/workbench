@@ -171,10 +171,14 @@ startup reading. Agents must still read every applicable requirement and run req
 Workbench supplies a separate deterministic live projection from recorded tasks and observed Git
 state, capped at 4,800 UTF-8 bytes, without reading the documentation archive or making a model
 call. The host refreshes it on task launch, relevant state changes, merge, and integration promotion.
-Only an ignored, managed state file is written; root authored progress and unrelated work remain
-untouched. Keep refresh time out of otherwise unchanged advice-cache inputs. Do not clone raw logs,
+This live projection writes only an ignored, managed state file. Separately, after each spec-review
+ticket the host publishes a bounded latest-review block to canonical root PROGRESS.md on the reviewed
+local base branch, with a documentation-only commit before review completion. Authored text outside
+the block and unrelated work are preserved. [Review publication](review-progress.md) describes retry,
+size and revision provenance. Keep refresh time out of otherwise unchanged advice-cache inputs. Do not clone raw logs,
 full task descriptions, or entire histories just to build a short summary. Failure to persist does
-not fail successful integration or withhold the bounded launch context.
+not fail successful integration or withhold the bounded launch context. A failed canonical review
+publication does keep that review unfinished; Resume retries the saved report without another model call.
 
 Parallel workers and read-only reviewers do not maintain shared progress. The integration owner
 replaces stale authored status rather than appending a diary. Board status, reported checks,

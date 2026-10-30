@@ -7,11 +7,23 @@
  *   - `planReviewOutcome()`  what to do with a finished review (round cap, batch status)
  */
 import type { Task } from '../types/task';
-import type { SpecBatch, SpecBatchStatus, SpecReviewGap, SpecReviewReport, SpecReviewSection, SpecSectionStatus } from '../types/spec-review';
+import type { SpecBatch, SpecBatchStatus, SpecReviewGap, SpecReviewProgressReceipt, SpecReviewReport, SpecReviewSection, SpecSectionStatus } from '../types/spec-review';
 import { breakDependencyCycles, sortByDependencies } from './task-breakdown-order';
 import { TASK_DECOMPOSITION_GUIDANCE } from './task-decomposition';
 
 export const DEFAULT_MAX_REVIEW_ROUNDS = 2;
+
+/** A cached truthy object alone cannot establish that canonical progress was published. */
+export function isSpecReviewProgressReceipt(value: unknown): value is SpecReviewProgressReceipt {
+  if (!value || typeof value !== 'object') return false;
+  const receipt = value as Record<string, unknown>;
+  return typeof receipt.commit === 'string' && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(receipt.commit)
+    && typeof receipt.branch === 'string' && !!receipt.branch.trim() && !/[\x00-\x20\x7f]/.test(receipt.branch)
+    && typeof receipt.reportDigest === 'string' && /^[a-f0-9]{64}$/i.test(receipt.reportDigest)
+    && typeof receipt.reviewedAt === 'string' && Number.isFinite(Date.parse(receipt.reviewedAt))
+    && (receipt.reviewedRevision === undefined || (typeof receipt.reviewedRevision === 'string' && /^[a-f0-9]{7,64}$/i.test(receipt.reviewedRevision)))
+    && typeof receipt.changed === 'boolean';
+}
 export const MAX_SPEC_GAPS = 12;
 const MAX_SPEC_TEXT_CHARS = 20_000;
 const PROMPT_EXCERPT_CHARS = 280;
@@ -277,6 +289,7 @@ How to review:
 1. Go through the spec section by section. For each section decide done, partial or missing, and name the evidence (files, tests, behaviour you observed).
 2. Run the project's tests (and type check or build when the project has them) and note what fails.
 3. List a gap only when you can name the spec section and concrete evidence: a missing test, observed behaviour that differs from the spec, a missing file. Do not list style opinions or ideas beyond the spec. Each gap is a self-contained ticket that a coding agent can build on its own.
+4. Workbench publishes the finished report into canonical PROGRESS.md on the reviewed base branch before this ticket completes. Keep the audit read-only; do not edit progress yourself. Its update records the reviewed revision, agent-reported results, remaining gaps and check-observation status, without claiming owner acceptance.
 
 ${TASK_DECOMPOSITION_GUIDANCE}
 Apply these boundaries only to evidence-backed gaps above; do not create extra work outside the spec to reorganize the project.

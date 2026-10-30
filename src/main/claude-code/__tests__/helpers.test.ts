@@ -3,6 +3,7 @@ import { buildMcpConfig } from '../mcp-config';
 import { resolveClaudeCodeTaskSettings } from '../settings';
 import { applyPlanningPolicy, fixedTriage } from '../triage';
 import { isClaudeRunFinished } from '../task-runner';
+import { specReviewProgressDigest } from '../../spec-review-progress';
 import { DEFAULT_CLAUDE_CODE_TASK_SETTINGS, type ClaudeRunInfo } from '../../../shared/types/claude-code';
 
 describe('buildMcpConfig', () => {
@@ -67,6 +68,23 @@ describe('isClaudeRunFinished', () => {
     expect(isClaudeRunFinished(run([{ name: 'validate', ...done, isError: true }]), true)).toBe(false);
     expect(isClaudeRunFinished(run([{ name: 'validate', startedAt: 'a' }]), true)).toBe(false);
     expect(isClaudeRunFinished(null, true)).toBe(false);
+  });
+
+  it('keeps a completed spec audit resumable until canonical progress is published', () => {
+    const reviewedAt = '2026-10-30T10:00:00Z';
+    const context = { specId: '123-review', baseBranch: 'main' };
+    const info: ClaudeRunInfo = { version: 1, phases: [{ name: 'spec_review', ...done, endedAt: reviewedAt }],
+      subagents: [], totalCostUsd: 0, updatedAt: '',
+      specReview: { complete: false, checksObserved: false, summary: 'Checks unobserved', sections: [], gaps: [] },
+    };
+    expect(isClaudeRunFinished(info, true, context)).toBe(false);
+    const reportDigest = specReviewProgressDigest({ taskId: context.specId, reviewedAt, report: info.specReview! });
+    info.specReviewProgress = { commit: 'a'.repeat(40), branch: 'main', reportDigest, reviewedAt, changed: true };
+    expect(isClaudeRunFinished(info, true, context)).toBe(true);
+    expect(isClaudeRunFinished(info, true)).toBe(false);
+    expect(isClaudeRunFinished(info, true, { ...context, baseBranch: 'other' })).toBe(false);
+    info.specReview = { ...info.specReview!, summary: 'Changed findings' };
+    expect(isClaudeRunFinished(info, true, context)).toBe(false);
   });
 
   it('does not reset a newly accepted reviewer request before its next phase is recorded', () => {

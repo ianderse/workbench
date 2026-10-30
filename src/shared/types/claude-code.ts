@@ -8,7 +8,7 @@ import type { PhaseProgressEvidence, PhaseProgressState, PhaseRecoveryIntent, Se
  * Claude Code plans (optional), implements and validates in one resumable session.
  */
 
-import type { SpecReviewReport } from './spec-review';
+import type { SpecReviewProgressReceipt, SpecReviewReport } from './spec-review';
 
 /** Model aliases accepted by `claude --model` */
 export type ClaudeModelAlias = 'haiku' | 'sonnet' | 'opus' | 'fable';
@@ -295,6 +295,10 @@ export interface ClaudeRunInfo {
   validation?: ValidationReport;
   /** Result of a Spec review ticket */
   specReview?: SpecReviewReport;
+  /** Actual review worktree HEAD captured before the read-only review, not the later target tip. */
+  specReviewRevision?: string;
+  /** Canonical progress publication must succeed before a spec-review ticket completes. */
+  specReviewProgress?: SpecReviewProgressReceipt;
   /** Every AI review round of the latest review loop */
   reviewRounds?: ReviewRound[];
   /** Final verdict of the latest review loop */
