@@ -87,7 +87,8 @@ const argValue = (args: string[], flag: string) => {
   return i === -1 ? undefined : args[i + 1];
 };
 
-describe('ClaudeTaskRun resync', () => {
+// Real git repos: git is slow to start on Windows runners
+describe('ClaudeTaskRun resync', { timeout: 30_000 }, () => {
   let tmp: string;
   let root: string;
   let worktree: string;
