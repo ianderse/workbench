@@ -58,6 +58,14 @@ import { checkRuntimeAtStartup } from './worktree/runtime-switch';
 import { ensureDevDesktopEntry } from './dev-desktop-entry';
 import { ptyDaemonClient } from './terminal/pty-daemon-client';
 import { AppTray, isWindowCloseAllowed, type TrayStatus } from './app-tray';
+import {
+  applyRestoredWindowState,
+  loadMainWindowState,
+  loadRestoredWindows,
+  saveWindowStateOnQuit,
+  trackWindowState,
+  type RestoredWindow
+} from './window-state';
 import { writeClaudeThemeSettings } from './claude-cli-theme';
 import {
   focusWindowById,
@@ -189,7 +197,7 @@ let appTray: AppTray | null = null;
 function showMainWindow(): void {
   const window = getFocusedWindow();
   if (!window) {
-    createWindow();
+    createWindow(null, loadMainWindowState());
     return;
   }
   showWindow(window);
@@ -318,9 +326,10 @@ function fillScreenOnMaximize(window: BrowserWindow): void {
 
 /**
  * Create an app window. `assignedProjectId` is the project the window opens (the Projects
- * page's "New window"); the first window passes null and restores the project it showed last.
+ * page's "New window", or a window reopened at launch); null restores the project shown last.
+ * `restored` is a saved window's place and state (windows reopened at launch).
  */
-function createWindow(assignedProjectId: string | null = null): BrowserWindow {
+function createWindow(assignedProjectId: string | null = null, restored: RestoredWindow | null = null): BrowserWindow {
   // Get the primary display's work area (accounts for taskbar, dock, etc.)
   // Wrapped in try/catch to handle potential failures with fallback to safe defaults
   let workAreaSize: { width: number; height: number };
@@ -355,14 +364,16 @@ function createWindow(assignedProjectId: string | null = null): BrowserWindow {
   const width: number = Math.min(WINDOW_PREFERRED_WIDTH, availableWidth);
   const height: number = Math.min(WINDOW_PREFERRED_HEIGHT, availableHeight);
 
+  // A reopened window goes where it was (display and size); without it, centred on the primary display
+  const bounds = restored?.bounds ?? { width, height };
+
   // Ensure minimum dimensions don't exceed the actual initial window size
-  const minWidth: number = Math.min(WINDOW_MIN_WIDTH, width);
-  const minHeight: number = Math.min(WINDOW_MIN_HEIGHT, height);
+  const minWidth: number = Math.min(WINDOW_MIN_WIDTH, bounds.width);
+  const minHeight: number = Math.min(WINDOW_MIN_HEIGHT, bounds.height);
 
   // Create the browser window
   const appWindow = new BrowserWindow({
-    width,
-    height,
+    ...bounds,
     minWidth,
     minHeight,
     show: false,
@@ -389,6 +400,8 @@ function createWindow(assignedProjectId: string | null = null): BrowserWindow {
   });
 
   registerWindow(appWindow, assignedProjectId);
+  // Before the close handler below, so a window hiding to the tray is saved while still visible
+  trackWindowState(appWindow, restored, assignedProjectId === null);
   if (isWSL()) {
     fillScreenOnMaximize(appWindow);
   }
@@ -414,7 +427,11 @@ function createWindow(assignedProjectId: string | null = null): BrowserWindow {
 
   // Show window when ready to avoid visual flash
   appWindow.on('ready-to-show', () => {
-    appWindow.show();
+    // Reopened windows other than the one used last stay behind it
+    if (restored && !restored.focused) appWindow.showInactive();
+    else appWindow.show();
+    // Maximized / full screen only once shown (Linux ignores it earlier), on the restored display
+    if (restored) applyRestoredWindowState(appWindow, restored);
   });
 
   // Capture renderer process crashes/termination reasons for diagnostics.
@@ -698,8 +715,12 @@ app.whenReady().then(async () => {
     taskQueue.request();
   });
 
-  // Create the first window (it restores the project it showed last)
-  const firstWindow = createWindow();
+  // Reopen the windows open when the app quit, each with its project, place and state (the
+  // main one restores the project it showed last; the one used last is created last, so it
+  // ends up on top); else one window that restores the project it showed last
+  const restoredWindows = loadRestoredWindows((projectId) => projectStore.getProject(projectId) !== undefined);
+  const createdWindows = restoredWindows.map((restored) => createWindow(restored.projectId, restored));
+  const firstWindow = createdWindows[0] ?? createWindow();
 
   // Tray icon for background mode (a desktop without a tray just keeps the old close-to-quit behavior)
   try {
@@ -882,6 +903,9 @@ app.on('before-quit', (event) => {
 
   // Pause quit to perform async cleanup
   event.preventDefault();
+
+  // Remember every open window while they are still open (reopened on the next launch)
+  saveWindowStateOnQuit();
 
   // Stop synchronous services immediately
   stopPeriodicUpdates();
