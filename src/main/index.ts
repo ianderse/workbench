@@ -46,6 +46,7 @@ import { DEFAULT_APP_SETTINGS, IPC_CHANNELS, TITLE_BAR_OVERLAY_HEIGHT, SPELL_CHE
 import { getAppLanguage, initAppLanguage } from './app-language';
 import { readSettingsFile } from './settings-utils';
 import { liveAgentRelay } from './live-agent/live-agent-relay';
+import { stopMcpProbes } from './mcp-availability';
 import { syncLiveAgentAtStartup } from './live-agent/live-agent-projects';
 import { appLog, setupErrorLogging } from './app-logger';
 import { preWarmToolCache, warmToolInfo } from './cli-tool-manager';
@@ -328,7 +329,8 @@ function fillScreenOnMaximize(window: BrowserWindow): void {
 
 /**
  * Create an app window. `assignedProjectId` is the project the window opens (the Projects
- * page's "New window"); the first window passes null and restores the project it showed last.
+ * page's "New window", or a window reopened at launch); null restores the project shown last.
+ * `restored` is a saved window's place and state (windows reopened at launch).
  */
 function createWindow(assignedProjectId: string | null = null, restored: RestoreItem | null = null): BrowserWindow {
   // Get the primary display's work area (accounts for taskbar, dock, etc.)
@@ -365,9 +367,12 @@ function createWindow(assignedProjectId: string | null = null, restored: Restore
   const width: number = Math.min(WINDOW_PREFERRED_WIDTH, availableWidth);
   const height: number = Math.min(WINDOW_PREFERRED_HEIGHT, availableHeight);
 
+  // A reopened window goes where it was (display and size); without it, centred on the primary display
+  const bounds = restored?.bounds ?? { width, height };
+
   // Ensure minimum dimensions don't exceed the actual initial window size
-  const minWidth: number = Math.min(WINDOW_MIN_WIDTH, width);
-  const minHeight: number = Math.min(WINDOW_MIN_HEIGHT, height);
+  const minWidth: number = Math.min(WINDOW_MIN_WIDTH, bounds.width);
+  const minHeight: number = Math.min(WINDOW_MIN_HEIGHT, bounds.height);
 
   // Create the browser window
   const savedBounds = restored?.bounds ?? null;
@@ -881,9 +886,11 @@ app.whenReady().then(async () => {
     console.warn('[main] ========================================');
   }
 
-  // Initialize app auto-updater (only in production, or when DEBUG_UPDATER is set)
-  const forceUpdater = process.env.DEBUG_UPDATER === 'true';
-  if (app.isPackaged || forceUpdater) {
+  // Initialize the app auto-updater. It checks once at launch and notifies about a new version.
+  // Development builds get it too, so a lowered package.json version can try the update flow;
+  // they don't check periodically (unless DEBUG_UPDATER=true) and never download or install
+  // (see app-updater.ts)
+  {
     // Load settings to get beta updates preference
     const settings = loadSettingsSync();
     const betaUpdates = settings.betaUpdates ?? false;
@@ -891,16 +898,6 @@ app.whenReady().then(async () => {
     initializeAppUpdater(() => getFocusedWindow(), betaUpdates);
     console.warn('[main] App auto-updater initialized');
     console.warn(`[main] Beta updates: ${betaUpdates ? 'enabled' : 'disabled'}`);
-    if (forceUpdater && !app.isPackaged) {
-      console.warn('[main] Updater forced in dev mode via DEBUG_UPDATER=true');
-      console.warn('[main] Note: Updates won\'t actually work in dev mode');
-    }
-  } else {
-    console.warn('[main] ========================================');
-    console.warn('[main] App auto-updater DISABLED (development mode)');
-    console.warn('[main] To test updater logging, set DEBUG_UPDATER=true');
-    console.warn('[main] Note: Actual updates only work in packaged builds');
-    console.warn('[main] ========================================');
   }
 
   // macOS: clicking the dock icon re-creates the window, or shows it if it was hidden to the tray
@@ -941,6 +938,7 @@ app.on('before-quit', (event) => {
   stopPeriodicUpdates();
   rateLimitResumeScheduler.dispose();
   taskQueue.dispose();
+  stopMcpProbes();
 
   const usageMonitor = getUsageMonitor();
   usageMonitor.stop();

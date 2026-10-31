@@ -29,7 +29,6 @@ import { Insights } from './components/Insights';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { ProjectsPage } from './components/ProjectsPage';
 import { AuthFailureModal } from './components/AuthFailureModal';
-import { AppUpdateNotification } from './components/AppUpdateNotification';
 import { ProactiveSwapListener } from './components/ProactiveSwapListener';
 import { useProjectStore, loadProjects, initializeProject, removeProject } from './stores/project-store';
 import { useTaskStore, loadTasks } from './stores/task-store';
@@ -310,21 +309,14 @@ export function App() {
     };
   }, []);
 
-  // Listen for app updates - auto-open settings to 'updates' section when update is ready
+  // A new version was found (or its notification clicked): open Settings > Updates, which shows the
+  // version and its Download button. The main process sends this to one window only.
   useEffect(() => {
-    // When an update is downloaded and ready to install, open settings to updates section.
-    // The event reaches every project window, so only the one the user is in opens the
-    // dialog; the others show the update notification like any other window would.
-    const cleanupDownloaded = window.electronAPI.onAppUpdateDownloaded(() => {
-      if (!document.hasFocus()) return;
-      console.debug('[App] Update downloaded, opening settings to updates section');
+    return window.electronAPI.onAppUpdateOpenSettings(() => {
+      setSettingsInitialProjectSection(undefined);
       setSettingsInitialSection('updates');
       setIsSettingsDialogOpen(true);
     });
-
-    return () => {
-      cleanupDownloaded();
-    };
   }, []);
 
   // Reset init success flag when selected project changes
@@ -977,9 +969,6 @@ export function App() {
             setIsSettingsDialogOpen(true);
           }} />
         )}
-
-        {/* App Update Notification - shows when new app version is available */}
-        <AppUpdateNotification />
       </div>
       </TooltipProvider>
     </ViewStateProvider>

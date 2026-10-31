@@ -6,14 +6,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { existsSync, readdirSync } from 'fs';
 import os from 'os';
-import { execFileSync } from 'child_process';
+import path from 'path';
+import { execFile, execFileSync, spawn } from 'child_process';
 import {
   getToolInfo,
+  getToolInfoAsync,
   getToolPathAsync,
   clearToolCache,
+  findNodeInLoginShell,
   getClaudeDetectionPaths,
   sortNvmVersionDirs,
-  buildClaudeDetectionResult
+  buildClaudeDetectionResult,
+  getNodeVersionManagerPaths
 } from '../cli-tool-manager';
 import {
   findWindowsExecutableViaWhere,
@@ -21,6 +25,9 @@ import {
   isSecurePath
 } from '../utils/windows-paths';
 import { findExecutable, findExecutableAsync } from '../env-utils';
+
+/** The host's platform: tests below pretend to be on other ones */
+const HOST_PLATFORM = process.platform;
 
 type SpawnOptions = Parameters<(typeof import('../env-utils'))['getSpawnOptions']>[1];
 type MockDirent = import('fs').Dirent<import('node:buffer').NonSharedBuffer>;
@@ -64,7 +71,9 @@ vi.mock('fs', () => ({
 // execFile and exec need to be promisify-compatible
 // IMPORTANT: execSync and execFileSync share the same mock so tests that set one will affect both
 // This is because validateClaude() uses execSync for .cmd files and execFileSync for others
-vi.mock('child_process', () => {
+vi.mock('child_process', async (importOriginal) => {
+  // The login shell lookup spawns a real (fake) shell in its tests
+  const actual = await importOriginal<typeof import('child_process')>();
   // Shared mock for sync execution - both execFileSync and execSync use this
   // so when tests call vi.mocked(execFileSync).mockReturnValue(), it affects execSync too
   const sharedSyncMock = vi.fn();
@@ -107,7 +116,8 @@ const mockExecFile = vi.fn((_cmd: unknown, _args: unknown, _options: unknown, ca
     execFileSync: sharedSyncMock,
     execFile: mockExecFile,
     execSync: sharedSyncMock,  // Share with execFileSync so tests work for both
-    exec: mockExec
+    exec: mockExec,
+    spawn: vi.fn(actual.spawn)
   };
 });
 
@@ -441,6 +451,40 @@ describe('cli-tool-manager - Claude CLI NVM detection', () => {
  * Unit tests for helper functions
  */
 describe('cli-tool-manager - Helper Functions', () => {
+  describe('getNodeVersionManagerPaths', () => {
+    it("looks in version managers' folders, newest version first", () => {
+      Object.defineProperty(process, 'platform', { value: 'linux', writable: true });
+      // Joined the way the host joins paths (backslashes on a Windows host)
+      const home = path.join('/home', 'me');
+      const at = (...parts: string[]) => path.join(home, ...parts);
+      const versions: Record<string, string[]> = {
+        [at('.nvm', 'versions', 'node')]: ['v22.1.0', 'v20.0.0'],
+        [at('.local', 'share', 'nvm')]: ['v24.3.0'],
+        [at('Library', 'Application Support', 'fnm', 'node-versions')]: ['v23.0.0'],
+      };
+      const paths = getNodeVersionManagerPaths(home, (dir) => versions[dir] ?? []);
+
+      expect(paths.slice(0, 3)).toEqual([
+        at('.nvm', 'versions', 'node', 'v22.1.0', 'bin', 'node'),
+        at('.nvm', 'versions', 'node', 'v20.0.0', 'bin', 'node'),
+        // nvm.fish
+        at('.local', 'share', 'nvm', 'v24.3.0', 'bin', 'node'),
+      ]);
+      expect(paths).toContain(at('.local', 'share', 'fnm', 'aliases', 'default', 'bin', 'node'));
+      // fnm's folder on macOS
+      expect(paths).toContain(at('Library', 'Application Support', 'fnm', 'node-versions', 'v23.0.0', 'installation', 'bin', 'node'));
+      expect(paths).toContain(at('.volta', 'bin', 'node'));
+      expect(paths).toContain(at('.asdf', 'shims', 'node'));
+    });
+
+    it("looks in nvm-windows' and Volta's folders on Windows", () => {
+      Object.defineProperty(process, 'platform', { value: 'win32', writable: true });
+      const paths = getNodeVersionManagerPaths('C:\\Users\\me', () => []);
+      expect(paths.some((p) => p.includes('nvm') && p.endsWith('node.exe'))).toBe(true);
+      expect(paths.some((p) => p.includes('Volta'))).toBe(true);
+    });
+  });
+
   describe('getClaudeDetectionPaths', () => {
     it('should return homebrew paths on macOS', () => {
       Object.defineProperty(process, 'platform', {
@@ -794,5 +838,98 @@ describe('cli-tool-manager - Claude CLI async Windows where.exe detection', () =
     const result = await getToolPathAsync('claude');
 
     expect(result).toBe('claude'); // Fallback
+  });
+});
+
+/**
+ * Node.js detection: the login shell is the last resort, and it can't hang the detection (every
+ * Claude Code run waits on it, for npx's folder on PATH)
+ */
+describe('cli-tool-manager - Node.js detection', () => {
+  const realFs = vi.importActual<typeof import('fs')>('fs');
+  const realOs = vi.importActual<typeof import('os')>('os');
+  const originalShell = process.env.SHELL;
+  const defaultExecFile = vi.mocked(execFile).getMockImplementation();
+  let dir: string;
+
+  /** `node --version` answers (the mock's callback value is what the promisified call resolves to) */
+  const nodeAnswers = () => {
+    vi.mocked(execFile).mockImplementation(((...args: unknown[]) => {
+      const callback = args.at(-1) as (error: Error | null, result: { stdout: string; stderr: string }) => void;
+      setImmediate(() => callback(null, { stdout: 'v22.1.0\n', stderr: '' }));
+      return {} as import('child_process').ChildProcess;
+    }) as unknown as typeof execFile);
+  };
+
+  /** A fake login shell that runs `body` (bash) */
+  const fakeShell = async (body: string) => {
+    const fs = await realFs;
+    const shellPath = path.join(dir, 'fake-shell.sh');
+    fs.writeFileSync(shellPath, `#!/bin/bash\n${body}\n`, { mode: 0o755 });
+    process.env.SHELL = shellPath;
+  };
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    Object.defineProperty(process, 'platform', { value: HOST_PLATFORM, writable: true });
+    const fs = await realFs;
+    dir = fs.realpathSync(fs.mkdtempSync(path.join((await realOs).tmpdir(), 'node-login-shell-')));
+    vi.mocked(os.homedir).mockReturnValue(dir);
+    clearToolCache();
+  });
+
+  afterEach(async () => {
+    if (defaultExecFile) vi.mocked(execFile).mockImplementation(defaultExecFile);
+    process.env.SHELL = originalShell;
+    clearToolCache();
+    (await realFs).rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.skipIf(HOST_PLATFORM === 'win32')('finds node as the login shell prints it, after its greeting', async () => {
+    await fakeShell('echo "Welcome!"; echo /opt/node/bin/node');
+    await expect(findNodeInLoginShell()).resolves.toBe('/opt/node/bin/node');
+    expect(vi.mocked(spawn).mock.calls[0]?.[2]).toMatchObject({ stdio: ['ignore', 'pipe', 'ignore'], detached: true });
+  });
+
+  it.skipIf(HOST_PLATFORM === 'win32')('gives up on a shell that waits for input', async () => {
+    // Ignores SIGTERM like an interactive bash; with no stdin, `read` ends at once
+    await fakeShell("trap '' TERM; read -r answer; sleep 30");
+    const started = Date.now();
+    await expect(findNodeInLoginShell(500)).resolves.toBeNull();
+    expect(Date.now() - started).toBeLessThan(3000);
+  });
+
+  it.skipIf(HOST_PLATFORM === 'win32')('gives up on a slow shell, and on whatever it started', async () => {
+    const fs = await realFs;
+    const marker = path.join(dir, 'still-running');
+    await fakeShell(`trap '' TERM; (sleep 1; touch '${marker}') & sleep 30`);
+    const started = Date.now();
+    await expect(findNodeInLoginShell(300)).resolves.toBeNull();
+    expect(Date.now() - started).toBeLessThan(3000);
+    // Its process group was killed: the background job never gets to write its file
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it('does not ask the login shell when node is on PATH', async () => {
+    await fakeShell('sleep 30');
+    nodeAnswers();
+    vi.mocked(findExecutableAsync).mockResolvedValue('/usr/bin/node');
+
+    const result = await getToolInfoAsync('node');
+
+    expect(result).toMatchObject({ found: true, path: '/usr/bin/node', source: 'system-path' });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(HOST_PLATFORM === 'win32')('asks the login shell when nothing else has node', async () => {
+    await fakeShell('echo /opt/from-shell/bin/node');
+    nodeAnswers();
+    vi.mocked(findExecutableAsync).mockResolvedValue(null);
+
+    const result = await getToolInfoAsync('node');
+
+    expect(spawn).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ found: true, path: '/opt/from-shell/bin/node' });
   });
 });

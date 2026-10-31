@@ -66,11 +66,8 @@ export interface AgentSessionRecord {
 }
 
 interface AgentSessionData {
-  version: number;
   sessions: AgentSessionRecord[];
 }
-
-const STORE_VERSION = 1;
 
 /** Writes in flight per file, so two windows starting at once can't lose each other's session */
 const writes = new Map<string, Promise<void>>();
@@ -121,7 +118,7 @@ async function updateSessions(
     const sessions = await loadSessions(file);
     if (sessions === null) return;
     const next = change(sessions);
-    const data: AgentSessionData = { version: STORE_VERSION, sessions: next };
+    const data: AgentSessionData = { sessions: next };
 
     const temp = `${file}.tmp`;
     await fsp.writeFile(temp, JSON.stringify(data, null, 2), 'utf-8');

@@ -93,7 +93,8 @@ const argValue = (args: string[], flag: string) => {
   return i === -1 ? undefined : args[i + 1];
 };
 
-describe('ClaudeTaskRun resync', () => {
+// Real git repos: git is slow to start on Windows runners
+describe('ClaudeTaskRun resync', { timeout: 30_000 }, () => {
   let tmp: string;
   let root: string;
   let worktree: string;
@@ -124,7 +125,7 @@ describe('ClaudeTaskRun resync', () => {
   });
 
   function runInfo(phases: ClaudeRunInfo['phases'], sessionId: string | null = 's1'): void {
-    const info: ClaudeRunInfo = { version: 1, phases, subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(), triage, sessionId: sessionId ?? undefined, runtime: 'native',
+    const info: ClaudeRunInfo = { phases, subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(), triage, sessionId: sessionId ?? undefined, runtime: 'native',
       // A finished validation leaves its report (the AI review loop checks for it)
       ...(phases.some((p) => p.name === 'validate' && p.endedAt) ? { validation: { status: 'passed' as const, summary: 'Still works', checks: [], findings: [] } } : {}) };
     writeFileSync(path.join(specDir, 'claude_run.json'), JSON.stringify(info));

@@ -20,6 +20,7 @@ export const settingsMock = {
     success: true,
     data: {
       python: { found: false, source: 'fallback' as const, message: 'Not available in browser mode' },
+      node: { found: false, source: 'fallback' as const, message: 'Not available in browser mode' },
       git: { found: false, source: 'fallback' as const, message: 'Not available in browser mode' },
       gh: { found: false, source: 'fallback' as const, message: 'Not available in browser mode' },
       glab: { found: false, source: 'fallback' as const, message: 'Not available in browser mode' },
@@ -53,16 +54,14 @@ export const settingsMock = {
   downloadStableUpdate: async () => ({ success: true }),
   installAppUpdate: () => { console.warn('[browser-mock] installAppUpdate called'); },
   getDownloadedAppUpdate: async () => ({ success: true, data: null }),
-  skipAppUpdate: async (_version: string) => ({ success: true }),
-  snoozeAppUpdate: async () => ({ success: true }),
-  isAppUpdateSuppressed: async (_version: string) => ({ success: true, data: false }),
+  getLastAppUpdateCheck: async () => ({ success: true, data: null }),
   setTitleBarColors: () => {},
 
   // App Update Event Listeners (no-op in browser mode)
-  onAppUpdateAvailable: () => () => {},
+  onAppUpdateChecked: () => () => {},
   onAppUpdateDownloaded: () => () => {},
   onAppUpdateProgress: () => () => {},
-  onAppUpdateStableDowngrade: () => () => {},
   onAppUpdateReadOnlyVolume: () => () => {},
-  onAppUpdateError: () => () => {}
+  onAppUpdateError: () => () => {},
+  onAppUpdateOpenSettings: () => () => {}
 };

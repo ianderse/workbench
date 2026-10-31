@@ -20,7 +20,7 @@
  * - Graceful fallbacks when tools not found
  */
 
-import { execFileSync, execFile, type ExecFileOptionsWithStringEncoding, type ExecFileSyncOptions } from 'child_process';
+import { execFileSync, execFile, spawn, type ChildProcess, type ExecFileOptionsWithStringEncoding, type ExecFileSyncOptions } from 'child_process';
 import { existsSync, readdirSync, promises as fsPromises } from 'fs';
 import path from 'path';
 import os from 'os';
@@ -58,7 +58,7 @@ import {
 /**
  * Supported CLI tools managed by this system
  */
-export type CLITool = 'python' | 'git' | 'gh' | 'glab' | 'claude';
+export type CLITool = 'python' | 'node' | 'git' | 'gh' | 'glab' | 'claude';
 
 /**
  * User configuration for CLI tool paths
@@ -66,6 +66,7 @@ export type CLITool = 'python' | 'git' | 'gh' | 'glab' | 'claude';
  */
 export interface ToolConfig {
   pythonPath?: string;
+  nodePath?: string;
   gitPath?: string;
   githubCLIPath?: string;
   gitlabCLIPath?: string;
@@ -77,6 +78,7 @@ export interface ToolConfig {
 /** Program name of each tool inside WSL (the startup probe looks these up) */
 const WSL_TOOL_NAMES: Record<CLITool, WslProbeTool> = {
   python: 'python3',
+  node: 'node',
   git: 'git',
   gh: 'gh',
   glab: 'glab',
@@ -85,6 +87,7 @@ const WSL_TOOL_NAMES: Record<CLITool, WslProbeTool> = {
 
 const TOOL_LABELS: Record<CLITool, string> = {
   python: 'Python',
+  node: 'Node.js',
   git: 'Git',
   gh: 'GitHub CLI',
   glab: 'GitLab CLI',
@@ -277,6 +280,170 @@ export function sortNvmVersionDirs(
     .map((entry) => entry.name);
 }
 
+/** Folders holding one folder per Node.js version (nvm, nvm.fish, fnm), read for its versions */
+function getNodeVersionDirs(homeDir: string): string[] {
+  if (isWindows()) return [];
+  return [
+    joinPaths(homeDir, '.nvm', 'versions', 'node'),
+    joinPaths(homeDir, '.local', 'share', 'nvm'),
+    ...getFnmDirs(homeDir).map((dir) => joinPaths(dir, 'node-versions')),
+  ];
+}
+
+function getFnmDirs(homeDir: string): string[] {
+  return [
+    joinPaths(homeDir, '.local', 'share', 'fnm'),
+    joinPaths(homeDir, '.fnm'),
+    joinPaths(homeDir, 'Library', 'Application Support', 'fnm'),
+  ];
+}
+
+/**
+ * Where Node.js version managers keep `node`, newest version first: nvm, nvm.fish, fnm (its
+ * default alias, then its versions), Volta, asdf, mise and nodenv. A desktop-launched app doesn't
+ * get the shell's PATH, so these are looked at directly. `listVersions` reads a directory's
+ * version folders (sorted newest first)
+ */
+export function getNodeVersionManagerPaths(
+  homeDir: string,
+  listVersions: (dir: string) => string[]
+): string[] {
+  if (isWindows()) {
+    // nvm-windows and fnm keep their links in the user's folders; Program Files is on the PATH list
+    return [
+      joinPaths(homeDir, 'AppData', 'Roaming', 'nvm', 'nodejs', 'node.exe'),
+      joinPaths(homeDir, 'AppData', 'Local', 'Volta', 'bin', 'node.exe'),
+      joinPaths(homeDir, 'scoop', 'apps', 'nodejs', 'current', 'node.exe'),
+    ];
+  }
+  const nvmDir = joinPaths(homeDir, '.nvm', 'versions', 'node');
+  const nvmFishDir = joinPaths(homeDir, '.local', 'share', 'nvm');
+  return [
+    ...listVersions(nvmDir).map((version) => joinPaths(nvmDir, version, 'bin', 'node')),
+    ...listVersions(nvmFishDir).map((version) => joinPaths(nvmFishDir, version, 'bin', 'node')),
+    ...getFnmDirs(homeDir).flatMap((dir) => [
+      joinPaths(dir, 'aliases', 'default', 'bin', 'node'),
+      ...listVersions(joinPaths(dir, 'node-versions')).map((version) =>
+        joinPaths(dir, 'node-versions', version, 'installation', 'bin', 'node')),
+    ]),
+    joinPaths(homeDir, '.volta', 'bin', 'node'),
+    joinPaths(homeDir, '.asdf', 'shims', 'node'),
+    joinPaths(homeDir, '.local', 'share', 'mise', 'shims', 'node'),
+    joinPaths(homeDir, '.nodenv', 'shims', 'node'),
+  ];
+}
+
+/** Version folders (v20.1.0, ...) in a directory, newest first; none when it doesn't exist */
+function listNodeVersionsSync(dir: string): string[] {
+  try {
+    return sortNvmVersionDirs(readdirSync(dir, { withFileTypes: true }));
+  } catch {
+    return [];
+  }
+}
+
+async function listNodeVersionsAsync(dir: string): Promise<string[]> {
+  try {
+    return sortNvmVersionDirs(await fsPromises.readdir(dir, { withFileTypes: true }));
+  } catch {
+    return [];
+  }
+}
+
+/** The same paths as `getNodeVersionManagerPaths`, with the version folders read asynchronously */
+async function getNodeVersionManagerPathsAsync(homeDir: string): Promise<string[]> {
+  const dirs = getNodeVersionDirs(homeDir);
+  const versions = new Map(await Promise.all(dirs.map(async (dir) => [dir, await listNodeVersionsAsync(dir)] as const)));
+  return getNodeVersionManagerPaths(homeDir, (dir) => versions.get(dir) ?? []);
+}
+
+/** How long the login shell may take to say where `node` is */
+const LOGIN_SHELL_TIMEOUT_MS = 5000;
+
+/**
+ * `node` as the user's login shell finds it (what a terminal would run, whichever version
+ * manager set it up). The last resort: an interactive shell runs the user's rc files, which can
+ * be slow or wait for input. So it gets no stdin, runs in its own process group (no terminal to
+ * take over) and the whole group is killed when it isn't done in time: this always settles, with
+ * null when the shell fails or takes too long. Not on Windows, where installers put Node on the
+ * system PATH
+ * @internal exported for tests
+ */
+export function findNodeInLoginShell(timeoutMs = LOGIN_SHELL_TIMEOUT_MS): Promise<string | null> {
+  if (isWindows()) return Promise.resolve(null);
+  const shell = process.env.SHELL || '/bin/sh';
+  return new Promise((resolve) => {
+    let child: ChildProcess;
+    try {
+      // -i: nvm and the like are usually set up in .bashrc / .zshrc, which only interactive shells read
+      child = spawn(shell, ['-ilc', 'command -v node'], {
+        cwd: os.homedir(),
+        stdio: ['ignore', 'pipe', 'ignore'],
+        detached: true,
+        windowsHide: true,
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let stdout = '';
+    let settled = false;
+    const finish = (found: string | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(found);
+    };
+    const timer = setTimeout(() => {
+      killProcessGroup(child);
+      // A process the rc files started may still hold the pipe open
+      child.stdout?.destroy();
+      finish(null);
+    }, timeoutMs);
+    child.stdout?.setEncoding('utf-8');
+    child.stdout?.on('data', (chunk: string) => {
+      // Only the last lines matter; a chatty rc file shouldn't grow this without bound
+      stdout = (stdout + chunk).slice(-64 * 1024);
+    });
+    child.on('error', () => finish(null));
+    child.on('close', (code) => {
+      if (code !== 0) return finish(null);
+      // Interactive shells may print a greeting first: the path is the last absolute line
+      const found = stdout.split('\n').map((line) => line.trim()).filter((line) => line.startsWith('/')).pop();
+      finish(found ?? null);
+    });
+  });
+}
+
+/** Kill a detached child and everything it started (its process group) */
+function killProcessGroup(child: ChildProcess): void {
+  try {
+    if (child.pid) process.kill(-child.pid, 'SIGKILL');
+  } catch {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Already gone
+    }
+  }
+}
+
+const NODE_NOT_FOUND: ToolDetectionResult = {
+  found: false,
+  source: 'fallback',
+  message: 'Node.js not found. Install it from https://nodejs.org (MCP servers like Context7 need npx)',
+};
+
+function nodeResult(nodePath: string, validation: ToolValidation, source: ToolDetectionResult['source']): ToolDetectionResult {
+  return {
+    found: true,
+    path: nodePath,
+    version: validation.version,
+    source,
+    message: `Using Node.js ${validation.version ?? ''}: ${nodePath}`,
+  };
+}
+
 /**
  * Build a ToolDetectionResult from a validation result.
  *
@@ -332,6 +499,9 @@ export function buildClaudeDetectionResult(
  *   const pythonPath = getToolPath('python');
  *   const gitPath = getToolPath('git');
  */
+/** The longest one tool's detection may take before it counts as not found (and is looked for again next time) */
+const TOOL_INFO_DEADLINE_MS = 30_000;
+
 class CLIToolManager {
   private cache: Map<CLITool, CacheEntry> = new Map();
   /** Full detection results for Settings > Developer > Paths, detected without blocking */
@@ -584,6 +754,8 @@ class CLIToolManager {
     switch (tool) {
       case 'python':
         return this.detectPython();
+      case 'node':
+        return this.detectNode();
       case 'git':
         return this.detectGit();
       case 'gh':
@@ -950,6 +1122,43 @@ class CLIToolManager {
    *
    * @returns Detection result for GitLab CLI
    */
+  /**
+   * Detect Node.js: the configured path, the (augmented) PATH, then version managers' folders.
+   * npx is the one next to it. Unlike the async detection, this never asks the login shell (it
+   * would block the process while the user's rc files run)
+   */
+  private detectNode(): ToolDetectionResult {
+    const candidates: Array<{ path: string; source: ToolDetectionResult['source'] }> = [];
+    if (this.userConfig.nodePath && !isWrongPlatformPath(this.userConfig.nodePath)) {
+      candidates.push({ path: this.userConfig.nodePath, source: 'user-config' });
+    }
+    const onPath = findExecutable('node');
+    if (onPath) candidates.push({ path: onPath, source: 'system-path' });
+    for (const managed of getNodeVersionManagerPaths(os.homedir(), listNodeVersionsSync)) {
+      if (existsSync(managed)) candidates.push({ path: managed, source: 'nvm' });
+    }
+    for (const candidate of candidates) {
+      const validation = this.validateNode(candidate.path);
+      if (validation.valid) return nodeResult(candidate.path, validation, candidate.source);
+    }
+    return NODE_NOT_FOUND;
+  }
+
+  private validateNode(nodeCmd: string): ToolValidation {
+    try {
+      const version = execFileSync(nodeCmd, ['--version'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        killSignal: 'SIGKILL',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true,
+      }).trim();
+      return { valid: true, version: version.replace(/^v/, ''), message: `Node.js ${version} is available` };
+    } catch (error) {
+      return { valid: false, message: `Failed to validate Node.js: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
   private detectGitLabCLI(): ToolDetectionResult {
     // 1. User configuration
     if (this.userConfig.gitlabCLIPath) {
@@ -1456,6 +1665,8 @@ class CLIToolManager {
         return this.detectClaudeAsync();
       case 'python':
         return this.detectPythonAsync();
+      case 'node':
+        return this.detectNodeAsync();
       case 'git':
         return this.detectGitAsync();
       case 'gh':
@@ -2129,6 +2340,45 @@ class CLIToolManager {
    *
    * @returns Promise resolving to detection result
    */
+  /**
+   * Detect Node.js asynchronously: the configured path, the (augmented) PATH, version managers'
+   * folders, and only when none of those has it, the login shell's `node`. npx is the one next to it
+   */
+  private async detectNodeAsync(): Promise<ToolDetectionResult> {
+    const tryCandidate = async (nodePath: string | null | undefined, source: ToolDetectionResult['source']) => {
+      if (!nodePath) return null;
+      const validation = await this.validateNodeAsync(nodePath);
+      return validation.valid ? nodeResult(nodePath, validation, source) : null;
+    };
+    if (this.userConfig.nodePath && !isWrongPlatformPath(this.userConfig.nodePath)) {
+      const configured = await tryCandidate(this.userConfig.nodePath, 'user-config');
+      if (configured) return configured;
+    }
+    const onPath = await tryCandidate(await findExecutableAsync('node'), 'system-path');
+    if (onPath) return onPath;
+    for (const managed of await getNodeVersionManagerPathsAsync(os.homedir())) {
+      if (!(await existsAsync(managed))) continue;
+      const found = await tryCandidate(managed, 'nvm');
+      if (found) return found;
+    }
+    return (await tryCandidate(await findNodeInLoginShell(), 'system-path')) ?? NODE_NOT_FOUND;
+  }
+
+  private async validateNodeAsync(nodeCmd: string): Promise<ToolValidation> {
+    try {
+      const { stdout } = await execFileAsync(nodeCmd, ['--version'], {
+        encoding: 'utf-8',
+        timeout: 5000,
+        killSignal: 'SIGKILL',
+        windowsHide: true,
+      });
+      const version = stdout.trim();
+      return { valid: true, version: version.replace(/^v/, ''), message: `Node.js ${version} is available` };
+    } catch (error) {
+      return { valid: false, message: `Failed to validate Node.js: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }
+
   private async detectGitLabCLIAsync(): Promise<ToolDetectionResult> {
     // 1. User configuration
     if (this.userConfig.gitlabCLIPath) {
@@ -2296,13 +2546,25 @@ class CLIToolManager {
 
   /** `fresh`: in WSL, look the tool up again instead of using the startup probe's result */
   private cachedToolInfo(tool: CLITool, fresh = false): Promise<ToolDetectionResult> {
-    let pending = this.infoCache.get(tool);
-    if (!pending) {
-      pending = this.detectToolPathAsync(tool, fresh);
-      this.infoCache.set(tool, pending);
-      // A failed detection is retried next time
-      pending.catch(() => this.infoCache.delete(tool));
-    }
+    const cached = this.infoCache.get(tool);
+    if (cached) return cached;
+    const forget = () => {
+      if (this.infoCache.get(tool) === pending) this.infoCache.delete(tool);
+    };
+    // Every caller waits on this (Node's folder is added to each Claude Code run's PATH), so it
+    // must settle: a detection that takes too long counts as not found and isn't kept
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<ToolDetectionResult>((resolve) => {
+      timer = setTimeout(() => {
+        forget();
+        resolve({ found: false, source: 'fallback', message: `Timed out looking for ${TOOL_LABELS[tool]}` });
+      }, TOOL_INFO_DEADLINE_MS);
+    });
+    const detection = this.detectToolPathAsync(tool, fresh).finally(() => clearTimeout(timer));
+    const pending: Promise<ToolDetectionResult> = Promise.race([detection, deadline]);
+    this.infoCache.set(tool, pending);
+    // A failed detection is retried next time
+    pending.catch(forget);
     return pending;
   }
 }
@@ -2388,7 +2650,7 @@ export function getToolInfoAsync(tool: CLITool, options?: ToolInfoOptions): Prom
 }
 
 /** Tools shown in Settings > Developer > Paths */
-const PATHS_PAGE_TOOLS: CLITool[] = ['python', 'git', 'gh', 'glab', 'claude'];
+const PATHS_PAGE_TOOLS: CLITool[] = ['python', 'node', 'git', 'gh', 'glab', 'claude'];
 
 /** Detect the Paths page tools in the background (at app start), so the page opens instantly */
 export function warmToolInfo(): void {

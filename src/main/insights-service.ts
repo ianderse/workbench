@@ -14,6 +14,31 @@ import { InsightsPaths } from './insights/paths';
 import { SessionStorage } from './insights/session-storage';
 import { SessionManager } from './insights/session-manager';
 import { InsightsExecutor } from './insights/insights-executor';
+import type { InsightsSessionPlan } from './insights/claude-code-runner';
+
+/** A message id that stays unique for messages created in the same millisecond */
+function newMessageId(): string {
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * The Claude Code session a new message runs in, from the reply before it:
+ * - that reply is the session's latest point: resume the session
+ * - an earlier reply of the session (an edit or regenerate dropped what came after it): fork the
+ *   session there, so the dropped turns stay out of it and the original session is kept
+ * - no reply before it (the first message), or a reply without a session (a stopped one, or one
+ *   from before chats had sessions): a new session, with the conversation folded into its prompt
+ */
+export function planClaudeSession(session: InsightsSession): InsightsSessionPlan {
+  const previous = session.messages.at(-2);
+  const ref = previous?.role === 'assistant' ? previous.claudeRef : undefined;
+  if (!ref) return { mode: 'new' };
+  const head = session.claudeHead;
+  if (head?.sessionId === ref.sessionId && head.messageUuid === ref.messageUuid) {
+    return { mode: 'resume', sessionId: ref.sessionId, profileId: ref.profileId };
+  }
+  return { mode: 'fork', sessionId: ref.sessionId, atMessageUuid: ref.messageUuid, profileId: ref.profileId };
+}
 
 /**
  * Service for AI-powered codebase insights chat
@@ -31,6 +56,8 @@ class InsightsService extends EventEmitter {
   private storage: SessionStorage;
   private sessionManager: SessionManager;
   private executor: InsightsExecutor;
+  /** The conversation each project's running reply belongs to (one reply runs per project) */
+  private replying: Map<string, { sessionId: string }> = new Map();
 
   constructor() {
     super();
@@ -89,17 +116,31 @@ class InsightsService extends EventEmitter {
   }
 
   /**
+   * Open a new chat; its conversation is created when the first message is sent
+   */
+  startNewChat(projectId: string, projectPath: string): void {
+    // A reply still being written stops: it is saved in its own chat, not in the new one
+    this.stopReplyUnless(projectId, null);
+    this.sessionManager.startNewChat(projectId, projectPath);
+  }
+
+  /**
    * Switch to a different session
    */
   switchSession(projectId: string, projectPath: string, sessionId: string): InsightsSession | null {
-    return this.sessionManager.switchSession(projectId, projectPath, sessionId);
+    const session = this.sessionManager.switchSession(projectId, projectPath, sessionId);
+    // Another chat's reply stops when the user leaves it (it is saved there as a stopped reply)
+    if (session) this.stopReplyUnless(projectId, sessionId);
+    return session;
   }
 
   /**
    * Delete a session
    */
   deleteSession(projectId: string, projectPath: string, sessionId: string): boolean {
-    return this.sessionManager.deleteSession(projectId, projectPath, sessionId);
+    const deleted = this.sessionManager.deleteSession(projectId, projectPath, sessionId);
+    if (deleted) this.stopReplyIn(projectId, [sessionId]);
+    return deleted;
   }
 
   /**
@@ -120,7 +161,9 @@ class InsightsService extends EventEmitter {
    * Delete multiple sessions
    */
   deleteSessions(projectId: string, projectPath: string, sessionIds: string[]): { deletedIds: string[]; failedIds: string[] } {
-    return this.sessionManager.deleteSessions(projectId, projectPath, sessionIds);
+    const result = this.sessionManager.deleteSessions(projectId, projectPath, sessionIds);
+    this.stopReplyIn(projectId, result.deletedIds);
+    return result;
   }
 
   /**
@@ -142,6 +185,44 @@ class InsightsService extends EventEmitter {
    */
   clearSession(projectId: string, projectPath: string): void {
     this.sessionManager.clearSession(projectId, projectPath);
+  }
+
+  /**
+   * Stop the reply being written for a project; returns false when nothing is running
+   */
+  stopMessage(projectId: string): boolean {
+    return this.executor.cancelSession(projectId);
+  }
+
+  /** Stop the project's running reply unless it belongs to the given conversation */
+  private stopReplyUnless(projectId: string, sessionId: string | null): void {
+    const running = this.replying.get(projectId);
+    if (running && running.sessionId !== sessionId) this.executor.cancelSession(projectId);
+  }
+
+  /** Stop the project's running reply if it belongs to one of the given conversations */
+  private stopReplyIn(projectId: string, sessionIds: string[]): void {
+    const running = this.replying.get(projectId);
+    if (running && sessionIds.includes(running.sessionId)) this.executor.cancelSession(projectId);
+  }
+
+  /**
+   * The project's open conversation, when it is the one the user sees: a chat shown in the app
+   * but not open here (or gone) is opened first, so regenerate and edit act on what is shown
+   */
+  private loadShownSession(projectId: string, projectPath: string, sessionId?: string): InsightsSession | null {
+    const session = this.sessionManager.loadSession(projectId, projectPath);
+    if (!sessionId || session?.id === sessionId) return session;
+    return this.sessionManager.switchSession(projectId, projectPath, sessionId);
+  }
+
+  /**
+   * Regenerate or edit found nothing to act on: the chat shows its saved conversation again and
+   * says why, instead of waiting for a reply that never comes
+   */
+  private failTurn(projectId: string, session: InsightsSession | null, error: string): void {
+    if (session) this.emit('session-updated', projectId, session);
+    this.emit('error', projectId, error);
   }
 
   /**
@@ -182,7 +263,7 @@ class InsightsService extends EventEmitter {
       data: undefined
     }));
     const userMessage: InsightsChatMessage = {
-      id: `msg-${Date.now()}`,
+      id: newMessageId(),
       role: 'user',
       content: message,
       timestamp: new Date(),
@@ -192,59 +273,172 @@ class InsightsService extends EventEmitter {
     if (modelConfig) session.modelConfig = modelConfig;
     session.updatedAt = new Date();
     this.sessionManager.saveSession(projectPath, session);
+    // The chat (and the history list) learn the conversation now, a new one included
+    this.emit('session-updated', projectId, session);
 
-    // Build conversation history for context
-    // Add notation when images are present so the AI has context
-    // For historical messages (all but the last), use past tense to avoid confusion
-    const conversationHistory = session.messages.map((m, index) => {
+    await this.reply(projectId, projectPath, session, message, modelConfig, images);
+  }
+
+  /**
+   * Write the latest reply again: the conversation's last reply is replaced by a new answer to
+   * the message before it, with that message's attachments
+   */
+  async regenerate(projectId: string, projectPath: string, modelConfig?: InsightsModelConfig, sessionId?: string): Promise<void> {
+    this.executor.cancelSession(projectId);
+
+    const session = this.loadShownSession(projectId, projectPath, sessionId);
+    while (session?.messages.at(-1)?.role === 'assistant') session.messages.pop();
+    const userMessage = session?.messages.at(-1);
+    if (!session || !userMessage) {
+      this.failTurn(projectId, session, 'There is no message to answer again');
+      return;
+    }
+
+    if (modelConfig) session.modelConfig = modelConfig;
+    session.updatedAt = new Date();
+    this.sessionManager.saveSession(projectPath, session);
+    this.emit('session-updated', projectId, session);
+
+    await this.reply(projectId, projectPath, session, userMessage.content, modelConfig, this.loadAttachments(projectPath, userMessage));
+  }
+
+  /**
+   * Send an edited message: the conversation from that message on is dropped, and the edited
+   * text (with the message's attachments) is sent in its place
+   */
+  async editMessage(
+    projectId: string,
+    projectPath: string,
+    messageId: string,
+    content: string,
+    modelConfig?: InsightsModelConfig,
+    sessionId?: string
+  ): Promise<void> {
+    this.executor.cancelSession(projectId);
+
+    const session = this.loadShownSession(projectId, projectPath, sessionId);
+    const index = session?.messages.findIndex((m) => m.id === messageId && m.role === 'user') ?? -1;
+    if (!session || index < 0) {
+      this.failTurn(projectId, session, 'The edited message is no longer in this chat');
+      return;
+    }
+    const original = session.messages[index];
+
+    // A title made from the first message follows its edit; a title the user gave stays
+    if (index === 0 && session.title === this.storage.generateTitle(original.content)) {
+      session.title = this.storage.generateTitle(content);
+    }
+    const userMessage: InsightsChatMessage = {
+      ...original,
+      id: newMessageId(),
+      content,
+      timestamp: new Date()
+    };
+    session.messages = [...session.messages.slice(0, index), userMessage];
+    if (modelConfig) session.modelConfig = modelConfig;
+    session.updatedAt = new Date();
+    this.sessionManager.saveSession(projectPath, session);
+    this.emit('session-updated', projectId, session);
+
+    await this.reply(projectId, projectPath, session, content, modelConfig, this.loadAttachments(projectPath, userMessage));
+  }
+
+  /**
+   * A sent message's attachments with their data, read back from the attachments directory
+   */
+  private loadAttachments(projectPath: string, message: InsightsChatMessage): ImageAttachment[] | undefined {
+    const images = (message.images ?? []).flatMap((img) => {
+      const data = img.path ? this.readAttachmentData(projectPath, img.path) : null;
+      return data ? [{ ...img, data }] : [];
+    });
+    return images.length > 0 ? images : undefined;
+  }
+
+  /**
+   * Run Claude Code for the conversation's last message and save its reply
+   */
+  private async reply(
+    projectId: string,
+    projectPath: string,
+    session: InsightsSession,
+    message: string,
+    modelConfig?: InsightsModelConfig,
+    images?: ImageAttachment[]
+  ): Promise<void> {
+    // The conversation before this message, for a turn that starts a new Claude Code session
+    // (replies stopped before any text are left out; the message itself is sent separately, with
+    // its attachments)
+    const messages = session.messages
+      .slice(0, -1)
+      .filter((m) => !(m.role === 'assistant' && m.stopped && !m.content));
+    const conversationHistory = messages.map((m) => {
       const imageCount = m.images?.length ?? 0;
-      const isLastMessage = index === session.messages.length - 1;
-      let imageNotation = '';
-      if (imageCount > 0 && m.role === 'user') {
-        imageNotation = isLastMessage
-          ? `\n[User attached ${imageCount} file(s)]`
-          : `\n[User previously attached ${imageCount} file(s) - not visible in this context]`;
-      }
-      return {
-        role: m.role,
-        content: imageNotation ? m.content + imageNotation : m.content
-      };
+      const imageNotation = imageCount > 0 && m.role === 'user'
+        ? `\n[User previously attached ${imageCount} file(s) - not visible in this context]`
+        : '';
+      return { role: m.role, content: m.content + imageNotation };
     });
 
     // Use provided modelConfig or fall back to session's config
     const configToUse = modelConfig || session.modelConfig;
 
+    const run = { sessionId: session.id };
+    this.replying.set(projectId, run);
     try {
-      // Execute insights query
       const result = await this.executor.execute(
         projectId,
         projectPath,
         message,
         conversationHistory,
         configToUse,
-        images
+        images,
+        { session: planClaudeSession(session), title: session.title, chatSessionId: session.id }
       );
+
+      if (result.replaced) return;
+
+      // A reply that ended with nothing leaves no message; a stopped one says it was stopped
+      const isEmpty = !result.fullResponse && result.toolsUsed.length === 0 && !result.suggestedTasks;
+      if (isEmpty && !result.stopped) return;
 
       // Add assistant message to session
       const assistantMessage: InsightsChatMessage = {
-        id: `msg-${Date.now()}`,
+        id: newMessageId(),
         role: 'assistant',
         content: result.fullResponse,
         timestamp: new Date(),
         suggestedTasks: result.suggestedTasks,
-        toolsUsed: result.toolsUsed.length > 0 ? result.toolsUsed : undefined
+        toolsUsed: result.toolsUsed.length > 0 ? result.toolsUsed : undefined,
+        stopped: result.stopped || undefined,
+        // Where the next message resumes (or, after an edit, forks) Claude Code's session
+        claudeRef: result.stopped ? undefined : result.claudeRef
       };
 
       session.messages.push(assistantMessage);
+      // A stopped reply leaves the session in the middle of a turn: the next message starts anew
+      session.claudeHead = assistantMessage.claudeRef;
       session.updatedAt = new Date();
-      this.sessionManager.saveSession(projectPath, session);
+      // A chat deleted while its reply ran stays deleted; one the user left keeps the reply
+      // without becoming the open chat again
+      if (!this.sessionManager.saveReply(projectId, projectPath, session)) return;
 
       // Emit session-updated event for real-time UI updates
       this.emit('session-updated', projectId, session);
     } catch (error) {
       // Error already emitted by executor
       console.error('[InsightsService] Error executing insights:', error);
+    } finally {
+      if (this.replying.get(projectId) === run) this.replying.delete(projectId);
     }
+  }
+
+  /**
+   * A stored attachment's base64 data (null if missing or outside the attachments dir)
+   */
+  private readAttachmentData(projectPath: string, relativePath: string): string | null {
+    const absolutePath = this.paths.resolveAttachmentPath(projectPath, relativePath);
+    if (!absolutePath || !existsSync(absolutePath)) return null;
+    return readFileSync(absolutePath).toString('base64');
   }
 
   /**

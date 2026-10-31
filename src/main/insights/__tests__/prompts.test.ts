@@ -1,22 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildConversationPrompt, buildSystemPrompt, extractTaskSuggestion, extractToolInput } from '../prompts';
-
-describe('extractTaskSuggestion', () => {
-  it('parses a suggestion line', () => {
-    const text = 'Sure.\n__TASK_SUGGESTION__:{"title": "Add login", "description": "Add a login page"}\nDone.';
-    expect(extractTaskSuggestion(text)).toEqual({ title: 'Add login', description: 'Add a login page' });
-  });
-
-  it('ignores extra fields such as the old category metadata', () => {
-    const text = '__TASK_SUGGESTION__:{"title": "T", "description": "D", "metadata": {"category": "feature"}}';
-    expect(extractTaskSuggestion(text)).toEqual({ title: 'T', description: 'D' });
-  });
-
-  it('returns null without a marker or with incomplete JSON fields', () => {
-    expect(extractTaskSuggestion('no suggestion here')).toBeNull();
-    expect(extractTaskSuggestion('__TASK_SUGGESTION__:{"title": "only title"}')).toBeNull();
-  });
-});
+import { INSIGHTS_GITHUB_COMMANDS, INSIGHTS_GITLAB_COMMANDS, buildConversationPrompt, buildSystemPrompt, extractToolInput } from '../prompts';
 
 describe('buildConversationPrompt', () => {
   it('uses the message directly without history', () => {
@@ -39,11 +22,20 @@ describe('extractToolInput', () => {
     expect(extractToolInput({ file_path: 'src/a.ts' })).toBe('src/a.ts');
     expect(extractToolInput({})).toBe('');
   });
+
+  it('keeps whole commands and paths, cutting only very long or multi-line ones', () => {
+    const command = 'gh issue view 14 --repo proactive-agent/workbench --json title,body,labels,comments';
+    expect(extractToolInput({ command })).toBe(command);
+    expect(extractToolInput({ file_path: '/home/me/projects/app/src/renderer/components/Insights.tsx' }))
+      .toBe('/home/me/projects/app/src/renderer/components/Insights.tsx');
+    expect(extractToolInput({ command: 'gh pr create --body-file - <<EOF\nbody\nEOF' })).toBe('gh pr create --body-file - <<EOF…');
+    expect(extractToolInput({ command: 'x'.repeat(600) })).toBe(`${'x'.repeat(500)}…`);
+  });
 });
 
 describe('buildSystemPrompt', () => {
   it.each([false, true])('uses bounded progress as navigation with task tools=%s', (taskTools) => {
-    const prompt = buildSystemPrompt('/nonexistent-project', { taskTools });
+    const prompt = buildSystemPrompt({ taskTools });
     expect(prompt).toContain('Follow CLAUDE.md and AGENTS.md');
     expect(prompt).toContain('root PROGRESS.md when present');
     expect(prompt).toContain('not proof of completion or approval');
@@ -52,18 +44,59 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Do not routinely scan or reread the entire docs folder');
     expect(prompt).toContain('still inspect every spec section and check needed');
     expect(prompt).toContain('Leave shared root PROGRESS.md and .workbench/PROGRESS.md updates');
-    expect(prompt).toContain("You can read the project's files but not change them");
+    expect(prompt).toContain("Read, Glob and Grep for the project's files. You can't change them");
   });
 
   it('describes the task tools only when the Kanban button is on', () => {
-    const withTools = buildSystemPrompt('/nonexistent-project', { taskTools: true });
+    const withTools = buildSystemPrompt({ taskTools: true });
     expect(withTools).toContain('mcp__workbench__');
     expect(withTools).toContain("don't create it. Suggest it instead");
 
-    const withoutTools = buildSystemPrompt('/nonexistent-project');
+    const withoutTools = buildSystemPrompt();
     expect(withoutTools).not.toContain('mcp__workbench__');
     expect(withoutTools).toContain('Kanban button');
     expect(withoutTools).toContain('When the user asks you to create a task');
-    expect(withoutTools).toContain('__TASK_SUGGESTION__:');
+    // Where the existing tasks are, instead of a list of folder names
+    expect(withoutTools).toContain('.workbench/tasks/<id>/');
+  });
+
+  it('asks for suggestion lines at the end, escaped, and says they become cards', () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain('__TASK_SUGGESTION__:{"title"');
+    expect(prompt).toContain('at the very end of your reply');
+    expect(prompt).toContain('write line breaks in the description as \\n');
+    expect(prompt).toMatch(/hides the line itself/);
+  });
+
+  it('lists exactly the tools the turn has', () => {
+    const plain = buildSystemPrompt();
+    expect(plain).toContain('- No shell commands.');
+    expect(plain).toContain('- WebSearch and WebFetch for the web');
+    expect(plain).not.toContain('MCP servers the user turned on');
+    expect(plain).toContain("You can't change them: code changes are made by tasks.");
+
+    const full = buildSystemPrompt({ graphify: true, cliTools: { github: true }, mcpServers: ['context7', 'Ant_Design'], memory: true });
+    expect(full).toContain('- Bash, only for the graphify searches described below and the `gh` commands listed below.');
+    expect(full).toContain('MCP servers the user turned on for this chat: context7, Ant_Design');
+    expect(full).toContain('(except your project memory, below)');
+    expect(full).toContain('## Project memory');
+  });
+
+  it('lists exactly the read-only gh and glab commands allowed, and says the rest is denied', () => {
+    const prompt = buildSystemPrompt({ cliTools: { github: true, gitlab: true } });
+    for (const command of [...INSIGHTS_GITHUB_COMMANDS, ...INSIGHTS_GITLAB_COMMANDS]) expect(prompt).toContain(`\`${command}\``);
+    expect(prompt).toContain('## GitHub and GitLab');
+    expect(prompt).toContain('Everything else is denied');
+    expect(prompt).toContain('do it themselves or do it through a task');
+    expect(prompt).not.toContain('`gh pr checkout`');
+
+    const githubOnly = buildSystemPrompt({ cliTools: { github: true } });
+    expect(githubOnly).toContain('`gh pr view`');
+    expect(githubOnly).not.toContain('glab');
+    expect(buildSystemPrompt()).not.toContain('## GitHub');
+  });
+
+    it('has no project memory section while self-improve is off', () => {
+    expect(buildSystemPrompt()).not.toContain('## Project memory');
   });
 });

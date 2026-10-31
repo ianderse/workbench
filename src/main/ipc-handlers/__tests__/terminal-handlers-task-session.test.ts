@@ -22,7 +22,6 @@ vi.mock('../../settings-utils', () => ({ readSettingsFileAsync: vi.fn(async () =
 vi.mock('../../claude-profile-manager', () => ({ getClaudeProfileManager: vi.fn() }));
 vi.mock('../../claude-profile/usage-monitor', () => ({ getUsageMonitor: vi.fn() }));
 vi.mock('../../terminal-manager', () => ({ TerminalManager: class {} }));
-vi.mock('../../terminal-name-generator', () => ({ terminalNameGenerator: { generateName: vi.fn() } }));
 vi.mock('../../claude-profile/session-utils', () => ({ migrateSession: vi.fn() }));
 vi.mock('../../terminal/session-handler', () => ({ findMostRecentClaudeSession: vi.fn() }));
 vi.mock('../../claude-profile/profile-utils', () => ({ createProfileDirectory: vi.fn() }));

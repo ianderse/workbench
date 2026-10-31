@@ -253,7 +253,7 @@ describe('TASK_FRESH_CONTEXT', () => {
     const worktree = path.join(root, 'worktree');
     mkdirSync(specDir, { recursive: true });
     mkdirSync(worktree);
-    const run: ClaudeRunInfo = { version: 1, sessionId: 'old-session', totalCostUsd: 12, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' };
+    const run: ClaudeRunInfo = { sessionId: 'old-session', totalCostUsd: 12, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' };
     const metadata = { customField: 'preserved', humanWork: { revision: 1, items: [] } };
     const metadataFile = path.join(specDir, 'task_metadata.json');
     writeFileSync(metadataFile, JSON.stringify(metadata));
@@ -298,7 +298,7 @@ describe('TASK_FRESH_CONTEXT', () => {
     mkdirSync(specDir, { recursive: true });
     const metadataFile = path.join(specDir, 'task_metadata.json');
     writeFileSync(metadataFile, JSON.stringify({ retained: true }));
-    vi.mocked(loadClaudeRunInfo).mockReturnValue({ version: 1, sessionId: 'old-session', totalCostUsd: 4, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' });
+    vi.mocked(loadClaudeRunInfo).mockReturnValue({ sessionId: 'old-session', totalCostUsd: 4, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' });
     vi.mocked(findTaskWorktree).mockReturnValue(root);
     if (fault.startsWith('queue')) {
       mocks.tasksByProject.set('project-a', [makeTask('project-a', { id: 'busy-1' }), makeTask('project-a', { id: 'busy-2' }), makeTask('project-a', { id: 'busy-3' })]);
@@ -336,7 +336,7 @@ describe('TASK_FRESH_CONTEXT', () => {
     mkdirSync(specDir, { recursive: true });
     const metadataFile = path.join(specDir, 'task_metadata.json');
     writeFileSync(metadataFile, '{}');
-    vi.mocked(loadClaudeRunInfo).mockReturnValue({ version: 1, sessionId: 'old-session', totalCostUsd: 0, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' });
+    vi.mocked(loadClaudeRunInfo).mockReturnValue({ sessionId: 'old-session', totalCostUsd: 0, phases: [{ name: 'implement', startedAt: '2026-10-28T12:00:00Z' }], subagents: [], updatedAt: '2026-10-28T12:00:00Z' });
     vi.mocked(findTaskWorktree).mockReturnValue(root);
     let tail = Promise.resolve<unknown>(undefined);
     mocks.queue.runExclusive.mockImplementation((_projectId, fn) => {

@@ -23,7 +23,12 @@ export interface AppUpdateCheckResult {
   status: AppUpdateCheckStatus;
   /** The newer release, when status is update-available */
   update?: AppUpdateInfo;
-  /** Newest published version, when one was found */
+  /**
+   * The latest stable release, when a beta is running with Beta updates off and that beta is newer
+   * than every stable release (downloading it goes back to stable)
+   */
+  downgrade?: AppUpdateInfo;
+  /** Highest eligible published version (pre-releases count only with Beta updates on) */
   latestVersion?: string;
   /** Failure reason, when status is error */
   error?: string;
@@ -33,12 +38,6 @@ export interface AppUpdateProgress {
   percent: number;
   transferred: number;
   total: number;
-}
-
-export interface AppUpdateAvailableEvent {
-  version: string;
-  releaseNotes?: string;
-  releaseDate?: string;
 }
 
 export interface AppUpdateDownloadedEvent {

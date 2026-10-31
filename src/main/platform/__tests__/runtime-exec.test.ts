@@ -211,6 +211,26 @@ describe('killRuntimeProcess', () => {
   });
 });
 
+describe('spawnTool process groups and shell quoting', () => {
+  it('starts a detached process in its own group on POSIX only', () => {
+    mocks.spawn.mockReturnValue({ pid: undefined });
+    spawnTool('python', ['-y', 'server'], { command: '/usr/bin/npx', detached: true });
+    expect(mocks.spawn).toHaveBeenLastCalledWith('/usr/bin/npx', ['-y', 'server'], { detached: true, shell: false });
+
+    mocks.windows = true;
+    spawnTool('python', ['-y', 'server'], { command: 'C:\\Program Files\\nodejs\\npx.cmd', detached: false });
+    expect(mocks.spawn).toHaveBeenLastCalledWith('"C:\\Program Files\\nodejs\\npx.cmd"', ['-y', 'server'], { shell: true });
+    spawnTool('python', ['-y', 'server'], { command: 'C:\\nodejs\\npx.cmd', detached: true });
+    expect(mocks.spawn).toHaveBeenLastCalledWith('"C:\\nodejs\\npx.cmd"', ['-y', 'server'], { shell: true });
+  });
+
+  it('quotes arguments with cmd.exe operators for a .cmd shim', () => {
+    mocks.windows = true;
+    spawnTool('python', ['--url', 'http://x/?a=1&b=2', 'a|b', 'plain'], { command: 'C:\\npm\\server.cmd' });
+    expect(mocks.spawn.mock.calls[0][1]).toEqual(['--url', '"http://x/?a=1&b=2"', '"a|b"', 'plain']);
+  });
+});
+
 describe('runToolScript', () => {
   it('runs each invocation in order and reports failures without stopping', async () => {
     mocks.execFile.mockImplementation((_file: string, args: string[], _options: unknown, callback: ExecCallback) => {

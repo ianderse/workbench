@@ -11,7 +11,7 @@ import {
 } from '../task-work-summary';
 
 function run(overrides: Partial<ClaudeRunInfo> = {}): ClaudeRunInfo {
-  return { version: 1, phases: [], subagents: [], totalCostUsd: 0, updatedAt: '2026-10-25T00:00:00Z', ...overrides };
+  return { phases: [], subagents: [], totalCostUsd: 0, updatedAt: '2026-10-25T00:00:00Z', ...overrides };
 }
 
 describe('task-work-summary', () => {

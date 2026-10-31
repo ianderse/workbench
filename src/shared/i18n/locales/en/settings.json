@@ -37,6 +37,10 @@
       "title": "Accounts",
       "description": "Claude accounts & API endpoints"
     },
+    "simulation": {
+      "title": "Simulation",
+      "description": "Previews of parts of the app in any state"
+    },
     "updates": {
       "title": "Updates",
       "description": "Workbench updates"
@@ -184,6 +188,9 @@
     "pythonPath": "Python path",
     "pythonPathDescription": "Path to Python executable (leave empty for auto-detection)",
     "pythonPathPlaceholder": "python3 (default)",
+    "nodePath": "Node.js path",
+    "nodePathDescription": "Path to the Node.js executable; npx next to it starts MCP servers (leave empty for auto-detection)",
+    "nodePathPlaceholder": "node (default)",
     "gitPath": "Git path",
     "gitPathDescription": "Path to Git executable (leave empty for auto-detection)",
     "gitPathPlaceholder": "git (default)",
@@ -263,17 +270,16 @@
   "updates": {
     "title": "Workbench Desktop",
     "description": "Manage Workbench updates",
-    "appUpdateReady": "Update available",
     "newVersion": "New version",
     "released": "Released",
     "downloading": "Downloading...",
-    "updateDownloaded": "Update downloaded! Click Install to restart and apply the update.",
     "installAndRestart": "Install and restart",
     "downloadUpdate": "Download update",
     "version": "Version",
     "loading": "Loading...",
     "checkingForUpdates": "Checking for updates...",
     "newVersionAvailable": "New version available:",
+    "viewReleaseAriaLabel": "View the changelog of version {{version}} on GitHub (opens in new window)",
     "latestVersion": "You're running the latest version",
     "unpublishedVersion": "Unpublished release: there's no published release to update from yet",
     "checkFailed": "Couldn't check for updates",
@@ -281,7 +287,7 @@
     "unableToCheck": "Unable to check for updates",
     "checkForUpdates": "Check for updates",
     "autoUpdateProjects": "Auto-update projects",
-    "autoUpdateProjectsDescription": "Automatically update Workbench in projects when a new version is available",
+    "autoUpdateProjectsDescription": "Open this page when a new version is found, instead of only showing a notification",
     "betaUpdates": "Beta updates",
     "betaUpdatesDescription": "Receive pre-release beta versions with new features (may be less stable)",
     "stableDowngradeAvailable": "Stable version available",
@@ -290,7 +296,9 @@
     "downloadStableVersion": "Download stable version",
     "readOnlyVolumeTitle": "Cannot install from disk image",
     "readOnlyVolumeDescription": "Workbench is running from a read-only disk image (DMG). Please drag the app to your Applications folder and relaunch it from there to install updates.",
-    "downloadError": "Failed to download update"
+    "downloadError": "Failed to download update",
+    "notificationTitle": "Workbench update available",
+    "notificationBody": "Version {{version}} is ready to download"
   },
   "notifications": {
     "title": "Notifications",
@@ -401,7 +409,12 @@
   "mcp": {
     "ompNote": "Connectors apply to Claude Code only. With OMP, add MCP servers to ~/.omp/agent/mcp.json or to a .mcp.json in the project",
     "serversEnabled": "{{count}} servers enabled",
-    "defaultsHint": "Defaults for new tasks; each task can change them",
+    "defaultsHint": "Defaults for new tasks and chats; each can change them",
+    "commandMissing": "Needs {{command}}, which isn't installed",
+    "npxCommand": "npx (Node.js)",
+    "preparing": "Getting ready; the first start downloads it",
+    "unavailable": "Can't start: {{reason}}",
+    "fixHint": "Run this to enable it:",
     "addServer": "Add server",
     "servers": {
       "context7": {
@@ -505,7 +518,7 @@
     "tasks": {
       "title": "Tasks",
       "account": "Account",
-      "accountDescription": "The Claude account this project's tasks and chats run on",
+      "accountDescription": "The Claude account this project's tasks, chats and agent windows run on",
       "noAccounts": "No Claude accounts",
       "budget": "Budget per task",
       "budgetDescription": "Stop a task when its estimated cost reaches this amount in US dollars. Leave empty for no limit",
@@ -802,11 +815,45 @@
     "testFailed": "Failed: {{error}}"
   },
   "usageSimulator": {
-    "title": "Simulation",
-    "clockLabel": "Date and time",
-    "clockDescription": "The moment the preview shows; empty uses the current time",
+    "title": "Usage popover",
+    "dateLabel": "Date",
+    "dateDescription": "The day the previews show; empty uses today",
+    "timeLabel": "Time",
+    "timeDescription": "The top previews show this time in the morning, the bottom ones in the evening",
     "percentLabel": "5-hour usage",
-    "percentDescription": "The percentage the preview shows; empty uses the real value",
-    "percentPlaceholder": "Real"
+    "percentDescription": "The percentage the previews show; starts at the real value",
+    "states": {
+      "apiProfile": "No usage endpoint",
+      "unavailable": "Usage couldn't be fetched",
+      "reauth": "Has to sign in again"
+    }
+  },
+  "liveAgentSimulator": {
+    "title": "Live agent graph",
+    "mockGraph": "Mock graph",
+    "mockGraphDescription": "Show every kind of node in every color instead of the graph built below",
+    "masterNode": "Master node",
+    "masterNodeDescription": "The session's main agent; add nodes under it to build the graph",
+    "kinds": {
+      "subtask": "Subtask",
+      "subagent": "Subagent",
+      "tool": "Tool"
+    },
+    "nodes": {
+      "subtask": "Subtask {{n}}",
+      "subagent": "Subagent {{n}}"
+    },
+    "toolNode": "Tool · {{tool}}",
+    "remove": "Remove"
+  },
+  "graphifySimulator": {
+    "title": "Graphify graph",
+    "size": "Random graph",
+    "sizeDescription": "Number of nodes and edges of the generated graph",
+    "nodes": "Nodes",
+    "edges": "Edges",
+    "generate": "Generate",
+    "style": "Graph style",
+    "styleDescription": "Plain or colored by community"
   }
 }

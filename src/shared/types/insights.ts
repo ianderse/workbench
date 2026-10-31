@@ -18,6 +18,12 @@ export interface InsightsModelConfig {
   thinkingLevel: ThinkingLevel;
   /** The Kanban button: Claude gets the project's task tools in this conversation */
   kanbanTools?: boolean;
+  /** The MCP button: connector ids for this conversation; unset = the Connectors defaults */
+  mcpConnectors?: string[];
+  /** The GitHub button: Claude can use the GitHub CLI (gh) in this conversation */
+  githubTools?: boolean;
+  /** The GitLab button: Claude can use the GitLab CLI (glab) in this conversation */
+  gitlabTools?: boolean;
 }
 
 type InsightsChatRole = 'user' | 'assistant';
@@ -44,6 +50,21 @@ export interface InsightsChatMessage {
   images?: ImageAttachment[];
   // Tools used during this response (assistant messages only)
   toolsUsed?: InsightsToolUsage[];
+  // The user stopped this reply (assistant messages only); content is what was written by then
+  stopped?: boolean;
+  /** Where this reply ends in Claude Code's session (assistant messages only) */
+  claudeRef?: ClaudeSessionRef;
+}
+
+/**
+ * A point in a Claude Code session: the session and its last assistant message at the end of a
+ * reply, and the account whose config dir holds the session's transcript
+ */
+export interface ClaudeSessionRef {
+  sessionId: string;
+  messageUuid: string;
+  /** Claude profile the session ran on (unset for API profiles) */
+  profileId?: string;
 }
 
 export interface InsightsSession {
@@ -52,6 +73,12 @@ export interface InsightsSession {
   title?: string; // Auto-generated from first message or user-set
   messages: InsightsChatMessage[];
   modelConfig?: InsightsModelConfig; // Per-session model configuration
+  /**
+   * The Claude Code session's latest point (the last reply that ended normally): a message that
+   * follows a reply ending here resumes the session, one that follows an earlier reply (after an
+   * edit or regenerate) forks it there
+   */
+  claudeHead?: ClaudeSessionRef;
   createdAt: Date;
   updatedAt: Date;
   archivedAt?: Date;
@@ -88,4 +115,6 @@ export interface InsightsStreamChunk {
     input?: string;  // Brief description of what's being searched/read
   };
   error?: string;
+  /** The conversation the reply belongs to; the chat shows only its own conversation's reply */
+  sessionId?: string;
 }

@@ -47,6 +47,42 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
     }
   );
 
+  // Send an edited message in place of the original and everything after it
+  ipcMain.on(
+    IPC_CHANNELS.INSIGHTS_EDIT_MESSAGE,
+    async (_, projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig, sessionId?: string) => {
+      const project = projectStore.getProject(projectId);
+      if (!project) {
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, "Project not found");
+        return;
+      }
+      try {
+        await insightsService.editMessage(projectId, project.path, messageId, content, { ...getInsightsFeatureSettings(), ...modelConfig }, sessionId);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, `Failed to send message: ${errorMessage}`);
+      }
+    }
+  );
+
+  // Stop the reply Claude is writing and write it again
+  ipcMain.on(
+    IPC_CHANNELS.INSIGHTS_REGENERATE,
+    async (_, projectId: string, modelConfig?: InsightsModelConfig, sessionId?: string) => {
+      const project = projectStore.getProject(projectId);
+      if (!project) {
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, "Project not found");
+        return;
+      }
+      try {
+        await insightsService.regenerate(projectId, project.path, { ...getInsightsFeatureSettings(), ...modelConfig }, sessionId);
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        safeSendToRenderer(getMainWindow, IPC_CHANNELS.INSIGHTS_ERROR, projectId, `Failed to send message: ${errorMessage}`);
+      }
+    }
+  );
+
   ipcMain.on(
     IPC_CHANNELS.INSIGHTS_SEND_MESSAGE,
     async (_, projectId: string, message: string, modelConfig?: InsightsModelConfig, images?: ImageAttachment[]) => {
@@ -95,6 +131,12 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
         );
       }
     }
+  );
+
+  // Stop the reply Claude is writing; what it wrote so far is kept
+  ipcMain.handle(
+    IPC_CHANNELS.INSIGHTS_STOP,
+    (_, projectId: string): boolean => insightsService.stopMessage(projectId)
   );
 
   ipcMain.handle(
@@ -310,14 +352,14 @@ export function registerInsightsHandlers(getMainWindow: () => BrowserWindow | nu
   // Create a new session
   ipcMain.handle(
     IPC_CHANNELS.INSIGHTS_NEW_SESSION,
-    async (_, projectId: string): Promise<IPCResult<InsightsSession>> => {
+    async (_, projectId: string): Promise<IPCResult> => {
       const project = projectStore.getProject(projectId);
       if (!project) {
         return { success: false, error: "Project not found" };
       }
 
-      const session = insightsService.createNewSession(projectId, project.path);
-      return { success: true, data: session };
+      insightsService.startNewChat(projectId, project.path);
+      return { success: true };
     }
   );
 

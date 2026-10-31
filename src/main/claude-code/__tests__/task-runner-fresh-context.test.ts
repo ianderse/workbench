@@ -41,7 +41,7 @@ beforeEach(async () => {
   await fs.writeFile(rawPath('old-session'), '{"type":"session","id":"old-session"}\n');
   await fs.writeFile(path.join(specDir, 'task_metadata.json'), JSON.stringify({ humanWork: { revision: 13, items: [{ owner: 'Ian', response: 'Reviewed the art asset, approved as is.' }] } }));
   await fs.writeFile(path.join(specDir, 'plan.md'), '# Approved implementation plan');
-  initial = { version: 1, backend: 'omp', runtime: 'native', sessionId: 'old-session', plan: '# Approved implementation plan', totalCostUsd: 2.5,
+  initial = { backend: 'omp', runtime: 'native', sessionId: 'old-session', plan: '# Approved implementation plan', totalCostUsd: 2.5,
     updatedAt: '2026-10-28T12:00:00Z', subagents: [], phases: [{ name: 'implement', sessionId: 'old-session', startedAt: '2026-10-28T11:00:00Z', endedAt: '2026-10-28T12:00:00Z', costUsd: 2.5 }] };
   await fs.writeFile(path.join(specDir, 'claude_run.json'), JSON.stringify(initial));
 });

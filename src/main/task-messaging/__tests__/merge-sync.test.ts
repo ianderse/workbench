@@ -126,7 +126,8 @@ afterEach(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('merge sync', () => {
+// Real git repos: git is slow to start on Windows runners
+describe('merge sync', { timeout: 30_000 }, () => {
   it('tells every unfinished task about a merge, whatever files it changes', async () => {
     const statuses: TaskStatus[] = ['in_progress', 'ai_review', 'human_review', 'human_review', 'pr_created', 'error', 'queue', 'backlog', 'done', 'human_review'];
     tasks.push(...statuses.map((status, i) => task(`0${10 + i}-x`, status, {

@@ -15,6 +15,7 @@
 import { promises as fsp } from 'fs';
 import path from 'path';
 import { getSessionFilePath } from '../claude-profile/session-utils';
+import { isHeadlessEntrypoint } from '../claude-code/session-entrypoint';
 import type { ClaudeSessionItem } from '../../shared/types';
 
 /** Bytes read from each end of a transcript */
@@ -148,7 +149,7 @@ export async function listDirectorySessions(configDir: string, cwd: string): Pro
     try {
       const { head, tail } = await readEnds(file.file, file.size);
       const summary = summarizeTranscript(head, tail);
-      if (!summary.hasConversation || summary.entrypoint === 'sdk-cli') continue;
+      if (!summary.hasConversation || isHeadlessEntrypoint(summary.entrypoint)) continue;
       sessions.push({ sessionId: file.sessionId, name: summary.name, modifiedAt: file.modifiedAt });
     } catch {
       // Removed or unreadable while listing

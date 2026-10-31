@@ -22,6 +22,7 @@ type PathsTool = keyof WslToolPaths;
 
 interface ToolsInfo {
   python: ToolDetectionResult;
+  node: ToolDetectionResult;
   git: ToolDetectionResult;
   gh: ToolDetectionResult;
   glab: ToolDetectionResult;
@@ -31,10 +32,11 @@ interface ToolsInfo {
 /** One row per tool: its native settings key and translation keys, and an example Linux path */
 const PATH_TOOLS: Array<{
   tool: PathsTool;
-  field: 'pythonPath' | 'gitPath' | 'githubCLIPath' | 'gitlabCLIPath' | 'claudePath';
+  field: 'pythonPath' | 'nodePath' | 'gitPath' | 'githubCLIPath' | 'gitlabCLIPath' | 'claudePath';
   wslExample: string;
 }> = [
   { tool: 'python', field: 'pythonPath', wslExample: '/usr/bin/python3' },
+  { tool: 'node', field: 'nodePath', wslExample: '/usr/bin/node' },
   { tool: 'git', field: 'gitPath', wslExample: '/usr/bin/git' },
   { tool: 'gh', field: 'githubCLIPath', wslExample: '/usr/bin/gh' },
   { tool: 'glab', field: 'gitlabCLIPath', wslExample: '/usr/bin/glab' },

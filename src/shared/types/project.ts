@@ -133,6 +133,20 @@ export interface CustomMcpServer {
 export type McpHealthStatus = 'healthy' | 'unhealthy' | 'needs_auth' | 'unknown' | 'checking';
 
 /**
+ * Whether a connector's MCP server can start (src/main/mcp-availability.ts): preparing while its
+ * first start downloads it, ready once it answered, unavailable with the missing command or why
+ */
+export interface McpAvailability {
+  state: 'preparing' | 'ready' | 'unavailable';
+  /** The command the server needs, when it isn't installed */
+  missingCommand?: string;
+  /** Why it couldn't start */
+  message?: string;
+  /** A command that makes it usable (e.g. installing Puppeteer's browser) */
+  fixCommand?: string;
+}
+
+/**
  * Result of a quick health check for a custom MCP server.
  */
 export interface McpHealthCheckResult {

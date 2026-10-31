@@ -91,7 +91,8 @@ const pushedBranchHas = (ref: string) => {
   }
 };
 
-describe('mergePR', () => {
+// Real git repos: git is slow to start on Windows runners
+describe('mergePR', { timeout: 30_000 }, () => {
   it('pulls the target into the task branch, pushes it and merges the PR (moving it to the chosen branch)', async () => {
     commitFile(worktree, 'a.txt', 'one\ntwo\nthree\ntask\n', 'task change');
     commitFile(seed, 'b.txt', 'b\nfrom another task\n', 'other task');

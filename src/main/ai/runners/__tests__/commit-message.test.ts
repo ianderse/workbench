@@ -46,7 +46,7 @@ describe('generateCommitMessage', () => {
 
   it('includes the Claude Code run summary when the task has one', async () => {
     writeFileSync(join(specDir, 'claude_run.json'), JSON.stringify({
-      version: 1, phases: [], subagents: [], totalCostUsd: 0, updatedAt: '', summary: 'Added the login form and route',
+      phases: [], subagents: [], totalCostUsd: 0, updatedAt: '', summary: 'Added the login form and route',
     }));
     mockRunClaudeText.mockResolvedValue({ text: 'feat: login' });
     await generateCommitMessage({ specName: '001-login', specDir });
