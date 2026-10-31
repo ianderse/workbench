@@ -168,7 +168,7 @@ describe('bounded recall and legacy compatibility', () => {
     for (let i = 0; i < 12; i++) await accept(await propose(`note-${i}`, { ...content(`Vitest worker ${i}`), body: 'Vitest worker ' + '検証済み '.repeat(70) }));
     const packet = await recall();
     expect(packet.items.length).toBeGreaterThan(0);
-    expect(packet.items.length).toBeLessThanOrEqual(8);
+    expect(packet.items.length).toBeLessThanOrEqual(4);
     expect(Buffer.byteLength(packet.prompt, 'utf8')).toBeLessThanOrEqual(MEMORY_CONTEXT_TOKEN_LIMIT * 3);
     expect(packet.estimatedTokens).toBeLessThanOrEqual(MEMORY_CONTEXT_TOKEN_LIMIT);
     expect((await recall()).prompt).toBe(packet.prompt);
@@ -192,13 +192,19 @@ describe('bounded recall and legacy compatibility', () => {
 });
 
 it('serializes real independent worker processes without losing entries', async () => {
+  const modules = path.join(root, 'src/main/self-improve');
+  const shared = path.join(root, 'src/shared/utils');
+  await mkdir(modules, { recursive: true });
+  await mkdir(shared, { recursive: true });
   const source = await readFile(path.join(process.cwd(), 'src/main/self-improve/project-memory.ts'), 'utf8');
-  await writeFile(path.join(root, 'memory.cjs'), ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText);
+  await writeFile(path.join(modules, 'project-memory.cjs'), ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText);
   const events = await readFile(path.join(process.cwd(), 'src/main/self-improve/memory-events.ts'), 'utf8');
-  await writeFile(path.join(root, 'memory-events.js'), ts.transpileModule(events, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
+  await writeFile(path.join(modules, 'memory-events.js'), ts.transpileModule(events, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
+  const review = await readFile(path.join(process.cwd(), 'src/shared/utils/project-memory-review.ts'), 'utf8');
+  await writeFile(path.join(shared, 'project-memory-review.js'), ts.transpileModule(review, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText);
   await symlink(path.join(process.cwd(), 'node_modules'), path.join(root, 'node_modules'), 'dir');
   const worker = path.join(root, 'worker.cjs');
-  await writeFile(worker, `const {mutateProjectMemory}=require('./memory.cjs');
+  await writeFile(worker, `const {mutateProjectMemory}=require('./src/main/self-improve/project-memory.cjs');
 const [dir,worker]=process.argv.slice(2);
 (async()=>{for(let i=0;i<4;i++) await mutateProjectMemory(dir,'project-a',{action:'propose',requestId:worker+'-'+i,content:{kind:'lesson',title:worker+' '+i,body:'Independent worker observation',source:{type:'task',reference:worker,evidence:'Observed in worker '+worker}}});})().catch(e=>{process.stderr.write(e.stack);process.exitCode=1});`);
   await Promise.all(['a', 'b', 'c', 'd'].map((id) => promisify(execFile)(process.execPath, [worker, dir, id])));
@@ -256,10 +262,20 @@ it('retires old automatic duplicate proposals instead of flagging the accepted c
 });
 
 it('durably batches review notices once per revision and defers running task proposals', async () => {
-  const entry = await propose('notice');
+  const old = await accept(await propose('original'));
+  const entry = await mutateProjectMemory(dir, project, { action: 'propose', requestId: 'notice', content: content('Replacement observation'), supersedes: old.id });
   expect(await claimMemoryReviewNotice(dir, project, [])).toEqual([]);
   expect(await claimMemoryReviewNotice(dir, project, ['001-tests'])).toHaveLength(1);
   expect(await claimMemoryReviewNotice(dir, project, ['001-tests'])).toEqual([]);
   await mutateProjectMemory(dir, project, { action: 'revise', id: entry.id, expectedRevision: entry.revision, content: content('Newly revised Vitest observation') });
   expect(await claimMemoryReviewNotice(dir, project, ['001-tests'])).toHaveLength(1);
+});
+
+it('does not notify for ordinary task suggestions but preserves explicit user decisions', async () => {
+  await propose('optional');
+  await propose('procedure', { ...content('Optional process'), kind: 'procedure' });
+  expect(await claimMemoryReviewNotice(dir, project, ['001-tests'])).toEqual([]);
+  const user = await propose('user', { ...content('Standing preference'), source: { type: 'user', reference: 'Owner instruction', evidence: 'Explicitly requested by the owner.' } });
+  expect((await claimMemoryReviewNotice(dir, project)).map((entry) => entry.id)).toEqual([user.id]);
+  expect(await claimMemoryReviewNotice(dir, project)).toEqual([]);
 });

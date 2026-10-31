@@ -6,10 +6,12 @@ import path from 'path';
 import * as lockfile from 'proper-lockfile';
 import type { MemoryContent, MemoryContextItem, MemoryContextPacket, MemoryMutation, MemoryRevision, ProjectMemory } from '../../shared/types/project-memory';
 import { memoryChanged } from './memory-events';
+import { memoryNeedsDecision } from '../../shared/utils/project-memory-review';
 
 interface Ledger { version: 1; projectId: string; entries: ProjectMemory[]; requests: Record<string, { fingerprint: string; id: string }>; notified?: Record<string, true> }
 const LEDGER = path.join('records', 'project-memory.json');
-export const MEMORY_CONTEXT_TOKEN_LIMIT = 1500;
+export const MEMORY_CONTEXT_TOKEN_LIMIT = 1000;
+export const MEMORY_CONTEXT_ITEM_LIMIT = 4;
 const CONTEXT_BYTES = MEMORY_CONTEXT_TOKEN_LIMIT * 3;
 const KINDS = new Set(['decision', 'lesson', 'procedure', 'preference']);
 const STATUSES = new Set(['proposed', 'active', 'obsolete', 'deleted']);
@@ -232,7 +234,7 @@ export async function claimMemoryReviewNotice(dir: string, projectId: string, el
   const release = await lockfile.lock(ledgerPath(dir), { realpath: false, retries: { retries: 60, minTimeout: 10, maxTimeout: 100 }, stale: 30_000 });
   try {
     const state = await readLedger(dir, projectId);
-    const pending = state.entries.filter((entry) => entry.status === 'proposed' && !state.notified?.[`${entry.id}:${entry.revision}`]
+    const pending = state.entries.filter((entry) => memoryNeedsDecision(entry, state.entries) && !state.notified?.[`${entry.id}:${entry.revision}`]
       && (entry.source.type !== 'task' || !eligibleTasks || eligibleTasks.includes(entry.source.reference)));
     if (!pending.length) return [];
     state.notified ??= {};
@@ -291,7 +293,7 @@ export async function recallProjectMemory(options: { dir: string; projectId: str
     if (Buffer.byteLength(prompt + block, 'utf8') > CONTEXT_BYTES) continue;
     prompt += block;
     items.push(item);
-    if (items.length >= 8) break;
+    if (items.length >= MEMORY_CONTEXT_ITEM_LIMIT) break;
   }
   if (!items.length) prompt = '';
   return { version: 1, projectId, taskId, phase, at: new Date().toISOString(), estimatedTokens: Math.ceil(Buffer.byteLength(prompt, 'utf8') / 3), prompt, items };

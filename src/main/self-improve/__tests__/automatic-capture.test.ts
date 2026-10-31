@@ -47,11 +47,18 @@ beforeEach(async () => {
 afterEach(async () => { await rm(root, { recursive: true, force: true }); });
 const entries = () => listProjectMemories(getCompengDir(root), project.id);
 const capture = () => captureTaskMemory(project, task, { extract });
+const merge = async () => { await command(['checkout', 'main']); await command(['merge', '--ff-only', 'task-memory']); };
+const journal = async () => {
+  const dir = path.join(getCompengDir(root), 'records/captures');
+  const files = await readdir(dir);
+  return JSON.parse(await readFile(path.join(dir, files[0]), 'utf8'));
+};
 
 it('captures once, waits for merge, then retains the checked quote without another extraction', async () => {
   await capture();
-  expect((await entries())[0]).toMatchObject({ status: 'proposed', reviewReason: 'unverified' });
-  await command(['checkout', 'main']); await command(['merge', '--ff-only', 'task-memory']);
+  expect(await entries()).toEqual([]);
+  expect(await journal()).toMatchObject({ status: 'complete', candidates: [candidate] });
+  await merge();
   await capture(); await capture();
   expect(extract).toHaveBeenCalledTimes(1);
   expect(await entries()).toHaveLength(1);
@@ -68,12 +75,13 @@ it('refuses changed, fabricated, non-document and unmerged citations', async () 
   expect(await verifyMemoryCitation(root, sha, 'main', { body: quote, source: candidate })).toBeUndefined();
 });
 
-it('leaves failed-run claims provisional even when their quote has merged', async () => {
+it('keeps failed-run claims task-local even when their quote has merged', async () => {
   const info = JSON.parse(await readFile(infoFile, 'utf8')); info.phases[0].isError = true;
   await writeFile(infoFile, JSON.stringify(info));
   await command(['checkout', 'main']); await command(['merge', '--ff-only', 'task-memory']);
   await capture();
-  expect((await entries())[0].status).toBe('proposed');
+  expect(await entries()).toEqual([]);
+  expect(await journal()).toMatchObject({ status: 'complete', candidates: [candidate] });
 });
 
 it('never captures a stale run or rediscovers an explicitly removed claim', async () => {
@@ -82,6 +90,7 @@ it('never captures a stale run or rediscovers an explicitly removed claim', asyn
     return { memories: [candidate] };
   } });
   expect(await entries()).toEqual([]);
+  await merge();
   await capture();
   const entry = (await entries())[0];
   await mutateProjectMemory(getCompengDir(root), project.id, { action: 'delete', id: entry.id, expectedRevision: entry.revision });
@@ -132,7 +141,7 @@ it('bounds actual serialized capture input including Unicode and JSON escaping',
 
 it('bounds extraction and rejects fabricated conflict identifiers', () => {
   expect(normalizeCapturedMemories({ memories: [candidate, candidate, candidate] }, new Set())).toHaveLength(1);
-  expect(normalizeCapturedMemories({ memories: [candidate, { ...candidate, title: 'Different rationale' }, { ...candidate, title: 'Third rationale' }] }, new Set())).toHaveLength(2);
+  expect(normalizeCapturedMemories({ memories: [candidate, { ...candidate, title: 'Different rationale' }, { ...candidate, title: 'Third rationale' }] }, new Set())).toHaveLength(1);
   expect(() => normalizeCapturedMemories({ memories: [{ ...candidate, conflictsWith: ['invented'] }] }, new Set())).toThrow('unknown conflict');
   expect(normalizeCapturedMemories({ memories: [{ ...candidate, body: 'api_key=abcdefgh1234567890' }] }, new Set())).toEqual([]);
 });
@@ -167,6 +176,7 @@ it('ignores copied active memories even when extraction calls them conflicts', (
 });
 
 it('does not resurrect a dismissed claim by changing its category or title', async () => {
+  await merge();
   await capture();
   const entry = (await entries())[0];
   await mutateProjectMemory(getCompengDir(root), project.id, { action: 'delete', id: entry.id, expectedRevision: entry.revision });
@@ -202,4 +212,62 @@ it('does not create duplicates when another task rediscovers an accepted claim',
   await writeFile(otherInfo, await readFile(infoFile));
   await captureTaskMemory(project, otherTask, { extract });
   expect(await entries()).toEqual([first]);
+});
+
+it('normally records an empty extraction without creating a memory or repeating the model call', async () => {
+  const empty = vi.fn(async () => ({ memories: [] }));
+  await captureTaskMemory(project, task, { extract: empty });
+  await captureTaskMemory(project, task, { extract: empty });
+  expect(await entries()).toEqual([]);
+  expect(await journal()).toMatchObject({ status: 'complete', candidates: [] });
+  expect(empty).toHaveBeenCalledTimes(1);
+});
+
+it.each(['decision', 'procedure', 'preference'] as const)('keeps an unsupported %s in the task journal instead of the review inbox', async (kind) => {
+  const body = 'When publishing memory, preserve the old ledger until the replacement is durable because interruption must not destroy accepted guidance.'
+    + (kind === 'procedure' ? '\n1. Sync the temporary file.\n2. Rename it over the ledger.' : '');
+  const localCandidate = { kind, title: 'Durable memory publication', body, evidence: 'Task report only; no verified documentation citation.', conflictsWith: [] };
+  const localExtract = vi.fn(async () => ({ memories: [localCandidate] }));
+  await merge();
+  await captureTaskMemory(project, task, { extract: localExtract });
+  await captureTaskMemory(project, task, { extract: localExtract });
+  expect(await entries()).toEqual([]);
+  expect(await journal()).toMatchObject({ status: 'complete', candidates: [localCandidate] });
+  expect(localExtract).toHaveBeenCalledTimes(1);
+});
+
+it.each(['explicit', 'same-title'] as const)('retains a real active conflict (%s) for a decision without accepting it', async (mode) => {
+  const old = await mutateProjectMemory(getCompengDir(root), project.id, {
+    action: 'propose', requestId: 'manual:old', content: {
+      kind: 'decision', title: candidate.title, body: 'Use direct writes for the ledger because a single process owns it.',
+      source: { type: 'user', reference: 'standing decision', evidence: 'Explicit fixture instruction.' },
+    },
+  });
+  await mutateProjectMemory(getCompengDir(root), project.id, { action: 'accept', id: old.id, expectedRevision: old.revision });
+  const conflicting = { ...candidate, title: mode === 'same-title' ? candidate.title : 'Preserve concurrent ledger writes', conflictsWith: mode === 'explicit' ? [old.id] : [] };
+  const conflictingExtract = vi.fn(async () => ({ memories: [conflicting] }));
+  await captureTaskMemory(project, task, { extract: conflictingExtract });
+  await captureTaskMemory(project, task, { extract: conflictingExtract });
+  const all = await entries();
+  expect(all).toHaveLength(2);
+  expect(all.find((entry) => entry.id === old.id)).toMatchObject({ status: 'active', verification: 'user-confirmed' });
+  expect(all.find((entry) => entry.id !== old.id)).toMatchObject({ status: 'proposed', reviewReason: 'conflict', conflictsWith: [old.id], verification: 'unverified' });
+  expect(conflictingExtract).toHaveBeenCalledTimes(1);
+});
+
+it('does not create review work when the cited conflict is no longer active', async () => {
+  const old = await mutateProjectMemory(getCompengDir(root), project.id, {
+    action: 'propose', requestId: 'manual:old', content: {
+      kind: 'decision', title: 'Old ledger policy', body: 'Use direct writes for the ledger because a single process owns it.',
+      source: { type: 'user', reference: 'standing decision', evidence: 'Explicit fixture instruction.' },
+    },
+  });
+  const active = await mutateProjectMemory(getCompengDir(root), project.id, { action: 'accept', id: old.id, expectedRevision: old.revision });
+  await captureTaskMemory(project, task, { extract: async () => {
+    await mutateProjectMemory(getCompengDir(root), project.id, { action: 'obsolete', id: old.id, expectedRevision: active.revision });
+    return { memories: [{ ...candidate, conflictsWith: [old.id] }] };
+  } });
+  expect(await entries()).toHaveLength(1);
+  expect((await entries())[0]).toMatchObject({ id: old.id, status: 'obsolete' });
+  expect(await journal()).toMatchObject({ status: 'complete', candidates: [{ ...candidate, conflictsWith: [old.id] }] });
 });

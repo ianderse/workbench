@@ -1,16 +1,16 @@
 {
   "title": "Project memory",
-  "description": "Memory gives future coding tasks relevant guidance without replaying entire conversations. Workbench captures useful decisions and lessons; uncertain claims, conflicts, preferences and procedures need review.",
+  "description": "Keep a small set of durable guidance for future tasks. Routine findings stay with their tasks; conflicts and instructions you propose need a decision.",
   "manage": "Manage memories",
-  "manageDescription": "Review proposals, correct entries and keep their revision history.",
+  "manageDescription": "Manage accepted guidance, review consequential changes and browse optional suggestions.",
   "refresh": "Refresh",
   "showInactive": "Show obsolete and removed entries",
-  "disabled": "Project memory is off. Enable Self-improve under Project \u2192 Knowledge to capture or accept entries. Existing records remain viewable.",
+  "disabled": "Project memory is off. Enable Self-improve under Project → Knowledge to capture or accept entries. Existing records remain viewable.",
   "restartRequired": "Workbench was updated while it was running. Restart the whole app to load project memory; reloading a window is not enough. Active workers keep running until you restart.",
   "empty": "No managed memories yet. Existing Markdown notes remain in the memory directory.",
   "sourceLink": "{{type}}: {{reference}}",
   "sourcePreview": "Source preview shows the current file or task. The recorded evidence above is preserved with this revision.",
-  "loading": "Loading\u2026",
+  "loading": "Loading…",
   "loadFailed": "Memory could not be loaded",
   "saveFailed": "Memory could not be saved",
   "commit": "Commit: {{commit}}",
@@ -43,7 +43,7 @@
   "contextHelp": "Exact context prepared for each task phase. This records what Workbench supplied, not whether the worker used it or whether its claims are true.",
   "noContext": "No recorded memory context for this task yet.",
   "capture": "Capture / review memory",
-  "packet": "{{phase}} \u00b7 {{count}} memories \u00b7 approximately {{tokens}} tokens",
+  "packet": "{{phase}} · {{count}} memories · approximately {{tokens}} tokens",
   "exactContext": "Exact prompt context",
   "excerpt": "Excerpt supplied; see the source for the full record.",
   "kinds": {
@@ -75,8 +75,8 @@
     "legacy-unverified": "Legacy note; unverified",
     "source-backed": "Source-backed: exact documentation quote checked in merged code; runtime claims not independently verified"
   },
-  "reviewPanel": "Memory needs review: {{count}} pending · conflicts: {{conflicts}}",
-  "review": "Review memories",
+  "reviewPanel": "Memory decisions: {{count}} · conflicts: {{conflicts}}",
+  "review": "Review decisions",
   "useNew": "Use new memory",
   "keepExisting": "Keep existing memory",
   "conflictWith": "Conflicts with the current memory:",
@@ -84,8 +84,10 @@
   "citation": "Recorded citation: {{file}}",
   "reviewReasons": {
     "conflict": "Conflicting claims need a decision",
-    "procedure": "Reusable procedures need explicit approval",
-    "preference": "Standing preferences need explicit approval",
-    "unverified": "Supporting evidence needs review"
-  }
+    "procedure": "Suggested procedure; optional to review",
+    "preference": "Suggested preference; optional to review",
+    "unverified": "Unverified task finding; optional to review"
+  },
+  "optionalSuggestions": "Optional suggestions ({{count}})",
+  "optionalSuggestionsHelp": "These task findings are not used in future tasks and do not need routine review. Open one only if it adds lasting guidance worth keeping."
 }
