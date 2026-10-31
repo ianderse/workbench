@@ -19,6 +19,8 @@
  * - The run itself applies the request (`ClaudeTaskRun` with `resync`); any start does: the user's,
  *   the queue's, a rate-limit resume. A failed resync is not retried automatically, and a task the
  *   user stopped (`user-stop.ts`) is left alone until the user starts it.
+ * - A terminal failed AI review is also left for an explicit Start or Request changes. A base
+ *   branch merge never buys another paid review loop; its request remains pending for that start.
  *
  * Checks for a project run one at a time, together with the queue's passes (`runExclusive`).
  */
@@ -79,14 +81,19 @@ function specDirOf(project: Project, task: Pick<Task, 'specId'>): string {
   return path.join(project.path, getSpecsDir(project.autoBuildPath), task.specId);
 }
 
-/** Whether the task's last AI review loop passed (`claude_run.json` `reviewVerdict`) */
-export function passedAiReview(specDir: string): boolean {
+function reviewVerdictStatus(specDir: string): 'passed' | 'failed' | undefined {
   try {
     const info = JSON.parse(readFileSync(path.join(specDir, 'claude_run.json'), 'utf-8')) as { reviewVerdict?: { status?: string } };
-    return info.reviewVerdict?.status === 'passed';
+    const status = info.reviewVerdict?.status;
+    return status === 'passed' || status === 'failed' ? status : undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+/** Whether the task's last AI review loop passed (`claude_run.json` `reviewVerdict`) */
+export function passedAiReview(specDir: string): boolean {
+  return reviewVerdictStatus(specDir) === 'passed';
 }
 
 function describeMerged(request: ResyncRequest): string {
@@ -184,9 +191,16 @@ export class TaskResync {
     const request = readResyncRequest(specDir);
     if (!request || request.failedAt) return 'none';
     if (isStoppedByUser(specDir)) return 'none';
-    // Still winding down (or started meanwhile, and so applies the request itself)
-    if (deps.isRunning(task.id, projectId)) return RESYNC_IDLE_STATUSES.has(task.status) ? 'retry' : 'none';
     if (!RESYNC_IDLE_STATUSES.has(task.status)) return 'none';
+    // Every automatic entry point reaches this guard: new merge notices, startup scans and
+    // after-run checks. Preserve the request and failed evidence before even inspecting Git.
+    // Explicit user starts bypass this scheduler and apply the pending request in the runner.
+    if (reviewVerdictStatus(specDir) === 'failed') {
+      appLog.info(`[TaskResync] ${task.specId} has a terminal failed review; awaiting explicit Start or Request changes before syncing ${request.into}`);
+      return 'none';
+    }
+    // Still winding down (or started meanwhile, and so applies the request itself)
+    if (deps.isRunning(task.id, projectId)) return 'retry';
     // A pull request is only brought up to date with a merge that was pushed
     if (keepsLocalMergeOut(request, task)) return 'none';
     if (isTaskBranchBusy(projectId, task.id)) return 'retry';
