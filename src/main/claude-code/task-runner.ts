@@ -29,7 +29,7 @@ import os from 'os';
 import path from 'path';
 import { resolveClaudeEnv } from './env';
 import { INITIAL_INPUT_ID, startClaudeProcess, type ClaudeProcessHandle, type TurnOrigin } from './process';
-import { buildMcpConfig } from './mcp-config';
+import { buildMcpConfig, MCP_STARTUP_TIMEOUT_MS } from './mcp-config';
 import { TASK_TOOLS_SERVER_NAME } from '../insights/task-tools-mcp';
 import { formatInboxSection, formatMessage } from '../task-messaging/broker';
 import { TASK_RUN_TOOL_NAMES } from '../task-messaging/tools';
@@ -716,7 +716,6 @@ export class ClaudeTaskRun {
     this.config = { ...config };
     this.runFile = path.join(config.specDir, CLAUDE_RUN_FILE);
     this.info = loadClaudeRunInfo(config.specDir) ?? {
-      version: 1,
       phases: [],
       subagents: [],
       totalCostUsd: 0,
@@ -2337,6 +2336,8 @@ no notes came with the request, so review the change against the task with fresh
     if (settings.fallbackModel?.trim()) args.push('--fallback-model', settings.fallbackModel.trim());
     if (this.memoryTools && !workbenchServer) args.push('--allowedTools', `mcp__${MEMORY_SERVER_NAME}__${MEMORY_TOOL_NAME}`);
     const mcpConfig = buildMcpConfig(this.config.connectorIds, this.config.connectorSettings);
+    // Time for a connector's first start, when npx downloads it (unless the user set their own)
+    if (Object.keys(mcpConfig.mcpServers).length > 0 && !env.MCP_TIMEOUT) env.MCP_TIMEOUT = String(MCP_STARTUP_TIMEOUT_MS);
     if ((workbenchServer || this.memoryTools) && tempDir) {
       // Through a file, so the tools' token isn't in the process list
       const mcpConfigFile = path.join(tempDir, 'mcp-config.json');
@@ -3190,7 +3191,7 @@ export function loadClaudeRunInfo(specDir: string): ClaudeRunInfo | null {
   if (!existsSync(file)) return null;
   try {
     const parsed = JSON.parse(readFileSync(file, 'utf-8')) as ClaudeRunInfo;
-    if (parsed?.version !== 1 || !Array.isArray(parsed.phases)) return null;
+    if (!Array.isArray(parsed?.phases)) return null;
     parsed.subagents = parsed.subagents ?? [];
     parsed.totalCostUsd = parsed.totalCostUsd ?? 0;
     return parsed;
@@ -3214,7 +3215,6 @@ export function isClaudeRunFinished(info: ClaudeRunInfo | null, validation: bool
 /** Forget a task's run state so the next start triages and runs from scratch */
 export function resetClaudeRunInfo(specDir: string): void {
   writeFileSafe(path.join(specDir, CLAUDE_RUN_FILE), JSON.stringify({
-    version: 1,
     phases: [],
     subagents: [],
     totalCostUsd: 0,

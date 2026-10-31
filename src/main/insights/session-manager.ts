@@ -51,7 +51,10 @@ export class SessionManager {
    * Create a new session
    */
   createNewSession(projectId: string, projectPath: string): InsightsSession {
-    const sessionId = `session-${Date.now()}`;
+    // Ids are timestamps; one taken already (two chats within a millisecond) moves to the next
+    let stamp = Date.now();
+    while (this.storage.loadSessionById(projectPath, `session-${stamp}`)) stamp += 1;
+    const sessionId = `session-${stamp}`;
     const session: InsightsSession = {
       id: sessionId,
       projectId,
@@ -67,6 +70,15 @@ export class SessionManager {
     this.sessions.set(projectId, session);
 
     return session;
+  }
+
+  /**
+   * Open a new chat: no session is current, so the next message starts one. Nothing is
+   * saved until then, so an unused new chat leaves no empty conversation behind
+   */
+  startNewChat(projectId: string, projectPath: string): void {
+    this.sessions.delete(projectId);
+    this.storage.clearCurrentSessionId(projectPath);
   }
 
   /**
@@ -91,16 +103,8 @@ export class SessionManager {
     // If this was the current session, clear the cache
     const currentSession = this.sessions.get(projectId);
     if (currentSession?.id === sessionId) {
-      this.sessions.delete(projectId);
-
-      // Find another session to switch to, or create new
-      const remaining = this.listSessions(projectPath);
-      if (remaining.length > 0) {
-        this.switchSession(projectId, projectPath, remaining[0].id);
-      } else {
-        // Clear current session pointer
-        this.storage.clearCurrentSessionId(projectPath);
-      }
+      // Deleting the open chat leads to a new chat, not to another conversation
+      this.startNewChat(projectId, projectPath);
     }
 
     return true;
@@ -145,14 +149,7 @@ export class SessionManager {
     // Check if current cached session was among deleted
     const currentSession = this.sessions.get(projectId);
     if (currentSession && result.deletedIds.includes(currentSession.id)) {
-      this.sessions.delete(projectId);
-
-      const remaining = this.listSessions(projectPath);
-      if (remaining.length > 0) {
-        this.switchSession(projectId, projectPath, remaining[0].id);
-      } else {
-        this.storage.clearCurrentSessionId(projectPath);
-      }
+      this.startNewChat(projectId, projectPath);
     }
 
     return result;
@@ -234,6 +231,24 @@ export class SessionManager {
   saveSession(projectPath: string, session: InsightsSession): void {
     this.storage.saveSession(projectPath, session);
     this.sessions.set(session.projectId, session);
+  }
+
+  /**
+   * Save a conversation whose reply just ended. A chat deleted meanwhile stays deleted (returns
+   * false), a chat that is no longer the open one doesn't become it again, and what changed on
+   * disk meanwhile (title, model, archive) is kept
+   */
+  saveReply(projectId: string, projectPath: string, session: InsightsSession): boolean {
+    const stored = this.storage.loadSessionById(projectPath, session.id);
+    if (!stored) return false;
+    session.title = stored.title;
+    session.modelConfig = stored.modelConfig;
+    session.archivedAt = stored.archivedAt;
+    this.storage.saveSession(projectPath, session);
+    if (this.sessions.get(projectId)?.id === session.id) {
+      this.sessions.set(projectId, session);
+    }
+    return true;
   }
 
   /**

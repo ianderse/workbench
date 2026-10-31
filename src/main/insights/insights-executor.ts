@@ -5,13 +5,22 @@ import type {
   InsightsStreamChunk,
   InsightsToolUsage,
   InsightsModelConfig,
-  ImageAttachment
+  ImageAttachment,
+  ClaudeSessionRef
 } from '../../shared/types';
 import { detectRateLimit, createSDKRateLimitInfo } from '../rate-limit-detector';
-import { runInsights } from './claude-code-runner';
+import { runInsights, type InsightsSessionPlan } from './claude-code-runner';
 import { getGraphifyPromptContext, isGraphifyEnabled } from '../graphify';
 import { projectStore } from '../project-store';
 import { openTaskToolsSession } from './task-tools-server';
+import { buildMcpConfig } from '../claude-code/mcp-config';
+import { usableMcpConnectorIds } from '../mcp-availability';
+import { getDefaultMcpConnectorIds } from '../../shared/utils/mcp-connectors';
+import { readSettingsFileAsync } from '../settings-utils';
+import { getToolInfoAsync } from '../cli-tool-manager';
+import { isSelfImproveEnabled } from '../self-improve/setting';
+import { stripTaskSuggestions } from '../../shared/utils/task-suggestions';
+import type { AppSettings } from '../../shared/types';
 
 /**
  * Message processor result
@@ -20,6 +29,27 @@ interface ProcessorResult {
   fullResponse: string;
   suggestedTasks?: InsightsChatMessage['suggestedTasks'];
   toolsUsed: InsightsToolUsage[];
+  /** The user stopped the reply */
+  stopped?: boolean;
+  /** A newer message or regenerate stopped the reply; that run owns the conversation */
+  replaced?: boolean;
+  /** Where the reply ends in its Claude Code session (replies that ended normally) */
+  claudeRef?: ClaudeSessionRef;
+}
+
+/** How a turn runs in Claude Code: the session to resume or fork, and the chat's title */
+export interface InsightsTurnOptions {
+  session?: InsightsSessionPlan;
+  title?: string;
+  /** The chat's conversation, sent with each stream chunk so only that chat shows the reply */
+  chatSessionId?: string;
+}
+
+/** The chat's MCP servers: its own choice or the Connectors defaults, without unavailable ones */
+async function chatMcpServers(ids: string[] | undefined) {
+  const connectorSettings = ((await readSettingsFileAsync()) as Partial<AppSettings> | undefined)?.mcpConnectors;
+  const chosen = ids ?? getDefaultMcpConnectorIds(connectorSettings);
+  return buildMcpConfig(usableMcpConnectorIds(chosen, connectorSettings), connectorSettings).mcpServers;
 }
 
 /**
@@ -60,7 +90,8 @@ export class InsightsExecutor extends EventEmitter {
     message: string,
     conversationHistory: Array<{ role: string; content: string }>,
     modelConfig?: InsightsModelConfig,
-    images?: ImageAttachment[]
+    images?: ImageAttachment[],
+    turn: InsightsTurnOptions = {}
   ): Promise<ProcessorResult> {
     // Cancel any existing session
     this.cancelSession(projectId);
@@ -73,6 +104,8 @@ export class InsightsExecutor extends EventEmitter {
 
     const controller = new AbortController();
     this.abortControllers.set(projectId, controller);
+    const emitChunk = (chunk: InsightsStreamChunk) =>
+      this.emit('stream-chunk', projectId, { ...chunk, sessionId: turn.chatSessionId });
 
     const fullResponse = '';
     const suggestedTasks: InsightsChatMessage['suggestedTasks'] = [];
@@ -115,19 +148,31 @@ export class InsightsExecutor extends EventEmitter {
           thinkingLevel,
           abortSignal: controller.signal,
           attachments: images,
+          session: turn.session,
+          title: turn.title,
           graphify,
           profileId: projectSettings?.claudeProfileId,
           taskTools: taskTools?.mcpServer,
+          // gh and glab with the GitHub and GitLab buttons, when they are installed
+          // Project memories can be saved when the project's self-improve switch is on
+          memory: isSelfImproveEnabled(projectSettings),
+          cliTools: {
+            github: modelConfig?.githubTools === true && (await getToolInfoAsync('gh')).found,
+            gitlab: modelConfig?.gitlabTools === true && (await getToolInfoAsync('glab')).found,
+          },
+          // The MCP servers chosen with the chat's MCP button (Connectors defaults until changed)
+          // (leaving out servers that can't start)
+          mcpServers: await chatMcpServers(modelConfig?.mcpConnectors),
         },
         (event) => {
           switch (event.type) {
             case 'text-delta': {
               accumulatedText += event.text;
               allOutput = (allOutput + event.text).slice(-10000);
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'text',
                 content: event.text,
-              } as InsightsStreamChunk);
+              });
               break;
             }
             case 'tool-start': {
@@ -136,61 +181,59 @@ export class InsightsExecutor extends EventEmitter {
                 input: event.input,
                 timestamp: new Date(),
               });
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'tool_start',
                 tool: { name: event.name, input: event.input },
-              } as InsightsStreamChunk);
+              });
               break;
             }
             case 'tool-end': {
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'tool_end',
                 tool: { name: event.name },
-              } as InsightsStreamChunk);
+              });
               break;
             }
             case 'error': {
               allOutput = (allOutput + event.error).slice(-10000);
-              this.emit('stream-chunk', projectId, {
+              emitChunk({
                 type: 'error',
                 error: event.error,
-              } as InsightsStreamChunk);
+              });
               break;
             }
           }
         },
       );
 
-      this.abortControllers.delete(projectId);
+      this.releaseController(projectId, controller);
 
-      // Extract task suggestion from the full result
-      if (result.taskSuggestion) {
-        const task = {
-          title: result.taskSuggestion.title,
-          description: result.taskSuggestion.description,
-        };
-        suggestedTasks.push(task);
-        this.emit('stream-chunk', projectId, {
+      // Each suggestion line of the reply becomes a card
+      if (result.taskSuggestions.length > 0) {
+        const tasks = result.taskSuggestions.map(({ title, description }) => ({ title, description }));
+        suggestedTasks.push(...tasks);
+        emitChunk({
           type: 'task_suggestion',
-          suggestedTasks: [task],
-        } as InsightsStreamChunk);
+          suggestedTasks: tasks,
+        });
       }
 
-      this.emit('stream-chunk', projectId, {
+      emitChunk({
         type: 'done',
-      } as InsightsStreamChunk);
+      });
 
       this.emit('status', projectId, {
         phase: 'complete',
       } as InsightsChatStatus);
 
       return {
-        fullResponse: result.text.trim() || accumulatedText.trim() || fullResponse,
+        fullResponse: result.text.trim() || stripTaskSuggestions(accumulatedText).trim() || fullResponse,
         suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
         toolsUsed,
+        claudeRef: result.claudeRef,
       };
     } catch (error) {
-      this.abortControllers.delete(projectId);
+      this.releaseController(projectId, controller);
 
       // Check for rate limit in accumulated output
       this.handleRateLimit(projectId, allOutput);
@@ -199,22 +242,40 @@ export class InsightsExecutor extends EventEmitter {
 
       // Don't emit error if aborted (user cancelled)
       if (error instanceof Error && error.name === 'AbortError') {
+        // Stopped by the user: end the reply with what was written so far. When a newer message
+        // replaced this run, that run owns the chat's state, so nothing is sent
+        const replaced = this.abortControllers.has(projectId);
+        if (!replaced) {
+          emitChunk({ type: 'done' });
+          this.emit('status', projectId, { phase: 'complete' } as InsightsChatStatus);
+        }
         return {
-          fullResponse: accumulatedText.trim(),
+          replaced,
+          fullResponse: stripTaskSuggestions(accumulatedText).trim(),
           suggestedTasks: suggestedTasks.length > 0 ? suggestedTasks : undefined,
           toolsUsed,
+          stopped: !replaced,
         };
       }
 
-      this.emit('stream-chunk', projectId, {
+      emitChunk({
         type: 'error',
         error: errorMsg,
-      } as InsightsStreamChunk);
+      });
 
       this.emit('error', projectId, errorMsg);
       throw error;
     } finally {
       taskTools?.close();
+    }
+  }
+
+  /**
+   * Forget a run's controller, unless a newer run already took its place
+   */
+  private releaseController(projectId: string, controller: AbortController): void {
+    if (this.abortControllers.get(projectId) === controller) {
+      this.abortControllers.delete(projectId);
     }
   }
 

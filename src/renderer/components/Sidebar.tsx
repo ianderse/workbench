@@ -24,6 +24,7 @@ import { GitSetupModal } from './GitSetupModal';
 import { UsageIndicator } from './UsageIndicator';
 import { loadClaudeProfiles, useClaudeProfileStore } from '../stores/claude-profile-store';
 import { sidebarAccount } from '../lib/sidebar-account';
+import { useWindowClaudeAccountId } from '../hooks/useWindowClaudeAccount';
 import type { GitStatus } from '../../shared/types';
 
 export type SidebarView = 'projects' | 'kanban' | 'terminals' | 'insights' | 'memory' | 'usage';
@@ -64,9 +65,9 @@ export function Sidebar({
   const storeSelectedProjectId = useProjectStore((state) => state.selectedProjectId);
   const selectedProjectId = activeProjectId ?? storeSelectedProjectId;
   const settings = useSettingsStore((state) => state.settings);
-  // The account tasks and agents run on, named in place of "Settings" once there is one
+  // The account this window's tasks and agents run on, named in place of "Settings" once there is one
   const claudeProfiles = useClaudeProfileStore((state) => state.profiles);
-  const claudeActiveId = useClaudeProfileStore((state) => state.activeProfileId);
+  const claudeActiveId = useWindowClaudeAccountId();
   const apiProfiles = useSettingsStore((state) => state.profiles);
   const apiActiveId = useSettingsStore((state) => state.activeProfileId);
   const account = sidebarAccount(claudeProfiles, claudeActiveId, apiProfiles, apiActiveId);

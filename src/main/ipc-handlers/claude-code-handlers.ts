@@ -1120,6 +1120,7 @@ function toolConfigFromSettings(settings: Record<string, unknown>): Parameters<t
   const str = (value: unknown) => (typeof value === 'string' ? value : undefined);
   return {
     pythonPath: str(settings.pythonPath),
+    nodePath: str(settings.nodePath),
     gitPath: str(settings.gitPath),
     githubCLIPath: str(settings.githubCLIPath),
     gitlabCLIPath: str(settings.gitlabCLIPath),

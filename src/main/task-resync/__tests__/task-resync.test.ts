@@ -100,7 +100,8 @@ const untilCalled = async (count = 1) => {
   for (let i = 0; i < 100 && calls.length < count; i++) await new Promise((resolve) => setTimeout(resolve, 10));
 };
 
-describe('TaskResync', () => {
+// Real git repos: git is slow to start on Windows runners
+describe('TaskResync', { timeout: 30_000 }, () => {
   it('drops the request when the branch already has the merge', async () => {
     pending('002-b');
     requestFor('002-b');

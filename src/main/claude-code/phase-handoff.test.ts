@@ -37,7 +37,7 @@ beforeEach(async () => {
   await fs.mkdir(path.join(specDir, 'omp-sessions', 'children'), { recursive: true });
   await fs.writeFile(path.join(specDir, 'omp-sessions', 'old-session.jsonl'), '{"type":"session","id":"old-session"}\n');
   await fs.writeFile(path.join(specDir, 'omp-sessions', 'children', 'advisor.jsonl'), '{"type":"message"}\n');
-  runInfo = { version: 1, backend: 'omp', sessionId: 'old-session', phases: [{ name: 'implement', startedAt: '2026-10-28T10:00:00Z', endedAt: '2026-10-28T10:01:00Z', costUsd: 1.5 }], subagents: [], totalCostUsd: 1.5, updatedAt: '2026-10-28T10:01:00Z', plan: 'The saved plan' };
+  runInfo = { backend: 'omp', sessionId: 'old-session', phases: [{ name: 'implement', startedAt: '2026-10-28T10:00:00Z', endedAt: '2026-10-28T10:01:00Z', costUsd: 1.5 }], subagents: [], totalCostUsd: 1.5, updatedAt: '2026-10-28T10:01:00Z', plan: 'The saved plan' };
 });
 afterEach(async () => { await fs.rm(root, { recursive: true, force: true }); });
 const prepare = () => preparePhaseHandoff({ specDir, worktreePath: repo, runInfo, nextPhase: 'validate', reason: 'before-validation', boundaryKey: 'implement-1', baseRef: 'main' });

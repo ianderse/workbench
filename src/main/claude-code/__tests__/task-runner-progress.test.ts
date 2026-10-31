@@ -42,7 +42,7 @@ beforeEach(async () => {
   await fs.writeFile(path.join(worktree, 'tracked.txt'), 'base\n'); git('add', '.'); git('commit', '-qm', 'base');
   await fs.writeFile(path.join(specDir, 'task_metadata.json'), '{"humanWork":{"revision":1}}');
   await fs.writeFile(raw('initial-session'), '{"type":"session","id":"initial-session"}\n');
-  initial = { version: 1, backend: 'omp', runtime: 'native', sessionId: 'initial-session', phases: [], subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(),
+  initial = { backend: 'omp', runtime: 'native', sessionId: 'initial-session', phases: [], subagents: [], totalCostUsd: 0, updatedAt: new Date().toISOString(),
     triage: { model: 'sonnet', effort: 'medium', needsPlan: false, scope: 'small', title: 'Fix parser', reasoning: 'Fixture', verification: ['npm test'], source: 'fixed' } };
   report = { status: 'failed', summary: 'Parser check still fails', checks: [{ name: 'parser', command: 'npm test', passed: false }], findings: [] };
   spawned = []; onLaunch = undefined; failedPhase = undefined; allowFallback = false; blocked = {}; toolMode = undefined;

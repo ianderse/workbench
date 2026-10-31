@@ -64,7 +64,6 @@ describe('watching a project\'s metrics', () => {
     writeFileSync(
       path.join(dataDir, 'agent-sessions.json'),
       JSON.stringify({
-        version: 1,
         sessions: [{ sessionId: 'abc', cwd: projectPath, startedAt: '2026-10-21T09:00:00.000Z' }],
       })
     );

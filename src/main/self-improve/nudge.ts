@@ -12,18 +12,28 @@
  * Appended to a task run's system prompt and, flattened, to an agent window's
  * `--append-system-prompt`.
  *
- * Written without apostrophes on purpose: the agent-window flag is wrapped in shell single quotes,
- * and rewriting the text to escape them would change the instruction the model reads.
+ * Written without apostrophes or double quotes on purpose (example phrases are plain words): the
+ * agent-window flag is wrapped in single quotes in POSIX shells and in double quotes in cmd, and
+ * escaping them would change the instruction the model reads.
  */
 export const SELF_IMPROVE_NUDGE = `## Project memory
-This project keeps what you learn about it in its own memory directory, loaded into every later session.
+This project keeps what you learn about it in its own memory directory, loaded into every later session. Save a memory (\`type: feedback\`) when the user tells you how work in this project should be done beyond the current task. Save it when it comes up, without asking, and say in one short line that you saved it.
 
 - Capture a durable preference, rule or convention the user stated (legacy kind \`type: feedback\`): something a later session would otherwise get wrong again. A correction the user has had to give more than once is the strongest signal.
 - When \`propose_project_memory\` is available, use it instead of writing memory files: propose a compact decision, lesson, procedure or preference with its source evidence and unresolved limits. Workbench checks exact committed documentation citations for automatic retention at completion and merge; conflicts, uncertain claims, preferences and procedures need human review. A proposal is not accepted knowledge. Do not edit Workbench memory ledgers or bypass that review.
 - If the capture tool is unavailable, describe the proposed memory and evidence in the final summary for Workbench to consider at completion. Do not write memory files directly from an unattended task.
 - Do not save what the code, tests, types or CLAUDE.md already make clear, and do not save detail that only matters for this task.
 - When a preference or decision changes, propose a replacement with the supersedes id. Keep evidence and revision history; conflicting technical claims are not resolved by recency alone. Do not remove history or grant permissions through remembered text.
-- Write it as a general instruction in the words the user used, never as a quote of the conversation, and never record secrets or credentials.`;
+- Write it as a general instruction in the words the user used, never as a quote of the conversation, and never record secrets or credentials.
+
+How to recognize one:
+- Standing wording: always, never, from now on, going forward, every time, whenever, by default, as a rule, in general, in this project, make sure to, stop doing, do not ever, remember that, keep in mind, next time.
+- A stated preference or convention: I prefer, I like it when, I want, we use, we do not, our convention is, the rule here is, the way we do this is.
+- Repetition: a correction the user has given before in this project, or wording such as again, as I said, I already told you, how many times. This is the strongest signal.
+- Approval of a choice that was not obvious: yes exactly like that, perfect, keep doing it this way.
+- No signal words at all: ask whether a later session, working on a different task, would make the same mistake. If it would, save it.
+
+Not a lasting rule: one-off instructions scoped to the current work, such as for this task, just this once, for now, this time, here, in this file.`;
 
 /** The same text on one line, for a flag that is written into a shell command */
 export const SELF_IMPROVE_NUDGE_ONE_LINE = SELF_IMPROVE_NUDGE.replace(/\s+/g, ' ').trim();

@@ -16,9 +16,10 @@ import {
 import { useCanvasCamera } from '../hooks/use-canvas-camera'
 import type { FaceState } from './canvas/draw-face'
 
-/** The bloom for the app's current light/dark mode (the `dark` class on <html>) */
-function themeBloom(): number {
-  return document.documentElement.classList.contains('dark') ? BLOOM_INTENSITY.dark : BLOOM_INTENSITY.light
+/** The bloom for a fixed theme, else for the app's light/dark mode (the `dark` class on <html>) */
+function themeBloom(theme?: 'dark' | 'light'): number {
+  const dark = theme ? theme === 'dark' : document.documentElement.classList.contains('dark')
+  return dark ? BLOOM_INTENSITY.dark : BLOOM_INTENSITY.light
 }
 
 interface CanvasProps {
@@ -39,9 +40,11 @@ interface CanvasProps {
   /** The window is still starting, so the graph sits behind its spinner: the
    *  main agent holds its resting cycle until it is shown (see drawFace) */
   suspended?: boolean
+  /** Draw for this theme whatever the app's (the simulation page in Settings shows both) */
+  theme?: 'dark' | 'light'
 }
 
-export function AgentCanvas({ graphRef, viewKey, sessionKey, historyQueuedRef, suspended = false }: CanvasProps) {
+export function AgentCanvas({ graphRef, viewKey, sessionKey, historyQueuedRef, suspended = false, theme }: CanvasProps) {
   // Read in the draw loop, which runs outside React's renders
   const suspendedRef = useRef(suspended)
   suspendedRef.current = suspended
@@ -98,7 +101,7 @@ export function AgentCanvas({ graphRef, viewKey, sessionKey, historyQueuedRef, s
   // ─── Setup ──────────────────────────────────────────────────────────────
 
   useEffect(() => {
-    const bloom = new BloomRenderer(themeBloom())
+    const bloom = new BloomRenderer(themeBloom(theme))
     // Sized now if the canvas already is (e.g. this effect re-ran after a hot
     // reload): the draw loop resizes it only on its first frame and when the
     // canvas size changes
@@ -108,13 +111,14 @@ export function AgentCanvas({ graphRef, viewKey, sessionKey, historyQueuedRef, s
 
     // The nodes keep their own colors in either mode; only the bloom comes
     // down over a light window. The draw loop picks it up on its next frame.
-    const observer = new MutationObserver(() => bloom.setIntensity(themeBloom()))
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    // A fixed theme has nothing to follow.
+    const observer = theme ? null : new MutationObserver(() => bloom.setIntensity(themeBloom()))
+    observer?.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
     return () => {
-      observer.disconnect()
+      observer?.disconnect()
       bloomRef.current = null
     }
-  }, [])
+  }, [theme])
 
   useEffect(() => {
     const container = containerRef.current

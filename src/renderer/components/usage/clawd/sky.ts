@@ -223,8 +223,8 @@ export interface SkyLook {
   cloudShade: string;
 }
 
-/** How the sky looks at this moment in this weather */
-export function skyLook(now: Date, weather: Weather): SkyLook {
+/** Where the day is between two of its palettes: night, dawn, day, dusk (a to b, k from 0 to 1) */
+function skyPhase(now: Date) {
   const { sr, ss } = sunTimes(now);
   const t = now.getHours() * 60 + now.getMinutes() + now.getSeconds() / 60;
 
@@ -243,7 +243,17 @@ export function skyLook(now: Date, weather: Weather): SkyLook {
       break;
     }
   }
-  const light = a.light + (b.light - a.light) * k;
+  return { sr, ss, t, a, b, k, light: a.light + (b.light - a.light) * k };
+}
+
+/** How light it is outside: 0 at night, 0.5 at dawn and dusk, 1 by day */
+export function daylight(now: Date): number {
+  return skyPhase(now).light;
+}
+
+/** How the sky looks at this moment in this weather */
+export function skyLook(now: Date, weather: Weather): SkyLook {
+  const { sr, ss, t, a, b, k, light } = skyPhase(now);
   const grey = weather.cover * 0.9;
 
   const vis = Math.max(0, 1 - weather.cover * 1.15);

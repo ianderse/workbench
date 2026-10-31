@@ -35,7 +35,6 @@ export const HEART_BY_COLS: Rect[][] =
   Array.from({ length: HEART_COLS + 1 }, (_, cols) => heartGeo(cols));
 
 export const HEART_FULL = HEART_BY_COLS[HEART_COLS];
-export const HEART_W = HEART_COLS * HEART_PX;
 export const HEART_H = HEART_ROWS.length * HEART_PX;
 
 /**

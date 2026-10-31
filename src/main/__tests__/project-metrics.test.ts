@@ -97,7 +97,6 @@ describe('spending per day', () => {
   /** A run whose steps started on the given local days */
   const run = (updatedAt: string, phases: Array<[string, number]>) =>
     JSON.stringify({
-      version: 1,
       phases: phases.map(([startedAt, costUsd]) => ({ name: 'implement', startedAt, costUsd })),
       subagents: [],
       totalCostUsd: phases.reduce((sum, [, costUsd]) => sum + costUsd, 0),
@@ -212,7 +211,7 @@ describe('agent window spending', () => {
     mkdirSync(path.join(dir, '.workbench'), { recursive: true });
     writeFileSync(
       path.join(dir, '.workbench', 'agent-sessions.json'),
-      JSON.stringify({ version: 1, sessions: [{ sessionId, configDir, startedAt: at(day, 9) }] })
+      JSON.stringify({ sessions: [{ sessionId, configDir, startedAt: at(day, 9) }] })
     );
     return path.join(transcripts, `${sessionId}.jsonl`);
   };
@@ -298,7 +297,6 @@ describe('agent window spending', () => {
       writeFileSync(
         path.join(dir, '.workbench', 'agent-sessions.json'),
         JSON.stringify({
-          version: 1,
           sessions: [
             { sessionId: 'first', configDir, startedAt: at('2026-10-20', 9) },
             { sessionId: 'second', configDir, startedAt: at('2026-10-21', 9) },
@@ -462,7 +460,6 @@ describe('agent window spending', () => {
       writeFileSync(
         path.join(dir, '.workbench', 'agent-sessions.json'),
         JSON.stringify({
-          version: 1,
           sessions: [{ sessionId: 'window-session', configDir: path.join(root, 'config'), cwd: dir, startedAt: at('2026-10-20', 9) }],
         })
       );

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { stripTaskSuggestions } from '../../shared/utils/task-suggestions';
 import type {
   InsightsSession,
   InsightsSessionSummary,
@@ -59,6 +60,17 @@ const initialStatus: InsightsChatStatus = {
   message: ''
 };
 
+/**
+ * Id of the conversation shown after the first message of a new chat, until the main process
+ * reports the conversation it created for it
+ */
+export const DRAFT_SESSION_ID = 'draft';
+
+/** A message id that stays unique for messages created in the same millisecond */
+function newMessageId(): string {
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export const useInsightsStore = create<InsightsState>((set, _get) => ({
   // Initial state
   projectId: null,
@@ -83,6 +95,7 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
         ? state
         : {
             projectId,
+            sessions: [],
             status: initialStatus,
             streamingContent: '',
             streamingTasks: [],
@@ -109,7 +122,7 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
         // Create new session if none exists
         return {
           session: {
-            id: `session-${Date.now()}`,
+            id: DRAFT_SESSION_ID,
             projectId: '',
             messages: [message],
             createdAt: new Date(),
@@ -178,7 +191,8 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
 
   finalizeStreamingMessage: () =>
     set((state) => {
-      const content = state.streamingContent;
+      // Suggestion lines are the cards in suggestedTasks
+      const content = stripTaskSuggestions(state.streamingContent);
       const toolsUsed = state.toolsUsed.length > 0 ? [...state.toolsUsed] : undefined;
       const suggestedTasks = state.streamingTasks.length > 0 ? [...state.streamingTasks] : undefined;
 
@@ -187,7 +201,7 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
       }
 
       const newMessage: InsightsChatMessage = {
-        id: `msg-${Date.now()}`,
+        id: newMessageId(),
         role: 'assistant',
         content,
         timestamp: new Date(),
@@ -201,7 +215,7 @@ export const useInsightsStore = create<InsightsState>((set, _get) => ({
           streamingTasks: [],
           toolsUsed: [],
           session: {
-            id: `session-${Date.now()}`,
+            id: DRAFT_SESSION_ID,
             projectId: '',
             messages: [newMessage],
             createdAt: new Date(),
@@ -303,7 +317,7 @@ export function sendMessage(projectId: string, message: string, modelConfig?: In
     data: undefined // Strip base64 data, keep thumbnails for display
   }));
   const userMessage: InsightsChatMessage = {
-    id: `msg-${Date.now()}`,
+    id: newMessageId(),
     role: 'user',
     content: message,
     timestamp: new Date(),
@@ -328,10 +342,83 @@ export function sendMessage(projectId: string, message: string, modelConfig?: In
   window.electronAPI.sendInsightsMessage(projectId, message, configToUse, images);
 }
 
+/**
+ * Stop the reply Claude is writing. The main process ends the reply with what was written so far;
+ * when nothing was running there (e.g. it just finished), the chat is settled here instead
+ */
+export async function stopMessage(projectId: string): Promise<void> {
+  const stopped = await window.electronAPI.stopInsightsMessage(projectId).catch(() => false);
+  if (stopped) return;
+  const store = useInsightsStore.getState();
+  if (store.status.phase !== 'thinking' && store.status.phase !== 'streaming') return;
+  store.setCurrentTool(null);
+  store.finalizeStreamingMessage();
+  store.setStatus({ phase: 'idle', message: '' });
+}
+
+/**
+ * Open the Claude page: it always starts on a new chat, past conversations stay in the history.
+ * A reply still being written keeps its conversation on screen, so it doesn't stream into the
+ * new chat
+ */
+/** The shown conversation's id, so regenerate and edit act on it (none before it is created) */
+function savedSessionId(session: InsightsSession | null): string | undefined {
+  return session && session.id !== DRAFT_SESSION_ID ? session.id : undefined;
+}
+
+/**
+ * Write the latest reply again: it leaves the chat and a new one streams in its place
+ */
+export function regenerateMessage(projectId: string, modelConfig?: InsightsModelConfig): void {
+  const store = useInsightsStore.getState();
+  const session = store.session;
+  if (session) {
+    const messages = [...session.messages];
+    while (messages.at(-1)?.role === 'assistant') messages.pop();
+    store.setSession({ ...session, messages });
+  }
+  store.clearStreamingContent();
+  store.clearToolsUsed();
+  store.setCurrentTool(null);
+  store.setStatus({ phase: 'thinking', message: 'Processing your message...' });
+  window.electronAPI.regenerateInsightsMessage(projectId, modelConfig ?? session?.modelConfig, savedSessionId(session));
+}
+
+/**
+ * Send an edited message: the chat from that message on is replaced by the edited message,
+ * and its reply streams in
+ */
+export function editMessage(projectId: string, messageId: string, content: string, modelConfig?: InsightsModelConfig): void {
+  const store = useInsightsStore.getState();
+  const session = store.session;
+  const index = session?.messages.findIndex((m) => m.id === messageId) ?? -1;
+  if (!session || index < 0) return;
+  store.setSession({
+    ...session,
+    messages: [...session.messages.slice(0, index), { ...session.messages[index], content, timestamp: new Date() }],
+  });
+  store.clearStreamingContent();
+  store.clearToolsUsed();
+  store.setCurrentTool(null);
+  store.setStatus({ phase: 'thinking', message: 'Processing your message...' });
+  window.electronAPI.editInsightsMessage(projectId, messageId, content, modelConfig ?? session.modelConfig, savedSessionId(session));
+}
+
+export async function openInsightsPage(projectId: string, includeArchived?: boolean): Promise<void> {
+  useInsightsStore.getState().setProjectId(projectId);
+  const { phase } = useInsightsStore.getState().status;
+  if (phase === 'thinking' || phase === 'streaming') {
+    await loadInsightsSessions(projectId, includeArchived);
+    return;
+  }
+  await newSession(projectId);
+}
+
 export async function newSession(projectId: string): Promise<void> {
+  // The conversation is created when the first message is sent
   const result = await window.electronAPI.newInsightsSession(projectId);
-  if (result.success && result.data) {
-    useInsightsStore.getState().setSession(result.data);
+  if (result.success) {
+    useInsightsStore.getState().setSession(null);
     // A fresh conversation starts clean: drop the previous one's error/streaming state
     useInsightsStore.getState().clearStreamingContent();
     useInsightsStore.getState().clearToolsUsed();
@@ -357,6 +444,14 @@ export async function switchSession(projectId: string, sessionId: string): Promi
 export async function deleteSession(projectId: string, sessionId: string, includeArchived?: boolean): Promise<boolean> {
   const result = await window.electronAPI.deleteInsightsSession(projectId, sessionId);
   if (result.success) {
+    // Deleting the open chat leads to a new chat, without the deleted chat's reply or error
+    const store = useInsightsStore.getState();
+    if (store.session?.id === sessionId) {
+      store.clearStreamingContent();
+      store.clearToolsUsed();
+      store.setCurrentTool(null);
+      store.setStatus({ phase: 'idle', message: '' });
+    }
     // Reload sessions list and current session
     await loadInsightsSession(projectId, includeArchived);
     return true;
@@ -428,6 +523,8 @@ export function setupInsightsListeners(): () => void {
   const unsubStreamChunk = window.electronAPI.onInsightsStreamChunk(
     (projectId, chunk: InsightsStreamChunk) => {
       if (!isCurrentProject(projectId)) return;
+      // A reply of a chat the user left (stopped when they did) doesn't show in the chat on screen
+      if (chunk.sessionId && chunk.sessionId !== store().session?.id) return;
       switch (chunk.type) {
         case 'text':
           if (chunk.content) {
@@ -506,9 +603,12 @@ export function setupInsightsListeners(): () => void {
     (projectId, session: InsightsSession) => {
       // Another project's chat (e.g. open in another window) leaves this one alone
       if (!isCurrentProject(projectId)) return;
-      // Update current session if it matches
+      // Update current session if it matches, or take the conversation a new chat's first
+      // message created
       const currentSession = store().session;
-      if (currentSession?.id === session.id) {
+      const createdForDraft = currentSession?.id === DRAFT_SESSION_ID &&
+        session.messages[0]?.content === currentSession.messages[0]?.content;
+      if (currentSession?.id === session.id || createdForDraft) {
         store().setSession(session);
       }
       // Also refresh sessions list for sidebar

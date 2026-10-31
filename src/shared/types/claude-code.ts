@@ -261,7 +261,6 @@ export interface ClaudeRevisionRequest {
 
 /** Persisted run state of a task (`<specDir>/claude_run.json`) */
 export interface ClaudeRunInfo {
-  version: 1;
   sessionEpoch?: SessionEpoch;
   freshContextConsumedRequestId?: string;
   phaseProgress?: PhaseProgressState;

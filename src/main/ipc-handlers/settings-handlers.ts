@@ -11,7 +11,7 @@ import type {
 } from '../../shared/types';
 import { AgentManager } from '../agent';
 import { appLog } from '../app-logger';
-import { setUpdateChannel, setUpdateChannelWithDowngradeCheck } from '../app-updater';
+import { setBetaUpdates } from '../app-updater';
 import { getSettingsPath, readSettingsFile } from '../settings-utils';
 import { taskQueue } from '../services/task-queue';
 import { configureTools, getToolInfo, getToolInfoAsync, isPathFromWrongPlatform, preWarmToolCache, type ToolConfig } from '../cli-tool-manager';
@@ -19,6 +19,7 @@ import { isMacOS, isWindows } from '../platform';
 import { git } from '../utils/git-exec';
 import { getWslInfo, reprobeWslTools } from '../platform/shell-runtime';
 import { getWslExePath } from '../platform/wsl-detect';
+import { resetMcpAvailability } from '../mcp-availability';
 
 const settingsPath = getSettingsPath();
 
@@ -38,6 +39,7 @@ const LEGACY_PROVIDER_SETTING_KEYS = [
 function toolConfigFromSettings(settings: Partial<AppSettings>): ToolConfig {
   return {
     pythonPath: settings.pythonPath,
+    nodePath: settings.nodePath,
     gitPath: settings.gitPath,
     githubCLIPath: settings.githubCLIPath,
     gitlabCLIPath: settings.gitlabCLIPath,
@@ -182,7 +184,7 @@ export function registerSettingsHandlers(
       // Migration: Clear CLI tool paths that are from a different platform
       // Fixes issue where Windows paths persisted on macOS (and vice versa)
       // when settings were synced/transferred between platforms
-      const pathFields = ['pythonPath', 'gitPath', 'githubCLIPath', 'gitlabCLIPath', 'claudePath', 'autoBuildPath'] as const;
+      const pathFields = ['pythonPath', 'nodePath', 'gitPath', 'githubCLIPath', 'gitlabCLIPath', 'claudePath', 'autoBuildPath'] as const;
       for (const field of pathFields) {
         const pathValue = settings[field];
         if (pathValue && isPathFromWrongPlatform(pathValue)) {
@@ -242,19 +244,14 @@ export function registerSettingsHandlers(
         const savedSettings = readSettingsFile();
         const currentSettings = { ...DEFAULT_APP_SETTINGS, ...savedSettings };
 
-        // skippedUpdateVersion/updateRemindAfter are owned by the app updater
-        const {
-          skippedUpdateVersion: _skipped,
-          updateRemindAfter: _remindAfter,
-          ...safeSettings
-        } = settings;
-        const newSettings = { ...currentSettings, ...safeSettings };
+        const newSettings = { ...currentSettings, ...settings };
 
         writeFileSync(settingsPath, JSON.stringify(newSettings, null, 2), 'utf-8');
 
         // Configure CLI tools if any paths changed
         if (
           settings.pythonPath !== undefined ||
+          settings.nodePath !== undefined ||
           settings.gitPath !== undefined ||
           settings.githubCLIPath !== undefined ||
           settings.gitlabCLIPath !== undefined ||
@@ -262,6 +259,13 @@ export function registerSettingsHandlers(
           settings.wslToolPaths !== undefined
         ) {
           configureTools(toolConfigFromSettings(newSettings));
+          // MCP servers run through Node.js: check them again with the new path
+          if (
+            newSettings.nodePath !== currentSettings.nodePath ||
+            JSON.stringify(newSettings.wslToolPaths) !== JSON.stringify(savedSettings?.wslToolPaths)
+          ) {
+            resetMcpAvailability();
+          }
 
           // Re-warm cache asynchronously after configuring (non-blocking)
           preWarmToolCache(['claude']).catch((error) => {
@@ -274,18 +278,10 @@ export function registerSettingsHandlers(
           taskQueue.request();
         }
 
-        // Update auto-updater channel if betaUpdates setting changed
+        // Every save sends the whole settings object; the updater only checks again (and drops
+        // the version it found) when Beta updates actually changed
         if (settings.betaUpdates !== undefined) {
-          if (settings.betaUpdates) {
-            // Enabling beta updates - just switch channel
-            setUpdateChannel('beta');
-          } else {
-            // Disabling beta updates - switch to stable and check if downgrade is available
-            // This will notify the renderer if user is on a prerelease and stable version exists
-            setUpdateChannelWithDowngradeCheck('latest', true).catch((err) => {
-              console.error('[settings-handlers] Failed to check for stable downgrade:', err);
-            });
-          }
+          setBetaUpdates(settings.betaUpdates);
         }
 
         return { success: true };
@@ -302,6 +298,7 @@ export function registerSettingsHandlers(
     IPC_CHANNELS.SETTINGS_GET_CLI_TOOLS_INFO,
     async (_event, options?: { refresh?: boolean }): Promise<IPCResult<{
       python: ReturnType<typeof getToolInfo>;
+      node: ReturnType<typeof getToolInfo>;
       git: ReturnType<typeof getToolInfo>;
       gh: ReturnType<typeof getToolInfo>;
       glab: ReturnType<typeof getToolInfo>;
@@ -313,14 +310,15 @@ export function registerSettingsHandlers(
         // the distribution again, which is what Claude Code runs and MCP checks use
         const refresh = options?.refresh === true;
         if (refresh) await reprobeWslTools();
-        const [python, git, gh, glab, claude] = await Promise.all([
+        const [python, node, git, gh, glab, claude] = await Promise.all([
           getToolInfoAsync('python', { refresh }),
+          getToolInfoAsync('node', { refresh }),
           getToolInfoAsync('git', { refresh }),
           getToolInfoAsync('gh', { refresh }),
           getToolInfoAsync('glab', { refresh }),
           getToolInfoAsync('claude', { refresh }),
         ]);
-        return { success: true, data: { python, git, gh, glab, claude } };
+        return { success: true, data: { python, node, git, gh, glab, claude } };
       } catch (error) {
         return {
           success: false,

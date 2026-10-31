@@ -267,7 +267,13 @@ const browserMockAPI: ElectronAPI = {
       success: false,
       message: 'Connection test not available in browser mode'
     }
-  })
+  }),
+  // Browser mode can't start servers; treat them as ready
+  getMcpAvailability: async (ids) => ({
+    success: true,
+    data: Object.fromEntries(ids.map((id) => [id, { state: 'ready' as const }]))
+  }),
+  onMcpAvailabilityChanged: () => () => {}
 };
 
 /**

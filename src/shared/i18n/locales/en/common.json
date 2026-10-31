@@ -140,7 +140,7 @@
     "messageCount": "{{count}} message",
     "messageCount_other": "{{count}} messages",
     "images": {
-      "removeImage": "Remove attachment",
+      "removeImage": "Remove",
       "maxImagesReached": "Maximum number of attachments reached",
       "invalidType": "Invalid file type. Please use PNG, JPEG, GIF, or WebP.",
       "processFailed": "Failed to process file"
@@ -155,13 +155,19 @@
     "placeholder": "Ask anything about your codebase",
     "replyPlaceholder": "Reply…",
     "newChat": "New chat",
-    "showHistory": "Show chat history",
-    "hideHistory": "Hide chat history",
-    "send": "Send message",
+    "showHistory": "History",
+    "hideHistory": "History",
+    "send": "Send",
+    "stop": "Stop",
+    "scrollToBottom": "Scroll to bottom",
+    "regenerate": "Regenerate",
+    "editMessage": "Edit",
+    "stoppedByUser": "You stopped this response",
     "sending": "Sending…",
     "thinking": "Thinking…",
     "disclaimer": "{{agent}} is AI and can make mistakes.",
     "copyResponse": "Copy response",
+    "copyMessage": "Copy",
     "copied": "Copied",
     "tools": {
       "readingFile": "Reading file",
@@ -197,7 +203,7 @@
       }
     },
     "attachments": {
-      "add": "Add files or images",
+      "add": "Attach",
       "dragOver": "Drop files to attach",
       "count": "{{count}} file attached",
       "count_plural": "{{count}} files attached",
@@ -227,6 +233,12 @@
       "unarchive_tasks": "Unarchiving tasks",
       "delete_task": "Deleting a task"
     },
+    "mcp": {
+      "label": "MCP servers"
+    },
+    "githubTools": "GitHub",
+    "gitlabTools": "GitLab",
+    "cliNotFound": "{{name}} CLI not detected",
     "kanbanTools": {
       "label": "Kanban",
       "off": "Let {{agent}} manage this project's tasks",
@@ -234,11 +246,11 @@
     }
   },
   "usage": {
-    "dataUnavailable": "Usage data unavailable",
-    "dataUnavailableDescription": "The usage monitoring endpoint for this provider is not available or not supported.",
+    "dataUnavailable": "Usage unavailable",
+    "dataUnavailableDescription": "This account's usage couldn't be fetched",
     "activeAccount": "Active Account",
     "apiKeyBadge": "API key",
-    "apiKeyUnknown": "Pay as you go: {{provider}} bills this API profile per token, so there's no usage limit to show",
+    "apiKeyUnknown": "There's no usage limit to show",
     "manageAccounts": "Manage accounts",
     "inUse": "In Use",
     "notAvailable": "N/A",
@@ -254,10 +266,10 @@
     "window5HoursQuota": "5 Hours Quota",
     "windowMonthlyToolsQuota": "Monthly Tools Quota",
     "otherAccounts": "Other Accounts",
-    "needsReauth": "Needs re-auth",
-    "reauthRequired": "Re-authentication required",
-    "reauthRequiredDescription": "Your session has expired. Re-authenticate to view usage and continue using this account.",
-    "reauthButton": "Re-authenticate",
+    "needsReauth": "Needs to sign in again",
+    "reauthRequired": "Needs to sign in again",
+    "reauthRequiredDescription": "This account's sign-in has expired",
+    "reauthButton": "Sign in again",
     "sessionShort": "5-hour session usage",
     "weeklyShort": "7-day weekly usage",
     "swap": "Swap",
@@ -266,6 +278,7 @@
     "compactDays": "{{days}}d {{hours}}h",
     "resetsInLowerHours": "resets in {{hours}}h {{minutes}}m",
     "resetsInLowerDays": "resets in {{days}}d {{hours}}h",
+    "sessionNotStarted": "starts when a message is sent",
     "heartsLeft": "{{percent}}% of the 5-hour limit left",
     "weekScoped": "{{model}} · Week"
   },

@@ -54,7 +54,7 @@ describe('fixedTriage planning', () => {
 });
 
 describe('isClaudeRunFinished', () => {
-  const run = (phases: Array<Record<string, unknown>>) => ({ version: 1 as const, phases, subagents: [], totalCostUsd: 0, updatedAt: '' }) as never;
+  const run = (phases: Array<Record<string, unknown>>) => ({ phases, subagents: [], totalCostUsd: 0, updatedAt: '' }) as never;
   const done = { startedAt: 'a', endedAt: 'b' };
 
   it('is finished after a successful validation, or implementation when validation is off', () => {
@@ -70,7 +70,7 @@ describe('isClaudeRunFinished', () => {
   });
 
   it('does not reset a newly accepted reviewer request before its next phase is recorded', () => {
-    const info: ClaudeRunInfo = { version: 1, phases: [{ name: 'validate', startedAt: 'a', endedAt: 'b' }],
+    const info: ClaudeRunInfo = { phases: [{ name: 'validate', startedAt: 'a', endedAt: 'b' }],
       subagents: [], totalCostUsd: 0, updatedAt: '', revisionRequest: {
         id: 'request', requestedAt: 'now', feedback: 'Apply this correction', feedbackAttachments: [], phaseStart: 1,
       } };

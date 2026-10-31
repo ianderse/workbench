@@ -40,6 +40,7 @@ export const DEFAULT_APP_SETTINGS = {
   theme: 'system' as const,
   colorTheme: 'default' as const,
   pythonPath: undefined as string | undefined,
+  nodePath: undefined as string | undefined,
   gitPath: undefined as string | undefined,
   githubCLIPath: undefined as string | undefined,
   gitlabCLIPath: undefined as string | undefined,

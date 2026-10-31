@@ -84,6 +84,8 @@ export interface SpawnToolOptions {
    * Workbench ends every such process when the app quits (killAllProcessTrees / signalProcessGroupsNow).
    */
   processGroup?: boolean;
+  /** Alias of processGroup (the name upstream's MCP availability check uses) */
+  detached?: boolean;
 }
 
 /** One invocation's outcome in a runToolScript batch */
@@ -105,9 +107,12 @@ interface NativeLaunch {
   shell: boolean;
 }
 
-/** Quote arguments containing spaces when the command runs through a shell (Windows .cmd shims) */
+/**
+ * Quote arguments containing spaces, quotes or cmd.exe operators (`& | < > ^ ( )`, literal inside
+ * quotes) when the command runs through a shell (Windows .cmd shims)
+ */
 function quoteForShell(args: string[], useShell: boolean): string[] {
-  return useShell ? args.map((a) => (a === '' || /[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
+  return useShell ? args.map((a) => (a === '' || /[\s"&|<>^()]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)) : args;
 }
 
 function nativeLaunch(command: string, args: string[]): NativeLaunch {
@@ -126,6 +131,7 @@ const WSL_TOOL_NAMES: Record<RuntimeTool, WslProbeTool> = {
   gh: 'gh',
   glab: 'glab',
   python: 'python3',
+  node: 'node',
 };
 
 /**
@@ -571,7 +577,8 @@ export function spawnTool(tool: RuntimeTool, args: string[], options: SpawnToolO
     return child;
   }
 
-  const { command, processGroup, ...spawnOptions } = options;
+  const { command, processGroup: groupOption, detached, ...spawnOptions } = options;
+  const processGroup = groupOption === true || detached === true;
   const launch = nativeLaunch(command ?? tool, args);
   // A process group of its own (POSIX): `detached` is setsid-like, stdio stays the caller's pipes
   const grouped = processGroup === true && !isWindows();
@@ -683,6 +690,14 @@ export function killRuntimeProcess(child: ChildProcess, options: KillProcessOpti
     return;
   }
   killProcessGracefully(child, options);
+}
+
+/**
+ * Stop a process started with spawnTool and everything it started. Upstream-sync alias: this fork ends
+ * trees through killRuntimeProcess (spawn with `processGroup` or the `detached` alias).
+ */
+export function killRuntimeProcessTree(child: ChildProcess, options: KillProcessOptions = {}): void {
+  killRuntimeProcess(child, options);
 }
 
 /** POSIX shell quoting (single quotes) */
