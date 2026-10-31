@@ -21,6 +21,36 @@ run clears the previous attempt's state. These indicators do not approve tasks o
 This requires the updated main process. Restart Workbench after current workers and merge agents
 finish; reloading a window only updates the display code.
 
+## Opt-in local verification before merge
+
+A project may commit `.workbench-verify.json` on its target branch:
+
+```json
+{
+  "version": 1,
+  "command": ["npm", "run", "verify:local"],
+  "timeoutMs": 5400000
+}
+```
+
+Manual local merge, autonomous task merge and integration-branch delivery read this policy from the pinned target commit,
+build a combined merge commit in a detached temporary worktree, and run the argv command there
+before advancing the target. Heavy commands share one queue in the main process. The command
+must exit successfully and leave the candidate HEAD, tracked files and nonignored untracked
+files unchanged. Source/target movement during verification blocks advancement. A failed command
+returns a blocked merge reason; it does not launch another agent, retry the checks or call GitHub.
+
+The project command owns dependencies, durable logs, environment-sensitive receipt reuse and
+any cross-process resource lock. Workbench never turns an agent's reported check into a passing
+receipt. Ignored output directories are allowed; tracked references must remain unchanged.
+
+An absent target policy preserves existing merge behavior. A malformed or unreadable policy
+fails closed. A task cannot remove or change the target's policy through an ordinary task merge;
+policy changes need an explicit owner-reviewed integration. The first addition of a policy must
+be independently verified because an untrusted candidate does not configure its own gate.
+This gate covers Workbench's local task merges and integration delivery, not arbitrary Git
+commands or GitHub PR merges. Activation requires the updated main process.
+
 ## Failed review is an automatic restart boundary
 
 A completed failed AI review does not receive a new review budget because another task merged

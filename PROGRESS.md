@@ -1,6 +1,6 @@
 # Workbench progress
 
-Observed 2026-10-30. This is the authored project entry point, not a completion ledger or approval.
+Observed 2026-10-31. This is the authored project entry point, not a completion ledger or approval.
 Inspect current Git state and task records for later changes; historical evidence remains linked.
 
 ## Current implementation
@@ -17,6 +17,18 @@ remain authoritative. Prompts prefer targeted edits and shared foundations befor
 Agent-launched Vitest uses one worker by default, capped at two for explicit settings; direct Workbench
 tests default to two. Keep broad suites sequential and use one worker on a busy host.
 
+Human review now puts existing decision-summary bullets before response fields and shows concrete
+requests on generic action cards. Validation and fresh diff review request a plain-language action,
+evidence, recommendation and approval scope; the summary writer receives longer human findings.
+This adds no model phase and changes no approval gate or historical receipt. Renderer behavior was
+inspected in the running development app; future model wording remains a live qualification boundary.
+
+Projects can opt into local merge verification through a tracked `.workbench-verify.json` on the
+target branch. Manual task merges, automatic merges and integration delivery verify the exact clean
+combined candidate before advancing refs. Commands are serialized in the main process; failures,
+changed candidates, moved refs and policy weakening block advancement without an AI repair round.
+Projects without the policy keep their existing merge behavior. See [merge policy](docs/merge-status.md).
+
 Each spec-review ticket now requires a host-published, documentation-only update to root PROGRESS.md
 on its reviewed local base branch before completion. The audit stays read-only. One bounded latest-review
 block records the inspected revision, agent-reported findings and check-observation status. Publication
@@ -31,9 +43,11 @@ and owner/spec acceptance remain distinct. Neither progress file can waive requi
 
 ## Validation and next boundaries
 
-Review-publication validation passed 309 test files (3,856 tests, one skipped), followed by 207
-focused tests for final receipt recovery and Git normalization, plus strict TypeScript and production
-build. All tests used one Vitest worker. Fixtures do not establish live activation or provider productivity.
+Local merge-verification validation passed 311 test files (3,931 tests, one skipped), strict TypeScript,
+and the production build. Tests used one Vitest worker. Ticket 238's decision summary was inspected
+in the running renderer; its original findings, receipts, approval and task state stayed unchanged.
+Prompt checks cover both backend validation requests and fresh diff review; future model output
+quality and main-process activation remain separate from those checks.
 New or resumed runs use changes after the main process loads the build; active workers were not
 interrupted to force activation. Existing workers may retain old settings and environment.
 

@@ -41,10 +41,13 @@ export function HumanRequestSummary({ findings }: { findings: ReviewRoundFinding
   const title = presentation.kind === 'screenshots'
     ? t(presentation.updated ? 'humanWork.request.updatedScreenshots' : 'humanWork.request.screenshots', { count: presentation.images.length })
     : t(`humanWork.request.${presentation.kind}`);
+  const specificGuidance = ['screenshots', 'hostedCi', 'enforcement'].includes(presentation.kind);
+  const descriptions = specificGuidance ? [] : [...new Set(findings.map(finding => finding.description.trim()).filter(Boolean))];
   return <div className="space-y-2">
     <h4 className="text-base font-medium leading-snug">{title}</h4>
-    <p className="text-sm text-muted-foreground">{t(presentation.kind === 'screenshots' && presentation.baselines
-      ? 'humanWork.request.baselineDecision' : `humanWork.request.${presentation.kind}Help`)}</p>
+    {descriptions.map(description => <p key={description} className="whitespace-pre-wrap text-sm wrap-anywhere">{description}</p>)}
+    {specificGuidance && <p className="text-sm text-muted-foreground">{t(presentation.kind === 'screenshots' && presentation.baselines
+      ? 'humanWork.request.baselineDecision' : `humanWork.request.${presentation.kind}Help`)}</p>}
     {presentation.kind === 'hostedCi' && <ol className="list-decimal space-y-1 pl-5 text-sm">
       <li>{t('humanWork.request.hostedCiFail')}</li>
       <li>{t('humanWork.request.hostedCiEvidence')}</li>

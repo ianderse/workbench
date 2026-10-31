@@ -580,6 +580,10 @@ describe('ClaudeTaskRun', () => {
         expect(review.mock.calls[0][0].effort).toBe('high');
         expect(review.mock.calls[0][0].appendSystemPrompt).toContain(reviewDiff.TASK_REVIEW_SCOPE_PROMPT);
         expect(review.mock.calls[0][0].appendSystemPrompt).toContain('applicable unmet task requirement needs real human approval');
+        expect(review.mock.calls[0][0].appendSystemPrompt).toContain(reviewDiff.HUMAN_REVIEW_HANDOFF_PROMPT);
+        expect(review.mock.calls[0][0].jsonSchema).toMatchObject({ properties: { findings: { items: { properties: {
+          issue: { description: reviewDiff.HUMAN_REVIEW_FINDING_DESCRIPTION },
+        } } } } });
         expect(run.reviewSection).toContain('found no issues');
         diff.mockResolvedValue('diff --git a/a.ts b/a.ts\n+different');
         review.mockRejectedValue(new Error('Provider unavailable'));
@@ -590,6 +594,29 @@ describe('ClaudeTaskRun', () => {
         expect(review).toHaveBeenCalledTimes(3);
         expect(failed.reviewSection).toBeUndefined();
       } finally { review.mockRestore(); diff.mockRestore(); fingerprint.mockRestore(); }
+    });
+  });
+
+  it.each(['claude', 'omp'])('sends a readable human-action contract in the actual %s validation request without another phase', async (backend) => {
+    triageMock.mockResolvedValue({ triage: triage() });
+    const action = 'Decide whether to accept the tactical experiment as complete. Four findings were supported, one contradicted, and the rest uncertain. Accept only the tested settings; balance changes remain separate.';
+    scripts.push(
+      { messages: [result('human-brief')] },
+      { messages: [result('human-brief', { structured_output: { status: 'failed', summary: 'Decision explained', checks: [],
+        findings: [{ severity: 'major', description: action, fixed: false, requiresHuman: true }],
+      } })] },
+    );
+    await makeRun({ backend }).run();
+    const launches = backend === 'omp' ? ompSpawned : spawned;
+    expect(launches).toHaveLength(2);
+    const input = (backend === 'omp' ? ompSpawned[1].prompt : spawned[1].input) as Array<{ text?: string }>;
+    expect(input.map((block) => block.text ?? '').join('\n')).toContain(reviewDiff.HUMAN_REVIEW_HANDOFF_PROMPT);
+    const schema = backend === 'omp' ? ompSpawned[1].jsonSchema : JSON.parse(argValue(spawned[1].args, '--json-schema')!);
+    expect(schema).toMatchObject({ properties: { findings: { items: { properties: {
+      description: { description: reviewDiff.HUMAN_REVIEW_FINDING_DESCRIPTION },
+    } } } } });
+    expect(loadClaudeRunInfo(specDir)?.reviewVerdict).toMatchObject({ status: 'failed', rounds: 1,
+      failure: { openFindings: [{ description: action, requiresHuman: true }] },
     });
   });
 

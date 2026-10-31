@@ -130,6 +130,13 @@ export interface ReviewReport {
   summary: string;
 }
 
+/** Also used by validation: the finding itself is the human action card's source. */
+export const HUMAN_REVIEW_FINDING_DESCRIPTION = 'For requiresHuman findings, write a self-contained, plain-language decision brief: requested action, concrete evidence and limits, supported recommendation or options, and exactly what accepting would authorize or leave unresolved. Explain row IDs/acronyms; file references supplement the brief.';
+
+/** Keep the decision readable in the existing report, without another model phase. */
+export const HUMAN_REVIEW_HANDOFF_PROMPT = `For each requiresHuman finding, write a short, self-contained decision brief in the finding text (issue for diff review, description for validation). Lead with the exact decision or action requested. Explain what was checked, the concrete result and important uncertainty, the evidence-supported recommendation or meaningful options, and exactly what acceptance would authorize and leave unresolved. If the evidence supports no recommendation, say so rather than inventing one. For a requested observation, say what the person should inspect or do and what to report.
+Use plain language and short sentences, roughly 80-150 words or fewer. Explain technical labels and acceptance-row IDs in ordinary words. File/line references are supporting detail: the person must understand the request without opening a long audit or translating spec codes. Never submit only "needs human review", "owner sign-off required", blank confirmation fields, or a pointer to a report. Keep detailed hashes, statistics and provenance in linked evidence. Keep ordinary evidence/prose cleanup as agent-actionable work, not a human approval chore; preserve explicit restrictions on editing frozen evidence. Preserve uncertain, contradicted and out-of-scope results, and never invent approval.`;
+
 export const REVIEW_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -143,7 +150,7 @@ export const REVIEW_SCHEMA = {
           severity: { type: 'string', enum: ['blocker', 'major', 'minor'] },
           file: { type: 'string' },
           line: { type: 'integer' },
-          issue: { type: 'string' },
+          issue: { type: 'string', description: HUMAN_REVIEW_FINDING_DESCRIPTION },
           requiresHuman: { type: 'boolean' },
           fix: { type: 'string' },
         },
@@ -205,6 +212,7 @@ export const REVIEW_SYSTEM_PROMPT = `You are a code reviewer with fresh eyes. Yo
 Look for real problems: bugs, missed requirements from the task, broken edge cases, security issues, and changes that break other code. Use your read, grep and glob tools to read the code around the changes and the code that uses them before you report a problem; do not report guesses.
 ${TASK_REVIEW_SCOPE_PROMPT}
 Flag requiresHuman: true when an applicable unmet task requirement needs real human approval, a decision or participant observations. Keep it open unless an actual scoped human decision resolves it; an agent cannot fabricate that evidence.
+${HUMAN_REVIEW_HANDOFF_PROMPT}
 Do not report style, naming, formatting or missing nice-to-haves. Do not modify any file.
 Severity: blocker = the change is broken or misses a core requirement; major = a real bug or gap that should be fixed before merging; minor = small and optional.
 Report at most 12 findings, most important first, each with the file and line when you know them. An empty findings list is the right answer for a correct change.`;

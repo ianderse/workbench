@@ -136,6 +136,26 @@ with the failed verdict preserved. Human actions are created when the task enter
 Mixed reviews continue to repair the agent-actionable findings while keeping human requirements
 pending. Untagged legacy findings can still be tracked manually.
 
+### Readable decision handoffs
+
+Fresh diff review and validation ask for a short decision brief in each human finding: the
+specific action, what was checked and found, an evidence-supported recommendation or options,
+and exactly what acceptance would cover or leave unresolved. Technical row IDs need a plain-language
+explanation. A file link supplements the brief; it cannot replace it with a demand to read an audit.
+Detailed statistics, hashes and provenance stay in supporting evidence. Agents fix ordinary
+evidence/prose cleanup themselves rather than asking the owner to approve a maintenance chore.
+
+The existing reviewer-summary call receives explicitly labeled human actions with up to 1200
+characters of their decision brief and asks for the actual decision and scope in its attention
+bullets. It cannot inspect linked files or invent missing recommendations. These are prompt
+instructions in the existing phases, not automatic approval, a new model call, or a guarantee
+that a model's wording is useful. Existing raw findings and decisions remain preserved.
+
+The human-work panel puts the existing summary's decision bullets before response fields.
+Generic request cards show their concrete finding text directly, while original locations,
+receipts and review history remain expandable. Specialized screenshot and hosted-CI guidance
+keeps its existing presentation. This display does not submit a decision or change a gate.
+
 ## Persistence and checks
 
 Records live under `task_metadata.json` → `humanWork`, with a stream revision and per-action

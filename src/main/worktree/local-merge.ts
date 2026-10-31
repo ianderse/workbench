@@ -25,6 +25,8 @@ import { PARSED_DIFF_FLAGS, abortOwnWorktreeMerge, inspectWorktreeMerge, mergeTa
 import type { MergeAgentFn } from '../ai/runners/merge-agent';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
 import type { LocalMergePullNote, LocalMergeStep, WorktreeLocalMergeResult } from '../../shared/types/task';
+import { autoMergeIntoTarget } from '../autonomous/autonomous-git';
+import { readLocalVerificationPolicy } from './local-verification';
 
 export interface LocalMergeConfig {
   /** Project root directory (the merge runs here, so the base branch must be checked out) */
@@ -145,6 +147,27 @@ export async function localMerge(config: LocalMergeConfig): Promise<WorktreeLoca
   // Nothing to merge when the base branch already has every commit of the task branch
   const alreadyMerged = await git(['merge-base', '--is-ancestor', sourceBranch, 'HEAD']).then(() => true, () => false);
   if (alreadyMerged) return { ...result, success: true, alreadyMerged: true };
+
+  // Opted-in projects use the same detached candidate and guarded branch advancement as
+  // autonomous merging. A failed command never exposes an unverified merge in the checkout.
+  try {
+    const targetSha = (await git(['rev-parse', 'HEAD'])).trim();
+    if (await readLocalVerificationPolicy(projectDir, targetSha)) {
+      const merged = await autoMergeIntoTarget({
+        projectDir, worktreePath, targetBranch, specId: sourceBranch,
+        expectedTargetSha: targetSha, expectedSourceBranch: sourceBranch,
+        taskTitle: config.taskTitle ?? sourceBranch, taskDescription: config.taskDescription,
+        dataDir: config.dataDir, verificationCommands: config.verificationCommands,
+        profileId: config.profileId, backend: config.backend, mergeAgent: config.mergeAgent,
+        onProgress: (step, count) => onProgress?.(step, count === undefined ? undefined : { count }),
+      });
+      return merged.success
+        ? { ...result, success: true, ...(merged.alreadyMerged ? { alreadyMerged: true } : {}) }
+        : { ...result, success: false, error: merged.message, ...(merged.conflictedFiles ? { conflictedFiles: merged.conflictedFiles } : {}) };
+    }
+  } catch (error) {
+    return { ...result, success: false, error: `Local verification policy blocked the merge: ${errorText(error)}` };
+  }
 
   /** Merge the task branch into the project's base branch; undone when git cannot finish it */
   const mergeInProject = async (): Promise<{ ok: true } | { ok: false; conflictedFiles: string[]; message: string }> => {
