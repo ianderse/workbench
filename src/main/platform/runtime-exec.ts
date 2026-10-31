@@ -521,6 +521,34 @@ function stopWslProcess(child: ChildProcess, tracked: WslProcess, options: KillP
 // Public API
 // =============================================================================
 
+/** Run an explicit argv command in the selected runtime, without shell text interpolation. */
+export async function runRuntimeCommand(command: string, args: string[], options: Omit<RunToolOptions, 'command'> = {}): Promise<RunToolResult> {
+  await whenShellRuntimeReady();
+  const info = getWslInfo();
+  if (info) {
+    const { cwd, env, encoding = 'utf8', windowsHide: _windowsHide, ...execOptions } = options;
+    const running = execFileAsync(getWslExePath(), wslArgs(info.distro, cwd, [command, ...args.map(toRuntimeArg)]), {
+      ...execOptions, env: buildWslEnv(env, info.loginPath), encoding, windowsHide: true,
+    });
+    const tracked = watchWslPid(running.child, info.distro);
+    try {
+      const { stdout, stderr } = await running;
+      return { stdout, stderr: stripPidLine(stderr) };
+    } catch (error) {
+      if (wasTerminated(error)) endLeftoverWslProcess(tracked);
+      throw cleanWslError(error, command, args);
+    }
+  }
+  const { encoding = 'utf8', ...execOptions } = options;
+  const launch = nativeLaunch(command, args);
+  // Windows command shims require a shell. Refuse shell syntax rather than interpreting argv as code.
+  if (launch.shell && [command, ...args].some(value => /[&|<>()^%!`$\r\n"]/.test(value))) {
+    throw new Error('Runtime command arguments contain unsupported Windows shell syntax');
+  }
+  const { stdout, stderr } = await execFileAsync(launch.file, launch.args, { ...execOptions, encoding, shell: launch.shell });
+  return { stdout, stderr };
+}
+
 /**
  * Run a tool to completion and collect its output.
  * Rejects like execFile does (non-zero exit, timeout, missing executable), with code/stdout/stderr.

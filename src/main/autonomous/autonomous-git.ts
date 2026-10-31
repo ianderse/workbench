@@ -21,8 +21,9 @@ import { git as runGit } from '../utils/git-exec';
 import { findBaseBranchRef } from '../utils/base-branch';
 import { toHostPath } from '../platform/shell-runtime';
 import { runMergeAgent, type MergeAgentFn } from '../ai/runners/merge-agent';
-import { mergeTargetIntoBranch } from '../ai/runners/merge-target-into-branch';
+import { abortOwnWorktreeMerge, inspectWorktreeMerge, mergeTargetIntoBranch } from '../ai/runners/merge-target-into-branch';
 import type { AgentBackendKind } from '../../shared/types/agent-backend';
+import { readLocalVerificationPolicy, verifyLocalCandidate, type LocalVerificationPolicy } from '../worktree/local-verification';
 
 const MAX_BUFFER = 20 * 1024 * 1024;
 
@@ -223,6 +224,9 @@ export interface AutoMergeInput {
   onProgress?: (step: 'resolving' | 'verifying', conflictCount?: number) => void;
   /** Checked before the target branch is changed; false abandons the merge (the user moved the task meanwhile) */
   shouldContinue?: () => boolean;
+  /** Manual local merge pins these after its checkout/pull preflight. */
+  expectedTargetSha?: string;
+  expectedSourceBranch?: string;
 }
 
 export type AutoMergeResult =
@@ -252,12 +256,21 @@ export async function autoMergeIntoTarget(input: AutoMergeInput): Promise<AutoMe
     return fail('error', `Could not read the task's branch: ${errorText(error)}`);
   }
   if (!taskBranch || taskBranch === 'HEAD') return fail('error', "The task's worktree has no branch checked out");
+  if (input.expectedSourceBranch && taskBranch !== input.expectedSourceBranch) return fail('error', 'The task branch changed before local verification');
 
   const targetSha = await localBranchSha(projectDir, targetBranch);
   if (!targetSha) return fail('error', `The target branch ${targetBranch} does not exist`);
+  if (input.expectedTargetSha && input.expectedTargetSha !== targetSha) return fail('dirty_target', 'The target branch moved before local verification');
+  let verificationPolicy: LocalVerificationPolicy | undefined;
+  try { verificationPolicy = await readLocalVerificationPolicy(projectDir, targetSha); }
+  catch (error) { return fail('error', `Could not read local verification policy: ${errorText(error)}`); }
 
   // Uncommitted work would be left behind
-  if (await isMerging()) await wt(['merge', '--abort']).catch(() => undefined);
+  if (verificationPolicy) {
+    const worktreeMerge = await inspectWorktreeMerge(worktreePath);
+    if (worktreeMerge === 'foreign') return fail('error', "A merge is in progress in the task's worktree; finish or abort it before verification");
+    if (worktreeMerge === 'own') await abortOwnWorktreeMerge(worktreePath);
+  } else if (await isMerging()) await wt(['merge', '--abort']).catch(() => undefined);
   const dirty = (await wt(['status', '--porcelain', '--untracked-files=no']))
     .split('\n').filter((line) => line.trim() && !line.slice(3).startsWith(dataDir));
   if (dirty.length) return fail('error', "The task's worktree has uncommitted changes");
@@ -313,12 +326,30 @@ export async function autoMergeIntoTarget(input: AutoMergeInput): Promise<AutoMe
         await git(['merge', '--abort']).catch(() => undefined);
         return { error: fail(files.length ? 'conflicts' : 'error', `Could not merge ${specId} into ${targetBranch}: ${errorText(error)}`, files.length ? files : undefined) };
       }
-      return { sha: (await git(['rev-parse', 'HEAD'])).trim() };
+      const sha = (await git(['rev-parse', 'HEAD'])).trim();
+      if (verificationPolicy) {
+        log('Verifying the combined merge candidate locally');
+        input.onProgress?.('verifying');
+        await verifyLocalCandidate(dir, sha, verificationPolicy, async () => {
+          if ((await localBranchSha(projectDir, targetBranch)) !== targetSha) throw new Error('The target branch moved during local verification');
+          if ((await localBranchSha(projectDir, taskBranch)) !== taskSha) throw new Error('The task branch moved during local verification');
+        });
+      }
+      return { sha };
     });
   } catch (error) {
     return fail('error', `Could not prepare the merge into ${targetBranch}: ${errorText(error)}`);
   }
   if ('error' in merged) return merged.error;
+
+  if (verificationPolicy) {
+    if ((await localBranchSha(projectDir, taskBranch)) !== taskSha
+      || (await wt(['rev-parse', 'HEAD'])).trim() !== taskSha
+      || (await wt(['rev-parse', '--abbrev-ref', 'HEAD'])).trim() !== taskBranch) {
+      return fail('error', 'The task branch moved during local verification; nothing was merged into the target');
+    }
+    if (input.shouldContinue && !input.shouldContinue()) return fail('error', 'The task was moved during local verification');
+  }
 
   // 3. Move the target branch to the merge commit
   const problem = await advanceBranch(projectDir, targetBranch, merged.sha, targetSha);
@@ -394,7 +425,9 @@ export async function mergeIntegrationIntoBase(
   if (await isAncestor(projectDir, integrationSha, baseSha)) return { success: true, sha: baseSha, alreadyUpToDate: true };
 
   let result: MergeIntoBaseResult;
+  let verificationPolicy: LocalVerificationPolicy | undefined;
   try {
+    verificationPolicy = await readLocalVerificationPolicy(projectDir, baseSha);
     result = await withTempWorktree(projectDir, baseSha, async (dir): Promise<MergeIntoBaseResult> => {
       const git = gitIn(dir);
       try {
@@ -408,12 +441,20 @@ export async function mergeIntegrationIntoBase(
           ...(files.length ? { conflictedFiles: files } : {}),
         };
       }
-      return { success: true, sha: (await git(['rev-parse', 'HEAD'])).trim() };
+      const sha = (await git(['rev-parse', 'HEAD'])).trim();
+      if (verificationPolicy) await verifyLocalCandidate(dir, sha, verificationPolicy, async () => {
+        if ((await localBranchSha(projectDir, baseBranch)) !== baseSha) throw new Error('The target branch moved during local verification');
+        if ((await localBranchSha(projectDir, integrationBranch)) !== integrationSha) throw new Error('The integration task branch moved during local verification');
+      });
+      return { success: true, sha };
     });
   } catch (error) {
     return { success: false, message: `Could not prepare the merge: ${errorText(error)}` };
   }
   if (!result.success) return result;
+  if (verificationPolicy && (await localBranchSha(projectDir, integrationBranch)) !== integrationSha) {
+    return { success: false, message: 'The integration task branch moved during local verification; the base branch was not advanced' };
+  }
   const problem = await advanceBranch(projectDir, baseBranch, result.sha, baseSha);
   if (problem) return { success: false, message: problem };
   const integrationProblem = await advanceBranch(projectDir, integrationBranch, result.sha, integrationSha);

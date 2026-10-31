@@ -76,6 +76,7 @@ import {
   killRuntimeProcess,
   parseBatchOutput,
   runTool,
+  runRuntimeCommand,
   runToolScript,
   spawnTool,
   wslSignalScript,
@@ -96,6 +97,32 @@ beforeEach(() => {
   mocks.windows = false;
   mocks.getToolPathAsync.mockImplementation(async () => mocks.toolPath);
   execFileSucceeds();
+});
+
+describe('runRuntimeCommand', () => {
+  it('preserves explicit argv without detecting or interpolating a shell command', async () => {
+    const args = ['run', 'verify:local', '--', 'path with spaces', '$(not-a-shell-command)'];
+    await runRuntimeCommand('npm', args, { cwd: '/repo', timeout: 5000 });
+    expect(mocks.getToolPathAsync).not.toHaveBeenCalled();
+    expect(mocks.execFile.mock.calls[0]).toEqual(['npm', args, { cwd: '/repo', timeout: 5000, encoding: 'utf8', shell: false }, expect.any(Function)]);
+  });
+
+  it('runs explicit commands on the WSL login PATH with translated argv and hidden pid telemetry', async () => {
+    wsl.info = wslInfo();
+    execFileSucceeds('passed', '\x1eWBPID 77\nwarning');
+    const result = await runRuntimeCommand('npm', ['run', 'verify:local', '--', 'C:\\repo\\evidence'], { cwd: 'C:\\repo', timeout: 5000 });
+    const [file, args, options] = mocks.execFile.mock.calls[0];
+    expect(file).toBe(WSL_EXE);
+    expect(args).toEqual(wrapped('/mnt/c/repo', 'npm', 'run', 'verify:local', '--', '/mnt/c/repo/evidence'));
+    expect(options).not.toHaveProperty('shell');
+    expect(result).toEqual({ stdout: 'passed', stderr: 'warning' });
+  });
+
+  it('refuses shell operators in Windows shim argv instead of executing them', async () => {
+    mocks.windows = true;
+    await expect(runRuntimeCommand('npm.cmd', ['run', 'verify:local', '& unwanted'])).rejects.toThrow('unsupported Windows shell syntax');
+    expect(mocks.execFile).not.toHaveBeenCalled();
+  });
 });
 
 describe('runTool', () => {
