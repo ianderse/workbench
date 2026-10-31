@@ -265,13 +265,51 @@ it.each([
   const note = { ...finding, requiresHuman: true, description };
   render(<HumanWorkPanel task={task} findings={[note]} />);
   expect(screen.getByRole('heading', { name: title })).toBeVisible();
-  expect(screen.getByText(description)).not.toBeVisible();
-  expect(screen.getByText(description).closest('details')).not.toHaveAttribute('open');
+  const copies = screen.getAllByText(description);
+  const exact = copies.find(element => element.closest('details'))!;
+  expect(exact).not.toBeVisible();
+  expect(exact.closest('details')).not.toHaveAttribute('open');
+  if (!title.includes('screenshot')) expect(copies.find(element => !element.closest('details'))).toBeVisible();
   expect(screen.queryByText(/Complete the requested participant/)).not.toBeInTheDocument();
   expect(screen.queryByText('Decide whether these screenshots may become regression baselines. Record approval or requested changes for these files.')).not.toBeInTheDocument();
-  expect(screen.getByText(/Read the source requirement/)).toBeVisible();
   fireEvent.click(screen.getByText('Read the exact requirement'));
-  expect(screen.getByText(description)).toBeVisible();
+  expect(exact).toBeVisible();
   expect(useTaskStore.getState().tasks[0].metadata?.humanWork).toBeUndefined();
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it('shows the concrete decision, recommendation and scope without opening technical details', () => {
+  const description = 'Decide whether to accept the tactical study as an honest test record. Four findings support their predictions, one contradicts its prediction, and many are uncertain. Recommend accepting the tested older simulation settings; wider compatibility approval stays open.';
+  const note = { ...finding, requiresHuman: true, description };
+  const humanWork = applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding: note }, [note], 'study-decision', '2026-10-31T16:00:00Z');
+  const before = structuredClone(humanWork);
+  useTaskStore.setState({ tasks: [{ ...task, metadata: { humanWork } }] });
+  render(<HumanWorkPanel task={task} findings={[note]} />);
+  const copies = screen.getAllByText(description);
+  expect(copies.find(element => !element.closest('details'))).toBeVisible();
+  expect(copies.find(element => element.closest('details'))).not.toBeVisible();
+  expect(screen.queryByText(/Read the source requirement/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Submit and continue' })).toBeDisabled();
+  expect(useTaskStore.getState().tasks[0].metadata?.humanWork).toEqual(before);
+  expect(mutate).not.toHaveBeenCalled();
+});
+
+it('renders an identical decision description once within a request', () => {
+  render(<HumanRequestSummary findings={[finding, { ...finding }]} />);
+  expect(screen.getAllByText(finding.description)).toHaveLength(1);
+});
+
+it('puts the existing decision summary before response fields while preserving old findings', () => {
+  const humanWork = applyHumanWorkMutation(undefined, { action: 'create', expectedRevision: 0, finding }, [finding], 'action-1', '2026-10-31T16:00:00Z');
+  const decision = 'Decide whether to accept the tactical test record. Recommendation: accept the tested older simulation; broader compatibility remains open.';
+  const current: Task = { ...task, metadata: { humanWork }, claudeRun: { version: 1, phases: [], subagents: [], totalCostUsd: 0, updatedAt: '2026-10-31T16:00:00Z', reviewSummary: { headline: 'Tactical study reviewed.', whatChanged: [], verified: 'Earlier checks passed.', needsAttention: [decision], generatedAt: '2026-10-31T16:00:00Z' } } };
+  const before = structuredClone(current);
+  useTaskStore.setState({ tasks: [current] });
+  render(<HumanWorkPanel task={task} findings={[finding]} />);
+  const brief = screen.getByText(decision);
+  expect(brief).toBeVisible();
+  expect(brief.compareDocumentPosition(screen.getByLabelText('Responsible person')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Submit and continue' })).toBeDisabled();
+  expect(useTaskStore.getState().tasks[0]).toEqual(before);
   expect(mutate).not.toHaveBeenCalled();
 });

@@ -88,6 +88,33 @@ describe('buildReviewSummaryPrompt', () => {
     expect(extractPlanGoal(`## Goal\n${'x'.repeat(2000)}\n## Next`)).toBeUndefined();
     expect(extractPlanGoal('no headings')).toBeUndefined();
   });
+
+  it('preserves human decision details past the ordinary finding limit while bounding the tool-less input', () => {
+    const details = 'Evidence: ' + 'tested result; '.repeat(20) + 'Recommendation: accept the experiment only. This does not approve balance changes.';
+    const prompt = buildReviewSummaryPrompt({
+      title: 'Tactical experiment', request: 'Review the evidence', validation: {
+        status: 'failed', summary: 'A scoped decision remains', checks: [], findings: [
+          { severity: 'major', description: details, fixed: false, requiresHuman: true },
+          { severity: 'minor', description: 'x'.repeat(2000), fixed: false },
+        ],
+      },
+    });
+    expect(prompt).toContain(`Open major human action (requiresHuman): ${details}`);
+    expect(prompt).toContain('This does not approve balance changes.');
+    expect(prompt).not.toContain('x'.repeat(241));
+    const bounded = buildReviewSummaryPrompt({ title: 'T', request: 'R', validation: {
+      status: 'failed', summary: '', checks: [], findings: [{ severity: 'major', fixed: false, requiresHuman: true, description: 'y'.repeat(3000) }],
+    } });
+    expect(bounded).toContain('y'.repeat(1200) + '...');
+    expect(bounded).not.toContain('y'.repeat(1201));
+  });
+
+  it('asks for the actual human decision, recommendation and consequence without inventing missing evidence', () => {
+    expect(REVIEW_SUMMARY_SYSTEM_PROMPT).toContain('what the person must decide or do');
+    expect(REVIEW_SUMMARY_SYSTEM_PROMPT).toContain('what accepting would cover or leave unresolved');
+    expect(REVIEW_SUMMARY_SYSTEM_PROMPT).toContain('state what is unknown; do not invent it');
+    expect(REVIEW_SUMMARY_SYSTEM_PROMPT).toContain('Use separate bullets for distinct decisions');
+  });
 });
 
 describe('panel display decisions', () => {

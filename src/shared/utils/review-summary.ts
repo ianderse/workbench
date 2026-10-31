@@ -19,6 +19,8 @@ const PLAN_GOAL_LIMIT = 1200;
 const AGENT_SUMMARY_LIMIT = 3000;
 const FINDING_LIMIT = 8;
 const FINDING_TEXT_LIMIT = 240;
+// Preserve the actual decision and its scope for the tool-less summary writer.
+const HUMAN_FINDING_TEXT_LIMIT = 1200;
 const CHECK_LIMIT = 15;
 const FILE_LIMIT = 25;
 
@@ -28,7 +30,7 @@ export const REVIEW_SUMMARY_SCHEMA = {
     headline: { type: 'string', description: 'One plain-language sentence: what the ticket now delivers' },
     whatChanged: { type: 'array', items: { type: 'string' }, description: '3 to 5 short bullets about capabilities and behaviour' },
     verified: { type: 'string', description: 'One short sentence on how the work was checked' },
-    needsAttention: { type: 'array', items: { type: 'string' }, description: '0 to 4 bullets the reviewer should know or decide; empty when nothing' },
+    needsAttention: { type: 'array', items: { type: 'string' }, description: '0 to 4 plain-language bullets: actual decision/action, supported recommendation and scope or consequence; empty when nothing' },
   },
   required: ['headline', 'whatChanged', 'verified', 'needsAttention'],
 } as const;
@@ -40,6 +42,7 @@ Fields:
 - whatChanged: 3 to 5 short bullets about capabilities and behaviour the product gained or changed. Not a list of files, functions or commits.
 - verified: ONE short sentence on how it was checked, from the validation report and review verdict. Example: "62 unit tests and the type check pass; AI review found nothing blocking."
 - needsAttention: 0 to 4 short bullets of what the reviewer should know or decide: assumptions made, deviations from the request, risks, open findings, follow-ups. Use an empty array when there is nothing.
+- When input identifies a human action, say what the person must decide or do, the evidence-supported recommendation or options, and what accepting would cover or leave unresolved. Explain the meaning of spec-row IDs and acronyms in ordinary words. "Needs human review", "owner sign-off required" or "accept the relevant clauses" alone is not a decision brief. Use separate bullets for distinct decisions when needed. If the supplied notes lack the result or scope, state what is unknown; do not invent it or send the person to read a long audit.
 
 Rules:
 - Write for someone who has not read the code. Plain words, short sentences.
@@ -106,7 +109,8 @@ export function buildReviewSummaryPrompt(input: ReviewSummaryInput): string {
     const open = all.filter((f) => !f.fixed && !overridden.includes(f));
     lines.push(`Findings: ${open.length} open, ${all.filter((finding) => finding.fixed).length} fixed${overridden.length ? `, ${overridden.length} overridden by the owner (not fixed)` : ''}`);
     for (const finding of open.slice(0, FINDING_LIMIT)) {
-      lines.push(`Open ${finding.severity} finding: ${clip(finding.description, FINDING_TEXT_LIMIT)}`);
+      const label = finding.requiresHuman ? 'human action (requiresHuman)' : 'finding';
+      lines.push(`Open ${finding.severity} ${label}: ${clip(finding.description, finding.requiresHuman ? HUMAN_FINDING_TEXT_LIMIT : FINDING_TEXT_LIMIT)}`);
     }
     parts.push(`<validation_report>\n${lines.join('\n')}\n</validation_report>`);
   }

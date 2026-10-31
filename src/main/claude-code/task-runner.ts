@@ -131,6 +131,8 @@ import {
   collectReviewDiff,
   countFindings,
   formatReviewForValidation,
+  HUMAN_REVIEW_FINDING_DESCRIPTION,
+  HUMAN_REVIEW_HANDOFF_PROMPT,
   normalizeReview,
   REVIEW_SCHEMA,
   REVIEW_SYSTEM_PROMPT,
@@ -346,7 +348,7 @@ const VALIDATION_SCHEMA = {
         additionalProperties: false,
         properties: {
           severity: { type: 'string', enum: ['critical', 'major', 'minor'] },
-          description: { type: 'string' },
+          description: { type: 'string', description: HUMAN_REVIEW_FINDING_DESCRIPTION },
           fixed: { type: 'boolean' },
           requiresHuman: { type: 'boolean', description: 'True only when resolution requires a real human approval, decision or participant observations. Keep this finding unfixed; never manufacture that evidence.' },
           file: { type: 'string' },
@@ -2180,6 +2182,7 @@ Implement this task. Verify it with ${verificationHint(triage)}, then commit the
 3. Commit any remaining changes.${this.isUiWork(triage) && this.info.plan ? DESIGN_VALIDATION_PROMPT : ''}
 ${TASK_REVIEW_SCOPE_PROMPT}
 Apply recorded human decisions within their stated scope before deciding what remains unresolved. When an applicable unmet task requirement still needs real human approval, a human decision, or participant observations, set requiresHuman: true. Keep it open, and never fabricate that evidence.
+${HUMAN_REVIEW_HANDOFF_PROMPT}
 Then return the report: status "passed" when the change works and the checks pass, "partial" when some checks couldn't run, "failed" when something is still broken.`;
         break;
       case 'spec_review':

@@ -37,6 +37,7 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
   const { t } = useTranslation('tasks');
   const cached = useTaskStore((state) => state.tasks.find((entry) => entry.id === task.id && entry.projectId === task.projectId));
   const stream = (cached ?? task).metadata?.humanWork;
+  const attention = (cached ?? task).claudeRun?.reviewSummary?.needsAttention ?? [];
   const groups = groupHumanWorkItems(stream?.items ?? []);
   const overrideActive = isHumanApprovalOverride(stream?.approvalOverride);
   const [showOverride, setShowOverride] = useState(false);
@@ -108,6 +109,9 @@ export function HumanWorkPanel({ task, findings }: { task: Task; findings: Revie
   return <section className="mt-4 space-y-3 rounded-lg border border-warning/50 bg-warning/5 p-4" aria-label={t('humanWork.title')}>
     <h3 className="text-sm font-medium">{t(overrideActive ? 'humanWork.recordedDecisionTitle' : responsesRecorded ? 'humanWork.recordedResponsesTitle' : 'humanWork.checklistTitle')}</h3>
     <p className="text-xs text-muted-foreground">{t(overrideActive ? 'humanWork.recordedDecisionHelp' : responsesRecorded ? 'humanWork.recordedResponsesHelp' : 'humanWork.checklistHelp')}</p>
+    {!overrideActive && !responsesRecorded && attention.length > 0 && <ul className="list-disc space-y-2 pl-5 text-sm">
+      {attention.map((item, index) => <li key={`${index}:${item}`} className="wrap-anywhere">{item}</li>)}
+    </ul>}
     {!available && <p role="alert" className="text-sm">{t('humanWork.restart')}</p>}
     {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     {overrideActive && <div role="status" className="space-y-1 rounded border border-primary/50 p-3 text-sm"><p className="font-medium">{t('humanWork.overrideActive', { approver: stream!.approvalOverride!.approver })}</p><p className="whitespace-pre-wrap wrap-anywhere">{stream!.approvalOverride!.reason}</p><p className="text-xs text-muted-foreground">{new Date(stream!.approvalOverride!.at).toLocaleString()} · {t('humanWork.overrideScope')}</p></div>}
