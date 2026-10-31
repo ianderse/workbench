@@ -6,6 +6,7 @@ import { Input } from '../ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { useProjectStore } from '../../stores/project-store';
 import { useProjectMemoryStore } from '../../stores/project-memory-store';
+import { memoryNeedsDecision } from '../../../shared/utils/project-memory-review';
 
 export function MemorySourceLink({ projectId, source }: { projectId: string; source: MemorySource }) {
   const { t } = useTranslation('memory');
@@ -86,6 +87,38 @@ export function ProjectMemoryDialog({ projectId, open, onOpenChange, taskId }: {
     ? { action: 'revise', id: editing.id, expectedRevision: editing.revision, content }
     : { action: 'propose', requestId: request.current, content, ...(supersedes ? { supersedes } : {}) }, true);
   const valid = !!(content.title.trim() && content.body.trim() && content.source.reference.trim() && content.source.evidence.trim());
+  const records = entries ?? [];
+  const foreground = records.filter((entry) => entry.status === 'active'
+    || memoryNeedsDecision(entry, records)
+    || showInactive && (entry.status === 'obsolete' || entry.status === 'deleted'))
+    .sort((a, b) => Number(memoryNeedsDecision(b, records)) - Number(memoryNeedsDecision(a, records)));
+  const suggestions = (records).filter((entry) => entry.status === 'proposed' && !memoryNeedsDecision(entry, records));
+  const renderEntry = (entry: ProjectMemory) => (
+    <article key={entry.id} className="space-y-2 rounded-lg border p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">{entry.title}</h3>
+        <span className="text-xs text-muted-foreground">{t(`kinds.${entry.kind}`)} · {t(`statuses.${entry.status}`)} · {t('revision', { revision: entry.revision })}</span>
+      </div>
+      <p className="whitespace-pre-wrap break-words text-sm">{entry.body}</p>
+      {entry.status === 'proposed' && <p className="text-xs text-muted-foreground">{t('proposalRecallHelp')}</p>}
+      <p className="text-xs text-muted-foreground">{t(`verification.${entry.verification}`)} · {new Date(entry.at).toLocaleString()}</p>
+      {entry.status === 'proposed' && entry.reviewReason && <p className="text-xs text-amber-500">{t(`reviewReasons.${entry.reviewReason}`)}</p>}
+      {entry.status === 'proposed' && entry.conflictsWith?.map((id) => records.find((item) => item.id === id && item.status === 'active')).filter((item): item is ProjectMemory => !!item).map((conflict) => <div key={conflict.id} className="space-y-1 rounded border border-amber-500/40 p-2 text-xs"><p>{t('conflictWith')} {conflict.title}</p><p className="whitespace-pre-wrap break-words">{conflict.body}</p><MemorySourceLink projectId={projectId} source={conflict.source} /></div>)}
+      {entry.supersedes && <p className="break-all text-xs">{t('replaces', { title: records.find((item) => item.id === entry.supersedes)?.title ?? entry.supersedes })}</p>}
+      <MemorySourceLink key={`${entry.id}:${entry.revision}`} projectId={projectId} source={entry.source} />
+      {entry.status !== 'deleted' && (
+        <div className="flex flex-wrap gap-2">
+          {entry.status === 'proposed' && !entry.conflictsWith?.some((id) => records.some((item) => item.id === id && item.status === 'active')) && <Button size="sm" disabled={busy || !enabled} onClick={() => void mutate({ action: 'accept', id: entry.id, expectedRevision: entry.revision })}>{t('accept')}</Button>}
+          {entry.status === 'proposed' && !!entry.conflictsWith?.length && entry.conflictsWith.every((id) => records.some((item) => item.id === id && item.status === 'active')) && <><Button size="sm" disabled={busy || !enabled} onClick={() => void mutate({ action: 'resolve', id: entry.id, expectedRevision: entry.revision, conflicts: entry.conflictsWith!.map((id) => ({ id, revision: records.find((item) => item.id === id)!.revision })) })}>{t('useNew')}</Button><Button size="sm" variant="outline" disabled={busy || !enabled} onClick={() => void mutate({ action: 'delete', id: entry.id, expectedRevision: entry.revision })}>{t('keepExisting')}</Button></>}
+          <Button size="sm" variant="outline" disabled={busy || !enabled} onClick={() => { setEditing(entry); setSupersedes(undefined); change({ kind: entry.kind, title: entry.title, body: entry.body, source: entry.source }); }}>{t('correct')}</Button>
+          {entry.status === 'active' && <Button size="sm" variant="outline" disabled={busy || !enabled} onClick={() => { setEditing(undefined); setSupersedes(entry.id); change({ ...emptyContent(taskId), kind: entry.kind, title: entry.title }); }}>{t('replace')}</Button>}
+          {entry.status === 'active' && <Button size="sm" variant="ghost" disabled={busy || !enabled} onClick={() => void mutate({ action: 'obsolete', id: entry.id, expectedRevision: entry.revision })}>{t('obsolete')}</Button>}
+          <Button size="sm" variant="ghost" disabled={busy || !enabled} onClick={() => void mutate({ action: 'delete', id: entry.id, expectedRevision: entry.revision })}>{t(entry.status === 'proposed' ? 'dismiss' : 'remove')}</Button>
+        </div>
+      )}
+      {entry.history.length > 0 && <details className="text-xs"><summary className="cursor-pointer">{t('history', { count: entry.history.length })}</summary><ol className="mt-2 space-y-2">{entry.history.map((revision) => <li key={revision.revision} className="border-l pl-2"><p>{t('revision', { revision: revision.revision })} · {t(`statuses.${revision.status}`)} · {new Date(revision.at).toLocaleString()}</p><p className="font-medium">{revision.title}</p><p className="whitespace-pre-wrap break-words">{revision.body}</p><MemorySourceLink projectId={projectId} source={revision.source} /></li>)}</ol></details>}
+    </article>
+  );
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
@@ -103,32 +136,12 @@ export function ProjectMemoryDialog({ projectId, open, onOpenChange, taskId }: {
             ? <p role="alert" className="text-sm text-muted-foreground">{t('restartRequired')}</p>
             : error && <p role="alert" className="text-sm text-destructive">{error}</p>}
           <div className="space-y-3">
-            {entries?.filter((entry) => showInactive || entry.status === 'active' || entry.status === 'proposed').sort((a, b) => Number(b.status === 'proposed') - Number(a.status === 'proposed')).map((entry) => (
-              <article key={entry.id} className="space-y-2 rounded-lg border p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 className="text-sm font-medium">{entry.title}</h3>
-                  <span className="text-xs text-muted-foreground">{t(`kinds.${entry.kind}`)} · {t(`statuses.${entry.status}`)} · {t('revision', { revision: entry.revision })}</span>
-                </div>
-                <p className="whitespace-pre-wrap break-words text-sm">{entry.body}</p>
-                {entry.status === 'proposed' && <p className="text-xs text-muted-foreground">{t('proposalRecallHelp')}</p>}
-                <p className="text-xs text-muted-foreground">{t(`verification.${entry.verification}`)} · {new Date(entry.at).toLocaleString()}</p>
-                {entry.status === 'proposed' && entry.reviewReason && <p className="text-xs text-amber-500">{t(`reviewReasons.${entry.reviewReason}`)}</p>}
-                {entry.status === 'proposed' && entry.conflictsWith?.map((id) => entries.find((item) => item.id === id && item.status === 'active')).filter((item): item is ProjectMemory => !!item).map((conflict) => <div key={conflict.id} className="space-y-1 rounded border border-amber-500/40 p-2 text-xs"><p>{t('conflictWith')} {conflict.title}</p><p className="whitespace-pre-wrap break-words">{conflict.body}</p><MemorySourceLink projectId={projectId} source={conflict.source} /></div>)}
-                {entry.supersedes && <p className="break-all text-xs">{t('replaces', { title: entries.find((item) => item.id === entry.supersedes)?.title ?? entry.supersedes })}</p>}
-                <MemorySourceLink key={`${entry.id}:${entry.revision}`} projectId={projectId} source={entry.source} />
-                {entry.status !== 'deleted' && (
-                  <div className="flex flex-wrap gap-2">
-                    {entry.status === 'proposed' && !entry.conflictsWith?.some((id) => entries.some((item) => item.id === id && item.status === 'active')) && <Button size="sm" disabled={busy || !enabled} onClick={() => void mutate({ action: 'accept', id: entry.id, expectedRevision: entry.revision })}>{t('accept')}</Button>}
-                    {entry.status === 'proposed' && !!entry.conflictsWith?.length && entry.conflictsWith.every((id) => entries.some((item) => item.id === id && item.status === 'active')) && <><Button size="sm" disabled={busy || !enabled} onClick={() => void mutate({ action: 'resolve', id: entry.id, expectedRevision: entry.revision, conflicts: entry.conflictsWith!.map((id) => ({ id, revision: entries.find((item) => item.id === id)!.revision })) })}>{t('useNew')}</Button><Button size="sm" variant="outline" disabled={busy || !enabled} onClick={() => void mutate({ action: 'delete', id: entry.id, expectedRevision: entry.revision })}>{t('keepExisting')}</Button></>}
-                    <Button size="sm" variant="outline" disabled={busy || !enabled} onClick={() => { setEditing(entry); setSupersedes(undefined); change({ kind: entry.kind, title: entry.title, body: entry.body, source: entry.source }); }}>{t('correct')}</Button>
-                    {entry.status === 'active' && <Button size="sm" variant="outline" disabled={busy || !enabled} onClick={() => { setEditing(undefined); setSupersedes(entry.id); change({ ...emptyContent(taskId), kind: entry.kind, title: entry.title }); }}>{t('replace')}</Button>}
-                    {entry.status === 'active' && <Button size="sm" variant="ghost" disabled={busy || !enabled} onClick={() => void mutate({ action: 'obsolete', id: entry.id, expectedRevision: entry.revision })}>{t('obsolete')}</Button>}
-                    <Button size="sm" variant="ghost" disabled={busy || !enabled} onClick={() => void mutate({ action: 'delete', id: entry.id, expectedRevision: entry.revision })}>{t(entry.status === 'proposed' ? 'dismiss' : 'remove')}</Button>
-                  </div>
-                )}
-                {entry.history.length > 0 && <details className="text-xs"><summary className="cursor-pointer">{t('history', { count: entry.history.length })}</summary><ol className="mt-2 space-y-2">{entry.history.map((revision) => <li key={revision.revision} className="border-l pl-2"><p>{t('revision', { revision: revision.revision })} · {t(`statuses.${revision.status}`)} · {new Date(revision.at).toLocaleString()}</p><p className="font-medium">{revision.title}</p><p className="whitespace-pre-wrap break-words">{revision.body}</p><MemorySourceLink projectId={projectId} source={revision.source} /></li>)}</ol></details>}
-              </article>
-            ))}
+            {foreground.map(renderEntry)}
+            {suggestions.length > 0 && <details className="space-y-3 rounded-lg border p-3">
+              <summary className="cursor-pointer text-sm font-medium">{t('optionalSuggestions', { count: suggestions.length })}</summary>
+              <p className="text-xs text-muted-foreground">{t('optionalSuggestionsHelp')}</p>
+              <div className="space-y-3">{suggestions.map(renderEntry)}</div>
+            </details>}
             {entries?.length === 0 && <p className="text-sm text-muted-foreground">{t('empty')}</p>}
           </div>
           {!requiresRestart && <form className="space-y-3 rounded-lg border p-3" onSubmit={(event) => { event.preventDefault(); if (valid && !busy && enabled) save(); }}>

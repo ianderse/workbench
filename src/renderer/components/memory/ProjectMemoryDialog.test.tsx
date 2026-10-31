@@ -28,6 +28,7 @@ afterEach(() => { cleanup(); vi.clearAllMocks(); });
 it('shows source evidence, accepts explicitly, and revises through the expected revision', async () => {
   render(<ProjectMemoryDialog projectId="project-a" open onOpenChange={() => {}} />);
   await screen.findByText('Inspect Vitest output');
+  fireEvent.click(screen.getByText('Optional suggestions (1)'));
   expect(screen.getByText(/^Unverified proposal/)).toBeInTheDocument();
   expect(screen.getByText(/^Not used in task context yet/)).toHaveTextContent('does not verify tests or approve the source task');
   expect(screen.getByText('The worker exited; no fix verified.')).toBeInTheDocument();
@@ -66,6 +67,7 @@ it('blocks mutations while project memory is disabled', async () => {
   useProjectStore.setState({ projects: [{ id: 'project-a', settings: { selfImprove: false } } as Project] });
   render(<ProjectMemoryDialog projectId="project-a" open onOpenChange={() => {}} />);
   await screen.findByText('Inspect Vitest output');
+  fireEvent.click(screen.getByText('Optional suggestions (1)'));
   expect(screen.getByRole('button', { name: 'Use in future tasks' })).toBeDisabled();
   expect(screen.getByRole('button', { name: 'Save proposal' })).toBeDisabled();
 });
@@ -97,9 +99,32 @@ it('shows both conflicting claims and resolves against the displayed revisions',
 it('dismisses a proposal against its displayed revision and explains the procedure category', async () => {
   render(<ProjectMemoryDialog projectId="project-a" open onOpenChange={() => {}} />);
   await screen.findByText('Inspect Vitest output');
+  fireEvent.click(screen.getByText('Optional suggestions (1)'));
   expect(screen.queryByRole('button', { name: 'Remove from recall' })).not.toBeInTheDocument();
   fireEvent.change(screen.getByLabelText('Category'), { target: { value: 'procedure' } });
   expect(screen.getByText(/An implementation detail is not a procedure/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Dismiss proposal' }));
   await waitFor(() => expect(mutate).toHaveBeenCalledWith('project-a', { action: 'delete', id: entry.id, expectedRevision: 1 }));
+});
+
+it('keeps routine suggestions collapsed and presents consequential decisions before accepted guidance', async () => {
+  const suggestion = { ...entry, id: 'optional', title: 'Routine task finding' };
+  const accepted = { ...entry, id: 'accepted', title: 'Accepted constraint', status: 'active' as const, verification: 'user-confirmed' as const };
+  entry = { ...entry, title: 'Conflicting change', reviewReason: 'conflict', conflictsWith: [accepted.id] };
+  list.mockImplementation(async () => ({ success: true, data: [suggestion, accepted, entry] }));
+  render(<ProjectMemoryDialog projectId="project-a" open onOpenChange={() => {}} />);
+  await screen.findByText('Optional suggestions (1)');
+  expect(screen.getByText('Routine task finding')).not.toBeVisible();
+  expect(screen.getAllByRole('heading', { level: 3 }).slice(0, 2).map((heading) => heading.textContent)).toEqual(['Conflicting change', 'Accepted constraint']);
+  expect(screen.getByRole('button', { name: 'Use new memory' })).toBeVisible();
+  fireEvent.click(screen.getByText('Optional suggestions (1)'));
+  expect(screen.getByText('Routine task finding')).toBeVisible();
+});
+
+it('keeps a user-authored proposal immediately available without opening optional suggestions', async () => {
+  entry = { ...entry, source: { type: 'user', reference: 'Owner instruction', evidence: 'Explicit scoped guidance.' } };
+  render(<ProjectMemoryDialog projectId="project-a" open onOpenChange={() => {}} />);
+  await screen.findByText('Inspect Vitest output');
+  expect(screen.queryByText(/^Optional suggestions/)).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Use in future tasks' })).toBeVisible();
 });

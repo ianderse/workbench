@@ -9,7 +9,7 @@
  * - checks a merge the task's session made itself before dropping the request
  */
 import { execFileSync } from 'child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +23,7 @@ import { readResyncRequest, recordResyncRequest, updateResyncRequest } from '../
 import { clearStoppedByUser, markStoppedByUser } from '../user-stop';
 import { guardKey, mergingPRs } from '../../worktree/merge-guard';
 import { taskHooks } from '../../task-hooks';
+import * as resyncGit from '../git';
 
 let tmp: string;
 let root: string;
@@ -92,6 +93,7 @@ beforeEach(() => {
 
 afterEach(() => {
   resync.dispose();
+  vi.restoreAllMocks();
   mergingPRs.clear();
   rmSync(tmp, { recursive: true, force: true });
 });
@@ -192,17 +194,21 @@ describe('TaskResync', () => {
   it('does not send a task that passed AI review back to validate again for a merge that landed during the review (merge before validation)', async () => {
     const b = pending('002-b');
     const c = pending('003-c');
+    const d = pending('004-d');
     commitFile(root, 'c.txt', 'from a\n', 'a merged');
     requestFor('002-b');
     requestFor('003-c');
+    requestFor('004-d');
     const verdict = (status: string) => JSON.stringify({ phases: [], reviewVerdict: { status, rounds: 1, maxRounds: 3 } });
     writeFileSync(path.join(specDirOf('002-b'), 'claude_run.json'), verdict('passed'));
     writeFileSync(path.join(specDirOf('003-c'), 'claude_run.json'), verdict('failed'));
     taskHooks.emit('state', { project, task: b, status: 'human_review' });
     taskHooks.emit('state', { project, task: c, status: 'human_review' });
+    taskHooks.emit('state', { project, task: d, status: 'human_review' });
     await untilCalled();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(calls).toEqual(['start 003-c']);
+    expect(calls).toEqual(['start 004-d']);
+    expect(readResyncRequest(specDirOf('003-c'))).toBeDefined();
 
     // With the old behavior the passed task is brought back too
     calls.length = 0;
@@ -210,6 +216,70 @@ describe('TaskResync', () => {
     taskHooks.emit('state', { project, task: b, status: 'human_review' });
     await untilCalled();
     expect(calls).toEqual(['start 002-b']);
+  });
+
+  it.each([true, false])('keeps terminal failed review closed across 35 base advances (own commits: %s)', async (ownCommits) => {
+    const blocked = pending('234-workflow', 'human_review', ownCommits);
+    blocked.reviewReason = 'qa_rejected';
+    const finding = { severity: 'major' as const, description: 'Hosted CI requires the owner to resolve the account blocker', requiresHuman: true };
+    blocked.metadata = { ...blocked.metadata, humanWork: { revision: 7, items: Array.from({ length: 7 }, (_, i) => ({
+      id: `owner-${i}`, revision: 1, owner: '', status: 'open' as const, response: '', evidence: '',
+      at: '2026-10-31T05:00:00Z', createdAt: '2026-10-31T05:00:00Z', finding, history: [],
+    })) } };
+    const runFile = path.join(specDirOf(blocked.specId), 'claude_run.json');
+    const run = JSON.stringify({ phases: [], validation: { status: 'failed', summary: 'Owner action is still required',
+      checks: [{ name: 'Hosted CI green', passed: false, details: 'No hosted runner was admitted' }], findings: [{ ...finding, fixed: false }] },
+      reviewVerdict: { status: 'failed', rounds: 3, maxRounds: 3, failure: { reason: 'Owner prerequisite remains unresolved',
+        openFindings: [finding], failingChecks: ['Hosted CI green'], roundLines: ['Round 1 failed', 'Round 2 failed', 'Round 3 failed'] } } });
+    writeFileSync(runFile, run);
+    const metadataFile = path.join(specDirOf(blocked.specId), 'task_metadata.json');
+    const metadata = JSON.stringify(blocked.metadata);
+    writeFileSync(metadataFile, metadata);
+    const head = git(worktreeOf(blocked.specId), 'rev-parse', 'HEAD');
+    const status = git(worktreeOf(blocked.specId), 'status', '--porcelain');
+    const inspect = vi.spyOn(resyncGit, 'inspectResync');
+    let lastRequest: ReturnType<typeof recordResyncRequest> | undefined;
+
+    for (let i = 0; i < 35; i++) {
+      commitFile(root, 'main-update.txt', `unrelated main change ${i}\n`, `main advance ${i}`);
+      lastRequest = recordResyncRequest(specDirOf(blocked.specId), { ref: 'main', into: 'main', via: 'local', merged: { specId: `main-${i}`, files: ['main-update.txt'] } });
+      atLimit = i % 2 === 0;
+      resync.request(project.id, blocked.id);
+      resync.scan([project.id]);
+      taskHooks.emit('state', { project, task: blocked, status: 'human_review' });
+      expect(await resync.process(project.id, blocked.id)).toBe('none');
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+
+    // Restarting the service also preserves the same terminal boundary and coalesced request.
+    resync.dispose();
+    resync = new TaskResync();
+    resync.configure({ getProject: () => project, getTasks: () => tasks, isRunning: () => false,
+      isAtParallelLimit: () => atLimit, start: async (id) => { calls.push(`start ${id}`); },
+      queue: async (_project, t) => { calls.push(`queue ${t.id}`); }, runExclusive: (_id, fn) => fn() });
+    resync.scan([project.id]);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(calls).toEqual([]);
+    expect(inspect).not.toHaveBeenCalled();
+    expect(git(worktreeOf(blocked.specId), 'rev-parse', 'HEAD')).toBe(head);
+    expect(git(worktreeOf(blocked.specId), 'status', '--porcelain')).toBe(status);
+    expect(existsSync(path.join(worktreeOf(blocked.specId), 'main-update.txt'))).toBe(false);
+    expect(readFileSync(runFile, 'utf8')).toBe(run);
+    expect(readFileSync(metadataFile, 'utf8')).toBe(metadata);
+    expect(readResyncRequest(specDirOf(blocked.specId))).toEqual(lastRequest);
+    expect(lastRequest?.merged).toHaveLength(35);
+  }, 20_000);
+
+  it('does not clear even an up-to-date request after an early terminal failed review', async () => {
+    pending('002-b');
+    const request = requestFor('002-b');
+    const verdict = JSON.stringify({ reviewVerdict: { status: 'failed', rounds: 1, maxRounds: 3 } });
+    const runFile = path.join(specDirOf('002-b'), 'claude_run.json');
+    writeFileSync(runFile, verdict);
+    expect(await resync.process(project.id, '002-b')).toBe('none');
+    expect(readResyncRequest(specDirOf('002-b'))).toEqual(request);
+    expect(readFileSync(runFile, 'utf8')).toBe(verdict);
+    expect(calls).toEqual([]);
   });
 
   it('picks up requests left from before a restart, but not of a task the user stopped', async () => {

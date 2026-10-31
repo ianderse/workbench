@@ -274,8 +274,9 @@ requests); notices, briefings and resync prompts are built from those.
 ### Task messaging and resync (upstream)
 
 Parallel tasks message each other through Workbench (`src/main/task-messaging/`: broker, inbox, notices, tools served over
-local MCP; Settings > Agents > Task messaging) and, when a task is merged, every other task on that base branch that lacks
-the merge goes back to In Progress to take it in (`src/main/task-resync/`, `ClaudeTaskRun` phase `resync`, request in
+local MCP; Settings > Agents > Task messaging) and, when a task is merged, eligible idle tasks on that base branch take
+in the merge automatically. Tasks with a terminal failed review wait for explicit user action
+(`src/main/task-resync/`, `ClaudeTaskRun` phase `resync`, request in
 `resync_request.json`). Messaging reaches OMP tasks too: the tools come from a per-run extension file (`task-messaging/omp-extension.ts`, `omp -e`) and live messages are steered into the running step through `omp --mode rpc` (`agent-backend/omp-rpc.ts`, setting `omp.liveMessages`; `-p` fallback keeps messages in the inbox for the next step);
 resync runs on either backend. "Started" notices go to running tasks only and carry `TaskMessage.about`, so they are dropped once that task is no longer running and are not queued twice while an unread one waits. See `docs/upstream-sync/2026-10-25.md` for how it was merged with this fork's features.
 
@@ -288,7 +289,10 @@ of every `runReviewLoop` round (the first validation and each re-validation afte
 the merge passed the check, so a second round finds nothing to do. It does nothing without a pending, unfailed request (no new base commits),
 without a worktree, or with `immediately` (the old notice: merge right now). The messaging and parallel-tasks prompt text follows the setting.
 `TaskResync.afterRun` does not send a task whose AI review passed back to be validated again for a merge that landed during the review (the
-merge into the base branch pulls it in anyway); queued and idle tasks keep the resync behavior. The system prompt tells agents to run the
+merge into the base branch pulls it in anyway). A terminal failed review is also held: automatic
+resync, startup scans and after-run requests preserve the pending merge without buying another
+review loop. Only an explicit Start/Resume or Request changes reopens that work; the failure and
+unmet checks remain recorded. Other queued and idle tasks keep the resync behavior. The system prompt tells agents to run the
 tests that cover their change while working and the full suite once before committing.
 
 ### Stale tickets (briefing and queue grooming)

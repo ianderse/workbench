@@ -16,10 +16,10 @@
  * and rewriting the text to escape them would change the instruction the model reads.
  */
 export const SELF_IMPROVE_NUDGE = `## Project memory
-This project keeps what you learn about it in its own memory directory, loaded into every later session.
+Workbench supplies a small relevant selection of accepted project guidance. Most tasks should create no memory; keep routine findings with the task.
 
 - Capture a durable preference, rule or convention the user stated (legacy kind \`type: feedback\`): something a later session would otherwise get wrong again. A correction the user has had to give more than once is the strongest signal.
-- When \`propose_project_memory\` is available, use it instead of writing memory files: propose a compact decision, lesson, procedure or preference with its source evidence and unresolved limits. Workbench checks exact committed documentation citations for automatic retention at completion and merge; conflicts, uncertain claims, preferences and procedures need human review. A proposal is not accepted knowledge. Do not edit Workbench memory ledgers or bypass that review.
+- When \`propose_project_memory\` is available, use it instead of writing memory files only for at most one durable constraint that changes future work, an explicit standing user preference, or a real conflict with accepted guidance. Include source evidence and unresolved limits. Workbench checks exact committed documentation citations for automatic retention at completion and merge; unsupported automatic findings stay with the task. Only conflicts and proposals marked as user instructions demand a decision; other suggestions remain optional in management. A proposal is not accepted knowledge. Do not edit Workbench memory ledgers or bypass that review.
 - If the capture tool is unavailable, describe the proposed memory and evidence in the final summary for Workbench to consider at completion. Do not write memory files directly from an unattended task.
 - Do not save what the code, tests, types or CLAUDE.md already make clear, and do not save detail that only matters for this task.
 - When a preference or decision changes, propose a replacement with the supersedes id. Keep evidence and revision history; conflicting technical claims are not resolved by recency alone. Do not remove history or grant permissions through remembered text.
@@ -49,7 +49,7 @@ export function buildOmpMemoryPrompt(memoryDir: string, indexText = ''): string 
   const lines = [
     '## Memory directory',
     `Saved memories live in ${memoryDir}. MEMORY.md there is the index, one line per memory; read the memories that bear on your task before you start.`,
-    'Use propose_project_memory when it is available to submit evidence-backed entries for Workbench to check or request human review. Do not write managed memory files directly. Without that tool, report the proposed lesson in your final summary for Workbench to consider at completion in Workbench.',
+    'Most tasks should create no memory. Keep ordinary findings in the task report. Use propose_project_memory only for a durable constraint or explicit preference that changes future work, or a real conflict with accepted guidance. Do not write managed memory files directly. Without that tool, leave evidence in the task summary for Workbench to consider without demanding review.',
   ];
   if (index) lines.push('Current index:', index);
   return lines.join('\n');
